@@ -24,25 +24,117 @@ OfxStatus propSetPointer(OfxPropertySetHandle properties,
 {
 	olive::plugin::Value val;
 	if (properties->plugin) {
-		OfxStatus status= properties->plugin->getProp(property, index, val);
-		if (val.isInt()) {
-			value=calloc(1,sizeof(long));
-			*(int64_t*)value=val.getInt();
-			properties->plugin->addMem(value);
+		if (index<0) {
+			return kOfxStatErrBadIndex;
 		}
-		else if (val.isFloat()) {
-			value=calloc(1,sizeof(double));
-			*(double*)value=val.getFloat();
-			properties->plugin->addMem(value);
-		}
-		else if (val.isString()) {
-			QString str=val.getString();
-			value=(void *)calloc(str.size()+1, sizeof(char));
-			memcpy(value, str.data(), str.size());
-			properties->plugin->addMem(value);
-		}
-		return status;
+		properties->plugin->setProp(property, index, value);
+		return kOfxStatOK;
 	}
 	return kOfxStatErrBadHandle;
+}
 
+OfxStatus propSetString(OfxPropertySetHandle properties,
+	const char *property, int index, const char *value)
+{
+	olive::plugin::Value val;
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, QString(value));
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetDouble(OfxPropertySetHandle properties,
+	const char *property, int index, double value)
+{
+	olive::plugin::Value val;
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, static_cast<double>(value));
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetInt(OfxPropertySetHandle properties, const char *property,
+					 int index, int value)
+{
+	olive::plugin::Value val;
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, value);
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetPointerN(OfxPropertySetHandle properties,
+	const char *property, int index, int count, void * const*value)
+{
+	olive::plugin::Value val;
+	olive::plugin::Array array(value,count);
+	val.setValue(array);
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, val);
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetStringN(OfxPropertySetHandle properties,
+	const char *property, int index, int count,const char *const *value)
+{
+	olive::plugin::Value val;
+	olive::plugin::Array array(value,count);
+	val.setValue(array);
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, val);
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetDoubleN(OfxPropertySetHandle properties,
+	const char *property, int index, int count, const double* value)
+{
+	olive::plugin::Value val;
+	olive::plugin::Array array(value,count);
+	val.setValue(array);
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, val);
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetIntN(OfxPropertySetHandle properties, const char *property,
+					 int index, int count, const int *value)
+{
+	olive::plugin::Value val;
+	olive::plugin::Array array(value, count);
+	val.setValue(array);
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		properties->plugin->setProp(property, index, val);
+		return kOfxStatOK;
+	}
+	return kOfxStatErrBadHandle;
 }
