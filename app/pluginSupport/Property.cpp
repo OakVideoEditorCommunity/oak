@@ -18,17 +18,17 @@
 #include "node/plugins/Plugin.h"
 
 #include <ofxProperty.h>
+#include <OpenImageIO/simd.h>
+#include <oneapi/tbb/detail/_template_helpers.h>
 
 OfxStatus propSetPointer(OfxPropertySetHandle properties,
 	const char *property, int index, void *value)
 {
-	olive::plugin::Value val;
 	if (properties->plugin) {
 		if (index<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, value);
-		return kOfxStatOK;
+		return properties->plugin->setProp(property, index, value);
 	}
 	return kOfxStatErrBadHandle;
 }
@@ -36,13 +36,11 @@ OfxStatus propSetPointer(OfxPropertySetHandle properties,
 OfxStatus propSetString(OfxPropertySetHandle properties,
 	const char *property, int index, const char *value)
 {
-	olive::plugin::Value val;
 	if (properties->plugin) {
 		if (index<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, QString(value));
-		return kOfxStatOK;
+		return properties->plugin->setProp(property, index, const_cast<char *>(value));
 	}
 	return kOfxStatErrBadHandle;
 }
@@ -50,13 +48,12 @@ OfxStatus propSetString(OfxPropertySetHandle properties,
 OfxStatus propSetDouble(OfxPropertySetHandle properties,
 	const char *property, int index, double value)
 {
-	olive::plugin::Value val;
+
 	if (properties->plugin) {
 		if (index<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, static_cast<double>(value));
-		return kOfxStatOK;
+		return properties->plugin->setProp(property, index, value);
 	}
 	return kOfxStatErrBadHandle;
 }
@@ -64,29 +61,24 @@ OfxStatus propSetDouble(OfxPropertySetHandle properties,
 OfxStatus propSetInt(OfxPropertySetHandle properties, const char *property,
 					 int index, int value)
 {
-	olive::plugin::Value val;
+
 	if (properties->plugin) {
 		if (index<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, value);
-		return kOfxStatOK;
+		return properties->plugin->setProp(property, index, value);
 	}
 	return kOfxStatErrBadHandle;
 }
 
 OfxStatus propSetPointerN(OfxPropertySetHandle properties,
-	const char *property, int index, int count, void * const*value)
+	const char *property, int count, void * const*value)
 {
-	olive::plugin::Value val;
-	olive::plugin::Array array(value,count);
-	val.setValue(array);
 	if (properties->plugin) {
-		if (index<0) {
+		if (count<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, val);
-		return kOfxStatOK;
+		return properties->plugin->setPropN(property, count, const_cast<void**>(value));
 	}
 	return kOfxStatErrBadHandle;
 }
@@ -94,47 +86,132 @@ OfxStatus propSetPointerN(OfxPropertySetHandle properties,
 OfxStatus propSetStringN(OfxPropertySetHandle properties,
 	const char *property, int index, int count,const char *const *value)
 {
-	olive::plugin::Value val;
-	olive::plugin::Array array(value,count);
-	val.setValue(array);
 	if (properties->plugin) {
-		if (index<0) {
+		if (count<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, val);
-		return kOfxStatOK;
+		return properties->plugin->setPropN(property, count, const_cast<char**>(value));
 	}
 	return kOfxStatErrBadHandle;
 }
 
 OfxStatus propSetDoubleN(OfxPropertySetHandle properties,
-	const char *property, int index, int count, const double* value)
+	const char *property,int count, const double* value)
 {
-	olive::plugin::Value val;
-	olive::plugin::Array array(value,count);
-	val.setValue(array);
 	if (properties->plugin) {
-		if (index<0) {
+		if (count<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, val);
-		return kOfxStatOK;
+		return properties->plugin->setPropN(property, count, const_cast<double *>(value));
 	}
 	return kOfxStatErrBadHandle;
 }
 
 OfxStatus propSetIntN(OfxPropertySetHandle properties, const char *property,
-					 int index, int count, const int *value)
+					 int count, const int *value)
 {
-	olive::plugin::Value val;
-	olive::plugin::Array array(value, count);
-	val.setValue(array);
+	if (properties->plugin) {
+		if (count<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->setPropN(property, count, const_cast<int *>(value));
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetPointer(OfxPropertySetHandle properties,
+	const char *property, int index, void **value)
+{
 	if (properties->plugin) {
 		if (index<0) {
 			return kOfxStatErrBadIndex;
 		}
-		properties->plugin->setProp(property, index, val);
-		return kOfxStatOK;
+		return properties->plugin->getProp(property, index, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetString(OfxPropertySetHandle properties,
+	const char *property, int index, char **value)
+{
+	std::any val;
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getProp(property, index, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetDouble(OfxPropertySetHandle properties,
+	const char *property, int index, double *value)
+{
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getProp(property, index, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetInt(OfxPropertySetHandle properties, const char *property,
+					 int index, int *value)
+{
+	if (properties->plugin) {
+		if (index<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getProp(property, index, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetPointerN(OfxPropertySetHandle properties,
+	const char *property, int count, void ***value)
+{
+	if (properties->plugin) {
+		if (count<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getPropN(property, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propGetStringN(OfxPropertySetHandle properties,
+	const char *property, int count, char ***value)
+{
+	if (properties->plugin) {
+		if (count<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getPropN(property, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetDoubleN(OfxPropertySetHandle properties,
+	const char *property, int index, int count, double** value)
+{
+	if (properties->plugin) {
+		if (count<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getPropN(property, value);
+	}
+	return kOfxStatErrBadHandle;
+}
+
+OfxStatus propSetIntN(OfxPropertySetHandle properties, const char *property,
+					 int index, int count, int **value)
+{
+	if (properties->plugin) {
+		if (count<0) {
+			return kOfxStatErrBadIndex;
+		}
+		return properties->plugin->getPropN(property, value);
 	}
 	return kOfxStatErrBadHandle;
 }
