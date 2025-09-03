@@ -14,9 +14,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 
 project(olive-editor VERSION 0.2.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD ON)
+find_package(expat REQUIRED)
 
 option(BUILD_QT6 "Build with Qt 6 over 5 (experimental)" ON)
 option(BUILD_DOXYGEN "Build Doxygen documentation" OFF)
@@ -31,10 +37,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+
 # Generates a compile_commands.json in the build dir, link that to the repo
 # root to enrich your IDE with clangd language server protocol functionalities
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
+add_subdirectory(third_party/openfx/HostSupport)
 # Sanitizers
 add_library(olive-sanitizers INTERFACE)
 include(cmake/Sanitizers.cmake)
@@ -168,7 +175,7 @@ list(APPEND OLIVE_LIBRARIES
 )
 
 # Link FFmpeg
-find_package(FFMPEG 3.0 REQUIRED
+find_package(FFMPEG 7.0 REQUIRED
   COMPONENTS
   avutil
   avcodec

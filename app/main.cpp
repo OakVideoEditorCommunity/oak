@@ -52,7 +52,7 @@ extern "C" {
 #ifdef USE_CRASHPAD
 #include "common/crashpadinterface.h"
 #endif // USE_CRASHPAD
-
+#include "OlivePlugin.cpp"
 int decompress_project(const QString &project)
 {
 	if (project.isEmpty()) {
@@ -214,6 +214,11 @@ int main(int argc, char *argv[])
 		QStringLiteral("project"),
 		QCoreApplication::translate("main", "Project to open on startup"));
 
+	auto no_plugin = parser.AddOption(
+		{ QStringLiteral("-no-plugin") },
+		QCoreApplication::translate("main", "Don't load plugins")
+		);
+
 	// Qt options re-implemented (add to this as necessary)
 	//
 	// Because we don't use QCommandLineParser, we must filter out Qt's arguments ourselves. Here,
@@ -278,6 +283,10 @@ int main(int argc, char *argv[])
 		} else {
 			startup_params.set_startup_language(ts_option->GetSetting());
 		}
+	}
+
+	if (!no_plugin->IsSet()) {
+		olive::plugin::loadPlugins("plugins");
 	}
 
 	if (crash_option->IsSet()) {

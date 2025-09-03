@@ -18,7 +18,6 @@
 set(OLIVE_SOURCES
   core.h
   core.cpp
-        pluginSupport/DrawSuite.cpp
 )
 
 #set(OLIVE_RESOURCES)
@@ -33,7 +32,6 @@ add_subdirectory(dialog)
 add_subdirectory(node)
 add_subdirectory(packaging)
 add_subdirectory(panel)
-add_subdirectory(pluginSupport)
 add_subdirectory(render)
 add_subdirectory(shaders)
 add_subdirectory(task)
@@ -75,8 +73,10 @@ add_library(libolive-editor
   ${OLIVE_SOURCES}
   ${OLIVE_RESOURCES}
 )
-
-target_include_directories(libolive-editor PUBLIC ../third_party/openfx/include)
+add_subdirectory(pluginSupport)
+target_compile_features(libolive-editor PUBLIC cxx_std_23)
+include_directories(../third_party/openfx/include
+        ../third_party/openfx/HostSupport/include)
 # Remove prefix - prevents CMake calling it "liblibolive-editor"
 set_target_properties(libolive-editor PROPERTIES PREFIX "")
 
@@ -86,7 +86,8 @@ add_executable(olive-editor
   $<TARGET_OBJECTS:libolive-editor>
   $<TARGET_OBJECTS:olive-version-obj>
 )
-
+target_include_directories(olive-editor PUBLIC pluginSupport)
+target_link_libraries(olive-editor PUBLIC OfxHost)
 # Create docs if doxygen was found
 if(DOXYGEN_FOUND)
   set(DOXYGEN_PROJECT_NAME "Olive")

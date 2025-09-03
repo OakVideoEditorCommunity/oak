@@ -1,6 +1,6 @@
 # CMake artifacts
 /build*/
-
+build
 # Doxygen
 /docs/
 
