@@ -35,7 +35,7 @@ public:
 	explicit PluginNode(struct olive_node_methods methods):Node()
 	{
 		this->methods=methods;
-	}PLUGIN_H
+	}
 	void setMethods(struct olive_node_methods methods)
 	{
 		this->methods=methods;

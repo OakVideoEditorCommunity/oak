@@ -16,10 +16,24 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ofxCore.h"
 #include "ofxImageEffect.h"
+#include <QString>
 #include "ofxhImageEffect.h"
+#include <map>
+#include <qcontainerfwd.h>
+#include <qlist.h>
 namespace olive {
 namespace plugin{
+enum class ErrorType{
+	Error,
+	Warning,
+	Message
+};
+struct PersistentErrors{
+	ErrorType type;
+	QString message;
+};
 class OliveInstance : public OFX::Host::ImageEffect::Instance {
 public:
 	OliveInstance(
@@ -51,7 +65,8 @@ public:
         va_list args)  override;
 		
     OfxStatus clearPersistentMessage() override;  
-	
+private:
+	QList<PersistentErrors> persistentErrors_;
 
 };
 }

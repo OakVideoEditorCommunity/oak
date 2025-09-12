@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <QMessageBox>
 #include <qmessagebox.h>
+#include <qobject.h>
 #include <string.h>
 #include <QString>
 namespace olive{
@@ -59,6 +60,48 @@ OfxStatus OliveInstance::vmessage(const char* type,
 		return kOfxStatOK;
 	}
 }
+OfxStatus OliveInstance::setPersistentMessage(const char* type,
+        const char* id,
+        const char* format,
+        va_list args){
+	char *buffer=new char[1024];
 
+	memset(buffer, 0, 1024*sizeof(char));
+	int ret=vsprintf(buffer, format, args);
+	if(ret<0){
+		return kOfxStatFailed;
+	}
+	QString message(buffer);
+
+	delete [] buffer;
+
+	// If This is a error message
+	if(strncmp(type, kOfxMessageError, strlen(kOfxMessageError))==0){
+		persistentErrors_.append({ErrorType::Error, message});
+		QMessageBox::critical(nullptr, "", message);
+		// TODO: tell the shell to show the error
+	}
+	// A warning
+	else if(strncmp(type, kOfxMessageWarning, strlen(kOfxMessageError))==0){
+		persistentErrors_.append({ErrorType::Warning, message});
+		QMessageBox::warning(nullptr, "", message);
+		// TODO: tell the shell to show the warning
+
+	}
+	// A simple information
+	else if(strncmp(type, kOfxMessageMessage, strlen(kOfxMessageError))==0){
+		persistentErrors_.append({ErrorType::Message, message});
+		QMessageBox::information(nullptr, "", message);
+	}
+	else{
+		return kOfxStatFailed;
+	}
+	return kOfxStatOK;
+}
+OfxStatus OliveInstance::clearPersistentMessage(){
+	persistentErrors_.clear();
+	// TODO: tell the shell to remove message.
+	return kOfxStatOK;
+}
 }
 }
