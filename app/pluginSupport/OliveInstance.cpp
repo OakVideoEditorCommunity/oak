@@ -18,90 +18,103 @@
 #include "OliveInstance.h"
 #include "ofxCore.h"
 #include "ofxMessage.h"
+#include "common/Current.h"
+
 #include <cstdio>
 #include <QMessageBox>
 #include <qmessagebox.h>
 #include <qobject.h>
 #include <string.h>
 #include <QString>
-namespace olive{
-namespace plugin {
-OfxStatus OliveInstance::vmessage(const char* type,
-	const char* id,
-	const char* format,	
-	va_list args){
+namespace olive
+{
+namespace plugin
+{
+OfxStatus OliveInstance::vmessage(const char *type, const char *id,
+								  const char *format, va_list args)
+{
+	char *buffer = new char[1024];
 
-	char *buffer=new char[1024];
-
-	memset(buffer, 0, 1024*sizeof(char));
+	memset(buffer, 0, 1024 * sizeof(char));
 	vsprintf(buffer, format, args);
 
 	QString message(buffer);
 
-	delete [] buffer;
+	delete[] buffer;
 
-	if(strncmp(type, kOfxMessageQuestion, strlen(kOfxMessageQuestion))){
+	if (strncmp(type, kOfxMessageQuestion, strlen(kOfxMessageQuestion))) {
+		auto ret = QMessageBox::information(
+			nullptr, "", message, QMessageBox::Ok, QMessageBox::Cancel);
 
-		auto ret= QMessageBox::information(nullptr, 
-			"", message, 
-			QMessageBox::Ok, QMessageBox::Cancel);
-
-		if(ret==QMessageBox::Ok){
+		if (ret == QMessageBox::Ok) {
 			return kOfxStatReplyYes;
-		} 
-		else {
+		} else {
 			return kOfxStatReplyNo;
-		}	
+		}
 
-	}
-	else{
-		QMessageBox::information(nullptr, 
-			"", message);
+	} else {
+		QMessageBox::information(nullptr, "", message);
 		return kOfxStatOK;
 	}
 }
-OfxStatus OliveInstance::setPersistentMessage(const char* type,
-        const char* id,
-        const char* format,
-        va_list args){
-	char *buffer=new char[1024];
+OfxStatus OliveInstance::setPersistentMessage(const char *type, const char *id,
+											  const char *format, va_list args)
+{
+	char *buffer = new char[1024];
 
-	memset(buffer, 0, 1024*sizeof(char));
-	int ret=vsprintf(buffer, format, args);
-	if(ret<0){
+	memset(buffer, 0, 1024 * sizeof(char));
+	int ret = vsprintf(buffer, format, args);
+	if (ret < 0) {
 		return kOfxStatFailed;
 	}
 	QString message(buffer);
 
-	delete [] buffer;
+	delete[] buffer;
 
 	// If This is a error message
-	if(strncmp(type, kOfxMessageError, strlen(kOfxMessageError))==0){
-		persistentErrors_.append({ErrorType::Error, message});
+	if (strncmp(type, kOfxMessageError, strlen(kOfxMessageError)) == 0) {
+		persistentErrors_.append({ ErrorType::Error, message });
 		QMessageBox::critical(nullptr, "", message);
 		// TODO: tell the shell to show the error
 	}
 	// A warning
-	else if(strncmp(type, kOfxMessageWarning, strlen(kOfxMessageError))==0){
-		persistentErrors_.append({ErrorType::Warning, message});
+	else if (strncmp(type, kOfxMessageWarning, strlen(kOfxMessageError)) == 0) {
+		persistentErrors_.append({ ErrorType::Warning, message });
 		QMessageBox::warning(nullptr, "", message);
 		// TODO: tell the shell to show the warning
 
 	}
 	// A simple information
-	else if(strncmp(type, kOfxMessageMessage, strlen(kOfxMessageError))==0){
-		persistentErrors_.append({ErrorType::Message, message});
+	else if (strncmp(type, kOfxMessageMessage, strlen(kOfxMessageError)) == 0) {
+		persistentErrors_.append({ ErrorType::Message, message });
 		QMessageBox::information(nullptr, "", message);
-	}
-	else{
+	} else {
 		return kOfxStatFailed;
 	}
 	return kOfxStatOK;
 }
-OfxStatus OliveInstance::clearPersistentMessage(){
+OfxStatus OliveInstance::clearPersistentMessage()
+{
 	persistentErrors_.clear();
 	// TODO: tell the shell to remove message.
 	return kOfxStatOK;
 }
+void OliveInstance::getProjectSize(double &xSize, double &ySize) const
+{
+	xSize = Current::getInstance().currentVideoParams().width();
+	ySize = Current::getInstance().currentVideoParams().height();
+}
+void OliveInstance::getProjectOffset(double &xOffset, double &yOffset) const
+{
+	xOffset = Current::getInstance().currentVideoParams().x();
+	yOffset = Current::getInstance().currentVideoParams().y();
+}
+void OliveInstance::getProjectExtent(double &xSize, double &ySize) const
+{
+	xSize = Current::getInstance().currentVideoParams().width();
+	ySize = Current::getInstance().currentVideoParams().height();
+	// TODO: Ensure this project does not support this.
+}
+
 }
 }

@@ -26,7 +26,6 @@ set(OLIVE_SOURCES
 add_subdirectory(audio)
 add_subdirectory(cli)
 add_subdirectory(codec)
-add_subdirectory(common)
 add_subdirectory(config)
 add_subdirectory(dialog)
 add_subdirectory(node)
@@ -73,7 +72,10 @@ add_library(libolive-editor
   ${OLIVE_SOURCES}
   ${OLIVE_RESOURCES}
 )
+add_subdirectory(common)
 add_subdirectory(pluginSupport)
+
+
 target_compile_features(libolive-editor PUBLIC cxx_std_23)
 include_directories(../third_party/openfx/include
         ../third_party/openfx/HostSupport/include)

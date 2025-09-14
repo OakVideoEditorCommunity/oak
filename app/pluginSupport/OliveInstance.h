@@ -64,7 +64,13 @@ public:
         const char* format,
         va_list args)  override;
 		
-    OfxStatus clearPersistentMessage() override;  
+    OfxStatus clearPersistentMessage() override;
+
+	void getProjectSize(double& xSize, double& ySize) const override;
+	void getProjectOffset(double& xOffset, double& yOffset) const override;
+	void getProjectExtent(double& xSize, double& ySize) const override;
+
+
 private:
 	QList<PersistentErrors> persistentErrors_;
 

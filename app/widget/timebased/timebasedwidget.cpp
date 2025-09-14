@@ -24,6 +24,7 @@
 #include "common/range.h"
 #include "config/config.h"
 #include "core.h"
+#include "common/Current.h"
 #include "dialog/markerproperties/markerpropertiesdialog.h"
 #include "node/project/sequence/sequence.h"
 #include "timeline/timelineundoworkarea.h"
@@ -90,7 +91,8 @@ void TimeBasedWidget::ConnectViewerNode(ViewerOutput *node)
 	// Set viewer node
 	ViewerOutput *old = viewer_node_;
 	viewer_node_ = node;
-
+	Current::getInstance().setCurrentVideoParams(viewer_node_->GetVideoParams());
+	Current::getInstance().setCurrentAudioParams(viewer_node_->GetAudioParams());
 	if (old) {
 		// Call potential derivative functions for disconnecting the viewer node
 		DisconnectNodeEvent(old);
