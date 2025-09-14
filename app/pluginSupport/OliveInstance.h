@@ -45,7 +45,7 @@ public:
 	{
 	}
 	~OliveInstance() override = default;
-	virtual const std::string &getDefaultOutputFielding() const{
+	const std::string &getDefaultOutputFielding() const{
 		return kOfxImageFieldNone;
 	};
 
@@ -69,7 +69,24 @@ public:
 	void getProjectSize(double& xSize, double& ySize) const override;
 	void getProjectOffset(double& xOffset, double& yOffset) const override;
 	void getProjectExtent(double& xSize, double& ySize) const override;
+	// The pixel aspect ratio of the current project 
+	double getProjectPixelAspectRatio() const override;
 
+	// The duration of the effect 
+	// This contains the duration of the plug-in effect, in frames. 
+	double getEffectDuration() const override;
+
+	// For an instance, this is the frame rate of the project the effect is in. 
+	double getFrameRate() const override;
+
+	/// This is called whenever a param is changed by the plugin so that
+	/// the recursive instanceChangedAction will be fed the correct frame 
+	double getFrameRecursive() const override;
+
+	/// This is called whenever a param is changed by the plugin so that
+	/// the recursive instanceChangedAction will be fed the correct
+	/// renderScale
+	void getRenderScaleRecursive(double &x, double &y) const override;
 
 private:
 	QList<PersistentErrors> persistentErrors_;

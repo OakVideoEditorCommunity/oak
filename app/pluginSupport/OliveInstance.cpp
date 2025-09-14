@@ -115,6 +115,17 @@ void OliveInstance::getProjectExtent(double &xSize, double &ySize) const
 	ySize = Current::getInstance().currentVideoParams().height();
 	// TODO: Ensure this project does not support this.
 }
+double OliveInstance::getProjectPixelAspectRatio() const
+{
+	return Current::getInstance()
+		.currentVideoParams()
+		.pixel_aspect_ratio()
+		.toDouble();
+}
+double OliveInstance::getFrameRate() const
+{
+	return Current::getInstance().currentVideoParams().frame_rate().toDouble();
+}
 
 }
 }
