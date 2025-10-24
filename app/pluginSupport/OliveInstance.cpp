@@ -16,6 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "OliveInstance.h"
+
+#include "OliveClip.h"
 #include "ofxCore.h"
 #include "ofxMessage.h"
 #include "common/Current.h"
@@ -101,18 +103,18 @@ OfxStatus OliveInstance::clearPersistentMessage()
 }
 void OliveInstance::getProjectSize(double &xSize, double &ySize) const
 {
-	xSize = Current::getInstance().currentVideoParams().width();
-	ySize = Current::getInstance().currentVideoParams().height();
+	xSize =params_.width();
+	ySize =params_.height();
 }
 void OliveInstance::getProjectOffset(double &xOffset, double &yOffset) const
 {
-	xOffset = Current::getInstance().currentVideoParams().x();
-	yOffset = Current::getInstance().currentVideoParams().y();
+	xOffset =params_.x();
+	yOffset =params_.y();
 }
 void OliveInstance::getProjectExtent(double &xSize, double &ySize) const
 {
-	xSize = Current::getInstance().currentVideoParams().width();
-	ySize = Current::getInstance().currentVideoParams().height();
+	xSize =params_.width();
+	ySize =params_.height();
 	// TODO: Ensure this project does not support this.
 }
 double OliveInstance::getProjectPixelAspectRatio() const
@@ -124,7 +126,36 @@ double OliveInstance::getProjectPixelAspectRatio() const
 }
 double OliveInstance::getFrameRate() const
 {
-	return Current::getInstance().currentVideoParams().frame_rate().toDouble();
+	return params_.frame_rate().toDouble();
+}
+
+double OliveInstance::getEffectDuration() const
+{
+	// Return a default duration value
+	return 100.0;
+}
+
+double OliveInstance::getFrameRecursive() const
+{
+	// Return current frame (this would typically be set by the host during rendering)
+	return 0.0;
+}
+
+void OliveInstance::getRenderScaleRecursive(double &x, double &y) const
+{
+	// Return default render scale (1.0, 1.0)
+	x = 1.0;
+	y = 1.0;
+}
+
+OFX::Host::ImageEffect::ClipInstance *OliveInstance::newClipInstance(
+	OFX::Host::ImageEffect::Instance *plugin,
+	OFX::Host::ImageEffect::ClipDescriptor *descriptor,
+	int index)
+{
+	// Create a new clip instance
+	OFX::Host::ImageEffect::ClipInstance* clipInstance = new OliveClipInstance(plugin, *descriptor, params_);
+	return clipInstance;
 }
 
 }
