@@ -147,6 +147,12 @@ void OliveInstance::getRenderScaleRecursive(double &x, double &y) const
 	x = 1.0;
 	y = 1.0;
 }
+OFX::Host::Param::Instance *
+OliveInstance::newParam(const std::string &name,
+						OFX::Host::Param::Descriptor &Descriptor)
+{
+
+}
 
 OFX::Host::ImageEffect::ClipInstance *OliveInstance::newClipInstance(
 	OFX::Host::ImageEffect::Instance *plugin,

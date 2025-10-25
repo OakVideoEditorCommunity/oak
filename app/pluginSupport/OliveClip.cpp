@@ -118,5 +118,28 @@ OFX::Host::ImageEffect::Image *
 olive::plugin::OliveClipInstance::getImage(OfxTime time,
 										   const OfxRectD *optionalBounds)
 {
+	return &image_;
+}
+OfxRectD
+olive::plugin::OliveClipInstance::getRegionOfDefinition(OfxTime time) const
+{
+	if (regionOfDefinitions_.contains(time)) {
+		return regionOfDefinitions_[time];
+	}
+	OfxRectD regionOfDefinition;
+	regionOfDefinition.x1=regionOfDefinition.y1=0;
+	regionOfDefinition.x2=params_.width();
+	regionOfDefinition.y2=params_.height();
+	return regionOfDefinition;
+}
+void olive::plugin::OliveClipInstance::setRegionOfDefinition(
+	OfxRectD regionOfDefinition, OfxTime time)
+{
+	regionOfDefinitions_[time] = regionOfDefinition;
+}
 
+void olive::plugin::OliveClipInstance::setDefaultRegionOfDefinition(
+	OfxRectD regionOfDefinition)
+{
+	defaultRegionOfDefinitions_ = regionOfDefinition;
 }

@@ -28,6 +28,8 @@
 #include "node/block/transition/transition.h"
 #include "node/project.h"
 #include "rendermanager.h"
+#include "pluginSupport/OliveClip.h"
+#include "pluginSupport/OliveHost.h"
 
 namespace olive
 {
@@ -157,12 +159,99 @@ void RenderProcessor::Run()
 
 	SetCancelPointer(ticket_->GetCancelAtom());
 
+	VideoParams params=ticket_->property("vparam").value<VideoParams>();
 	SetCacheVideoParams(ticket_->property("vparam").value<VideoParams>());
 	SetCacheAudioParams(ticket_->property("aparam").value<AudioParams>());
 
 	if (IsCancelled()) {
 		ticket_->Finish();
 		return;
+	}
+
+	// if is a plugin
+	Node *node=ticket_->property("node").value<Node*>();
+	if (node && node->getPlugin()) {
+		std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> plugin
+			= node->getPlugin();
+		std::unique_ptr<OFX::Host::ImageEffect::Instance> instance(plugin->createInstance(kOfxImageEffectContextFilter, NULL));
+
+		OfxStatus stat;
+		stat = instance->createInstanceAction();
+		if(stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
+			ticket_->Finish();
+			return;
+		}
+		// now we need to to call getClipPreferences on the instance so that it does the clip component/depth
+		// logic and caches away the components and depth on each clip.
+		bool ok = instance->getClipPreferences();
+		if (!ok) {
+			ticket_->Finish();
+			return;
+		}
+
+		// current render scale of 1
+		OfxPointD renderScale;
+		renderScale.x = renderScale.y = 1.0;
+
+		// The render window is in pixel coordinates
+		// ie: render scale and a PAR of not 1
+		OfxRectI  renderWindow;
+		renderWindow.x1 = renderWindow.y1 = 0;
+		renderWindow.x2 = ticket_->property("size").value<QSize>().width();
+		renderWindow.y2 = ticket_->property("size").value<QSize>().height();
+
+		/// RoI is in canonical coords,
+		OfxRectD  regionOfInterest;
+		regionOfInterest.x1 = regionOfInterest.y1 = 0;
+		regionOfInterest.x2 = renderWindow.x2 * instance->getProjectPixelAspectRatio();
+		regionOfInterest.y2 = renderWindow.y2 * instance->getProjectPixelAspectRatio();
+
+		OfxRectD regionOfDefinition;
+		regionOfDefinition.x1 = regionOfDefinition.y1 = 0;
+		regionOfDefinition.x2 = params.width();
+		regionOfDefinition.y2 = params.height();
+
+
+		int numFramesToRender=ticket_->property("time").value<rational>().toDouble()
+			* params.frame_rate().toDouble();
+		stat = instance->beginRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=*/true, /*interactive=*/false
+										 );
+		if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
+			ticket_->Finish();
+			return;
+		}
+
+		plugin::OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
+		for(int t = 0; t <= numFramesToRender; ++t)
+		{
+			// call get region of interest on each of the inputs
+			OfxTime frame = t;
+
+			// get the RoI for each input clip
+			// the regions of interest for each input clip are returned in a std::map
+			// on a real host, these will be the regions of each input clip that the
+			// effect needs to render a given frame (clipped to the RoD).
+			//
+			// In our example we are doing full frame fetches regardless.
+			std::map<OFX::Host::ImageEffect::ClipInstance *, OfxRectD> rois;
+			stat = instance->getRegionOfInterestAction(frame, renderScale,
+													   regionOfInterest, rois);
+			assert(stat == kOfxStatOK || stat == kOfxStatReplyDefault);
+
+			// render a frame
+			stat = instance->renderAction(t,kOfxImageFieldBoth,renderWindow, renderScale, /*sequential=*/true, /*interactive=*/false, /*draft=*/false);
+			assert(stat == kOfxStatOK);
+
+			// get the output image buffer
+			OFX::Host::ImageEffect::Image *outputImage = clip->getOutputImage();
+
+			std::ostringstream ss;
+			ss << "Output." << t << ".ppm";
+			exportToPPM(ss.str(), outputImage);
+		}
+
+		instance->endRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=*/true, /*interactive=*/false
+								  );
 	}
 
 	switch (type) {

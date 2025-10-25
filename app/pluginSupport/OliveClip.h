@@ -25,6 +25,8 @@
 #define OLIVECLIP_H
 #include "ofxhClip.h"
 #include "render/videoparams.h"
+
+#include <QMap>
 namespace olive
 {
 namespace plugin
@@ -37,6 +39,11 @@ public:
 	{
 		params_ = params;
 	}
+	OFX::Host::ImageEffect::Image& getOutputImage()
+	{
+		return image_;
+	}
+
 	const std::string &getUnmappedBitDepth() const override;
 	const std::string &getUnmappedComponents() const override;
 	const std::string &getPremult() const override;
@@ -50,10 +57,21 @@ public:
 	bool getContinuousSamples() const override;
 	OFX::Host::ImageEffect::Image* getImage(OfxTime time, const OfxRectD *optionalBounds) override;
 	OfxRectD getRegionOfDefinition(OfxTime time) const override;
-	const std::string &findSupportedComp(const std::string &s) const override;
+
+	void setRegionOfDefinition(OfxRectD regionOfDefinition, OfxTime time);
+	void olive::plugin::OliveClipInstance::setDefaultRegionOfDefinition(
+	OfxRectD regionOfDefinition);
+#   ifdef OFX_SUPPORTS_OPENGLRENDER
+	OFX::Host::ImageEffect::Texture* loadTexture(OfxTime time, const char *format, const OfxRectD *optionalBounds) { return NULL; };
+#   endif
 private:
 	VideoParams params_;
 
+	QMap<OfxTime, OfxRectD> regionOfDefinitions_;
+
+	OfxRectD defaultRegionOfDefinitions_;
+
+	OFX::Host::ImageEffect::Image image_;
 };
 }
 }

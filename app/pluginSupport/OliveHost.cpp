@@ -25,6 +25,9 @@
 #include <QApplication>
 #include <QDir>
 #include "OliveHost.h"
+
+#include "OliveInstance.h"
+#include "common/Current.h"
 using namespace OFX::Host;
 using namespace olive::plugin;
 void loadPlugins(QString path)
@@ -79,7 +82,7 @@ OFX::Host::ImageEffect::Instance* OliveHost::newInstance(void* clientData,
 							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 							OFX::Host::ImageEffect::Descriptor& desc,
 							const std::string& context){
-	//ImageEffect::Instance* instance=new ImageEffect::Instance(clientData,plugin,desc,context);
+	ImageEffect::Instance* instance=new OliveInstance(plugin,desc,context,Current::getInstance().interactive());
 	instances_.append(instance);
 	return instance;
 };

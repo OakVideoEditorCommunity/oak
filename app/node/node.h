@@ -1124,7 +1124,12 @@ public:
 
 	static const QString kEnabledInput;
 
+	std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> getPlugin();
 protected:
+
+	// If is set, this is a plugin node.
+	std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> plugin;
+
 	void InsertInput(const QString &id, NodeValue::Type type,
 					 const QVariant &default_value, InputFlags flags,
 					 int index);

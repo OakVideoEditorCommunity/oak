@@ -51,6 +51,10 @@ public:
 	{
 		currentAudioParams_ = params;
 	}
+	bool interactive()
+	{
+		return true;
+	}
 private:
 	static Current current;
 	olive::VideoParams currentVideoParams_;
