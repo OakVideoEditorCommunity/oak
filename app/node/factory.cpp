@@ -29,6 +29,7 @@
 #include "block/transition/diptocolor/diptocolortransition.h"
 #include "color/displaytransform/displaytransform.h"
 #include "color/ociogradingtransformlinear/ociogradingtransformlinear.h"
+#include "common/Current.h"
 #include "distort/cornerpin/cornerpindistortnode.h"
 #include "distort/crop/cropdistortnode.h"
 #include "distort/flip/flipdistortnode.h"
@@ -62,6 +63,8 @@
 #include "math/trigonometry/trigonometry.h"
 #include "output/track/track.h"
 #include "output/viewer/viewer.h"
+#include "pluginSupport/OliveHost.h"
+#include "plugins/Plugin.h"
 #include "project/folder/folder.h"
 #include "project/footage/footage.h"
 #include "project/sequence/sequence.h"
@@ -84,6 +87,19 @@ void NodeFactory::Initialize()
 
 		library_.append(created_node);
 	}
+
+	std::shared_ptr<olive::plugin::OliveHost> host=std::make_shared<olive::plugin::OliveHost>();
+	Current::getInstance().setPluginHost(host);
+	std::shared_ptr<OFX::Host::ImageEffect::PluginCache> plugin_cache=std::make_shared<OFX::Host::ImageEffect::PluginCache>(*host);
+	plugin_cache->registerInCache(*OFX::Host::PluginCache::getPluginCache());
+	OFX::Host::PluginCache::getPluginCache()->scanPluginFiles();
+
+
+	for (auto plugin : OFX::Host::PluginCache::getPluginCache()->getPlugins()) {
+		plugin::PluginNode *plugin_node=new plugin::PluginNode(dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin*>(plugin));
+		library_.append(plugin_node);
+	}
+
 }
 
 void NodeFactory::Destroy()

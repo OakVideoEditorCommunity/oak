@@ -1,6 +1,10 @@
 target_sources(libolive-editor PRIVATE
         OliveHost.h
         OliveHost.cpp
-        OliveInstance.h
-        OliveInstance.cpp
+        OlivePluginInstance.h
+        OlivePluginInstance.cpp
+        OliveClip.cpp
+        OliveClip.h
+        paraminstance.cpp
+        paraminstance.h
 )

@@ -169,7 +169,7 @@ void RenderProcessor::Run()
 	}
 
 	// if is a plugin
-	Node *node=ticket_->property("node").value<Node*>();
+	/*Node *node=ticket_->property("node").value<Node*>();
 	if (node && node->getPlugin()) {
 		std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> plugin
 			= node->getPlugin();
@@ -214,7 +214,7 @@ void RenderProcessor::Run()
 
 		int numFramesToRender=ticket_->property("time").value<rational>().toDouble()
 			* params.frame_rate().toDouble();
-		stat = instance->beginRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=*/true, /*interactive=*/false
+		stat = instance->beginRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=#1#true, /*interactive=#1#false
 										 );
 		if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
 			ticket_->Finish();
@@ -239,7 +239,7 @@ void RenderProcessor::Run()
 			assert(stat == kOfxStatOK || stat == kOfxStatReplyDefault);
 
 			// render a frame
-			stat = instance->renderAction(t,kOfxImageFieldBoth,renderWindow, renderScale, /*sequential=*/true, /*interactive=*/false, /*draft=*/false);
+			stat = instance->renderAction(t,kOfxImageFieldBoth,renderWindow, renderScale, /*sequential=#1#true, /*interactive=#1#false, /*draft=#1#false);
 			assert(stat == kOfxStatOK);
 
 			// get the output image buffer
@@ -250,9 +250,10 @@ void RenderProcessor::Run()
 			exportToPPM(ss.str(), outputImage);
 		}
 
-		instance->endRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=*/true, /*interactive=*/false
+		instance->endRenderAction(0, numFramesToRender, 1.0, false, renderScale, /*sequential=#1#true, /*interactive=#1#false
 								  );
 	}
+	*/
 
 	switch (type) {
 	case RenderManager::kTypeVideo: {

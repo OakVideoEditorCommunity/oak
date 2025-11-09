@@ -15,7 +15,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+#ifndef OLIVE_INSTANCE_H
+#define OLIVE_INSTANCE_H
 #include "ofxCore.h"
 #include "ofxImageEffect.h"
 #include <QString>
@@ -36,9 +37,9 @@ struct PersistentErrors{
 	ErrorType type;
 	QString message;
 };
-class OliveInstance : public OFX::Host::ImageEffect::Instance {
+class OlivePluginInstance : public OFX::Host::ImageEffect::Instance {
 public:
-	OliveInstance(
+	OlivePluginInstance(
 				  OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 				  OFX::Host::ImageEffect::Descriptor& desc,
 				  const std::string& context,
@@ -46,7 +47,7 @@ public:
 		: OFX::Host::ImageEffect::Instance(plugin, desc, context, interactive)
 	{
 	}
-	~OliveInstance() override = default;
+	~OlivePluginInstance() override = default;
 	const std::string &getDefaultOutputFielding() const{
 		return kOfxImageFieldNone;
 	};
@@ -152,3 +153,4 @@ private:
 };
 }
 }
+#endif

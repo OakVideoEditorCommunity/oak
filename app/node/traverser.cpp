@@ -387,6 +387,10 @@ QVector2D NodeTraverser::GenerateResolution() const
 					 video_params_.height());
 }
 
+/**
+ * Resolve Jobs. I need to add a PluginJob here and move the plugin code here.
+ * @param val
+ */
 void NodeTraverser::ResolveJobs(NodeValue &val)
 {
 	if (val.type() == NodeValue::kTexture) {

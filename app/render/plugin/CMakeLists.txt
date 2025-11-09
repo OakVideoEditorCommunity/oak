@@ -1,0 +1,1 @@
+target_sources(libolive-editor PRIVATE pluginrenderer.cpp pluginrenderer.h)

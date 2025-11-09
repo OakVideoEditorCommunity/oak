@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include "OliveInstance.h"
+#include "OlivePluginInstance.h"
 
 #include "OliveClip.h"
 #include "ofxCore.h"
@@ -28,11 +28,12 @@
 #include <qobject.h>
 #include <string.h>
 #include <QString>
+#include "paraminstance.h"
 namespace olive
 {
 namespace plugin
 {
-OfxStatus OliveInstance::vmessage(const char *type, const char *id,
+OfxStatus OlivePluginInstance::vmessage(const char *type, const char *id,
 								  const char *format, va_list args)
 {
 	char *buffer = new char[1024];
@@ -59,7 +60,7 @@ OfxStatus OliveInstance::vmessage(const char *type, const char *id,
 		return kOfxStatOK;
 	}
 }
-OfxStatus OliveInstance::setPersistentMessage(const char *type, const char *id,
+OfxStatus OlivePluginInstance::setPersistentMessage(const char *type, const char *id,
 											  const char *format, va_list args)
 {
 	char *buffer = new char[1024];
@@ -95,66 +96,66 @@ OfxStatus OliveInstance::setPersistentMessage(const char *type, const char *id,
 	}
 	return kOfxStatOK;
 }
-OfxStatus OliveInstance::clearPersistentMessage()
+OfxStatus OlivePluginInstance::clearPersistentMessage()
 {
 	persistentErrors_.clear();
 	// TODO: tell the shell to remove message.
 	return kOfxStatOK;
 }
-void OliveInstance::getProjectSize(double &xSize, double &ySize) const
+void OlivePluginInstance::getProjectSize(double &xSize, double &ySize) const
 {
 	xSize =params_.width();
 	ySize =params_.height();
 }
-void OliveInstance::getProjectOffset(double &xOffset, double &yOffset) const
+void OlivePluginInstance::getProjectOffset(double &xOffset, double &yOffset) const
 {
 	xOffset =params_.x();
 	yOffset =params_.y();
 }
-void OliveInstance::getProjectExtent(double &xSize, double &ySize) const
+void OlivePluginInstance::getProjectExtent(double &xSize, double &ySize) const
 {
 	xSize =params_.width();
 	ySize =params_.height();
 	// TODO: Ensure this project does not support this.
 }
-double OliveInstance::getProjectPixelAspectRatio() const
+double OlivePluginInstance::getProjectPixelAspectRatio() const
 {
 	return Current::getInstance()
 		.currentVideoParams()
 		.pixel_aspect_ratio()
 		.toDouble();
 }
-double OliveInstance::getFrameRate() const
+double OlivePluginInstance::getFrameRate() const
 {
 	return params_.frame_rate().toDouble();
 }
 
-double OliveInstance::getEffectDuration() const
+double OlivePluginInstance::getEffectDuration() const
 {
 	// Return a default duration value
 	return 100.0;
 }
 
-double OliveInstance::getFrameRecursive() const
+double OlivePluginInstance::getFrameRecursive() const
 {
 	// Return current frame (this would typically be set by the host during rendering)
 	return 0.0;
 }
 
-void OliveInstance::getRenderScaleRecursive(double &x, double &y) const
+void OlivePluginInstance::getRenderScaleRecursive(double &x, double &y) const
 {
 	// Return default render scale (1.0, 1.0)
 	x = 1.0;
 	y = 1.0;
 }
 OFX::Host::Param::Instance *
-OliveInstance::newParam(const std::string &name,
+OlivePluginInstance::newParam(const std::string &name,
 						OFX::Host::Param::Descriptor &Descriptor)
 {
 
 }
 
-OFX::Host::ImageEffect::ClipInstance *OliveInstance::newClipInstance(
+OFX::Host::ImageEffect::ClipInstance *OlivePluginInstance::newClipInstance(
 	OFX::Host::ImageEffect::Instance *plugin,
 	OFX::Host::ImageEffect::ClipDescriptor *descriptor,
 	int index)

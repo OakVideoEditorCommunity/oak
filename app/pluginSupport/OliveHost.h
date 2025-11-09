@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef OLIVE_HOST_H
+#define OLIVE_HOST_H
 #include  "ofxhHost.h"
 #include "ofxhImageEffectAPI.h"
 #include "ofxCore.h"
@@ -67,3 +69,4 @@ private:
 };
 }
 }
+#endif

@@ -19,6 +19,8 @@
 #ifndef NODE_H
 #define NODE_H
 
+#include "ofxhImageEffectAPI.h"
+
 #include <map>
 #include <QMutex>
 #include <QObject>
@@ -1124,11 +1126,11 @@ public:
 
 	static const QString kEnabledInput;
 
-	std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> getPlugin();
+	OFX::Host::ImageEffect::ImageEffectPlugin* getPlugin();
 protected:
 
 	// If is set, this is a plugin node.
-	std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> plugin;
+	OFX::Host::ImageEffect::ImageEffectPlugin* plugin= nullptr;
 
 	void InsertInput(const QString &id, NodeValue::Type type,
 					 const QVariant &default_value, InputFlags flags,

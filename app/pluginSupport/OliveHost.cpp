@@ -26,22 +26,15 @@
 #include <QDir>
 #include "OliveHost.h"
 
-#include "OliveInstance.h"
+#include "OlivePluginInstance.h"
 #include "common/Current.h"
 using namespace OFX::Host;
 using namespace olive::plugin;
-void loadPlugins(QString path)
+
+void olive::plugin::loadPlugins(QString path)
 {
-	QDir dir=(QCoreApplication::applicationDirPath()+path);
-	QFileInfoList files=dir.entryInfoList();
-	for (auto& file:files) {
-		if (file.isDir()) {
-			OFX::Binary binary(file.absoluteFilePath().toStdString());
-
-		}
-	}
+	OFX::Host::ImageEffect::PluginCache imageEffectPluginCache(myHost);
 }
-
 OliveHost::~OliveHost()
 {
 	for(auto& descriptor:descriptors_){
@@ -82,7 +75,7 @@ OFX::Host::ImageEffect::Instance* OliveHost::newInstance(void* clientData,
 							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 							OFX::Host::ImageEffect::Descriptor& desc,
 							const std::string& context){
-	ImageEffect::Instance* instance=new OliveInstance(plugin,desc,context,Current::getInstance().interactive());
+	ImageEffect::Instance* instance=new OlivePluginInstance(plugin,desc,context,Current::getInstance().interactive());
 	instances_.append(instance);
 	return instance;
 };
