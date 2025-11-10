@@ -17,33 +17,4 @@
  *
  */
 
-#ifndef PLUGINJOB_H
-#define PLUGINJOB_H
-#include "acceleratedjob.h"
-#include "pluginSupport/OlivePluginInstance.h"
-
-#include <any>
-#include <OpenImageIO/detail/fmt/chrono.h>
-
-namespace olive {
-namespace plugin {
-
-class PluginJob :public AcceleratedJob{
-public:
-	explicit PluginJob(OFX::Host::ImageEffect::ImageEffectPlugin* pluginInstance, NodeValueRow row): AcceleratedJob()
-	{
-		this->pluginInstance = pluginInstance;
-	}
-
-private:
-	OFX::Host::ImageEffect::ImageEffectPlugin *pluginInstance=nullptr;
-
-	QHash<OfxTime, QHash<QString, std::any>> paramsOnTime;
-
-	QHash<QString, std::any> params;
-};
-
-} // plugin
-} // olive
-
-#endif //PLUGINJOB_H
+#include "nodeparambutton.h"

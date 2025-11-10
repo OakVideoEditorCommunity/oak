@@ -40,6 +40,7 @@ public:
 
 	void AddPushButton();
 	void AddPage();
+
 	Node *copy() const override;
 	/**
    * @brief The main processing function
@@ -72,6 +73,9 @@ public:
    * The destination buffer. It will already be allocated and ready for writing to.
    */
 	virtual void GenerateFrame(FramePtr frame, const GenerateJob &job) const;
+
+public slots:
+	void pushButtonClicked(QString name);
 
 };
 

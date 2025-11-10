@@ -53,19 +53,19 @@ olive::plugin::PluginNode::PluginNode(
 		} else if (ofxType == kOfxParamTypeStrChoice){
 			type = NodeValue::kStrCombo;
 		}else if (ofxType == kOfxParamTypeBytes
-					|| ofxType == kOfxParamTypeCustom) {
+			|| ofxType == kOfxParamTypeCustom) {
 			type = NodeValue::kBinary;
-		} else {
-			type = NodeValue::kNone;
-		}
-
-		if (ofxType == kOfxParamTypePushButton) {
-			// TODO
+		} else if (ofxType == kOfxParamTypePushButton) {
+			type = NodeValue::kPushButton;
 		} else if (ofxType == kOfxParamTypeGroup) {
 			// TODO
 		} else if (ofxType == kOfxParamTypePage) {
 			// TODO
+		}else {
+			type = NodeValue::kNone;
 		}
+
+
 
 		AddInput(param.second->getName().data(), type);
 	}
@@ -91,12 +91,12 @@ void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 {
 	TexturePtr tex = value[kTextureInput].toTexture();
 	if (tex) {
-		PluginJob job(,value);
+		PluginJob job(plugin, value);
 		table->Push(NodeValue::kTexture, tex->toJob(job), this);
 	}
-
-
-
+}
+void olive::plugin::PluginNode::pushButtonClicked(QString name)
+{
 }
 
 QString olive::plugin::PluginNode::id() const

@@ -17,33 +17,31 @@
  *
  */
 
-#ifndef PLUGINJOB_H
-#define PLUGINJOB_H
-#include "acceleratedjob.h"
-#include "pluginSupport/OlivePluginInstance.h"
+#ifndef NODEPARAMBUTTON_H
+#define NODEPARAMBUTTON_H
+#include "node/plugins/Plugin.h"
 
-#include <any>
-#include <OpenImageIO/detail/fmt/chrono.h>
+#include <QPushButton>
 
-namespace olive {
-namespace plugin {
-
-class PluginJob :public AcceleratedJob{
+class NodeParamButton : public QPushButton{
+Q_OBJECT
 public:
-	explicit PluginJob(OFX::Host::ImageEffect::ImageEffectPlugin* pluginInstance, NodeValueRow row): AcceleratedJob()
+	NodeParamButton(QString name, QWidget *parent = nullptr):QPushButton(parent)
 	{
-		this->pluginInstance = pluginInstance;
+		this->name_=name;
+		connect(this, &QPushButton::clicked, this, &NodeParamButton::pressed);
 	}
-
+signals:
+	void onPressed(QString name);
+private slots:
+	void pressed(){
+		emit onPressed(name_);
+	}
 private:
-	OFX::Host::ImageEffect::ImageEffectPlugin *pluginInstance=nullptr;
+	QString name_;
 
-	QHash<OfxTime, QHash<QString, std::any>> paramsOnTime;
-
-	QHash<QString, std::any> params;
 };
 
-} // plugin
-} // olive
 
-#endif //PLUGINJOB_H
+
+#endif //NODEPARAMBUTTON_H

@@ -197,6 +197,10 @@ public:
 		kBinary,
 
 		/**
+		 *Push Button
+		 */
+		kPushButton,
+		/**
      * End of list
      */
 		kDataTypeCount
