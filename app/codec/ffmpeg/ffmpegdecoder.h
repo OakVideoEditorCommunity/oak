@@ -42,6 +42,20 @@ extern "C" {
 namespace olive
 {
 
+// 头文件里先备好枚举映射
+static VideoParams::Interlacing FFmpegFieldOrderToOlive(AVFieldOrder fo)
+{
+	switch (fo) {
+	case AV_FIELD_TT:          // 隔行，顶场在前
+		return VideoParams::kInterlacedTopFirst;
+	case AV_FIELD_BB:          // 隔行，底场在前
+		return VideoParams::kInterlacedBottomFirst;
+	case AV_FIELD_PROGRESSIVE:
+	default:
+		return VideoParams::kInterlaceNone;
+	}
+}
+
 /**
  * @brief A Decoder derivative that wraps FFmpeg functions as on Olive decoder
  */
@@ -123,6 +137,10 @@ private:
 		AVStream *avstream() const
 		{
 			return avstream_;
+		}
+		AVCodecContext *codec_ctx()
+		{
+			return codec_ctx_;
 		}
 
 	private:
