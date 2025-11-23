@@ -180,7 +180,7 @@ void ProjectPanel::ItemDoubleClickSlot(Node *item)
 			PanelManager::instance()->MostRecentlyFocused<FootageViewerPanel>();
 		panel->ConnectViewerNode(static_cast<Footage *>(item));
 		panel->raise();
-		panel->setFocus();
+		panel->setFocus(Qt::FocusReason::MouseFocusReason);
 	} else if (dynamic_cast<Sequence *>(item)) {
 		// Open this sequence in the Timeline
 		Core::instance()->main_window()->OpenSequence(

@@ -140,7 +140,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 			break;
 		}
 
-		AVFrame *hw_in = f.get();
+		AVFramePtr hw_in = f;
 
 		VideoParams plane_params = vp;
 		plane_params.set_channel_count(1);
@@ -148,7 +148,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 
 		TexturePtr y_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[0], hw_in->linesize[0] / px_size);
-
+		y_plane->handleFrame(hw_in);
 		switch (f->format) {
 		case AV_PIX_FMT_YUV420P:
 		case AV_PIX_FMT_YUV422P:
@@ -170,8 +170,11 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 
 		TexturePtr u_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[1], hw_in->linesize[1] / px_size);
+		u_plane->handleFrame(hw_in);
+
 		TexturePtr v_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[2], hw_in->linesize[2] / px_size);
+		v_plane->handleFrame(hw_in);
 
 		ShaderJob job;
 		job.Insert(QStringLiteral("y_channel"),
@@ -207,6 +210,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 	case AV_PIX_FMT_RGBA:
 	case AV_PIX_FMT_RGBA64LE:
 		// RGBA can be uploaded directly to the texture
+		tex->handleFrame(f);
 		tex->Upload(f->data[0], f->linesize[0] / vp.GetBytesPerPixel());
 		break;
 	}
@@ -282,14 +286,17 @@ TexturePtr FFmpegDecoder::RetrieveVideoInternal(const RetrieveVideoParams &p)
 							 AVCOL_RANGE_MPEG;
 
 		// Perform any CPU processing required
-		f = PreProcessFrame(f, p);
+		AVFramePtr ptr = PreProcessFrame(f, p);
+		f=std::move(ptr);
 		if (!f) {
 			// Error occurred while software scaling
 			return nullptr;
 		}
 
 		// Finally, perform any GPU processing required
-		return ProcessFrameIntoTexture(f, p, original);
+		TexturePtr texture = ProcessFrameIntoTexture(f, p, original);
+
+		return texture;
 	}
 
 	return nullptr;
@@ -799,7 +806,7 @@ AVFramePtr FFmpegDecoder::PreProcessFrame(AVFramePtr f,
 	dest->format = f->format;
 	dest->color_range = f->color_range;
 	dest->colorspace = f->colorspace;
-
+	dest->hw_frames_ctx = nullptr;
 	if (p.divider > 1) {
 		dest->width = VideoParams::GetScaledDimension(dest->width, p.divider);
 		dest->height = VideoParams::GetScaledDimension(dest->height, p.divider);
@@ -852,8 +859,8 @@ AVFramePtr FFmpegDecoder::PreProcessFrame(AVFramePtr f,
 			dest->color_range == AVCOL_RANGE_JPEG ? 1 : 0, 0, 0x10000, 0x10000);
 	}
 
-	r = sws_scale(sws_ctx_, f->data, f->linesize, 0, f->height, dest->data,
-				  dest->linesize);
+	r = sws_scale_frame(sws_ctx_, dest.get(), f.get());
+
 	if (r < 0) {
 		FFmpegError(r);
 		return nullptr;

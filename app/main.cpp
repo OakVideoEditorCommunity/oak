@@ -145,6 +145,7 @@ int decompress_project(const QString &project)
 
 int main(int argc, char *argv[])
 {
+
 	// Set up debug handler
 	qInstallMessageHandler(olive::DebugHandler);
 

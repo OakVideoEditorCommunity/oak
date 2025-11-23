@@ -1203,8 +1203,11 @@ void ViewerWidget::UpdateMinimumScale()
 		// Avoids divide by zero
 		SetMinimumScale(0);
 	} else {
-		SetMinimumScale(static_cast<double>(ruler()->width()) /
-						GetConnectedNode()->GetLength().toDouble());
+		double min_scale = static_cast<double>(ruler()->width()) /
+						   GetConnectedNode()->GetLength().toDouble();
+		// Ensure min_scale doesn't exceed max_scale to prevent crash
+		min_scale = qMin(min_scale, GetMaximumScale());
+		SetMinimumScale(min_scale);
 	}
 }
 

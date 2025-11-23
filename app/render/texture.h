@@ -21,6 +21,8 @@
 #ifndef RENDERTEXTURE_H
 #define RENDERTEXTURE_H
 
+#include "common/ffmpegutils.h"
+
 #include <memory>
 #include <QVariant>
 
@@ -150,7 +152,10 @@ public:
 	{
 		return job_;
 	}
-
+	void handleFrame(AVFramePtr ptr)
+	{
+		frame_=ptr;
+	}
 private:
 	Renderer *renderer_;
 
@@ -159,6 +164,8 @@ private:
 	QVariant id_;
 
 	AcceleratedJob *job_;
+
+	AVFramePtr frame_;
 };
 
 }

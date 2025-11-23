@@ -17,7 +17,11 @@
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(olive-editor VERSION 0.2.0 LANGUAGES CXX)
-
+if(${CMAKE_BUILD_TYPE} EQUAL Debug)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -g")
+set(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=memory)
+endif ()
 option(BUILD_QT6 "Build with Qt 6 over 5 (experimental)" ON)
 option(BUILD_DOXYGEN "Build Doxygen documentation" OFF)
 option(BUILD_TESTS "Build unit tests" OFF)
@@ -168,7 +172,7 @@ list(APPEND OLIVE_LIBRARIES
 )
 
 # Link FFmpeg
-find_package(FFMPEG 3.0 REQUIRED
+find_package(FFMPEG REQUIRED
   COMPONENTS
   avutil
   avcodec

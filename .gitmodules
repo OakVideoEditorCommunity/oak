@@ -5,3 +5,4 @@
 [submodule "ext/KDDockWidgets"]
 	path = ext/KDDockWidgets
 	url = https://github.com/olive-editor/KDDockWidgets.git
+	branch = main
