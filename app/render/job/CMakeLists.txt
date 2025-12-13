@@ -22,5 +22,7 @@ set(OLIVE_SOURCES
   render/job/generatejob.h
   render/job/samplejob.h
   render/job/shaderjob.h
-  PARENT_SCOPE
+  render/job/pluginjob.h
+  render/job/pluginjob.cpp
+        PARENT_SCOPE
 )

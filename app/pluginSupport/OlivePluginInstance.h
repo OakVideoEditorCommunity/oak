@@ -15,11 +15,14 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+#ifndef OLIVE_INSTANCE_H
+#define OLIVE_INSTANCE_H
 #include "ofxCore.h"
 #include "ofxImageEffect.h"
 #include <QString>
 #include "ofxhImageEffect.h"
+#include "render/videoparams.h"
+
 #include <map>
 #include <qcontainerfwd.h>
 #include <qlist.h>
@@ -34,9 +37,9 @@ struct PersistentErrors{
 	ErrorType type;
 	QString message;
 };
-class OliveInstance : public OFX::Host::ImageEffect::Instance {
+class OlivePluginInstance : public OFX::Host::ImageEffect::Instance {
 public:
-	OliveInstance(
+	OlivePluginInstance(
 				  OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 				  OFX::Host::ImageEffect::Descriptor& desc,
 				  const std::string& context,
@@ -44,11 +47,15 @@ public:
 		: OFX::Host::ImageEffect::Instance(plugin, desc, context, interactive)
 	{
 	}
-	~OliveInstance() override = default;
+	~OlivePluginInstance() override = default;
 	const std::string &getDefaultOutputFielding() const{
 		return kOfxImageFieldNone;
 	};
 
+	void setVideoParam(VideoParams params)
+	{
+		this->params_=params;
+	}
 	OFX::Host::ImageEffect::ClipInstance *newClipInstance(
 		OFX::Host::ImageEffect::Instance *plugin,
 		OFX::Host::ImageEffect::ClipDescriptor *descriptor,
@@ -88,9 +95,62 @@ public:
 	/// renderScale
 	void getRenderScaleRecursive(double &x, double &y) const override;
 
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	// overridden for Param::SetInstance
+
+	/// make a parameter instance
+	///
+	/// Client host code needs to implement this
+	virtual OFX::Host::Param::Instance* newParam(const std::string& name, OFX::Host::Param::Descriptor& Descriptor);
+
+	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditBegin
+	///
+	/// Client host code needs to implement this
+	virtual OfxStatus editBegin(const std::string& name);
+
+	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditEnd
+	///
+	/// Client host code needs to implement this
+	virtual OfxStatus editEnd();
+
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	// overridden for Progress::ProgressI
+
+	/// Start doing progress.
+	virtual void progressStart(const std::string &message, const std::string &messageid);
+
+	/// finish yer progress
+	virtual void progressEnd();
+
+	/// set the progress to some level of completion, returns
+	/// false if you should abandon processing, true to continue
+	virtual bool progressUpdate(double t);
+
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////
+	// overridden for TimeLine::TimeLineI
+
+	/// get the current time on the timeline. This is not necessarily the same
+	/// time as being passed to an action (eg render)
+	virtual double timeLineGetTime();
+
+	/// set the timeline to a specific time
+	virtual void timeLineGotoTime(double t);
+
+	/// get the first and last times available on the effect's timeline
+	virtual void timeLineGetBounds(double &t1, double &t2);
 private:
 	QList<PersistentErrors> persistentErrors_;
-
+	VideoParams params_;
 };
 }
 }
+#endif

@@ -163,7 +163,13 @@ public:
      * Resolves to `int` - the index currently selected
      */
 		kCombo,
-
+		/**
+	 * ComboBox type
+	 *
+	 * Resolves to `QString` - the text of choice currently selected
+	 * This is to support the OpenFX type kOfxParamTypeStrChoice
+	 */
+		kStrCombo,
 		/**
      * Video Parameters type
      *
@@ -190,6 +196,10 @@ public:
      */
 		kBinary,
 
+		/**
+		 *Push Button
+		 */
+		kPushButton,
 		/**
      * End of list
      */

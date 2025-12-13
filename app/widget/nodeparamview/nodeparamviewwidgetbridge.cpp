@@ -26,6 +26,7 @@
 
 #include "common/qtutils.h"
 #include "core.h"
+#include "nodeparambutton.h"
 #include "node/group/group.h"
 #include "node/node.h"
 #include "node/nodeundo.h"
@@ -39,6 +40,8 @@
 #include "widget/slider/floatslider.h"
 #include "widget/slider/integerslider.h"
 #include "widget/slider/rationalslider.h"
+
+#include <OpenImageIO/detail/fmt/base.h>
 
 namespace olive
 {
@@ -178,6 +181,13 @@ void NodeParamViewWidgetBridge::CreateWidgets()
 			connect(bezier->cp2_y_slider(), &FloatSlider::ValueChanged, this,
 					&NodeParamViewWidgetBridge::WidgetCallback);
 			break;
+		}
+		case NodeValue::kPushButton: {
+			NodeInput input=GetInnerInput();
+			NodeParamButton *button=new NodeParamButton(input.name(),parent);
+			widgets_.append(button);
+			plugin::PluginNode* plugin_node=dynamic_cast<plugin::PluginNode*>(input.node());
+			connect(button, &NodeParamButton::onPressed, plugin_node, &plugin::PluginNode::pushButtonClicked);
 		}
 		}
 

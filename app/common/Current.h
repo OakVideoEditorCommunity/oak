@@ -19,7 +19,9 @@
 
 #ifndef CURRENT_H
 #define CURRENT_H
+#include "pluginSupport/OliveHost.h"
 #include "render/videoparams.h"
+#include "render/job/pluginjob.h"
 
 class Current {
 public:
@@ -51,10 +53,36 @@ public:
 	{
 		currentAudioParams_ = params;
 	}
+	bool interactive()
+	{
+		return true;
+	}
+
+	std::shared_ptr<olive::plugin::OliveHost> pluginHost()
+	{
+		return myHost;
+	}
+
+	void setPluginHost(std::shared_ptr<olive::plugin::OliveHost> host)
+	{
+		myHost = host;
+	}
+
+	std::shared_ptr<OFX::Host::ImageEffect::PluginCache> pluginCache()
+	{
+		return plugin_cache_;
+	}
+
+	void setPluginCache(std::shared_ptr<OFX::Host::ImageEffect::PluginCache> cache)
+	{
+		plugin_cache_ = cache;
+	}
 private:
 	static Current current;
 	olive::VideoParams currentVideoParams_;
 	olive::AudioParams currentAudioParams_;
+	std::shared_ptr<olive::plugin::OliveHost> myHost;
+	std::shared_ptr<OFX::Host::ImageEffect::PluginCache> plugin_cache_;
 };
 
 

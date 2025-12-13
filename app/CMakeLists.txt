@@ -55,6 +55,10 @@ configure_file(ts/translations.qrc.in ts/translations.qrc @ONLY)
 set(OLIVE_RESOURCES
   ${OLIVE_RESOURCES}
   ${CMAKE_CURRENT_BINARY_DIR}/ts/translations.qrc
+        render/job/pluginjob.cpp
+        render/job/pluginjob.h
+        widget/nodeparamview/nodeparambutton.cpp
+        widget/nodeparamview/nodeparambutton.h
 )
 
 # Add version object

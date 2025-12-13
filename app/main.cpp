@@ -24,6 +24,7 @@
  * Use the navigation above to find documentation on classes or source files.
  */
 
+#include "OliveHost.h"
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavfilter/avfilter.h>
@@ -52,7 +53,6 @@ extern "C" {
 #ifdef USE_CRASHPAD
 #include "common/crashpadinterface.h"
 #endif // USE_CRASHPAD
-#include "OlivePlugin.cpp"
 int decompress_project(const QString &project)
 {
 	if (project.isEmpty()) {
