@@ -372,7 +372,7 @@ bool ViewerDisplayWidget::eventFilter(QObject *o, QEvent *e)
 void ViewerDisplayWidget::OnPaint()
 {
 	// Clear background to empty
-	QColor bg_color = show_widget_background_ ? palette().window().color() :
+ 	QColor bg_color = show_widget_background_ ? palette().window().color() :
 												Qt::black;
 	renderer()->ClearDestination(nullptr, bg_color.redF(), bg_color.greenF(),
 								 bg_color.blueF());

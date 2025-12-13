@@ -56,6 +56,9 @@ const double &TimeScaledObject::timebase_dbl() const
 rational TimeScaledObject::SceneToTime(const double &x, const double &x_scale,
 									   const rational &timebase, bool round)
 {
+	if (timebase.isNull()) {
+		return rational();
+	}
 	double unscaled_time = x / x_scale / timebase.toDouble();
 
 	// Adjust screen point by scale and timebase
@@ -85,16 +88,25 @@ rational TimeScaledObject::SceneToTimeNoGrid(const double &x,
 
 double TimeScaledObject::TimeToScene(const rational &time) const
 {
+	if (timebase_.isNull()) {
+		return 0.0;
+	}
 	return time.toDouble() * scale_;
 }
 
 rational TimeScaledObject::SceneToTime(const double &x, bool round) const
 {
+	if (timebase_.isNull()) {
+		return rational();
+	}
 	return SceneToTime(x, scale_, timebase_, round);
 }
 
 rational TimeScaledObject::SceneToTimeNoGrid(const double &x) const
 {
+	if (timebase_.isNull()) {
+		return rational::fromDouble(x / scale_);
+	}
 	return SceneToTimeNoGrid(x, scale_);
 }
 

@@ -1,0 +1,25 @@
+From 6b0ef44eb189411d36c739ccde8a081a3e62034a Mon Sep 17 00:00:00 2001
+From: Mike Solar <iam@mikesolar.com>
+Date: Mon, 24 Nov 2025 20:57:12 +0800
+Subject: [PATCH] Fix include path for Window_p.h in qtcommon directory
+
+---
+ src/qtcommon/Window_p.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qtcommon/Window_p.h b/src/qtcommon/Window_p.h
+index f29b209a5..d1d6b47ad 100644
+--- a/src/qtcommon/Window_p.h
++++ b/src/qtcommon/Window_p.h
+@@ -11,7 +11,7 @@
+ 
+ #pragma once
+ 
+-#include "core/Window_p.h"
++#include "../core/Window_p.h"
+ #include "Screen_p.h"
+ 
+ #include <QPointer>
+-- 
+2.52.0
+

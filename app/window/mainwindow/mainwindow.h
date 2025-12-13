@@ -51,7 +51,7 @@ namespace olive
 /**
  * @brief Olive's main window responsible for docking widgets and the main menu bar.
  */
-class MainWindow : public KDDockWidgets::MainWindow {
+class MainWindow : public KDDockWidgets::QtWidgets::MainWindow {
 	Q_OBJECT
 public:
 	MainWindow(QWidget *parent = nullptr);

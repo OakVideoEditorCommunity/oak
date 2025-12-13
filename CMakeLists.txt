@@ -14,16 +14,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(olive-editor VERSION 0.2.0 LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 23)
-
-set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD ON)
-find_package(expat REQUIRED)
-
+if(${CMAKE_BUILD_TYPE} EQUAL Debug)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -g")
+set(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=memory)
+endif ()
 option(BUILD_QT6 "Build with Qt 6 over 5 (experimental)" ON)
 option(BUILD_DOXYGEN "Build Doxygen documentation" OFF)
 option(BUILD_TESTS "Build unit tests" OFF)
@@ -37,11 +35,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-
 # Generates a compile_commands.json in the build dir, link that to the repo
 # root to enrich your IDE with clangd language server protocol functionalities
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-add_subdirectory(third_party/openfx/HostSupport)
+
 # Sanitizers
 add_library(olive-sanitizers INTERFACE)
 include(cmake/Sanitizers.cmake)
@@ -110,6 +107,7 @@ list(APPEND OLIVE_INCLUDE_DIRS ${OPENEXR_INCLUDES})
 list(APPEND OLIVE_LIBRARIES olivecore)
 list(APPEND OLIVE_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/ext/core/include)
 
+
 # Link Qt
 set(QT_LIBRARIES
   Core
@@ -175,7 +173,7 @@ list(APPEND OLIVE_LIBRARIES
 )
 
 # Link FFmpeg
-find_package(FFMPEG 7.0 REQUIRED
+find_package(FFMPEG REQUIRED
   COMPONENTS
   avutil
   avcodec

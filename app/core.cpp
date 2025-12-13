@@ -774,6 +774,7 @@ void Core::StartGUI(bool full_screen)
 	connect(qApp, &QApplication::focusChanged, PanelManager::instance(),
 			&PanelManager::FocusChanged);
 
+	KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtWidgets);
 	// Set KDDockWidgets flags
 	auto &config = KDDockWidgets::Config::self();
 	auto flags = config.flags();

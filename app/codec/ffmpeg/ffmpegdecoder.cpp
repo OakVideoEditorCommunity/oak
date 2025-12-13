@@ -26,6 +26,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/frame.h>
 }
 
 #include <OpenImageIO/imagebuf.h>
@@ -137,7 +138,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 			break;
 		}
 
-		AVFrame *hw_in = f.get();
+		AVFramePtr hw_in = f;
 
 		VideoParams plane_params = vp;
 		plane_params.set_channel_count(1);
@@ -145,7 +146,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 
 		TexturePtr y_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[0], hw_in->linesize[0] / px_size);
-
+		y_plane->handleFrame(hw_in);
 		switch (f->format) {
 		case AV_PIX_FMT_YUV420P:
 		case AV_PIX_FMT_YUV422P:
@@ -167,8 +168,11 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 
 		TexturePtr u_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[1], hw_in->linesize[1] / px_size);
+		u_plane->handleFrame(hw_in);
+
 		TexturePtr v_plane = p.renderer->CreateTexture(
 			plane_params, hw_in->data[2], hw_in->linesize[2] / px_size);
+		v_plane->handleFrame(hw_in);
 
 		ShaderJob job;
 		job.Insert(QStringLiteral("y_channel"),
@@ -204,6 +208,7 @@ TexturePtr FFmpegDecoder::ProcessFrameIntoTexture(AVFramePtr f,
 	case AV_PIX_FMT_RGBA:
 	case AV_PIX_FMT_RGBA64LE:
 		// RGBA can be uploaded directly to the texture
+		tex->handleFrame(f);
 		tex->Upload(f->data[0], f->linesize[0] / vp.GetBytesPerPixel());
 		break;
 	}
@@ -279,14 +284,17 @@ TexturePtr FFmpegDecoder::RetrieveVideoInternal(const RetrieveVideoParams &p)
 							 AVCOL_RANGE_MPEG;
 
 		// Perform any CPU processing required
-		f = PreProcessFrame(f, p);
+		AVFramePtr ptr = PreProcessFrame(f, p);
+		f=std::move(ptr);
 		if (!f) {
 			// Error occurred while software scaling
 			return nullptr;
 		}
 
 		// Finally, perform any GPU processing required
-		return ProcessFrameIntoTexture(f, p, original);
+		TexturePtr texture = ProcessFrameIntoTexture(f, p, original);
+
+		return texture;
 	}
 
 	return nullptr;
@@ -380,116 +388,77 @@ FootageDescription FFmpegDecoder::Probe(const QString &filename,
 						VideoParams::kInterlaceNone;
 
 					{
-						// Read at least two frames to get more information about this video stream
-						AVPacket *pkt = av_packet_alloc();
-						AVFrame *frame = av_frame_alloc();
+					    // Read at least two frames to get more information about this video stream
+					    AVPacket *pkt = av_packet_alloc();
+					    AVFrame  *frame = av_frame_alloc();
 
-						{
-							Instance instance;
-							instance.Open(filename_c, avstream->index);
+					    VideoParams::Interlacing interlacing = VideoParams::kInterlaceNone;
+					    AVRational pixel_aspect_ratio = {1, 1};
+					    AVRational frame_rate = avstream->avg_frame_rate;
+					    AVPixelFormat compatible_pix_fmt =
+					        FFmpegUtils::GetCompatiblePixelFormat(
+					            static_cast<AVPixelFormat>(avstream->codecpar->format));
+					    bool image_is_still = false;
 
-							// Read first frame and retrieve some metadata
-							if (instance.GetFrame(pkt, frame) >= 0) {
-								// Check if video is interlaced and what field dominance it has if so
-								if (frame->interlaced_frame) {
-									if (frame->top_field_first) {
-										interlacing =
-											VideoParams::kInterlacedTopFirst;
-									} else {
-										interlacing =
-											VideoParams::kInterlacedBottomFirst;
-									}
-								}
+					    {
+					        Instance instance;
+					        if (instance.Open(filename_c, avstream->index) != 0)
+					            goto cleanup;
 
-								pixel_aspect_ratio =
-									av_guess_sample_aspect_ratio(
-										instance.fmt_ctx(), instance.avstream(),
-										frame);
+					        AVCodecContext *avctx = instance.codec_ctx();
+					        interlacing = FFmpegFieldOrderToOlive(avctx->field_order);
 
-								frame_rate = av_guess_frame_rate(
-									instance.fmt_ctx(), instance.avstream(),
-									frame);
+					        if (instance.GetFrame(pkt, frame) >= 0) {
+					            pixel_aspect_ratio =
+					                av_guess_sample_aspect_ratio(instance.fmt_ctx(),
+					                                             instance.avstream(), frame);
+					            frame_rate =
+					                av_guess_frame_rate(instance.fmt_ctx(),
+					                                    instance.avstream(), frame);
+					        }
 
-								compatible_pix_fmt =
-									FFmpegUtils::GetCompatiblePixelFormat(
-										static_cast<AVPixelFormat>(
-											avstream->codecpar->format));
-							}
+					        int ret = instance.GetFrame(pkt, frame);
+					        if (ret == AVERROR_EOF) {
+					            image_is_still = true;
+					        } else if (avstream->duration == AV_NOPTS_VALUE ||
+					                   duration_guessed_from_bitrate) {
+					            int64_t last_ts = frame->best_effort_timestamp;
+					            while (instance.GetFrame(pkt, frame) >= 0 &&
+					                   (!cancelled || !cancelled->IsCancelled()))
+					                last_ts = frame->best_effort_timestamp;
+					            avstream->duration = last_ts;
+					        }
 
-							// Read second frame
-							int ret = instance.GetFrame(pkt, frame);
+					        instance.Close();
+					    }
 
-							if (ret >= 0) {
-								// Check if we need a manual duration
-								if (avstream->duration == AV_NOPTS_VALUE ||
-									duration_guessed_from_bitrate) {
-									if (footage_duration == AV_NOPTS_VALUE ||
-										duration_guessed_from_bitrate) {
-										// Manually read through file for duration
-										int64_t new_dur;
+					cleanup:
+					    av_frame_free(&frame);
+					    av_packet_free(&pkt);
 
-										do {
-											new_dur =
-												frame->best_effort_timestamp;
-										} while (instance.GetFrame(
-													 pkt, frame) >= 0 &&
-												 (!cancelled ||
-												  !cancelled->IsCancelled()));
+					    VideoParams stream;
+					    stream.set_stream_index(i);
+					    stream.set_width(avstream->codecpar->width);
+					    stream.set_height(avstream->codecpar->height);
+					    stream.set_video_type(image_is_still ? VideoParams::kVideoTypeStill
+					                                         : VideoParams::kVideoTypeVideo);
+					    stream.set_format(GetNativePixelFormat(compatible_pix_fmt));
+					    stream.set_channel_count(GetNativeChannelCount(compatible_pix_fmt));
+					    stream.set_interlacing(interlacing);          // <-- 已正确填充
+					    stream.set_pixel_aspect_ratio(pixel_aspect_ratio);
+					    stream.set_frame_rate(frame_rate);
+					    stream.set_start_time(avstream->start_time);
+					    stream.set_time_base(avstream->time_base);
+					    stream.set_duration(avstream->duration);
+					    stream.set_color_range(avstream->codecpar->color_range == AVCOL_RANGE_JPEG
+					                               ? VideoParams::kColorRangeFull
+					                               : VideoParams::kColorRangeLimited);
+					    stream.set_premultiplied_alpha(false);
 
-										avstream->duration = new_dur;
-
-									} else {
-										// Fallback to footage duration
-										avstream->duration =
-											Timecode::rescale_timestamp_ceil(
-												footage_duration,
-												rational(1, AV_TIME_BASE),
-												avstream->time_base);
-									}
-								}
-							} else if (ret == AVERROR_EOF) {
-								// Video has only one frame in it, treat it like a still image
-								image_is_still = true;
-							}
-
-							instance.Close();
-						}
-
-						av_frame_free(&frame);
-						av_packet_free(&pkt);
+					    desc.AddVideoStream(stream);
+					    image_is_still ? still_streams++ : video_streams++;
 					}
 
-					VideoParams stream;
-					stream.set_stream_index(i);
-					stream.set_width(avstream->codecpar->width);
-					stream.set_height(avstream->codecpar->height);
-					stream.set_video_type((image_is_still) ?
-											  VideoParams::kVideoTypeStill :
-											  VideoParams::kVideoTypeVideo);
-					stream.set_format(GetNativePixelFormat(compatible_pix_fmt));
-					stream.set_channel_count(
-						GetNativeChannelCount(compatible_pix_fmt));
-					stream.set_interlacing(interlacing);
-					stream.set_pixel_aspect_ratio(pixel_aspect_ratio);
-					stream.set_frame_rate(frame_rate);
-					stream.set_start_time(avstream->start_time);
-					stream.set_time_base(avstream->time_base);
-					stream.set_duration(avstream->duration);
-					stream.set_color_range(avstream->codecpar->color_range ==
-												   AVCOL_RANGE_JPEG ?
-											   VideoParams::kColorRangeFull :
-											   VideoParams::kColorRangeLimited);
-
-					// Defaults to false, requires user intervention if incorrect
-					stream.set_premultiplied_alpha(false);
-
-					desc.AddVideoStream(stream);
-
-					if (image_is_still) {
-						still_streams++;
-					} else {
-						video_streams++;
-					}
 
 				} else if (avstream->codecpar->codec_type ==
 						   AVMEDIA_TYPE_AUDIO) {
@@ -627,7 +596,7 @@ bool FFmpegDecoder::ConformAudioInternal(const QVector<QString> &filenames,
 	}
 	// Create resampling context
 	AVChannelLayout layout = params.channel_layout();
-	SwrContext *resampler;
+	SwrContext *resampler=NULL;
 	swr_alloc_set_opts2(
 		&resampler, &layout,
 		FFmpegUtils::GetFFmpegSampleFormat(params.format()),
@@ -835,7 +804,7 @@ AVFramePtr FFmpegDecoder::PreProcessFrame(AVFramePtr f,
 	dest->format = f->format;
 	dest->color_range = f->color_range;
 	dest->colorspace = f->colorspace;
-
+	dest->hw_frames_ctx = nullptr;
 	if (p.divider > 1) {
 		dest->width = VideoParams::GetScaledDimension(dest->width, p.divider);
 		dest->height = VideoParams::GetScaledDimension(dest->height, p.divider);
@@ -888,8 +857,8 @@ AVFramePtr FFmpegDecoder::PreProcessFrame(AVFramePtr f,
 			dest->color_range == AVCOL_RANGE_JPEG ? 1 : 0, 0, 0x10000, 0x10000);
 	}
 
-	r = sws_scale(sws_ctx_, f->data, f->linesize, 0, f->height, dest->data,
-				  dest->linesize);
+	r = sws_scale_frame(sws_ctx_, dest.get(), f.get());
+
 	if (r < 0) {
 		FFmpegError(r);
 		return nullptr;
