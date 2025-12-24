@@ -1,1 +1,6 @@
-target_sources(libolive-editor PRIVATE pluginrenderer.cpp pluginrenderer.h)
+set(OLIVE_SOURCES
+        ${OLIVE_SOURCES}
+        render/plugin/pluginrenderer.cpp
+        render/plugin/pluginrenderer.h
+        PARENT_SCOPE
+)

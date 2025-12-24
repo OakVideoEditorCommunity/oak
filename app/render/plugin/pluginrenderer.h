@@ -23,20 +23,31 @@
 
 #ifndef PLUGINRENDERER_H
 #define PLUGINRENDERER_H
+#include <QOpenGLExtraFunctions>
+#include <QOpenGLBuffer>
+#include <QOpenGLFunctions>
+#include <QOpenGLShader>
+#include <QOpenGLVertexArrayObject>
+#include <QThread>
+#include <QOffscreenSurface>
+
 #include "render/renderer.h"
+#include "render/job/pluginjob.h"
+#include "render/opengl/openglrenderer.h"
 namespace olive
 {
 namespace plugin{
-class PluginRenderer : public olive::Renderer{
+class PluginRenderer : public olive::OpenGLRenderer{
 	Q_OBJECT
 public:
-	PluginRenderer(QObject *parent=nullptr):Renderer(parent){};
+	PluginRenderer(QObject *parent=nullptr):OpenGLRenderer(parent){};
+	virtual ~PluginRenderer() override{};
 protected:
-	void Blit(QVariant shader,
-		ShaderJob job,
-		Texture *destination,
-		VideoParams destination_params,
-		bool clear_destination) override;
+	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
+					  olive::Texture *destination,
+					  olive::VideoParams destination_params,
+					  bool clear_destination) override;
+
 };
 }
 }

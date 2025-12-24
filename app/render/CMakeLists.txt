@@ -17,7 +17,7 @@
 add_subdirectory(job)
 add_subdirectory(ocioconf)
 add_subdirectory(opengl)
-
+add_subdirectory(plugin)
 set(OLIVE_SOURCES
   ${OLIVE_SOURCES}
   render/audioplaybackcache.cpp

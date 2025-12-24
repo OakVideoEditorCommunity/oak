@@ -22,6 +22,7 @@
 #include "node/block/clip/clip.h"
 #include "render/job/footagejob.h"
 #include "render/rendermanager.h"
+#include "render/job/pluginjob.h"
 
 namespace olive
 {
@@ -381,6 +382,10 @@ TexturePtr NodeTraverser::ProcessVideoCacheJob(const CacheJob *val)
 	return nullptr;
 }
 
+TexturePtr NodeTraverser::ProcessPluginJob(plugin::PluginJob *job)
+{
+	// TODO
+}
 QVector2D NodeTraverser::GenerateResolution() const
 {
 	return QVector2D(video_params_.square_pixel_width(),
@@ -489,6 +494,9 @@ void NodeTraverser::ResolveJobs(NodeValue &val)
 						}
 
 						val.set_value(tex);
+					}
+					else if (plugin::PluginJob* plugin_job=dynamic_cast<plugin::PluginJob*>(base_job)) {
+						ProcessPluginJob(plugin_job);
 					}
 
 					// Cache resolved value

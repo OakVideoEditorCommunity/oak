@@ -29,6 +29,7 @@
 #include "render/job/colortransformjob.h"
 #include "render/videoparams.h"
 #include "texture.h"
+#include "job/pluginjob.h"
 
 namespace olive
 {
@@ -47,15 +48,16 @@ public:
 
 	void DestroyTexture(Texture *texture);
 
-	void BlitToTexture(QVariant shader, olive::ShaderJob job,
+	virtual void BlitToTexture(QVariant shader, olive::AcceleratedJob& job,
 					   olive::Texture *destination,
 					   bool clear_destination = true)
 	{
 		Blit(shader, job, destination, destination->params(),
 			 clear_destination);
+
 	}
 
-	void Blit(QVariant shader, olive::ShaderJob job, olive::VideoParams params,
+	void Blit(QVariant shader, olive::AcceleratedJob& job, olive::VideoParams params,
 			  bool clear_destination = true)
 	{
 		Blit(shader, job, nullptr, params, clear_destination);
@@ -106,11 +108,10 @@ public:
 									  const QPointF &pt) = 0;
 
 protected:
-	virtual void Blit(QVariant shader, olive::ShaderJob job,
+	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
 					  olive::Texture *destination,
 					  olive::VideoParams destination_params,
 					  bool clear_destination) = 0;
-
 	virtual QVariant CreateNativeTexture(int width, int height, int depth,
 										 PixelFormat format, int channel_count,
 										 const void *data = nullptr,

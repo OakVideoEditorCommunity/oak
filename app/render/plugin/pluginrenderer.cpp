@@ -20,13 +20,15 @@
 //
 // Created by mikesolar on 25-10-19.
 //
-
+#define GL_PREAMBLE //QMutexLocker __l(&global_opengl_mutex);
 #include "pluginrenderer.h"
 
 #include "pluginSupport/OlivePluginInstance.h"
-void olive::plugin::PluginRenderer::Blit(QVariant shader, ShaderJob job,
-										 Texture *destination,
-										 VideoParams destination_params,
+
+void olive::plugin::PluginRenderer::Blit(QVariant shader,
+										 olive::AcceleratedJob &job,
+										 olive::Texture *destination,
+										 olive::VideoParams destination_params,
 										 bool clear_destination)
 {
 

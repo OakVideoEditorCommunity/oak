@@ -30,6 +30,7 @@
 #include "render/job/colortransformjob.h"
 #include "render/job/footagejob.h"
 #include "value.h"
+#include "render/job/pluginjob.h"
 
 namespace olive
 {
@@ -143,6 +144,7 @@ protected:
 		return SampleBuffer();
 	}
 
+	virtual TexturePtr ProcessPluginJob(plugin::PluginJob *job);
 	SampleBuffer CreateSampleBuffer(const AudioParams &params,
 									const rational &length)
 	{

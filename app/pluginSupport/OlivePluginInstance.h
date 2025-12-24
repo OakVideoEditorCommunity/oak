@@ -126,12 +126,18 @@ public:
 	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditBegin
 	///
 	/// Client host code needs to implement this
-	virtual OfxStatus editBegin(const std::string& name);
+	virtual OfxStatus editBegin(const std::string& name)
+	{
+		return kOfxStatOK;
+	};
 
 	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditEnd
 	///
 	/// Client host code needs to implement this
-	virtual OfxStatus editEnd();
+	virtual OfxStatus editEnd()
+	{
+		return kOfxStatOK;
+	};
 
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
@@ -141,14 +147,16 @@ public:
 	// overridden for Progress::ProgressI
 
 	/// Start doing progress.
-	virtual void progressStart(const std::string &message, const std::string &messageid);
+	virtual void progressStart(const std::string &message, const std::string &messageid)
+	{
+	};
 
 	/// finish yer progress
-	virtual void progressEnd();
+	virtual void progressEnd(){};
 
 	/// set the progress to some level of completion, returns
 	/// false if you should abandon processing, true to continue
-	virtual bool progressUpdate(double t);
+	virtual bool progressUpdate(double t){return true;};
 
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////

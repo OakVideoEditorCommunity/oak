@@ -397,305 +397,310 @@ struct TextureToBind {
 	Texture::Interpolation interpolation;
 };
 
-void OpenGLRenderer::Blit(QVariant s, ShaderJob job, Texture *destination,
+void OpenGLRenderer::Blit(QVariant s, AcceleratedJob& a_job, Texture *destination,
 						  VideoParams destination_params,
 						  bool clear_destination)
 {
 	GL_PREAMBLE;
+	try {
+		ShaderJob &s_job=dynamic_cast<ShaderJob &>(a_job);
+		ShaderJob job(s_job);
+		// If this node is iterative, we'll pick up which input here
+		QMap<QString, GLuint> texture_index_map;
+		QVector<TextureToBind> textures_to_bind;
 
-	// If this node is iterative, we'll pick up which input here
-	QMap<QString, GLuint> texture_index_map;
-	QVector<TextureToBind> textures_to_bind;
+		GLuint shader = s.value<GLuint>();
 
-	GLuint shader = s.value<GLuint>();
+		functions_->glUseProgram(shader);
 
-	functions_->glUseProgram(shader);
+		for (auto it = job.GetValues().constBegin();
+			 it != job.GetValues().constEnd(); it++) {
+			// See if the shader has takes this parameter as an input
+			GLint variable_location = functions_->glGetUniformLocation(
+				shader, it.key().toUtf8().constData());
 
-	for (auto it = job.GetValues().constBegin();
-		 it != job.GetValues().constEnd(); it++) {
-		// See if the shader has takes this parameter as an input
-		GLint variable_location = functions_->glGetUniformLocation(
-			shader, it.key().toUtf8().constData());
+			if (variable_location == -1) {
+				continue;
+			}
 
-		if (variable_location == -1) {
-			continue;
+			// This variable is used in the shader, let's set it
+			const NodeValue &value = it.value();
+
+			// Arrays are not currently supported in this system
+			if (value.array()) {
+				continue;
+			}
+
+			switch (value.type()) {
+			case NodeValue::kInt:
+				// kInt technically specifies a LongLong, but OpenGL doesn't support those. This may lead to
+				// over/underflows if the number is large enough, but the likelihood of that is quite low.
+				functions_->glUniform1i(variable_location, value.toInt());
+				break;
+			case NodeValue::kFloat:
+				// kFloat technically specifies a double but as above, OpenGL doesn't support those.
+				functions_->glUniform1f(variable_location, value.toDouble());
+				break;
+			case NodeValue::kVec2: {
+				QVector2D v = value.toVec2();
+				functions_->glUniform2fv(variable_location, 1,
+										 reinterpret_cast<const GLfloat *>(&v));
+				break;
+			}
+			case NodeValue::kVec3: {
+				QVector3D v = value.toVec3();
+				functions_->glUniform3fv(variable_location, 1,
+										 reinterpret_cast<const GLfloat *>(&v));
+				break;
+			}
+			case NodeValue::kVec4: {
+				QVector4D v = value.toVec4();
+				functions_->glUniform4fv(variable_location, 1,
+										 reinterpret_cast<const GLfloat *>(&v));
+				break;
+			}
+			case NodeValue::kMatrix:
+				functions_->glUniformMatrix4fv(variable_location, 1, false,
+											   value.toMatrix().constData());
+				break;
+			case NodeValue::kCombo:
+				functions_->glUniform1i(variable_location, value.toInt());
+				break;
+			case NodeValue::kColor: {
+				Color color = value.toColor();
+				functions_->glUniform4f(variable_location, color.red(),
+										color.green(), color.blue(), color.alpha());
+				break;
+			}
+			case NodeValue::kBoolean:
+				functions_->glUniform1i(variable_location, value.toBool());
+				break;
+			case NodeValue::kTexture: {
+				TexturePtr texture = value.toTexture();
+
+				// Set value to bound texture
+				functions_->glUniform1i(variable_location, textures_to_bind.size());
+
+				texture_index_map.insert(it.key(), textures_to_bind.size());
+
+				textures_to_bind.append(
+					{ texture, job.GetInterpolation(it.key()) });
+
+				// Set enable flag if shader wants it
+				GLuint tex_id = texture ? texture->id().value<GLuint>() : 0;
+				int enable_param_location = functions_->glGetUniformLocation(
+					shader,
+					QStringLiteral("%1_enabled").arg(it.key()).toUtf8().constData());
+				if (enable_param_location > -1) {
+					functions_->glUniform1i(enable_param_location, tex_id > 0);
+				}
+				break;
+			}
+			case NodeValue::kSamples:
+			case NodeValue::kText:
+			case NodeValue::kRational:
+			case NodeValue::kFont:
+			case NodeValue::kFile:
+			case NodeValue::kVideoParams:
+			case NodeValue::kAudioParams:
+			case NodeValue::kSubtitleParams:
+			case NodeValue::kBezier:
+			case NodeValue::kBinary:
+			case NodeValue::kNone:
+			case NodeValue::kDataTypeCount:
+				break;
+			}
 		}
 
-		// This variable is used in the shader, let's set it
-		const NodeValue &value = it.value();
+		// Bind all textures
+		for (int i = 0; i < textures_to_bind.size(); i++) {
+			const TextureToBind &t = textures_to_bind.at(i);
+			TexturePtr texture = t.texture;
 
-		// Arrays are not currently supported in this system
-		if (value.array()) {
-			continue;
-		}
-
-		switch (value.type()) {
-		case NodeValue::kInt:
-			// kInt technically specifies a LongLong, but OpenGL doesn't support those. This may lead to
-			// over/underflows if the number is large enough, but the likelihood of that is quite low.
-			functions_->glUniform1i(variable_location, value.toInt());
-			break;
-		case NodeValue::kFloat:
-			// kFloat technically specifies a double but as above, OpenGL doesn't support those.
-			functions_->glUniform1f(variable_location, value.toDouble());
-			break;
-		case NodeValue::kVec2: {
-			QVector2D v = value.toVec2();
-			functions_->glUniform2fv(variable_location, 1,
-									 reinterpret_cast<const GLfloat *>(&v));
-			break;
-		}
-		case NodeValue::kVec3: {
-			QVector3D v = value.toVec3();
-			functions_->glUniform3fv(variable_location, 1,
-									 reinterpret_cast<const GLfloat *>(&v));
-			break;
-		}
-		case NodeValue::kVec4: {
-			QVector4D v = value.toVec4();
-			functions_->glUniform4fv(variable_location, 1,
-									 reinterpret_cast<const GLfloat *>(&v));
-			break;
-		}
-		case NodeValue::kMatrix:
-			functions_->glUniformMatrix4fv(variable_location, 1, false,
-										   value.toMatrix().constData());
-			break;
-		case NodeValue::kCombo:
-			functions_->glUniform1i(variable_location, value.toInt());
-			break;
-		case NodeValue::kColor: {
-			Color color = value.toColor();
-			functions_->glUniform4f(variable_location, color.red(),
-									color.green(), color.blue(), color.alpha());
-			break;
-		}
-		case NodeValue::kBoolean:
-			functions_->glUniform1i(variable_location, value.toBool());
-			break;
-		case NodeValue::kTexture: {
-			TexturePtr texture = value.toTexture();
-
-			// Set value to bound texture
-			functions_->glUniform1i(variable_location, textures_to_bind.size());
-
-			texture_index_map.insert(it.key(), textures_to_bind.size());
-
-			textures_to_bind.append(
-				{ texture, job.GetInterpolation(it.key()) });
-
-			// Set enable flag if shader wants it
 			GLuint tex_id = texture ? texture->id().value<GLuint>() : 0;
-			int enable_param_location = functions_->glGetUniformLocation(
-				shader,
-				QStringLiteral("%1_enabled").arg(it.key()).toUtf8().constData());
-			if (enable_param_location > -1) {
-				functions_->glUniform1i(enable_param_location, tex_id > 0);
-			}
-			break;
-		}
-		case NodeValue::kSamples:
-		case NodeValue::kText:
-		case NodeValue::kRational:
-		case NodeValue::kFont:
-		case NodeValue::kFile:
-		case NodeValue::kVideoParams:
-		case NodeValue::kAudioParams:
-		case NodeValue::kSubtitleParams:
-		case NodeValue::kBezier:
-		case NodeValue::kBinary:
-		case NodeValue::kNone:
-		case NodeValue::kDataTypeCount:
-			break;
-		}
-	}
 
-	// Bind all textures
-	for (int i = 0; i < textures_to_bind.size(); i++) {
-		const TextureToBind &t = textures_to_bind.at(i);
-		TexturePtr texture = t.texture;
+			functions_->glActiveTexture(GL_TEXTURE0 + i);
 
-		GLuint tex_id = texture ? texture->id().value<GLuint>() : 0;
+			GLenum target = (texture && texture->params().is_3d()) ? GL_TEXTURE_3D :
+																	 GL_TEXTURE_2D;
+			functions_->glBindTexture(target, tex_id);
 
-		functions_->glActiveTexture(GL_TEXTURE0 + i);
+			if (tex_id) {
+				PrepareInputTexture(target, t.interpolation);
 
-		GLenum target = (texture && texture->params().is_3d()) ? GL_TEXTURE_3D :
-																 GL_TEXTURE_2D;
-		functions_->glBindTexture(target, tex_id);
-
-		if (tex_id) {
-			PrepareInputTexture(target, t.interpolation);
-
-			if (texture->channel_count() == 1 &&
-				destination_params.channel_count() != 1) {
-				// Interpret this texture as a grayscale texture
-				functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R,
-											GL_RED);
-				functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
-											GL_RED);
-				functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
-											GL_RED);
+				if (texture->channel_count() == 1 &&
+					destination_params.channel_count() != 1) {
+					// Interpret this texture as a grayscale texture
+					functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R,
+												GL_RED);
+					functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
+												GL_RED);
+					functions_->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
+												GL_RED);
+				}
 			}
 		}
-	}
 
-	// Ensure matrix is set, at least to identity
-	GLint mvpmat_location =
-		functions_->glGetUniformLocation(shader, "ove_mvpmat");
-	if (mvpmat_location > -1) {
-		functions_->glUniformMatrix4fv(
-			mvpmat_location, 1, false,
-			job.Get(QStringLiteral("ove_mvpmat")).toMatrix().constData());
-	}
+		// Ensure matrix is set, at least to identity
+		GLint mvpmat_location =
+			functions_->glGetUniformLocation(shader, "ove_mvpmat");
+		if (mvpmat_location > -1) {
+			functions_->glUniformMatrix4fv(
+				mvpmat_location, 1, false,
+				job.Get(QStringLiteral("ove_mvpmat")).toMatrix().constData());
+		}
 
-	// Set the viewport to the "physical" resolution of the destination
-	functions_->glViewport(0, 0, destination_params.effective_width(),
-						   destination_params.effective_height());
+		// Set the viewport to the "physical" resolution of the destination
+		functions_->glViewport(0, 0, destination_params.effective_width(),
+							   destination_params.effective_height());
 
-	// Bind vertex array object
-	QOpenGLVertexArrayObject vao_;
-	vao_.create();
-	vao_.bind();
+		// Bind vertex array object
+		QOpenGLVertexArrayObject vao_;
+		vao_.create();
+		vao_.bind();
 
-	// Set buffers
-	QOpenGLBuffer vert_vbo_;
-	vert_vbo_.create();
-	vert_vbo_.bind();
-	// If the job has vertex coordinate overrides use them instead of the defaults.
-	if (!job.GetVertexCoordinates().isEmpty()) {
-		Q_ASSERT(job.GetVertexCoordinates().size() == 18);
-		vert_vbo_.allocate(job.GetVertexCoordinates().constData(),
-						   job.GetVertexCoordinates().size() * sizeof(float));
-	} else {
-		vert_vbo_.allocate(blit_vertices.constData(),
-						   blit_vertices.size() * sizeof(GLfloat));
-	}
-	vert_vbo_.release();
-
-	QOpenGLBuffer frag_vbo_;
-	frag_vbo_.create();
-	frag_vbo_.bind();
-	frag_vbo_.allocate(blit_texcoords.constData(),
-					   blit_texcoords.size() * sizeof(GLfloat));
-	frag_vbo_.release();
-
-	GLint vertex_location =
-		functions_->glGetAttribLocation(shader, "a_position");
-	if (vertex_location != -1) {
+		// Set buffers
+		QOpenGLBuffer vert_vbo_;
+		vert_vbo_.create();
 		vert_vbo_.bind();
-		functions_->glEnableVertexAttribArray(vertex_location);
-		functions_->glVertexAttribPointer(vertex_location, 3, GL_FLOAT,
-										  GL_FALSE, 0, nullptr);
-		vert_vbo_.release();
-	}
-
-	GLint tex_location = functions_->glGetAttribLocation(shader, "a_texcoord");
-	if (tex_location != -1) {
-		frag_vbo_.bind();
-		functions_->glEnableVertexAttribArray(tex_location);
-		functions_->glVertexAttribPointer(tex_location, 2, GL_FLOAT, GL_FALSE,
-										  0, nullptr);
-		frag_vbo_.release();
-	}
-
-	// Some shaders optimize through multiple iterations which requires ping-ponging textures
-	// - If there are only two iterations, we can just create one backend texture and then the
-	//   destination can be the second
-	// - If there are more than two iterations, we need to ping pong back and forth between two
-	//   textures. We can still use the destination as the last iteration, but we'll need textures
-	//   for the iterative process.
-	int real_iteration_count;
-	if (job.GetIterationCount() > 1 && !job.GetIterativeInput().isEmpty()) {
-		real_iteration_count = job.GetIterationCount();
-	} else {
-		real_iteration_count = 1;
-	}
-
-	TexturePtr output_tex, input_tex;
-	if (real_iteration_count > 1) {
-		// Create one texture to bounce off
-		output_tex = CreateTexture(destination_params);
-
-		if (real_iteration_count > 2) {
-			// Create a second texture bounce off
-			input_tex = CreateTexture(destination_params);
-		}
-	}
-
-	GLint iteration_location =
-		functions_->glGetUniformLocation(shader, "ove_iteration");
-	for (int iteration = 0; iteration < real_iteration_count; iteration++) {
-		// Set iteration number
-		if (iteration_location > -1) {
-			functions_->glUniform1i(iteration_location, iteration);
-		}
-
-		// Replace iterative input
-		if (iteration == real_iteration_count - 1) {
-			// This is the last iteration, draw to the destination
-			if (destination) {
-				// If we have a destination texture, draw to it
-				AttachTextureAsDestination(destination->id());
-			} else if (iteration > 0) {
-				// Otherwise, if we were iterating before, detach texture now
-				DetachTextureAsDestination();
-			}
-
-			// Clear the destination if the caller requested it
-			if (clear_destination) {
-				ClearDestinationInternal();
-			}
+		// If the job has vertex coordinate overrides use them instead of the defaults.
+		if (!job.GetVertexCoordinates().isEmpty()) {
+			Q_ASSERT(job.GetVertexCoordinates().size() == 18);
+			vert_vbo_.allocate(job.GetVertexCoordinates().constData(),
+							   job.GetVertexCoordinates().size() * sizeof(float));
 		} else {
-			// Always draw to output_tex, which gets swapped with input_tex every iteration
-			AttachTextureAsDestination(output_tex->id());
+			vert_vbo_.allocate(blit_vertices.constData(),
+							   blit_vertices.size() * sizeof(GLfloat));
+		}
+		vert_vbo_.release();
+
+		QOpenGLBuffer frag_vbo_;
+		frag_vbo_.create();
+		frag_vbo_.bind();
+		frag_vbo_.allocate(blit_texcoords.constData(),
+						   blit_texcoords.size() * sizeof(GLfloat));
+		frag_vbo_.release();
+
+		GLint vertex_location =
+			functions_->glGetAttribLocation(shader, "a_position");
+		if (vertex_location != -1) {
+			vert_vbo_.bind();
+			functions_->glEnableVertexAttribArray(vertex_location);
+			functions_->glVertexAttribPointer(vertex_location, 3, GL_FLOAT,
+											  GL_FALSE, 0, nullptr);
+			vert_vbo_.release();
 		}
 
-		if (iteration > 0) {
-			// If this is not the first iteration, replace the iterative texture with the one we
-			// last drew
-			const QString &iterative_input = job.GetIterativeInput();
-			functions_->glActiveTexture(
-				GL_TEXTURE0 + texture_index_map.value(iterative_input));
-			functions_->glBindTexture(GL_TEXTURE_2D,
-									  input_tex->id().value<GLuint>());
-
-			// At this time, we only support iterating 2D textures
-			PrepareInputTexture(GL_TEXTURE_2D,
-								job.GetInterpolation(iterative_input));
+		GLint tex_location = functions_->glGetAttribLocation(shader, "a_texcoord");
+		if (tex_location != -1) {
+			frag_vbo_.bind();
+			functions_->glEnableVertexAttribArray(tex_location);
+			functions_->glVertexAttribPointer(tex_location, 2, GL_FLOAT, GL_FALSE,
+											  0, nullptr);
+			frag_vbo_.release();
 		}
 
-		// Swap so that the next iteration, the texture we draw now will be the input texture next
-		std::swap(output_tex, input_tex);
-
-		// Blit this texture through this shader
-		{
-			PRINT_GL_ERRORS;
-			functions_->glDrawArrays(GL_TRIANGLES, 0, blit_vertices.size() / 3);
+		// Some shaders optimize through multiple iterations which requires ping-ponging textures
+		// - If there are only two iterations, we can just create one backend texture and then the
+		//   destination can be the second
+		// - If there are more than two iterations, we need to ping pong back and forth between two
+		//   textures. We can still use the destination as the last iteration, but we'll need textures
+		//   for the iterative process.
+		int real_iteration_count;
+		if (job.GetIterationCount() > 1 && !job.GetIterativeInput().isEmpty()) {
+			real_iteration_count = job.GetIterationCount();
+		} else {
+			real_iteration_count = 1;
 		}
+
+		TexturePtr output_tex, input_tex;
+		if (real_iteration_count > 1) {
+			// Create one texture to bounce off
+			output_tex = CreateTexture(destination_params);
+
+			if (real_iteration_count > 2) {
+				// Create a second texture bounce off
+				input_tex = CreateTexture(destination_params);
+			}
+		}
+
+		GLint iteration_location =
+			functions_->glGetUniformLocation(shader, "ove_iteration");
+		for (int iteration = 0; iteration < real_iteration_count; iteration++) {
+			// Set iteration number
+			if (iteration_location > -1) {
+				functions_->glUniform1i(iteration_location, iteration);
+			}
+
+			// Replace iterative input
+			if (iteration == real_iteration_count - 1) {
+				// This is the last iteration, draw to the destination
+				if (destination) {
+					// If we have a destination texture, draw to it
+					AttachTextureAsDestination(destination->id());
+				} else if (iteration > 0) {
+					// Otherwise, if we were iterating before, detach texture now
+					DetachTextureAsDestination();
+				}
+
+				// Clear the destination if the caller requested it
+				if (clear_destination) {
+					ClearDestinationInternal();
+				}
+			} else {
+				// Always draw to output_tex, which gets swapped with input_tex every iteration
+				AttachTextureAsDestination(output_tex->id());
+			}
+
+			if (iteration > 0) {
+				// If this is not the first iteration, replace the iterative texture with the one we
+				// last drew
+				const QString &iterative_input = job.GetIterativeInput();
+				functions_->glActiveTexture(
+					GL_TEXTURE0 + texture_index_map.value(iterative_input));
+				functions_->glBindTexture(GL_TEXTURE_2D,
+										  input_tex->id().value<GLuint>());
+
+				// At this time, we only support iterating 2D textures
+				PrepareInputTexture(GL_TEXTURE_2D,
+									job.GetInterpolation(iterative_input));
+			}
+
+			// Swap so that the next iteration, the texture we draw now will be the input texture next
+			std::swap(output_tex, input_tex);
+
+			// Blit this texture through this shader
+			{
+				PRINT_GL_ERRORS;
+				functions_->glDrawArrays(GL_TRIANGLES, 0, blit_vertices.size() / 3);
+			}
+		}
+
+		if (destination) {
+			// Reset framebuffer to default if we were drawing to a texture
+			DetachTextureAsDestination();
+		}
+
+		// Release any textures we bound before
+		for (int i = textures_to_bind.size() - 1; i >= 0; i--) {
+			TexturePtr texture = textures_to_bind.at(i).texture;
+			GLenum target = (texture && texture->params().is_3d()) ? GL_TEXTURE_3D :
+																	 GL_TEXTURE_2D;
+			functions_->glActiveTexture(GL_TEXTURE0 + i);
+			functions_->glBindTexture(target, 0);
+		}
+
+		// Release shader
+		functions_->glUseProgram(0);
+
+		// Release vertex array object
+		frag_vbo_.destroy();
+		vert_vbo_.destroy();
+		vao_.release();
+		vao_.destroy();
 	}
+	catch (std::bad_cast e){}
 
-	if (destination) {
-		// Reset framebuffer to default if we were drawing to a texture
-		DetachTextureAsDestination();
-	}
-
-	// Release any textures we bound before
-	for (int i = textures_to_bind.size() - 1; i >= 0; i--) {
-		TexturePtr texture = textures_to_bind.at(i).texture;
-		GLenum target = (texture && texture->params().is_3d()) ? GL_TEXTURE_3D :
-																 GL_TEXTURE_2D;
-		functions_->glActiveTexture(GL_TEXTURE0 + i);
-		functions_->glBindTexture(target, 0);
-	}
-
-	// Release shader
-	functions_->glUseProgram(0);
-
-	// Release vertex array object
-	frag_vbo_.destroy();
-	vert_vbo_.destroy();
-	vao_.release();
-	vao_.destroy();
 }
 
 GLint OpenGLRenderer::GetInternalFormat(PixelFormat format, int channel_layout)
