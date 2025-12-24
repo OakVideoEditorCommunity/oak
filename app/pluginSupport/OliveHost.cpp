@@ -31,9 +31,19 @@
 using namespace OFX::Host;
 using namespace olive::plugin;
 
+namespace olive {
+namespace plugin {
+class PluginNode;
+}
+}
+
 void olive::plugin::loadPlugins(QString path)
 {
-	OFX::Host::ImageEffect::PluginCache imageEffectPluginCache(myHost);
+	std::shared_ptr<OliveHost> host=std::make_shared<OliveHost>();
+	Current::getInstance().setPluginHost(host);
+	std::shared_ptr<ImageEffect::PluginCache> imageEffectPluginCache
+		=std::make_shared<ImageEffect::PluginCache>(*host);
+
 }
 OliveHost::~OliveHost()
 {
@@ -46,6 +56,18 @@ OliveHost::~OliveHost()
 		instance=nullptr;
 	}
 	
+}
+
+void OliveHost::destroyInstance(OFX::Host::ImageEffect::Instance* instance)
+{
+	if (!instance) {
+		return;
+	}
+	if (instances_.contains(instance))
+	{
+		instances_.removeOne(instance);
+		delete instance;
+	}
 }
 ImageEffect::Descriptor *
 OliveHost::makeDescriptor(ImageEffect::ImageEffectPlugin* plugin)
@@ -75,7 +97,11 @@ OFX::Host::ImageEffect::Instance* OliveHost::newInstance(void* clientData,
 							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 							OFX::Host::ImageEffect::Descriptor& desc,
 							const std::string& context){
-	ImageEffect::Instance* instance=new OlivePluginInstance(plugin,desc,context,Current::getInstance().interactive());
+	auto* instance = new OlivePluginInstance(
+		plugin, desc, context, Current::getInstance().interactive());
+	if (clientData) {
+		instance->setNode(static_cast<olive::plugin::PluginNode*>(clientData));
+	}
 	instances_.append(instance);
 	return instance;
 };

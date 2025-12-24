@@ -28,6 +28,7 @@
 #include <qlist.h>
 namespace olive {
 namespace plugin{
+class PluginNode;
 enum class ErrorType{
 	Error,
 	Warning,
@@ -47,6 +48,20 @@ public:
 		: OFX::Host::ImageEffect::Instance(plugin, desc, context, interactive)
 	{
 	}
+	OlivePluginInstance(OlivePluginInstance& instance)
+		: Instance(_plugin, *_descriptor, _context, _interactive)
+	{
+		_clips=instance._clips;
+		_created=instance._created;
+		_clipPrefsDirty=instance._clipPrefsDirty;
+		_continuousSamples=instance._continuousSamples;
+		_frameVarying=instance._frameVarying;
+		_outputPreMultiplication=instance._outputPreMultiplication;
+		_outputFielding=instance._outputFielding;
+		_outputFrameRate=instance._outputFrameRate;
+
+	}
+	explicit OlivePluginInstance(Instance & instance):Instance(instance){};
 	~OlivePluginInstance() override = default;
 	const std::string &getDefaultOutputFielding() const{
 		return kOfxImageFieldNone;
@@ -55,6 +70,10 @@ public:
 	void setVideoParam(VideoParams params)
 	{
 		this->params_=params;
+	}
+	void setNode(PluginNode* node)
+	{
+		node_ = node;
 	}
 	OFX::Host::ImageEffect::ClipInstance *newClipInstance(
 		OFX::Host::ImageEffect::Instance *plugin,
@@ -102,7 +121,7 @@ public:
 	/// make a parameter instance
 	///
 	/// Client host code needs to implement this
-	virtual OFX::Host::Param::Instance* newParam(const std::string& name, OFX::Host::Param::Descriptor& Descriptor);
+	OFX::Host::Param::Instance* newParam(const std::string& name, OFX::Host::Param::Descriptor& Descriptor) override;
 
 	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditBegin
 	///
@@ -150,6 +169,7 @@ public:
 private:
 	QList<PersistentErrors> persistentErrors_;
 	VideoParams params_;
+	std::shared_ptr<PluginNode> node_ = nullptr;
 };
 }
 }

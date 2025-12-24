@@ -30,13 +30,13 @@ namespace plugin {
 
 class PluginJob :public AcceleratedJob{
 public:
-	explicit PluginJob(OFX::Host::ImageEffect::ImageEffectPlugin* pluginInstance, NodeValueRow row): AcceleratedJob()
+	explicit PluginJob(OFX::Host::ImageEffect::Instance* pluginInstance, NodeValueRow row): AcceleratedJob()
 	{
 		this->pluginInstance = pluginInstance;
 	}
 
 private:
-	OFX::Host::ImageEffect::ImageEffectPlugin *pluginInstance=nullptr;
+	OFX::Host::ImageEffect::Instance *pluginInstance=nullptr;
 
 	QHash<OfxTime, QHash<QString, std::any>> paramsOnTime;
 

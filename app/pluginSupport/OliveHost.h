@@ -39,6 +39,7 @@ class OliveHost: public OFX::Host::ImageEffect::Host{
 public:
 	OliveHost()=default;
 	~OliveHost() override;
+	void destroyInstance(OFX::Host::ImageEffect::Instance *instance);
 
 	bool pluginSupported(OFX::Host::ImageEffect::ImageEffectPlugin *plugin,
 		std::string &reason) const override

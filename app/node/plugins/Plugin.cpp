@@ -21,14 +21,14 @@
 #include "render/rendermanager.h"
 #include "render/job/pluginjob.h"
 olive::plugin::PluginNode::PluginNode(
-	OFX::Host::ImageEffect::ImageEffectPlugin *plugin)
+	OFX::Host::ImageEffect::Instance *plugin)
 {
-	this->plugin = plugin;
-	auto params = plugin->getDescriptor().getParams();
+	plugin_instance_=plugin;
 
+	auto params=plugin_instance_->getParams();
 	for (auto param: params) {
 
-		NodeValue::Type type;
+		NodeValue::Type type = NodeValue::kNone;
 
 		const std::string &ofxType = param.second->getType();
 		if (ofxType == kOfxParamTypeInteger) {
@@ -73,6 +73,7 @@ olive::plugin::PluginNode::PluginNode(
 }
 QString olive::plugin::PluginNode::Name() const
 {
+	const auto *plugin = plugin_instance_->getPlugin();
 	return plugin->getDescriptor()
 		.getProps()
 		.getStringProperty(kOfxPropLabel)
@@ -82,7 +83,11 @@ QString olive::plugin::PluginNode::Name() const
 
 QString olive::plugin::PluginNode::Description() const
 {
-	return plugin->getDescriptor().getProps().getStringProperty(kOfxPropPluginDescription).data();
+	const auto *plugin = plugin_instance_->getPlugin();
+	return plugin->getDescriptor()
+		.getProps()
+		.getStringProperty(kOfxPropPluginDescription)
+		.data();
 
 }
 void olive::plugin::PluginNode::Value(const NodeValueRow &value,
@@ -90,8 +95,8 @@ void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 									  NodeValueTable *table) const
 {
 	TexturePtr tex = value[kTextureInput].toTexture();
-	if (tex) {
-		PluginJob job(plugin, value);
+	if (tex && plugin_instance_) {
+		PluginJob job(plugin_instance_, value);
 		table->Push(NodeValue::kTexture, tex->toJob(job), this);
 	}
 }
@@ -101,5 +106,26 @@ void olive::plugin::PluginNode::pushButtonClicked(QString name)
 
 QString olive::plugin::PluginNode::id() const
 {
+	const auto *plugin = plugin_instance_->getPlugin();
 	return plugin->getIdentifier().data();
+}
+
+olive::Node *olive::plugin::PluginNode::copy() const
+{
+	auto *node = new PluginNode(new OlivePluginInstance(*plugin_instance_));
+	if (!plugin_instance_) {
+		return node;
+	}
+
+	const auto &contexts = plugin_instance_->getPlugin()->getContexts();
+	std::string context = kOfxImageEffectContextFilter;
+	if (!contexts.empty()) {
+		if (contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
+			context = *contexts.begin();
+		}
+	}
+
+	node->setPluginInstance(
+		plugin_instance_->getPlugin()->createInstance(context, node));
+	return node;
 }

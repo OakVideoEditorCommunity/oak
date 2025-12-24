@@ -30,7 +30,8 @@ const QString kTextureInput = QStringLiteral("tex_in");
 
 class PluginNode : public olive::Node{
 public:
-	PluginNode(OFX::Host::ImageEffect::ImageEffectPlugin* plugin)	;
+	PluginNode(OFX::Host::ImageEffect::Instance* plugin)	;
+	~PluginNode() override;
 
 
 	QString Name() const override;

@@ -23,7 +23,7 @@
 
 #include <QString>
 #include <QVector2D>
-
+#include <QVariant>
 #include "ofxhParam.h"
 #include "node/nodeundo.h"
 #include "node/plugins/Plugin.h"
@@ -41,10 +41,10 @@ inline QString ParamChangeLabel(const OFX::Host::Param::Descriptor &descriptor)
 
 class PushbuttonInstance : public OFX::Host::Param::PushbuttonInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor *_descriptor;
 public:
-	PushbuttonInstance(PluginNode *effect, const std::string &name,
+	PushbuttonInstance(std::shared_ptr<PluginNode> effect, const std::string &name,
 					   OFX::Host::Param::Descriptor &descriptor)
 		: OFX::Host::Param::PushbuttonInstance(descriptor)
 		, node(effect)
@@ -55,11 +55,11 @@ public:
 
 class IntegerInstance : public OFX::Host::Param::IntegerInstance {
 protected:
-	PluginNode*   _node;
+	std::shared_ptr<PluginNode>   _node;
 	OFX::Host::Param::Descriptor& _descriptor;
 	QString id;
 public:
-	IntegerInstance(PluginNode *node, OFX::Host::Param::Descriptor &descriptor)
+	IntegerInstance(std::shared_ptr<PluginNode>node, OFX::Host::Param::Descriptor &descriptor)
 						: _node(node), _descriptor(descriptor),
 						OFX::Host::Param::IntegerInstance(_descriptor){}
 	OfxStatus get(int &a)
@@ -95,7 +95,7 @@ public:
 			NodeValue::kInt, data);
 
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(_node, _descriptor.getName().c_str()), split);
+			NodeInput(_node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		id=_descriptor.getName().c_str();
@@ -105,7 +105,7 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
-			NodeInput(_node, _descriptor.getName().c_str()),
+			NodeInput(_node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -116,10 +116,10 @@ public:
 
 class DoubleInstance : public OFX::Host::Param::DoubleInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	DoubleInstance(PluginNode* effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	DoubleInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::DoubleInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -153,7 +153,7 @@ public:
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kFloat, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -162,7 +162,7 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
-			NodeInput(node, _descriptor.getName().c_str()),
+			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -180,10 +180,10 @@ public:
 
 class BooleanInstance : public OFX::Host::Param::BooleanInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	BooleanInstance(PluginNode* effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	BooleanInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::BooleanInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -217,7 +217,7 @@ public:
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kBoolean, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -226,7 +226,7 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
-			NodeInput(node, _descriptor.getName().c_str()),
+			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -236,10 +236,10 @@ public:
 
 class ChoiceInstance : public OFX::Host::Param::ChoiceInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	ChoiceInstance(PluginNode* effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	ChoiceInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::ChoiceInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -273,7 +273,7 @@ public:
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kCombo, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -282,7 +282,7 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
-			NodeInput(node, _descriptor.getName().c_str()),
+			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -292,10 +292,10 @@ public:
 
 class RGBAInstance : public OFX::Host::Param::RGBAInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	RGBAInstance(PluginNode* effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	RGBAInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::RGBAInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -333,7 +333,7 @@ public:
 			NodeValue::kColor,
 			QVariant::fromValue(olive::core::Color(r, g, b, a)));
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -342,13 +342,13 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 r, 0, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 g, 1, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 b, 2, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 a, 3, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -359,10 +359,10 @@ public:
 
 class RGBInstance : public OFX::Host::Param::RGBInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	RGBInstance(PluginNode* effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	RGBInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::RGBInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -398,7 +398,7 @@ public:
 			NodeValue::kColor,
 			QVariant::fromValue(olive::core::Color(r, g, b)));
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -407,11 +407,11 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 r, 0, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 g, 1, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 b, 2, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -421,10 +421,10 @@ public:
 
 class Double2DInstance : public OFX::Host::Param::Double2DInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	Double2DInstance(PluginNode* effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	Double2DInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::Double2DInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -455,7 +455,7 @@ public:
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -464,9 +464,9 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 x, 0, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 y, 1, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
@@ -476,10 +476,10 @@ public:
 
 class Integer2DInstance : public OFX::Host::Param::Integer2DInstance {
 protected:
-	PluginNode*   node;
+	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
 public:
-	Integer2DInstance(PluginNode* effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
+	Integer2DInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::Integer2DInstance(descriptor)
 		, node(effect)
 		, _descriptor(descriptor)
@@ -510,7 +510,7 @@ public:
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
-			NodeInput(node, _descriptor.getName().c_str()), split);
+			NodeInput(node.get(), _descriptor.getName().c_str()), split);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
@@ -519,9 +519,9 @@ public:
 	{
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 x, 0, command, true);
-		Node::SetValueAtTime(NodeInput(node, name), rational::fromDouble(time),
+		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 y, 1, command, true);
 		Core::instance()->undo_stack()->push(command,
 											 ParamChangeLabel(_descriptor));

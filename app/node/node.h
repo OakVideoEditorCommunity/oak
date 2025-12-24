@@ -1126,11 +1126,23 @@ public:
 
 	static const QString kEnabledInput;
 
-	OFX::Host::ImageEffect::ImageEffectPlugin* getPlugin();
+	OFX::Host::ImageEffect::Instance* getPluginInstance() const
+	{
+		return plugin_instance_;
+	}
+	OFX::Host::ImageEffect::ImageEffectPlugin* getPlugin() const
+	{
+		return plugin_instance_ ? plugin_instance_->getPlugin() : nullptr;
+	}
 protected:
 
-	// If is set, this is a plugin node.
-	OFX::Host::ImageEffect::ImageEffectPlugin* plugin= nullptr;
+	// If set, this node owns a plugin instance.
+	OFX::Host::ImageEffect::Instance* plugin_instance_ = nullptr;
+
+	void setPluginInstance(OFX::Host::ImageEffect::Instance* instance)
+	{
+		plugin_instance_ = instance;
+	}
 
 	void InsertInput(const QString &id, NodeValue::Type type,
 					 const QVariant &default_value, InputFlags flags,

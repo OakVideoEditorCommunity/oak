@@ -150,9 +150,37 @@ void OlivePluginInstance::getRenderScaleRecursive(double &x, double &y) const
 }
 OFX::Host::Param::Instance *
 OlivePluginInstance::newParam(const std::string &name,
-						OFX::Host::Param::Descriptor &Descriptor)
+						OFX::Host::Param::Descriptor &desc)
 {
+	if (!node_) {
+		return nullptr;
+	}
+	const std::string &type = desc.getType();
 
+	if (type == kOfxParamTypeInteger) {
+		return new IntegerInstance(node_, desc);
+	} else if (type == kOfxParamTypeDouble) {
+		return new DoubleInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeBoolean) {
+		return new BooleanInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeChoice) {
+		return new ChoiceInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeRGBA) {
+		return new RGBAInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeRGB) {
+		return new RGBInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeDouble2D) {
+		return new Double2DInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeInteger2D) {
+		return new Integer2DInstance(node_, name, desc);
+	} else if (type == kOfxParamTypePushButton) {
+		return new PushbuttonInstance(node_, name, desc);
+	}
+
+	return nullptr; // 未实现的类型
+}
+OfxStatus OlivePluginInstance::editBegin(const std::string &name)
+{
 }
 
 OFX::Host::ImageEffect::ClipInstance *OlivePluginInstance::newClipInstance(

@@ -303,8 +303,19 @@ namespace OFX {
                  Descriptor         &other, 
                  const std::string  &context,
                  bool               interactive);
-
-        virtual ~Instance();
+      	Instance(Instance& instance)
+			: Base(_properties)
+		{
+			_clips = instance._clips;
+			_created = instance._created;
+			_clipPrefsDirty = instance._clipPrefsDirty;
+			_continuousSamples = instance._continuousSamples;
+			_frameVarying = instance._frameVarying;
+			_outputPreMultiplication = instance._outputPreMultiplication;
+			_outputFielding = instance._outputFielding;
+			_outputFrameRate = instance._outputFrameRate;
+		}
+		virtual ~Instance();
 
         /// implemented for Param::SetInstance
         virtual Property::Set &getParamSetProps();
