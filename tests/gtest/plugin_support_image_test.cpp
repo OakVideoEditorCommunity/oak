@@ -89,3 +89,59 @@ TEST(PluginSupportImage, PropertyFallbacks)
 	EXPECT_EQ(image.width(), 32);
 	EXPECT_EQ(image.height(), 50);
 }
+
+TEST(PluginSupportImage, AllocateSetsOfxProperties)
+{
+	OFX::Host::ImageEffect::ClipDescriptor desc(kOfxImageEffectOutputClipName);
+	olive::VideoParams params =
+		MakeParams(8, 6, olive::core::PixelFormat::F16, 4, false);
+	olive::plugin::OliveClipInstance clip(nullptr, desc, params);
+
+	olive::plugin::Image image(clip);
+	OfxRectI bounds = { 2, 3, 10, 9 };
+	OfxRectI rod = { 0, 0, 12, 12 };
+	image.Allocate(8, 6, olive::core::PixelFormat::F16, 4, false, bounds, rod,
+				   true);
+
+	EXPECT_NE(image.data(), nullptr);
+	EXPECT_EQ(image.row_bytes(), 8 * 4 * 2);
+
+	int bounds_props[4] = {0};
+	image.getIntPropertyN(kOfxImagePropBounds, bounds_props, 4);
+	EXPECT_EQ(bounds_props[0], bounds.x1);
+	EXPECT_EQ(bounds_props[1], bounds.y1);
+	EXPECT_EQ(bounds_props[2], bounds.x2);
+	EXPECT_EQ(bounds_props[3], bounds.y2);
+
+	int rod_props[4] = {0};
+	image.getIntPropertyN(kOfxImagePropRegionOfDefinition, rod_props, 4);
+	EXPECT_EQ(rod_props[0], rod.x1);
+	EXPECT_EQ(rod_props[1], rod.y1);
+	EXPECT_EQ(rod_props[2], rod.x2);
+	EXPECT_EQ(rod_props[3], rod.y2);
+
+	EXPECT_EQ(image.getStringProperty(kOfxImageEffectPropComponents),
+			  std::string(kOfxImageComponentRGBA));
+	EXPECT_EQ(image.getStringProperty(kOfxImageEffectPropPixelDepth),
+			  std::string(kOfxBitDepthHalf));
+	EXPECT_EQ(image.getStringProperty(kOfxImageEffectPropPreMultiplication),
+			  std::string(kOfxImageUnPreMultiplied));
+}
+
+TEST(PluginSupportImage, EnsureAllocatedPreservesWithoutClear)
+{
+	OFX::Host::ImageEffect::ClipDescriptor desc(kOfxImageEffectOutputClipName);
+	olive::VideoParams params =
+		MakeParams(4, 4, olive::core::PixelFormat::U8, 3, false);
+	olive::plugin::OliveClipInstance clip(nullptr, desc, params);
+
+	olive::plugin::Image image(clip);
+	OfxRectI bounds = { 0, 0, 4, 4 };
+	OfxRectI rod = bounds;
+	image.AllocateFromParams(params, bounds, rod, true);
+	ASSERT_NE(image.data(), nullptr);
+	image.data()[0] = 0x5A;
+
+	image.EnsureAllocatedFromParams(params, bounds, rod, false);
+	EXPECT_EQ(image.data()[0], 0x5A);
+}

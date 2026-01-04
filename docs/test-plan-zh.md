@@ -59,6 +59,13 @@
 - 使用事件循环等待完成。
 - 验证任务确实执行。
 
+## 单元覆盖重点（已扩展）
+
+- `app/undo`：`undo_stack_test.cpp` 覆盖空栈状态、模型数据、redo 区域颜色、jump 行为、空 MultiUndoCommand 忽略逻辑。
+- `app/timeline`：`timeline_marker_test.cpp` 覆盖列表排序、最近 marker 查询、含未知元素的保存/加载、marker 增删改命令。
+- `app/pluginSupport`：`plugin_support_image_test.cpp` 覆盖 OFX 属性映射（bounds/ROD、像素深度、通道、预乘）及分配/清理行为。
+- `app/render`：`render_videoparams_branch_test.cpp` 覆盖自动 divider、像素宽高比校验、方形像素宽度、Save/Load 回归。
+
 ## 无 GUI 运行
 
 - 测试避免使用 QWidget。

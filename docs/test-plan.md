@@ -59,6 +59,13 @@ If a module has a GUI dependency (e.g., widgets), tests focus on non-visual data
 - Waits for completion using an event loop.
 - Verifies the task ran.
 
+## Unit Coverage Highlights (Expanded)
+
+- `app/undo`: `undo_stack_test.cpp` now covers empty stack state, model data, redo list coloring, jump behavior, and ignored empty multi-commands.
+- `app/timeline`: `timeline_marker_test.cpp` now covers list ordering, closest-marker lookup, list save/load with unknown elements, and marker add/remove/change commands.
+- `app/pluginSupport`: `plugin_support_image_test.cpp` now checks OFX property wiring (bounds/ROD, pixel depth, components, premult) and allocation clearing behavior.
+- `app/render`: `render_videoparams_branch_test.cpp` now covers auto divider selection, pixel aspect validation, square-pixel width, and Save/Load roundtrip.
+
 ## Headless Execution
 
 - Tests avoid QWidget usage.
