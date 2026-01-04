@@ -19,8 +19,14 @@ add_executable(olive-gtest
   plugin_support_image_test.cpp
   plugin_support_clip_test.cpp
   codec_frame_test.cpp
+  codec_exportcodec_test.cpp
+  codec_exportformat_test.cpp
+  codec_encoder_test.cpp
   task_taskmanager_test.cpp
   module_smoke_test.cpp
+  shader_resources_test.cpp
+  timeline_coordinate_test.cpp
+  timeline_workarea_test.cpp
 )
 
 target_sources(olive-gtest PRIVATE $<TARGET_OBJECTS:libolive-editor>)
