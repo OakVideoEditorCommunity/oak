@@ -88,12 +88,7 @@ void NodeFactory::Initialize()
 		library_.append(created_node);
 	}
 
-	std::shared_ptr<olive::plugin::OliveHost> host=std::make_shared<olive::plugin::OliveHost>();
-	Current::getInstance().setPluginHost(host);
-	std::shared_ptr<OFX::Host::ImageEffect::PluginCache> plugin_cache=std::make_shared<OFX::Host::ImageEffect::PluginCache>(*host);
-	plugin_cache->registerInCache(*OFX::Host::PluginCache::getPluginCache());
-	OFX::Host::PluginCache::getPluginCache()->scanPluginFiles();
-
+	olive::plugin::loadPlugins(QString());
 
 	for (auto plugin : OFX::Host::PluginCache::getPluginCache()->getPlugins()) {
 		plugin::PluginNode *plugin_node=new plugin::PluginNode(dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin*>(plugin));

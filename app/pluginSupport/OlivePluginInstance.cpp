@@ -410,6 +410,7 @@ bool OlivePluginInstance::progressUpdate(double t)
 	return !progress_cancelled_;
 }
 
+#ifdef OFX_SUPPORTS_OPENGLRENDER
 OfxStatus OlivePluginInstance::contextAttachedAction()
 {
 	if (!open_gl_enabled_) {
@@ -425,6 +426,7 @@ OfxStatus OlivePluginInstance::contextDetachedAction()
 	}
 	return kOfxStatOK;
 }
+#endif
 
 double OlivePluginInstance::timeLineGetTime()
 {

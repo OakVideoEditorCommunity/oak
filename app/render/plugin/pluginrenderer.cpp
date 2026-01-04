@@ -341,10 +341,12 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		return;
 	}
 
+#ifdef OFX_SUPPORTS_OPENGLRENDER
 	if (use_opengl) {
 		instance->contextAttachedAction();
 		AttachOutputTexture(destination);
 	}
+#endif
 
 	OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
 	if (!clip) {
@@ -412,8 +414,10 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		}
 	} else {
 		if (!destination || !destination->id().isValid()) {
+#ifdef OFX_SUPPORTS_OPENGLRENDER
 			DetachOutputTexture();
 			instance->contextDetachedAction();
+#endif
 			instance->endRenderAction(frame, numFramesToRender, 1.0, interactive,
 									  renderScale, true, interactive);
 			return;
@@ -432,8 +436,10 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	} else {
 		AVFramePtr frame_ptr =
 			ReadbackTextureToFrame(destination, destination_params);
+#ifdef OFX_SUPPORTS_OPENGLRENDER
 		DetachOutputTexture();
 		instance->contextDetachedAction();
+#endif
 		if (frame_ptr) {
 			AVFramePtr converted =
 				ConvertFrameIfNeeded(frame_ptr, destination_params);

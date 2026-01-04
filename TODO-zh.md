@@ -3,9 +3,11 @@
 下面是 README 里 OpenFX TODO 的中文翻译与详细说明。每条都尽量解释“是什么、为什么需要、该往哪里改”。
 
 1) 实现插件发现与加载流程
-- 现状：`app/pluginSupport/OliveHost.cpp` 里只创建了 Host 和 PluginCache，但没有扫描路径/加载 OFX 插件。
-- 为什么需要：没有完整的发现/加载，就无法让用户看到插件或实例化插件。
-- 可能改动：补全 `loadPlugins()`，遍历指定目录（如 OFX 标准路径），调用 OpenFX 的插件缓存加载逻辑，注册可用插件并让 UI/节点系统可用。
+- 现状：`app/node/factory.cpp` 自己临时创建 Host/PluginCache 并扫描，`loadPlugins()` 只是一段占位逻辑。
+- 为什么需要：没有统一的发现/加载入口，插件扫描路径和实例化流程很容易分叉，后续维护困难。
+- 已完成：
+  - 在 `app/pluginSupport/OliveHost.cpp` 实现 `loadPlugins()`：创建 Host/PluginCache，注册到 OFX 全局缓存，设置 host path，按需追加路径并扫描插件文件。
+  - `app/node/factory.cpp` 统一通过 `loadPlugins()` 初始化插件，再从全局缓存取插件注册到节点库。
 
 2) 输出剪辑图像的缓冲区管理（Output Clip）
 - 现状：`OliveClipInstance::getImage()` 返回空的 OFX Image，没有分配像素内存，也没有设置 `kOfxImagePropData`。

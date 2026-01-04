@@ -25,6 +25,7 @@
 #include <ofxhBinary.h>
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QDir>
 #include "OliveHost.h"
 
@@ -41,13 +42,64 @@ class PluginNode;
 }
 }
 
+namespace {
+void AddPluginPath(OFX::Host::PluginCache *cache, const QString &path, bool recurse = true)
+{
+	if (!cache || path.isEmpty()) {
+		return;
+	}
+	QDir dir(path);
+	if (!dir.exists()) {
+		return;
+	}
+	cache->addFileToPath(dir.canonicalPath().toStdString(), recurse);
+}
+
+void AddPluginPathsFromEnv(OFX::Host::PluginCache *cache, const char *env_var)
+{
+	QString raw = qEnvironmentVariable(env_var);
+	if (raw.isEmpty()) {
+		return;
+	}
+	const QChar separator = QDir::listSeparator();
+	const QStringList paths = raw.split(separator, Qt::SkipEmptyParts);
+	for (const QString &path : paths) {
+		AddPluginPath(cache, path);
+	}
+}
+}
+
 void olive::plugin::loadPlugins(QString path)
 {
-	std::shared_ptr<OliveHost> host=std::make_shared<OliveHost>();
+	std::shared_ptr<OliveHost> host = std::make_shared<OliveHost>();
 	Current::getInstance().setPluginHost(host);
-	std::shared_ptr<ImageEffect::PluginCache> imageEffectPluginCache
-		=std::make_shared<ImageEffect::PluginCache>(*host);
 
+	std::shared_ptr<ImageEffect::PluginCache> imageEffectPluginCache =
+		std::make_shared<ImageEffect::PluginCache>(*host);
+	Current::getInstance().setPluginCache(imageEffectPluginCache);
+
+	imageEffectPluginCache->registerInCache(
+		*OFX::Host::PluginCache::getPluginCache());
+	OFX::Host::PluginCache *cache = OFX::Host::PluginCache::getPluginCache();
+	cache->setPluginHostPath("Olive");
+
+	const QString home_path = QDir::homePath();
+	AddPluginPath(cache, QDir(home_path).filePath(".OFX/Plugins"));
+	AddPluginPath(cache, QDir(home_path).filePath(".local/share/OFX/Plugins"));
+	AddPluginPath(cache, QDir(home_path).filePath(".local/share/olive/ofx/Plugins"));
+
+	const QString app_dir = QCoreApplication::applicationDirPath();
+	AddPluginPath(cache, QDir(app_dir).filePath("../OFX/Plugins"));
+	AddPluginPath(cache, QDir(app_dir).filePath("../share/olive/ofx/Plugins"));
+	AddPluginPath(cache, QDir(app_dir).filePath("../lib/olive/ofx/Plugins"));
+
+	AddPluginPathsFromEnv(cache, "OLIVE_OFX_PLUGIN_PATH");
+	AddPluginPathsFromEnv(cache, "OLIVE_PLUGIN_PATH");
+
+	if (!path.isEmpty()) {
+		AddPluginPath(cache, path, true);
+	}
+	cache->scanPluginFiles();
 }
 OliveHost::~OliveHost()
 {
