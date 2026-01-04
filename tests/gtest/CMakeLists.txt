@@ -24,6 +24,8 @@ target_include_directories(
   PRIVATE
   ${CMAKE_SOURCE_DIR}/app
   ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_SOURCE_DIR}/third_party/openfx/include
+  ${CMAKE_SOURCE_DIR}/third_party/openfx/HostSupport/include
   ${OLIVE_INCLUDE_DIRS}
 )
 

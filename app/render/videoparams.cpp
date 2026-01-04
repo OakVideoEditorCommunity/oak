@@ -71,11 +71,15 @@ VideoParams::VideoParams()
 	: width_(0)
 	, height_(0)
 	, depth_(0)
+	, time_base_(0)
 	, format_(PixelFormat::INVALID)
 	, channel_count_(0)
+	, pixel_aspect_ratio_(1)
 	, interlacing_(Interlacing::kInterlaceNone)
 	, divider_(1)
 {
+	calculate_effective_size();
+	validate_pixel_aspect_ratio();
 	set_defaults_for_footage();
 }
 

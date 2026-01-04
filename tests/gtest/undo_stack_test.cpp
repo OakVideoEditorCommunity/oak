@@ -11,6 +11,11 @@ public:
 	{
 	}
 
+	olive::Project *GetRelevantProject() const override
+	{
+		return nullptr;
+	}
+
 protected:
 	void redo() override
 	{

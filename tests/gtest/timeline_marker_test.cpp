@@ -32,7 +32,7 @@ TEST(TimelineMarker, SaveLoadRoundTrip)
 	EXPECT_EQ(reader.name().toString(), QStringLiteral("marker"));
 	loaded.load(&reader);
 
-	EXPECT_EQ(loaded.time(), olive::core::rational(10, 1));
+	EXPECT_EQ(loaded.time().in(), olive::core::rational(10, 1));
 	EXPECT_EQ(loaded.name(), QStringLiteral("Marker"));
 	EXPECT_EQ(loaded.color(), 5);
 }

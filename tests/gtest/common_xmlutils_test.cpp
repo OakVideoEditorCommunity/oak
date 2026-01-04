@@ -13,8 +13,8 @@ TEST(CommonXmlUtils, ReadNextStartElement)
 	buffer.open(QIODevice::ReadOnly);
 	QXmlStreamReader reader(&buffer);
 
-	EXPECT_TRUE(XMLReadNextStartElement(&reader));
+	EXPECT_TRUE(olive::XMLReadNextStartElement(&reader));
 	EXPECT_EQ(reader.name().toString(), QStringLiteral("root"));
-	EXPECT_TRUE(XMLReadNextStartElement(&reader));
+	EXPECT_TRUE(olive::XMLReadNextStartElement(&reader));
 	EXPECT_EQ(reader.name().toString(), QStringLiteral("child"));
 }

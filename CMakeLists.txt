@@ -178,6 +178,9 @@ list(APPEND OLIVE_LIBRARIES
   KDAB::kddockwidgets
 )
 
+# Link OFX HostSupport wherever libolive-editor objects are used.
+list(APPEND OLIVE_LIBRARIES OfxHost)
+
 # Link FFmpeg
 find_package(FFMPEG REQUIRED
   COMPONENTS

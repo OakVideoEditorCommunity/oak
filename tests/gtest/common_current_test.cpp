@@ -2,7 +2,7 @@
 
 #include "common/Current.h"
 #include "render/videoparams.h"
-#include "render/audioparams.h"
+#include "olive/core/render/audioparams.h"
 
 TEST(CommonCurrent, SetAndGetVideoParams)
 {

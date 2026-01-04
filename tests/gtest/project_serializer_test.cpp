@@ -8,10 +8,19 @@
 #include "node/project.h"
 #include "node/input/time/timeinput.h"
 #include "node/project/serializer/serializer.h"
+#include "node/color/colormanager/colormanager.h"
+#include "render/diskmanager.h"
 
 TEST(ProjectSerializer, SaveLoadProjectRoundTrip)
 {
+	const bool created_disk_manager = (olive::DiskManager::instance() == nullptr);
+	if (created_disk_manager) {
+		olive::DiskManager::CreateInstance();
+	}
+
+	olive::ColorManager::SetUpDefaultConfig();
 	olive::NodeFactory::Initialize();
+	olive::ProjectSerializer::Initialize();
 
 	olive::Project project;
 	project.Initialize();
@@ -27,8 +36,9 @@ TEST(ProjectSerializer, SaveLoadProjectRoundTrip)
 	QBuffer buffer(&xml);
 	buffer.open(QIODevice::WriteOnly);
 	QXmlStreamWriter writer(&buffer);
-	EXPECT_EQ(olive::ProjectSerializer::Save(&writer, save_data),
-		olive::ProjectSerializer::kSuccess);
+	olive::ProjectSerializer::Result save_result =
+		olive::ProjectSerializer::Save(&writer, save_data);
+	EXPECT_EQ(save_result.code(), olive::ProjectSerializer::kSuccess);
 	buffer.close();
 
 	olive::Project loaded_project;
@@ -40,4 +50,9 @@ TEST(ProjectSerializer, SaveLoadProjectRoundTrip)
 			olive::ProjectSerializer::kProject);
 	EXPECT_EQ(result.code(), olive::ProjectSerializer::kSuccess);
 	EXPECT_FALSE(loaded_project.nodes().isEmpty());
+
+	olive::ProjectSerializer::Destroy();
+	if (created_disk_manager) {
+		olive::DiskManager::DestroyInstance();
+	}
 }

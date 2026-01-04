@@ -5,7 +5,7 @@
 #include <QXmlStreamWriter>
 
 #include "node/project/serializer/typeserializer.h"
-#include "render/audioparams.h"
+#include "olive/core/render/audioparams.h"
 
 TEST(RenderAudioParams, SaveLoadRoundTrip)
 {

@@ -6,7 +6,9 @@
 
 #include "node/node.h"
 #include "node/serializeddata.h"
+#include "node/splitvalue.h"
 #include "node/value.h"
+#include "render/diskmanager.h"
 
 namespace {
 class TestNode final : public olive::Node {
@@ -14,7 +16,9 @@ public:
 	TestNode()
 	{
 		AddInput(QStringLiteral("Value"), olive::NodeValue::kFloat);
-		SetSplitStandardValue(QStringLiteral("Value"), 3.5, -1);
+		olive::SplitValue value;
+		value.append(3.5);
+		SetSplitStandardValue(QStringLiteral("Value"), value, -1);
 	}
 
 	TestNode *copy() const override
@@ -42,7 +46,8 @@ public:
 		return QStringLiteral("Test node for serialization");
 	}
 
-	void Value(const NodeValueRow &, const NodeGlobals &, NodeValueTable *) const override
+	void Value(const olive::NodeValueRow &, const olive::NodeGlobals &,
+			   olive::NodeValueTable *) const override
 	{
 	}
 };
@@ -50,6 +55,11 @@ public:
 
 TEST(NodeSerialization, SaveAndLoadInput)
 {
+	const bool created_disk_manager = (olive::DiskManager::instance() == nullptr);
+	if (created_disk_manager) {
+		olive::DiskManager::CreateInstance();
+	}
+
 	TestNode node;
 	node.SetLabel(QStringLiteral("MyNode"));
 	node.SetOverrideColor(2);
@@ -78,4 +88,8 @@ TEST(NodeSerialization, SaveAndLoadInput)
 	EXPECT_EQ(loaded.GetOverrideColor(), 2);
 	EXPECT_DOUBLE_EQ(loaded.GetSplitStandardValue(QStringLiteral("Value"), -1)
 		.first().toDouble(), 3.5);
+
+	if (created_disk_manager) {
+		olive::DiskManager::DestroyInstance();
+	}
 }
