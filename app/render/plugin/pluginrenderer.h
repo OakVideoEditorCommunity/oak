@@ -42,6 +42,8 @@ class PluginRenderer : public olive::OpenGLRenderer{
 public:
 	PluginRenderer(QObject *parent=nullptr):OpenGLRenderer(parent){};
 	virtual ~PluginRenderer() override{};
+	void AttachOutputTexture(olive::Texture *texture);
+	void DetachOutputTexture();
 protected:
 	virtual void RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
 					  olive::Texture *destination,

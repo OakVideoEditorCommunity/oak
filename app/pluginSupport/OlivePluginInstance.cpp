@@ -18,6 +18,7 @@
 #include "OlivePluginInstance.h"
 
 #include "OliveClip.h"
+#include "ofxGPURender.h"
 #include "ofxCore.h"
 #include "ofxMessage.h"
 #include "common/Current.h"
@@ -42,6 +43,19 @@ namespace olive
 namespace plugin
 {
 namespace {
+const std::string &FieldOrderForParams(const VideoParams &params)
+{
+	switch (params.interlacing()) {
+	case VideoParams::kInterlaceNone:
+		return kOfxImageFieldNone;
+	case VideoParams::kInterlacedTopFirst:
+		return kOfxImageFieldUpper;
+	case VideoParams::kInterlacedBottomFirst:
+		return kOfxImageFieldLower;
+	}
+	return kOfxImageFieldNone;
+}
+
 class DeferredRedoCommand : public UndoCommand {
 public:
 	explicit DeferredRedoCommand(UndoCommand *inner)
@@ -106,6 +120,11 @@ ViewerOutput *GetActiveViewerOutput()
 	return nullptr;
 }
 } // namespace
+
+const std::string &OlivePluginInstance::getDefaultOutputFielding() const
+{
+	return FieldOrderForParams(params_);
+}
 
 OfxStatus OlivePluginInstance::vmessage(const char *type, const char *id,
 								  const char *format, va_list args)
@@ -196,7 +215,6 @@ void OlivePluginInstance::getProjectExtent(double &xSize, double &ySize) const
 {
 	xSize =params_.width();
 	ySize =params_.height();
-	// TODO: Ensure this project does not support this.
 }
 double OlivePluginInstance::getProjectPixelAspectRatio() const
 {
@@ -392,6 +410,22 @@ bool OlivePluginInstance::progressUpdate(double t)
 	return !progress_cancelled_;
 }
 
+OfxStatus OlivePluginInstance::contextAttachedAction()
+{
+	if (!open_gl_enabled_) {
+		return kOfxStatReplyDefault;
+	}
+	return kOfxStatOK;
+}
+
+OfxStatus OlivePluginInstance::contextDetachedAction()
+{
+	if (!open_gl_enabled_) {
+		return kOfxStatReplyDefault;
+	}
+	return kOfxStatOK;
+}
+
 double OlivePluginInstance::timeLineGetTime()
 {
 	if (ViewerOutput *viewer = GetActiveViewerOutput()) {
@@ -418,6 +452,17 @@ void OlivePluginInstance::timeLineGetBounds(double &t1, double &t2)
 
 	t1 = 0.0;
 	t2 = 0.0;
+}
+
+void OlivePluginInstance::setCustomInArgs(const std::string &action,
+										  OFX::Host::Property::Set &inArgs)
+{
+	if (action == kOfxImageEffectActionRender ||
+		action == kOfxImageEffectActionBeginSequenceRender ||
+		action == kOfxImageEffectActionEndSequenceRender) {
+		inArgs.setIntProperty(kOfxImageEffectPropOpenGLEnabled,
+							  open_gl_enabled_ ? 1 : 0);
+	}
 }
 
 OFX::Host::ImageEffect::ClipInstance *OlivePluginInstance::newClipInstance(

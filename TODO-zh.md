@@ -45,12 +45,18 @@
 8) Project Extent / Fielding 行为待确认
 - 现状：`OlivePluginInstance::getProjectExtent()` 有 “TODO” 注释。
 - 为什么需要：OFX 插件会根据项目尺寸、扫描线场信息做渲染决策。
-- 可能改动：明确工程是否支持不同 extent/fielding，确保返回值与项目设置一致。
+- 已完成：
+  - `getProjectExtent()` 明确返回项目宽高，不再留 TODO。
+  - `getDefaultOutputFielding()` 根据 `VideoParams::interlacing()` 映射为 OFX fielding。
+  - 渲染时 `renderAction()` 的 field 参数根据项目是否交错决定（progressive 用 `None`，interlaced 用 `Both`）。
 
 9) OpenGL Render Suite 支持
 - 现状：`OliveClipInstance::loadTexture()` 返回 null，OpenGL 渲染路径未实现。
 - 为什么需要：有些 OFX 插件只支持 OpenGL 渲染，不支持 CPU 渲染。
-- 可能改动：要么实现 OpenGL texture 的加载与生命周期，要么在 host capability 中明确禁用 OpenGL render。
+- 已完成：
+  - Host 端声明 `kOfxImageEffectPropOpenGLRenderSupported = true`。
+  - `OliveClipInstance::loadTexture()` 返回真实的 OpenGL 纹理句柄。
+  - 渲染前设置 Output Clip 的目标纹理，输入纹理走 OpenGL 纹理路径。
 
 ---
 

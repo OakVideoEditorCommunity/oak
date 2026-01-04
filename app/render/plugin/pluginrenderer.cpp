@@ -151,6 +151,94 @@ static AVPixelFormat GetDestinationAVPixelFormat(const olive::VideoParams &param
 	return pix_fmt;
 }
 
+static const char *GetRenderFieldForParams(const olive::VideoParams &params)
+{
+	switch (params.interlacing()) {
+	case olive::VideoParams::kInterlaceNone:
+		return kOfxImageFieldNone;
+	case olive::VideoParams::kInterlacedTopFirst:
+	case olive::VideoParams::kInterlacedBottomFirst:
+		return kOfxImageFieldBoth;
+	}
+	return kOfxImageFieldNone;
+}
+
+static olive::AVFramePtr ReadbackTextureToFrame(olive::Texture *texture,
+												const olive::VideoParams &params)
+{
+	if (!texture || texture->IsDummy()) {
+		return nullptr;
+	}
+
+	AVPixelFormat pix_fmt = GetDestinationAVPixelFormat(params);
+	if (pix_fmt == AV_PIX_FMT_NONE) {
+		return nullptr;
+	}
+
+	const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+	if (!desc) {
+		return nullptr;
+	}
+
+	if (!(desc->flags & AV_PIX_FMT_FLAG_PLANAR)) {
+		olive::AVFramePtr frame = olive::CreateAVFramePtr();
+		frame->format = pix_fmt;
+		frame->width = params.width();
+		frame->height = params.height();
+		if (av_frame_get_buffer(frame.get(), 0) < 0) {
+			return nullptr;
+		}
+
+		if (texture->renderer()) {
+			texture->renderer()->DownloadFromTexture(
+				texture->id(), params, frame->data[0], frame->linesize[0]);
+		}
+		return frame;
+	}
+
+	// Planar formats: read back as RGBA and convert.
+	olive::VideoParams rgba_params(
+		params.width(), params.height(), olive::core::PixelFormat::U8, 4,
+		params.pixel_aspect_ratio(), params.interlacing(), params.divider());
+
+	olive::AVFramePtr rgba_frame = olive::CreateAVFramePtr();
+	rgba_frame->format = AV_PIX_FMT_RGBA;
+	rgba_frame->width = params.width();
+	rgba_frame->height = params.height();
+	if (av_frame_get_buffer(rgba_frame.get(), 0) < 0) {
+		return nullptr;
+	}
+
+	if (texture->renderer()) {
+		texture->renderer()->DownloadFromTexture(
+			texture->id(), rgba_params, rgba_frame->data[0],
+			rgba_frame->linesize[0]);
+	}
+
+	olive::AVFramePtr dst = olive::CreateAVFramePtr();
+	dst->format = pix_fmt;
+	dst->width = params.width();
+	dst->height = params.height();
+	if (av_frame_get_buffer(dst.get(), 0) < 0) {
+		return rgba_frame;
+	}
+
+	SwsContext *sws_ctx = sws_getContext(
+		rgba_frame->width, rgba_frame->height,
+		static_cast<AVPixelFormat>(rgba_frame->format),
+		dst->width, dst->height, pix_fmt, SWS_POINT,
+		nullptr, nullptr, nullptr);
+	if (!sws_ctx) {
+		return rgba_frame;
+	}
+
+	sws_scale(sws_ctx, rgba_frame->data, rgba_frame->linesize, 0,
+			  rgba_frame->height, dst->data, dst->linesize);
+	sws_freeContext(sws_ctx);
+
+	return dst;
+}
+
 static olive::AVFramePtr ConvertFrameIfNeeded(olive::AVFramePtr src,
 											  const olive::VideoParams &dst_params)
 {
@@ -198,6 +286,16 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 					  bool clear_destination, bool interactive)
 {
 	auto instance=job.pluginInstance();
+	if (!instance) {
+		return;
+	}
+	auto *olive_instance =
+		dynamic_cast<olive::plugin::OlivePluginInstance *>(instance);
+	const bool use_opengl =
+		destination && destination->renderer() && destination->id().isValid();
+	if (olive_instance) {
+		olive_instance->setOpenGLEnabled(use_opengl);
+	}
 	OfxStatus stat;
 	stat = instance->createInstanceAction();
 	if(stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
@@ -243,8 +341,17 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		return;
 	}
 
+	if (use_opengl) {
+		instance->contextAttachedAction();
+		AttachOutputTexture(destination);
+	}
+
 	OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
 	if (!clip) {
+		if (use_opengl) {
+			DetachOutputTexture();
+			instance->contextDetachedAction();
+		}
 		instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
 								  );
 		return;
@@ -255,6 +362,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 
 	clip->setParams(destination_params);
 	clip->setRegionOfDefinition(regionOfDefinition, frame);
+	clip->setOutputTexture(destination, frame);
 
 	const NodeValueRow &values = job.GetValues();
 	const auto &clips = instance->getDescriptor().getClips();
@@ -288,28 +396,65 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	assert(stat == kOfxStatOK || stat == kOfxStatReplyDefault);
 
 	// render a frame
-	stat = instance->renderAction(0,kOfxImageFieldBoth,renderWindow, renderScale, true, interactive, interactive);
+	const char *render_field = GetRenderFieldForParams(destination_params);
+	stat = instance->renderAction(0, render_field, renderWindow, renderScale,
+								  true, interactive, interactive);
 	assert(stat == kOfxStatOK);
 
-	// get the output image buffer
-	std::shared_ptr<OFX::Host::ImageEffect::Image> output_image = clip->getOutputImage(frame);
-	if (!output_image) {
-		instance->endRenderAction(frame, numFramesToRender, 1.0, interactive, renderScale, true,interactive
-								  );
-		return;
+	// get the output image buffer (CPU path only)
+	std::shared_ptr<OFX::Host::ImageEffect::Image> output_image;
+	if (!use_opengl) {
+		output_image = clip->getOutputImage(frame);
+		if (!output_image) {
+			instance->endRenderAction(frame, numFramesToRender, 1.0, interactive,
+									  renderScale, true, interactive);
+			return;
+		}
+	} else {
+		if (!destination || !destination->id().isValid()) {
+			DetachOutputTexture();
+			instance->contextDetachedAction();
+			instance->endRenderAction(frame, numFramesToRender, 1.0, interactive,
+									  renderScale, true, interactive);
+			return;
+		}
 	}
 
-	AVFramePtr frame_ptr = create_avframe_from_ofx_image(*output_image);
-	if (!frame_ptr) {
-		instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
-								  );
-		return;
+	if (!use_opengl) {
+		AVFramePtr frame_ptr = create_avframe_from_ofx_image(*output_image);
+		if (!frame_ptr) {
+			instance->endRenderAction(0, numFramesToRender, 1.0, interactive,
+									  renderScale, true, interactive);
+			return;
+		}
+		AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
+		destination->handleFrame(converted);
+	} else {
+		AVFramePtr frame_ptr =
+			ReadbackTextureToFrame(destination, destination_params);
+		DetachOutputTexture();
+		instance->contextDetachedAction();
+		if (frame_ptr) {
+			AVFramePtr converted =
+				ConvertFrameIfNeeded(frame_ptr, destination_params);
+			destination->handleFrame(converted);
+		}
 	}
-
-	AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
-	destination->handleFrame(converted);
 
 	instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
 							  );
 
+}
+
+void olive::plugin::PluginRenderer::AttachOutputTexture(olive::Texture *texture)
+{
+	if (!texture) {
+		return;
+	}
+	AttachTextureAsDestination(texture->id());
+}
+
+void olive::plugin::PluginRenderer::DetachOutputTexture()
+{
+	DetachTextureAsDestination();
 }

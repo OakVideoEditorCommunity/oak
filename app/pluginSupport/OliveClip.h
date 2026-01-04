@@ -70,10 +70,13 @@ public:
 		params_ = params;
 	}
 #   ifdef OFX_SUPPORTS_OPENGLRENDER
-	OFX::Host::ImageEffect::Texture* loadTexture(OfxTime time, const char *format, const OfxRectD *optionalBounds) { return NULL; };
+	OFX::Host::ImageEffect::Texture* loadTexture(OfxTime time,
+												 const char *format,
+												 const OfxRectD *optionalBounds) override;
 #   endif
 
 	void setInputTexture(TexturePtr texture, OfxTime time);
+	void setOutputTexture(Texture *texture, OfxTime time);
 
 private:
 	VideoParams params_;
@@ -84,6 +87,10 @@ private:
 
 	std::string name_;
 	QMap<OfxTime,std::shared_ptr<Image>> images_;
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	QMap<OfxTime, TexturePtr> input_textures_;
+	QMap<OfxTime, Texture *> output_textures_;
+#endif
 };
 }
 }

@@ -77,6 +77,10 @@ ImageEffect::Descriptor *
 OliveHost::makeDescriptor(ImageEffect::ImageEffectPlugin* plugin)
 {
 	ImageEffect::Descriptor* desc = new ImageEffect::Descriptor(plugin);
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
+									   "true");
+#endif
 	descriptors_.append(desc);
 	return desc;
 }
@@ -85,6 +89,10 @@ OliveHost::makeDescriptor(const ImageEffect::Descriptor &rootContext,
 							ImageEffect::ImageEffectPlugin *plugin)
 {
 	ImageEffect::Descriptor* desc =  new ImageEffect::Descriptor(rootContext,plugin);
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
+									   "true");
+#endif
 	descriptors_.append(desc);
 	return desc;
 }
@@ -93,6 +101,10 @@ OliveHost::makeDescriptor(const std::string &bundlePath,
 							ImageEffect::ImageEffectPlugin *plugin)
 {
 	ImageEffect::Descriptor* desc =  new ImageEffect::Descriptor(bundlePath, plugin);
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
+									   "true");
+#endif
 	descriptors_.append(desc);
 	return desc;
 }

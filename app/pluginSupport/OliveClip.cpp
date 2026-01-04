@@ -32,6 +32,9 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+#include <QOpenGLFunctions>
+#endif
 
 extern "C" {
 #include <libswscale/swscale.h>
@@ -203,12 +206,15 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 	if (!texture) {
 		return;
 	}
+	this->params_ = texture->params();
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	input_textures_.insert(time, texture);
+#endif
+
 	AVFramePtr frame = texture->frame();
 	if (!frame || !frame->data[0]) {
 		return;
 	}
-
-	this->params_=texture->params();
 	AVPixelFormat expected_fmt =
 		FFmpegUtils::GetFFmpegPixelFormat(params_.format(),
 										  params_.channel_count());
@@ -282,3 +288,70 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 					copy_bytes);
 	}
 }
+
+void olive::plugin::OliveClipInstance::setOutputTexture(Texture *texture,
+														OfxTime time)
+{
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	if (!texture) {
+		return;
+	}
+	output_textures_.insert(time, texture);
+#else
+	(void)texture;
+	(void)time;
+#endif
+}
+
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+OFX::Host::ImageEffect::Texture *
+olive::plugin::OliveClipInstance::loadTexture(OfxTime time, const char *format,
+											  const OfxRectD *optionalBounds)
+{
+	(void)format;
+
+	Texture *gl_texture = nullptr;
+	if (isOutput()) {
+		gl_texture = output_textures_.value(time, nullptr);
+	} else {
+		TexturePtr input = input_textures_.value(time);
+		gl_texture = input ? input.get() : nullptr;
+	}
+
+	if (!gl_texture || gl_texture->IsDummy() || !gl_texture->id().isValid()) {
+		return nullptr;
+	}
+
+	OfxRectD rod_d = getRegionOfDefinition(time);
+	OfxRectI rod = { static_cast<int>(std::floor(rod_d.x1)),
+					 static_cast<int>(std::floor(rod_d.y1)),
+					 static_cast<int>(std::ceil(rod_d.x2)),
+					 static_cast<int>(std::ceil(rod_d.y2)) };
+	OfxRectI bounds = rod;
+	if (optionalBounds) {
+		bounds.x1 = static_cast<int>(std::floor(optionalBounds->x1));
+		bounds.y1 = static_cast<int>(std::floor(optionalBounds->y1));
+		bounds.x2 = static_cast<int>(std::ceil(optionalBounds->x2));
+		bounds.y2 = static_cast<int>(std::ceil(optionalBounds->y2));
+	}
+	bounds.x1 = std::max(bounds.x1, rod.x1);
+	bounds.y1 = std::max(bounds.y1, rod.y1);
+	bounds.x2 = std::min(bounds.x2, rod.x2);
+	bounds.y2 = std::min(bounds.y2, rod.y2);
+
+	const int bytes_per_row =
+		params_.width() * params_.channel_count() * params_.format().byte_count();
+	const std::string &field = getFieldOrder();
+	const std::string unique_id = std::to_string(
+		reinterpret_cast<uintptr_t>(gl_texture)) + "_" +
+		std::to_string(static_cast<long long>(time));
+
+	const int texture_id = gl_texture->id().value<GLuint>();
+	OFX::Host::ImageEffect::Texture *texture =
+		new OFX::Host::ImageEffect::Texture(
+			*this, 1.0, 1.0, texture_id, GL_TEXTURE_2D, bounds, rod,
+			bytes_per_row, field, unique_id);
+	texture->addReference();
+	return texture;
+}
+#endif

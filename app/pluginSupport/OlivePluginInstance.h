@@ -67,9 +67,7 @@ public:
 	}
 	explicit OlivePluginInstance(Instance & instance):Instance(instance){};
 	~OlivePluginInstance() override = default;
-	const std::string &getDefaultOutputFielding() const{
-		return kOfxImageFieldNone;
-	};
+	const std::string &getDefaultOutputFielding() const override;
 
 	void setVideoParam(VideoParams params)
 	{
@@ -78,6 +76,10 @@ public:
 	void setNode(std::shared_ptr<PluginNode> node)
 	{
 		node_ = node;
+	}
+	void setOpenGLEnabled(bool enabled)
+	{
+		open_gl_enabled_ = enabled;
 	}
 	OFX::Host::ImageEffect::ClipInstance *newClipInstance(
 		OFX::Host::ImageEffect::Instance *plugin,
@@ -165,6 +167,11 @@ public:
 	/// false if you should abandon processing, true to continue
 	virtual bool progressUpdate(double t) override;
 
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	virtual OfxStatus contextAttachedAction() override;
+	virtual OfxStatus contextDetachedAction() override;
+#endif
+
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
@@ -182,6 +189,9 @@ public:
 	/// get the first and last times available on the effect's timeline
 	virtual void timeLineGetBounds(double &t1, double &t2);
 
+	void setCustomInArgs(const std::string &action,
+						 OFX::Host::Property::Set &inArgs) override;
+
 
 private:
 	QList<PersistentErrors> persistentErrors_;
@@ -195,6 +205,7 @@ private:
 	QPointer<ProgressDialog> progress_dialog_;
 	bool progress_cancelled_ = false;
 	bool progress_active_ = false;
+	bool open_gl_enabled_ = false;
 };
 }
 }
