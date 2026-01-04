@@ -102,6 +102,7 @@ public:
 	static QString GetNameFromID(const QString &id);
 
 	static Node *CreateFromID(const QString &id);
+	static void RegisterPluginNodes();
 
 	static Node *CreateFromFactoryIndex(const InternalID &id);
 
