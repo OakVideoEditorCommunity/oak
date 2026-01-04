@@ -49,8 +49,39 @@ olive::plugin::PluginNode::PluginNode(
 {
 	plugin_instance_=plugin;
 	bool has_texture_input = false;
+	QHash<QString, QString> group_labels;
+	QHash<QString, QString> page_labels;
+	QHash<QString, QString> page_for_param;
 
 	auto params=plugin_instance_->getParams();
+	for (auto param: params) {
+		const std::string &ofxType = param.second->getType();
+		if (ofxType == kOfxParamTypeGroup) {
+			const QString name = QString::fromStdString(param.first);
+			const QString label =
+				QString::fromStdString(param.second->getLabel());
+			group_labels.insert(name, label.isEmpty() ? name : label);
+		} else if (ofxType == kOfxParamTypePage) {
+			const QString name = QString::fromStdString(param.first);
+			const QString label =
+				QString::fromStdString(param.second->getLabel());
+			page_labels.insert(name, label.isEmpty() ? name : label);
+
+			const auto &props = param.second->getProperties();
+			int count = props.getDimension(kOfxParamPropPageChild);
+			for (int i = 0; i < count; ++i) {
+				const std::string &child =
+					props.getStringProperty(kOfxParamPropPageChild, i);
+				if (child == kOfxParamPageSkipRow ||
+					child == kOfxParamPageSkipColumn) {
+					continue;
+				}
+				page_for_param.insert(QString::fromStdString(child),
+									  page_labels.value(name));
+			}
+		}
+	}
+
 	for (auto param: params) {
 
 		NodeValue::Type type = NodeValue::kNone;
@@ -82,17 +113,25 @@ olive::plugin::PluginNode::PluginNode(
 			type = NodeValue::kBinary;
 		} else if (ofxType == kOfxParamTypePushButton) {
 			type = NodeValue::kPushButton;
-		} else if (ofxType == kOfxParamTypeGroup) {
-			// TODO
-		} else if (ofxType == kOfxParamTypePage) {
-			// TODO
+		} else if (ofxType == kOfxParamTypeGroup ||
+				   ofxType == kOfxParamTypePage) {
+			continue;
 		}else {
 			type = NodeValue::kNone;
 		}
 
-
-
-		AddInput(param.second->getName().data(), type);
+		const QString input_id = QString::fromStdString(param.second->getName());
+		AddInput(input_id, type);
+		const QString parent =
+			QString::fromStdString(param.second->getParentName());
+		if (!parent.isEmpty()) {
+			SetInputProperty(input_id, QStringLiteral("ui_group"),
+							 group_labels.value(parent, parent));
+		}
+		if (page_for_param.contains(input_id)) {
+			SetInputProperty(input_id, QStringLiteral("ui_page"),
+							 page_for_param.value(input_id));
+		}
 	}
 
 	const auto &clips = plugin_instance_->getDescriptor().getClips();

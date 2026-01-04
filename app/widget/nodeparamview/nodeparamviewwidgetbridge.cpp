@@ -261,9 +261,16 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 	case NodeValue::kVideoParams:
 	case NodeValue::kAudioParams:
 	case NodeValue::kSubtitleParams:
-	case NodeValue::kBinary:
 	case NodeValue::kDataTypeCount:
 		break;
+	case NodeValue::kBinary: {
+		NodeParamViewTextEdit *line_edit =
+			new NodeParamViewTextEdit(parent);
+		widgets_.append(line_edit);
+		connect(line_edit, &NodeParamViewTextEdit::textEdited, this,
+				&NodeParamViewWidgetBridge::WidgetCallback);
+		break;
+	}
 	case NodeValue::kInt: {
 		// Widget is a IntegerSlider
 		IntegerSlider *slider = static_cast<IntegerSlider *>(sender());
@@ -340,6 +347,16 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 		// Sender is a NodeParamViewRichText
 		SetInputValue(static_cast<NodeParamViewTextEdit *>(sender())->text(),
 					  0);
+		break;
+	}
+	case NodeValue::kBinary: {
+		QString text = static_cast<NodeParamViewTextEdit *>(sender())->text();
+		QByteArray raw = text.toUtf8();
+		QByteArray decoded = QByteArray::fromBase64(raw);
+		if (decoded.isEmpty() && !raw.isEmpty()) {
+			decoded = raw;
+		}
+		SetInputValue(decoded, 0);
 		break;
 	}
 	case NodeValue::kBoolean: {
@@ -440,9 +457,15 @@ void NodeParamViewWidgetBridge::UpdateWidgetValues()
 	case NodeValue::kVideoParams:
 	case NodeValue::kAudioParams:
 	case NodeValue::kSubtitleParams:
-	case NodeValue::kBinary:
 	case NodeValue::kDataTypeCount:
 		break;
+	case NodeValue::kBinary: {
+		NodeParamViewTextEdit *e =
+			static_cast<NodeParamViewTextEdit *>(widgets_.first());
+		QByteArray bytes = GetInnerInput().GetValueAtTime(node_time).toByteArray();
+		e->setTextPreservingCursor(QString::fromUtf8(bytes.toBase64()));
+		break;
+	}
 	case NodeValue::kInt: {
 		static_cast<IntegerSlider *>(widgets_.first())
 			->SetValue(GetInnerInput().GetValueAtTime(node_time).toLongLong());

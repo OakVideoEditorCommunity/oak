@@ -196,6 +196,8 @@ NodeParamViewItemBody::NodeParamViewItemBody(
 	QGridLayout *root_layout = new QGridLayout(this);
 
 	int insert_row = 0;
+	QString current_page;
+	QString current_group;
 
 	QVector<Node *> connected_signals;
 
@@ -219,6 +221,27 @@ NodeParamViewItemBody::NodeParamViewItemBody(
 								   { n, input });
 
 		if (!(n->GetInputFlags(input) & kInputFlagHidden)) {
+			QString page_label = n->GetInputProperty(input, QStringLiteral("ui_page")).toString();
+			QString group_label = n->GetInputProperty(input, QStringLiteral("ui_group")).toString();
+			if (!page_label.isEmpty() && page_label != current_page) {
+				QLabel *page_title = new QLabel(page_label, this);
+				QFont f = page_title->font();
+				f.setBold(true);
+				page_title->setFont(f);
+				root_layout->addWidget(page_title, insert_row, 0, 1, 10);
+				insert_row++;
+				current_page = page_label;
+				current_group.clear();
+			}
+			if (!group_label.isEmpty() && group_label != current_group) {
+				QLabel *group_title = new QLabel(group_label, this);
+				QFont f = group_title->font();
+				f.setBold(true);
+				group_title->setFont(f);
+				root_layout->addWidget(group_title, insert_row, 0, 1, 10);
+				insert_row++;
+				current_group = group_label;
+			}
 			CreateWidgets(root_layout, n, input, -1, insert_row);
 
 			insert_row++;

@@ -171,6 +171,8 @@ OlivePluginInstance::newParam(const std::string &name,
 		return new BooleanInstance(node_, name, desc);
 	} else if (type == kOfxParamTypeChoice) {
 		return new ChoiceInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeString) {
+		return new StringInstance(node_, name, desc);
 	} else if (type == kOfxParamTypeRGBA) {
 		return new RGBAInstance(node_, name, desc);
 	} else if (type == kOfxParamTypeRGB) {
@@ -179,6 +181,17 @@ OlivePluginInstance::newParam(const std::string &name,
 		return new Double2DInstance(node_, name, desc);
 	} else if (type == kOfxParamTypeInteger2D) {
 		return new Integer2DInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeDouble3D) {
+		return new Double3DInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeInteger3D) {
+		return new Integer3DInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeCustom ||
+			   type == kOfxParamTypeBytes) {
+		return new CustomInstance(node_, name, desc);
+	} else if (type == kOfxParamTypeGroup) {
+		return new GroupInstance(desc);
+	} else if (type == kOfxParamTypePage) {
+		return new PageInstance(desc);
 	} else if (type == kOfxParamTypePushButton) {
 		return new PushbuttonInstance(node_, name, desc);
 	}

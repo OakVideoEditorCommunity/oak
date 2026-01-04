@@ -32,6 +32,11 @@
 - 为什么需要：插件在编辑参数、显示进度、根据时间线上下文渲染时依赖这些回调。
 - 可能改动：实现 editBegin/editEnd 通知；progressStart/Update/End 与 UI 进度条连接；timelineGetTime/GotoTime/Bounds 与工程时间轴连接。
 
+7) 持久消息展示与清理机制需要完善
+- 现状：我们已在 Host/Instance 里保存消息并能弹窗，但 UI 面板还需要稳定地展示、更新和清理。
+- 为什么需要：插件经常用 persistent message 提示错误或警告，需要可追踪、可清除。
+- 可能改动：统一消息存储（Host/Instance），提供 UI 列表、清除按钮、计数徽标，并保证信号更新。
+
 8) Project Extent / Fielding 行为待确认
 - 现状：`OlivePluginInstance::getProjectExtent()` 有 “TODO” 注释。
 - 为什么需要：OFX 插件会根据项目尺寸、扫描线场信息做渲染决策。
