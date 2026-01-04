@@ -61,7 +61,7 @@ namespace OFX {
         ///   \arg plugin - the plugin being created
         ///   \arg desc - the descriptor for that plugin
         ///   \arg context - the context to be created in
-        virtual Instance* newInstance(std::shared_ptr<olive::plugin::PluginNode> clientData,
+        virtual Instance* newInstance(void *clientData,
                                       ImageEffectPlugin* plugin,
                                       Descriptor& desc,
                                       const std::string& context) = 0;

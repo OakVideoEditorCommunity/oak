@@ -646,7 +646,7 @@ void NodeView::mouseDoubleClickEvent(QMouseEvent *event)
 													QStringLiteral("ParamPanel"))) {
 					panel->show();
 					panel->raise();
-					panel->setFocus();
+										panel->setFocus(Qt::OtherFocusReason);
 				}
 			}
 		}

@@ -91,7 +91,25 @@ void NodeFactory::Initialize()
 	olive::plugin::loadPlugins(QString());
 
 	for (auto plugin : OFX::Host::PluginCache::getPluginCache()->getPlugins()) {
-		plugin::PluginNode *plugin_node=new plugin::PluginNode(dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin*>(plugin));
+		auto *image_effect =
+			dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin *>(plugin);
+		if (!image_effect) {
+			continue;
+		}
+
+		const auto &contexts = image_effect->getContexts();
+		std::string context = kOfxImageEffectContextFilter;
+		if (!contexts.empty() &&
+			contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
+			context = *contexts.begin();
+		}
+
+		auto *instance = image_effect->createInstance(context, nullptr);
+		if (!instance) {
+			continue;
+		}
+
+		plugin::PluginNode *plugin_node = new plugin::PluginNode(instance);
 		library_.append(plugin_node);
 	}
 

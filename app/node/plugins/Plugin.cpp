@@ -149,6 +149,8 @@ olive::plugin::PluginNode::PluginNode(
 		SetInputName(kTextureInput, tr("Texture"));
 	}
 }
+
+olive::plugin::PluginNode::~PluginNode() = default;
 QString olive::plugin::PluginNode::Name() const
 {
 	const auto *plugin = plugin_instance_->getPlugin();
@@ -159,6 +161,11 @@ QString olive::plugin::PluginNode::Name() const
 
 }
 
+QVector<olive::Node::CategoryID> olive::plugin::PluginNode::Category() const
+{
+	return { olive::Node::kCategoryUnknown };
+}
+
 QString olive::plugin::PluginNode::Description() const
 {
 	const auto *plugin = plugin_instance_->getPlugin();
@@ -167,6 +174,23 @@ QString olive::plugin::PluginNode::Description() const
 		.getStringProperty(kOfxPropPluginDescription)
 		.data();
 
+}
+void olive::plugin::PluginNode::ProcessSamples(const NodeValueRow &values,
+											   const SampleBuffer &input,
+											   SampleBuffer &output,
+											   int index) const
+{
+	(void)values;
+	(void)input;
+	(void)output;
+	(void)index;
+}
+
+void olive::plugin::PluginNode::GenerateFrame(FramePtr frame,
+											  const GenerateJob &job) const
+{
+	(void)frame;
+	(void)job;
 }
 void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 									  const NodeGlobals &globals,

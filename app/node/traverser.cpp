@@ -382,9 +382,12 @@ TexturePtr NodeTraverser::ProcessVideoCacheJob(const CacheJob *val)
 	return nullptr;
 }
 
-TexturePtr NodeTraverser::ProcessPluginJob(TexturePtr texture, TexturePtr destination, const Node *node,)
+TexturePtr NodeTraverser::ProcessPluginJob(TexturePtr texture,
+										   TexturePtr destination,
+										   const Node *node)
 {
 	// TODO
+	return nullptr;
 }
 QVector2D NodeTraverser::GenerateResolution() const
 {

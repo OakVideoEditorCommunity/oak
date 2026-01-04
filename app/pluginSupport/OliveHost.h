@@ -57,7 +57,7 @@ public:
 		return true;
 	};
 
-	OFX::Host::ImageEffect::Instance* newInstance(std::shared_ptr<PluginNode> ptr,
+	OFX::Host::ImageEffect::Instance* newInstance(void *clientData,
 							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 							OFX::Host::ImageEffect::Descriptor& desc,
 							const std::string& context) override;

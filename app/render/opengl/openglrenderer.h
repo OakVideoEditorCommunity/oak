@@ -83,16 +83,16 @@ protected:
 
 	virtual void DestroyInternal() override;
 
+	void AttachTextureAsDestination(const QVariant &texture);
+
+	void DetachTextureAsDestination();
+
 private:
 	static GLint GetInternalFormat(PixelFormat format, int channel_layout);
 
 	static GLenum GetPixelType(PixelFormat format);
 
 	static GLenum GetPixelFormat(int channel_count);
-
-	void AttachTextureAsDestination(const QVariant &texture);
-
-	void DetachTextureAsDestination();
 
 	void PrepareInputTexture(GLenum target, Texture::Interpolation interp);
 

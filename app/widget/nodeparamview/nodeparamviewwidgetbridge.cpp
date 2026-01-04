@@ -263,14 +263,6 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 	case NodeValue::kSubtitleParams:
 	case NodeValue::kDataTypeCount:
 		break;
-	case NodeValue::kBinary: {
-		NodeParamViewTextEdit *line_edit =
-			new NodeParamViewTextEdit(parent);
-		widgets_.append(line_edit);
-		connect(line_edit, &NodeParamViewTextEdit::textEdited, this,
-				&NodeParamViewWidgetBridge::WidgetCallback);
-		break;
-	}
 	case NodeValue::kInt: {
 		// Widget is a IntegerSlider
 		IntegerSlider *slider = static_cast<IntegerSlider *>(sender());

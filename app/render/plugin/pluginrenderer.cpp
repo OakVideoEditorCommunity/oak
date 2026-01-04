@@ -350,10 +350,12 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 
 	OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
 	if (!clip) {
+#ifdef OFX_SUPPORTS_OPENGLRENDER
 		if (use_opengl) {
 			DetachOutputTexture();
 			instance->contextDetachedAction();
 		}
+#endif
 		instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
 								  );
 		return;

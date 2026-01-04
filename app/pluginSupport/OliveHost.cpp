@@ -161,14 +161,16 @@ OliveHost::makeDescriptor(const std::string &bundlePath,
 	return desc;
 }
 
-ImageEffect::Instance* OliveHost::newInstance(std::shared_ptr<PluginNode> clientData,
+ImageEffect::Instance* OliveHost::newInstance(void *clientData,
 							ImageEffect::ImageEffectPlugin* plugin,
 							ImageEffect::Descriptor& desc,
 							const std::string& context){
 	auto* instance = new OlivePluginInstance(
 		plugin, desc, context, Current::getInstance().interactive());
 	if (clientData) {
-		instance->setNode(clientData);
+		auto *node = static_cast<PluginNode *>(clientData);
+		instance->setNode(
+			std::shared_ptr<PluginNode>(node, [](PluginNode *) {}));
 	}
 	instances_.append(instance);
 	return instance;

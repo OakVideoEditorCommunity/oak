@@ -30,9 +30,9 @@
 #include <qcontainerfwd.h>
 #include <qlist.h>
 namespace olive {
+class ProgressDialog;
 namespace plugin{
 class PluginNode;
-class ProgressDialog;
 enum class ErrorType{
 	Error,
 	Warning,
@@ -202,7 +202,7 @@ private:
 	QString edit_label_;
 	QString edit_first_label_;
 	int edit_param_count_ = 0;
-	QPointer<ProgressDialog> progress_dialog_;
+	QPointer<olive::ProgressDialog> progress_dialog_;
 	bool progress_cancelled_ = false;
 	bool progress_active_ = false;
 	bool open_gl_enabled_ = false;

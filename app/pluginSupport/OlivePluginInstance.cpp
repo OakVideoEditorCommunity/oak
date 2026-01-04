@@ -377,11 +377,12 @@ void OlivePluginInstance::progressStart(const std::string &message,
 		? QStringLiteral("Processing...")
 		: QString::fromStdString(message);
 
-	progress_dialog_ = new ProgressDialog(
-		dialog_message, QStringLiteral("OpenFX"), Core::instance()->main_window());
+	progress_dialog_ = new ::olive::ProgressDialog(
+		dialog_message, QStringLiteral("OpenFX"), nullptr);
 	progress_dialog_->setAttribute(Qt::WA_DeleteOnClose);
-	connect(progress_dialog_, &ProgressDialog::Cancelled, this,
-			[this]() { progress_cancelled_ = true; });
+	QObject::connect(progress_dialog_, &::olive::ProgressDialog::Cancelled,
+					 progress_dialog_,
+					 [this]() { progress_cancelled_ = true; });
 	progress_dialog_->show();
 }
 
@@ -440,7 +441,7 @@ double OlivePluginInstance::timeLineGetTime()
 void OlivePluginInstance::timeLineGotoTime(double t)
 {
 	if (ViewerOutput *viewer = GetActiveViewerOutput()) {
-		viewer->SetPlayhead(core::rational::fromDouble(t));
+		viewer->SetPlayhead(olive::core::rational::fromDouble(t));
 	}
 }
 

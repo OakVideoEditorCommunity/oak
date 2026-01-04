@@ -81,6 +81,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+# OFX HostSupport requires expat::expat
+find_package(EXPAT REQUIRED)
+if (TARGET EXPAT::EXPAT AND NOT TARGET expat::expat)
+  add_library(expat::expat ALIAS EXPAT::EXPAT)
+endif()
+
 # Link OpenGL
 if(UNIX AND NOT APPLE AND NOT DEFINED OpenGL_GL_PREFERENCE)
   set(OpenGL_GL_PREFERENCE LEGACY)
@@ -262,6 +268,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 list(APPEND OLIVE_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext)
 
 add_subdirectory(ext)
+add_subdirectory(third_party/openfx/HostSupport)
 add_subdirectory(app)
 
 if (BUILD_TESTS)
