@@ -39,6 +39,8 @@ inline QString ParamChangeLabel(const OFX::Host::Param::Descriptor &descriptor)
 	return QStringLiteral("Change %1")
 		.arg(QString::fromStdString(descriptor.getName()));
 }
+void SubmitUndoCommand(const std::shared_ptr<PluginNode> &node,
+					   UndoCommand *command, const QString &label);
 
 class PushbuttonInstance : public OFX::Host::Param::PushbuttonInstance {
 protected:
@@ -97,8 +99,7 @@ public:
 
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(_node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(_node, command, ParamChangeLabel(_descriptor));
 		id=_descriptor.getName().c_str();
 		return kOfxStatOK;
 	}
@@ -108,8 +109,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(_node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(_node, command, ParamChangeLabel(_descriptor));
 		id=_descriptor.getName().c_str();
 		return kOfxStatOK;
 	}
@@ -155,8 +155,7 @@ public:
 			NodeValue::kFloat, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, double data)
@@ -165,8 +164,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus derive(OfxTime, double&)
@@ -219,8 +217,7 @@ public:
 			NodeValue::kBoolean, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, bool data)
@@ -229,8 +226,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -275,8 +271,7 @@ public:
 			NodeValue::kCombo, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, int data)
@@ -285,8 +280,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), data, 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -335,8 +329,7 @@ public:
 			QVariant::fromValue(olive::core::Color(r, g, b, a)));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, double r,double g,double b,double a)
@@ -351,8 +344,7 @@ public:
 							 b, 2, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 a, 3, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -400,8 +392,7 @@ public:
 			QVariant::fromValue(olive::core::Color(r, g, b)));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, double r,double g,double b)
@@ -414,8 +405,7 @@ public:
 							 g, 1, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 b, 2, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -457,8 +447,7 @@ public:
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time,double x,double y)
@@ -469,8 +458,7 @@ public:
 							 x, 0, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 y, 1, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -512,8 +500,7 @@ public:
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time,int x,int y)
@@ -524,8 +511,7 @@ public:
 							 x, 0, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
 							 y, 1, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -570,8 +556,7 @@ public:
 			NodeValue::kVec3, QVector3D(x, y, z));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time,double x,double y,double z)
@@ -584,8 +569,7 @@ public:
 							 rational::fromDouble(time), y, 1, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name),
 							 rational::fromDouble(time), z, 2, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -630,8 +614,7 @@ public:
 			NodeValue::kVec3, QVector3D(x, y, z));
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time,int x,int y,int z)
@@ -644,8 +627,7 @@ public:
 							 rational::fromDouble(time), y, 1, command, true);
 		Node::SetValueAtTime(NodeInput(node.get(), name),
 							 rational::fromDouble(time), z, 2, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -692,8 +674,7 @@ public:
 			NodeValue::kText, v);
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, const char *data)
@@ -702,8 +683,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), QString::fromUtf8(data), 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };
@@ -758,8 +738,7 @@ public:
 			NodeValue::kBinary, v);
 		auto command = new NodeParamSetSplitStandardValueCommand(
 			NodeInput(node.get(), _descriptor.getName().c_str()), split);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 	OfxStatus set(OfxTime time, const char *data)
@@ -768,8 +747,7 @@ public:
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
 			rational::fromDouble(time), QByteArray(data), 0, command, true);
-		Core::instance()->undo_stack()->push(command,
-											 ParamChangeLabel(_descriptor));
+		SubmitUndoCommand(node, command, ParamChangeLabel(_descriptor));
 		return kOfxStatOK;
 	}
 };

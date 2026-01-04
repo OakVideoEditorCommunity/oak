@@ -4918,4 +4918,19 @@ What would you like to do with these clips?</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation type="unfinished"></translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation type="unfinished"></translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation type="unfinished"></translation>
+  </message>
+</context>
 </TS>

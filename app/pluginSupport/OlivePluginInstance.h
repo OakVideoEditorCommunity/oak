@@ -23,13 +23,16 @@
 #include "ofxhImageEffect.h"
 #include "node/plugins/Plugin.h"
 #include "render/videoparams.h"
+#include "undo/undocommand.h"
 
 #include <map>
+#include <QPointer>
 #include <qcontainerfwd.h>
 #include <qlist.h>
 namespace olive {
 namespace plugin{
 class PluginNode;
+class ProgressDialog;
 enum class ErrorType{
 	Error,
 	Warning,
@@ -132,21 +135,17 @@ public:
 	/// Client host code needs to implement this
 	OFX::Host::Param::Instance* newParam(const std::string& name, OFX::Host::Param::Descriptor& Descriptor) override;
 
+	void SubmitUndoCommand(UndoCommand *command, const QString &label);
+
 	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditBegin
 	///
 	/// Client host code needs to implement this
-	virtual OfxStatus editBegin(const std::string& name)
-	{
-		return kOfxStatOK;
-	};
+	virtual OfxStatus editBegin(const std::string& name) override;
 
 	/// Triggered when the plug-in calls OfxParameterSuiteV1::paramEditEnd
 	///
 	/// Client host code needs to implement this
-	virtual OfxStatus editEnd()
-	{
-		return kOfxStatOK;
-	};
+	virtual OfxStatus editEnd() override;
 
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
@@ -156,16 +155,15 @@ public:
 	// overridden for Progress::ProgressI
 
 	/// Start doing progress.
-	virtual void progressStart(const std::string &message, const std::string &messageid)
-	{
-	};
+	virtual void progressStart(const std::string &message,
+							   const std::string &messageid) override;
 
 	/// finish yer progress
-	virtual void progressEnd(){};
+	virtual void progressEnd() override;
 
 	/// set the progress to some level of completion, returns
 	/// false if you should abandon processing, true to continue
-	virtual bool progressUpdate(double t){return true;};
+	virtual bool progressUpdate(double t) override;
 
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
@@ -189,6 +187,14 @@ private:
 	QList<PersistentErrors> persistentErrors_;
 	VideoParams params_;
 	std::shared_ptr<PluginNode> node_ = nullptr;
+	int edit_depth_ = 0;
+	MultiUndoCommand *edit_command_ = nullptr;
+	QString edit_label_;
+	QString edit_first_label_;
+	int edit_param_count_ = 0;
+	QPointer<ProgressDialog> progress_dialog_;
+	bool progress_cancelled_ = false;
+	bool progress_active_ = false;
 };
 }
 }

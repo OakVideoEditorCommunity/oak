@@ -233,6 +233,7 @@ protected slots:
 private:
 	NodeParamViewItemBody *body_;
 	QLabel *message_label_;
+	QPushButton *message_clear_button_;
 	QWidget *message_container_;
 
 	Node *node_;
@@ -250,6 +251,7 @@ private:
 private slots:
 	void RecreateBody();
 	void UpdateMessagePanel();
+	void ClearMessages();
 };
 
 }

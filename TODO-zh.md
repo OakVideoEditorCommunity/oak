@@ -30,13 +30,18 @@
 6) editBegin/editEnd、Progress、Timeline 等回调还只是空实现
 - 现状：`OlivePluginInstance` 中多处函数是空壳或默认返回。
 - 为什么需要：插件在编辑参数、显示进度、根据时间线上下文渲染时依赖这些回调。
-- 可能改动：实现 editBegin/editEnd 通知；progressStart/Update/End 与 UI 进度条连接；timelineGetTime/GotoTime/Bounds 与工程时间轴连接。
+- 已完成：
+  - editBegin/editEnd：实现编辑会话计数，保证调用合法并可用于后续扩展。
+  - progressStart/Update/End：接入 `ProgressDialog`，支持取消并返回给插件停止信号。
+  - timeLineGetTime/GotoTime/Bounds：关联当前活跃的时间线/面板播放头，读取与设置时间。
 
 7) 持久消息展示与清理机制需要完善
 - 现状：我们已在 Host/Instance 里保存消息并能弹窗，但 UI 面板还需要稳定地展示、更新和清理。
 - 为什么需要：插件经常用 persistent message 提示错误或警告，需要可追踪、可清除。
-- 可能改动：统一消息存储（Host/Instance），提供 UI 列表、清除按钮、计数徽标，并保证信号更新。
-
+- 已完成：
+  - Host/Instance 持久消息保存，节点右上角显示数量徽标。
+  - 参数面板顶部展示消息列表，并可点击清除按钮移除消息。
+  - 清除/新增消息后通过信号更新 UI。
 8) Project Extent / Fielding 行为待确认
 - 现状：`OlivePluginInstance::getProjectExtent()` 有 “TODO” 注释。
 - 为什么需要：OFX 插件会根据项目尺寸、扫描线场信息做渲染决策。

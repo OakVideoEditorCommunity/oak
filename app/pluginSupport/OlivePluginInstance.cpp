@@ -21,11 +21,19 @@
 #include "ofxCore.h"
 #include "ofxMessage.h"
 #include "common/Current.h"
+#include "core.h"
+#include "dialog/progress/progress.h"
+#include "node/output/viewer/viewer.h"
+#include "panel/panelmanager.h"
+#include "panel/timebased/timebased.h"
+#include "panel/timeline/timeline.h"
 
 #include <cstdio>
 #include <QMessageBox>
+#include <QCoreApplication>
 #include <qmessagebox.h>
 #include <qobject.h>
+#include <QtGlobal>
 #include <string.h>
 #include <QString>
 #include "paraminstance.h"
@@ -33,6 +41,72 @@ namespace olive
 {
 namespace plugin
 {
+namespace {
+class DeferredRedoCommand : public UndoCommand {
+public:
+	explicit DeferredRedoCommand(UndoCommand *inner)
+		: inner_(inner)
+	{
+	}
+
+	~DeferredRedoCommand() override
+	{
+		delete inner_;
+	}
+
+	Project *GetRelevantProject() const override
+	{
+		return inner_ ? inner_->GetRelevantProject() : nullptr;
+	}
+
+protected:
+	void redo() override
+	{
+		if (skip_first_redo_) {
+			skip_first_redo_ = false;
+			return;
+		}
+		if (inner_) {
+			inner_->redo_now();
+		}
+	}
+
+	void undo() override
+	{
+		if (inner_) {
+			inner_->undo_now();
+		}
+	}
+
+private:
+	UndoCommand *inner_ = nullptr;
+	bool skip_first_redo_ = true;
+};
+
+ViewerOutput *GetActiveViewerOutput()
+{
+	PanelManager *manager = PanelManager::instance();
+	if (!manager) {
+		return nullptr;
+	}
+
+	if (auto *time_panel = manager->MostRecentlyFocused<TimeBasedPanel>()) {
+		if (time_panel->GetConnectedViewer()) {
+			return time_panel->GetConnectedViewer();
+		}
+	}
+
+	QList<TimelinePanel *> timelines = manager->GetPanelsOfType<TimelinePanel>();
+	for (TimelinePanel *panel : timelines) {
+		if (panel && panel->GetConnectedViewer()) {
+			return panel->GetConnectedViewer();
+		}
+	}
+
+	return nullptr;
+}
+} // namespace
+
 OfxStatus OlivePluginInstance::vmessage(const char *type, const char *id,
 								  const char *format, va_list args)
 {
@@ -200,6 +274,150 @@ OlivePluginInstance::newParam(const std::string &name,
 }
 OfxStatus OlivePluginInstance::editBegin(const std::string &name)
 {
+	edit_depth_++;
+	if (edit_depth_ == 1) {
+		edit_command_ = nullptr;
+		edit_label_.clear();
+		edit_first_label_.clear();
+		edit_param_count_ = 0;
+		if (!name.empty()) {
+			edit_first_label_ =
+				QCoreApplication::translate(
+					"OlivePluginInstance", "Change %1")
+					.arg(QString::fromStdString(name));
+		}
+	}
+	return kOfxStatOK;
+}
+OfxStatus OlivePluginInstance::editEnd()
+{
+	if (edit_depth_ > 0) {
+		edit_depth_--;
+	}
+	if (edit_depth_ == 0 && edit_command_) {
+		QString label = edit_label_;
+		if (label.isEmpty()) {
+			if (edit_param_count_ <= 1 && !edit_first_label_.isEmpty()) {
+				label = edit_first_label_;
+			} else if (edit_param_count_ > 1 &&
+					   !edit_first_label_.isEmpty()) {
+				label = QCoreApplication::translate(
+							"OlivePluginInstance", "%1 (+%2)")
+							.arg(edit_first_label_)
+							.arg(edit_param_count_ - 1);
+			} else {
+				label = QCoreApplication::translate(
+					"OlivePluginInstance", "Edit Parameters");
+			}
+		}
+		Core::instance()->undo_stack()->push(edit_command_, label);
+		edit_command_ = nullptr;
+		edit_label_.clear();
+		edit_first_label_.clear();
+		edit_param_count_ = 0;
+	}
+	return kOfxStatOK;
+}
+
+void OlivePluginInstance::SubmitUndoCommand(UndoCommand *command,
+											const QString &label)
+{
+	if (!command) {
+		return;
+	}
+
+	if (edit_depth_ > 0) {
+		if (!edit_command_) {
+			edit_command_ = new MultiUndoCommand();
+		}
+		edit_param_count_++;
+		if (!label.isEmpty() && edit_first_label_.isEmpty()) {
+			edit_first_label_ = label;
+		}
+
+		command->redo_now();
+		edit_command_->add_child(new DeferredRedoCommand(command));
+		return;
+	}
+
+	Core::instance()->undo_stack()->push(command, label);
+}
+
+void OlivePluginInstance::progressStart(const std::string &message,
+										const std::string &messageid)
+{
+	(void)messageid;
+	progress_cancelled_ = false;
+	progress_active_ = true;
+
+	if (progress_dialog_) {
+		progress_dialog_->close();
+		progress_dialog_->deleteLater();
+	}
+
+	QString dialog_message = message.empty()
+		? QStringLiteral("Processing...")
+		: QString::fromStdString(message);
+
+	progress_dialog_ = new ProgressDialog(
+		dialog_message, QStringLiteral("OpenFX"), Core::instance()->main_window());
+	progress_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+	connect(progress_dialog_, &ProgressDialog::Cancelled, this,
+			[this]() { progress_cancelled_ = true; });
+	progress_dialog_->show();
+}
+
+void OlivePluginInstance::progressEnd()
+{
+	progress_active_ = false;
+	progress_cancelled_ = false;
+
+	if (progress_dialog_) {
+		progress_dialog_->close();
+		progress_dialog_->deleteLater();
+	}
+}
+
+bool OlivePluginInstance::progressUpdate(double t)
+{
+	if (!progress_active_) {
+		return true;
+	}
+
+	if (progress_dialog_) {
+		double clamped = qBound(0.0, t, 1.0);
+		progress_dialog_->SetProgress(clamped);
+	}
+
+	return !progress_cancelled_;
+}
+
+double OlivePluginInstance::timeLineGetTime()
+{
+	if (ViewerOutput *viewer = GetActiveViewerOutput()) {
+		return viewer->GetPlayhead().toDouble();
+	}
+
+	return 0.0;
+}
+
+void OlivePluginInstance::timeLineGotoTime(double t)
+{
+	if (ViewerOutput *viewer = GetActiveViewerOutput()) {
+		viewer->SetPlayhead(core::rational::fromDouble(t));
+	}
+}
+
+void OlivePluginInstance::timeLineGetBounds(double &t1, double &t2)
+{
+	if (ViewerOutput *viewer = GetActiveViewerOutput()) {
+		t1 = 0.0;
+		t2 = viewer->GetLength().toDouble();
+		return;
+	}
+
+	t1 = 0.0;
+	t2 = 0.0;
 }
 
 OFX::Host::ImageEffect::ClipInstance *OlivePluginInstance::newClipInstance(

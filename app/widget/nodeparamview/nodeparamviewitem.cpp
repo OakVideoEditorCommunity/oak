@@ -51,6 +51,7 @@ NodeParamViewItem::NodeParamViewItem(
 	: super(parent)
 	, body_(nullptr)
 	, message_label_(nullptr)
+	, message_clear_button_(nullptr)
 	, message_container_(nullptr)
 	, node_(node)
 	, create_checkboxes_(create_checkboxes)
@@ -103,6 +104,7 @@ void NodeParamViewItem::RecreateBody()
 		message_container_->deleteLater();
 		message_container_ = nullptr;
 		message_label_ = nullptr;
+		message_clear_button_ = nullptr;
 	}
 
 	body_ = new NodeParamViewItemBody(node_, create_checkboxes_, this);
@@ -122,6 +124,16 @@ void NodeParamViewItem::RecreateBody()
 	QVBoxLayout *message_layout = new QVBoxLayout(message_container_);
 	message_layout->setContentsMargins(0, 0, 0, 0);
 	message_layout->setSpacing(4);
+
+	QHBoxLayout *message_header = new QHBoxLayout();
+	message_header->setContentsMargins(0, 0, 0, 0);
+	message_header->addStretch();
+	message_clear_button_ = new QPushButton(tr("Clear"), message_container_);
+	message_clear_button_->setVisible(false);
+	connect(message_clear_button_, &QPushButton::clicked, this,
+			&NodeParamViewItem::ClearMessages);
+	message_header->addWidget(message_clear_button_);
+	message_layout->addLayout(message_header);
 
 	message_label_ = new QLabel(message_container_);
 	message_label_->setWordWrap(true);
@@ -146,6 +158,9 @@ void NodeParamViewItem::UpdateMessagePanel()
 		dynamic_cast<plugin::OlivePluginInstance *>(instance);
 	if (!olive_instance || olive_instance->persistentMessageCount() == 0) {
 		message_label_->setVisible(false);
+		if (message_clear_button_) {
+			message_clear_button_->setVisible(false);
+		}
 		return;
 	}
 
@@ -168,6 +183,9 @@ void NodeParamViewItem::UpdateMessagePanel()
 
 	message_label_->setText(lines.join('\n'));
 	message_label_->setVisible(true);
+	if (message_clear_button_) {
+		message_clear_button_->setVisible(true);
+	}
 }
 
 int NodeParamViewItem::GetElementY(const NodeInput &c) const
@@ -183,6 +201,18 @@ int NodeParamViewItem::GetElementY(const NodeInput &c) const
 void NodeParamViewItem::SetInputChecked(const NodeInput &input, bool e)
 {
 	body_->SetInputChecked(input, e);
+}
+
+void NodeParamViewItem::ClearMessages()
+{
+	auto *instance = node_->getPluginInstance();
+	auto *olive_instance =
+		dynamic_cast<plugin::OlivePluginInstance *>(instance);
+	if (!olive_instance) {
+		return;
+	}
+
+	olive_instance->clearPersistentMessage();
 }
 
 NodeParamViewItemBody::NodeParamViewItemBody(
