@@ -4792,15 +4792,15 @@ What would you like to do with these clips?</source>
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>Promeni %1</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 (+%2)</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>Izmeni parametre</translation>
   </message>
 </context>
 </TS>

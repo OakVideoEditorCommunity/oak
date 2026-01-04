@@ -73,15 +73,15 @@
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>Change %1</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 (+%2)</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>Edit Parameters</translation>
   </message>
 </context>
 </TS>

@@ -5498,15 +5498,15 @@ Equivale a moltiplicare per una matrice ortografica.</translation>
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>Modifica %1</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 (+%2)</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>Modifica parametri</translation>
   </message>
 </context>
 </TS>

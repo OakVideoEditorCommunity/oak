@@ -7422,15 +7422,15 @@ Please check your audio preferences and try again.</source>
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>更改 %1</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1（+%2）</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>编辑参数</translation>
   </message>
 </context>
 </TS>

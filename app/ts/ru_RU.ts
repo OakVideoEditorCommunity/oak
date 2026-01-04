@@ -6097,15 +6097,15 @@ Duration: %3</source>
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>Изменить %1</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 (+%2)</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>Изменить параметры</translation>
   </message>
 </context>
 </TS>

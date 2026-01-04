@@ -5738,15 +5738,15 @@ Soll es wirklich gelöscht werden?</translation>
   <name>OlivePluginInstance</name>
   <message>
     <source>Change %1</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 ändern</translation>
   </message>
   <message>
     <source>%1 (+%2)</source>
-    <translation type="unfinished"></translation>
+    <translation>%1 (+%2)</translation>
   </message>
   <message>
     <source>Edit Parameters</source>
-    <translation type="unfinished"></translation>
+    <translation>Parameter bearbeiten</translation>
   </message>
 </context>
 </TS>
