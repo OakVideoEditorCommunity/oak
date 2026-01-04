@@ -19,6 +19,8 @@
 #include "node/project.h"
 #include "ofxhImageEffect.h"
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include  <ofxhPluginCache.h>
 #include <ofxhBinary.h>
 
@@ -28,6 +30,8 @@
 
 #include "OlivePluginInstance.h"
 #include "common/Current.h"
+#include "ofxMessage.h"
+#include <QMessageBox>
 using namespace OFX::Host;
 using namespace olive::plugin;
 
@@ -93,15 +97,76 @@ OliveHost::makeDescriptor(const std::string &bundlePath,
 	return desc;
 }
 
-OFX::Host::ImageEffect::Instance* OliveHost::newInstance(void* clientData,
-							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
-							OFX::Host::ImageEffect::Descriptor& desc,
+ImageEffect::Instance* OliveHost::newInstance(std::shared_ptr<PluginNode> clientData,
+							ImageEffect::ImageEffectPlugin* plugin,
+							ImageEffect::Descriptor& desc,
 							const std::string& context){
 	auto* instance = new OlivePluginInstance(
 		plugin, desc, context, Current::getInstance().interactive());
 	if (clientData) {
-		instance->setNode(static_cast<olive::plugin::PluginNode*>(clientData));
+		instance->setNode(clientData);
 	}
 	instances_.append(instance);
 	return instance;
 };
+OfxStatus olive::plugin::OliveHost::vmessage(const char *type, const char *id, const char *format,
+						   va_list args){
+	if (!type || !format) {
+		return kOfxStatFailed;
+	}
+
+	char buffer[1024];
+	buffer[0] = '\0';
+	vsnprintf(buffer, sizeof(buffer), format, args);
+	QString message(buffer);
+
+	if (strcmp(type, kOfxMessageQuestion) == 0) {
+		auto ret = QMessageBox::question(nullptr, "", message,
+										 QMessageBox::Ok, QMessageBox::Cancel);
+		return (ret == QMessageBox::Ok) ? kOfxStatReplyYes : kOfxStatReplyNo;
+	}
+
+	if (strcmp(type, kOfxMessageError) == 0) {
+		QMessageBox::critical(nullptr, "", message);
+	} else if (strcmp(type, kOfxMessageWarning) == 0) {
+		QMessageBox::warning(nullptr, "", message);
+	} else {
+		QMessageBox::information(nullptr, "", message);
+	}
+
+	return kOfxStatOK;
+}
+
+OfxStatus olive::plugin::OliveHost::setPersistentMessage(
+	const char *type, const char *id, const char *format, va_list args)
+{
+	if (!type || !format) {
+		return kOfxStatFailed;
+	}
+
+	char buffer[1024];
+	buffer[0] = '\0';
+	vsnprintf(buffer, sizeof(buffer), format, args);
+	QString message(buffer);
+
+	if (strcmp(type, kOfxMessageError) == 0) {
+		persistent_messages_.append({HostMessageType::Error, message});
+		QMessageBox::critical(nullptr, "", message);
+	} else if (strcmp(type, kOfxMessageWarning) == 0) {
+		persistent_messages_.append({HostMessageType::Warning, message});
+		QMessageBox::warning(nullptr, "", message);
+	} else if (strcmp(type, kOfxMessageMessage) == 0) {
+		persistent_messages_.append({HostMessageType::Message, message});
+		QMessageBox::information(nullptr, "", message);
+	} else {
+		return kOfxStatFailed;
+	}
+
+	return kOfxStatOK;
+}
+
+OfxStatus olive::plugin::OliveHost::clearPersistentMessage()
+{
+	persistent_messages_.clear();
+	return kOfxStatOK;
+}

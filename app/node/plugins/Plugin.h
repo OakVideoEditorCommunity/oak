@@ -20,6 +20,7 @@
 #define PLUGIN_NODES_H
 #include "ofxhImageEffectAPI.h"
 #include "ofxhPluginCache.h"
+#include "ofxImageEffect.h"
 #include "node/node.h"
 
 namespace olive

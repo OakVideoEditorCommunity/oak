@@ -27,6 +27,7 @@
 #include "node/group/group.h"
 #include "node/nodeundo.h"
 #include "node/project/sequence/sequence.h"
+#include "pluginSupport/OlivePluginInstance.h"
 
 namespace olive
 {
@@ -49,6 +50,8 @@ NodeParamViewItem::NodeParamViewItem(
 	QWidget *parent)
 	: super(parent)
 	, body_(nullptr)
+	, message_label_(nullptr)
+	, message_container_(nullptr)
 	, node_(node)
 	, create_checkboxes_(create_checkboxes)
 	, ctx_(nullptr)
@@ -62,6 +65,8 @@ NodeParamViewItem::NodeParamViewItem(
 	connect(node_, &Node::LabelChanged, this, &NodeParamViewItem::Retranslate);
 	connect(node_, &Node::InputArraySizeChanged, this,
 			&NodeParamViewItem::InputArraySizeChanged);
+	connect(node_, &Node::MessageCountChanged, this,
+			&NodeParamViewItem::UpdateMessagePanel);
 
 	// FIXME: Implemented to pick up when an input is set to hidden or not - DEFINITELY not a fast
 	//        way of doing this, but "fine" for now.
@@ -93,6 +98,12 @@ void NodeParamViewItem::RecreateBody()
 		body_->setParent(nullptr);
 		body_->deleteLater();
 	}
+	if (message_container_) {
+		message_container_->setParent(nullptr);
+		message_container_->deleteLater();
+		message_container_ = nullptr;
+		message_label_ = nullptr;
+	}
 
 	body_ = new NodeParamViewItemBody(node_, create_checkboxes_, this);
 	connect(body_, &NodeParamViewItemBody::RequestSelectNode, this,
@@ -106,7 +117,57 @@ void NodeParamViewItem::RecreateBody()
 	body_->Retranslate();
 	body_->SetTimebase(timebase_);
 	body_->SetTimeTarget(time_target_);
-	SetBody(body_);
+
+	message_container_ = new QWidget(this);
+	QVBoxLayout *message_layout = new QVBoxLayout(message_container_);
+	message_layout->setContentsMargins(0, 0, 0, 0);
+	message_layout->setSpacing(4);
+
+	message_label_ = new QLabel(message_container_);
+	message_label_->setWordWrap(true);
+	message_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	message_label_->setStyleSheet(
+		QStringLiteral("background: rgba(0, 0, 0, 0.06); padding: 6px;"));
+	message_layout->addWidget(message_label_);
+	message_layout->addWidget(body_);
+
+	SetBody(message_container_);
+	UpdateMessagePanel();
+}
+
+void NodeParamViewItem::UpdateMessagePanel()
+{
+	if (!message_label_) {
+		return;
+	}
+
+	auto *instance = node_->getPluginInstance();
+	auto *olive_instance =
+		dynamic_cast<plugin::OlivePluginInstance *>(instance);
+	if (!olive_instance || olive_instance->persistentMessageCount() == 0) {
+		message_label_->setVisible(false);
+		return;
+	}
+
+	QStringList lines;
+	for (const auto &msg : olive_instance->persistentMessages()) {
+		QString prefix;
+		switch (msg.type) {
+		case plugin::ErrorType::Error:
+			prefix = QStringLiteral("Error");
+			break;
+		case plugin::ErrorType::Warning:
+			prefix = QStringLiteral("Warning");
+			break;
+		case plugin::ErrorType::Message:
+			prefix = QStringLiteral("Message");
+			break;
+		}
+		lines.append(QStringLiteral("%1: %2").arg(prefix, msg.message));
+	}
+
+	message_label_->setText(lines.join('\n'));
+	message_label_->setVisible(true);
 }
 
 int NodeParamViewItem::GetElementY(const NodeInput &c) const

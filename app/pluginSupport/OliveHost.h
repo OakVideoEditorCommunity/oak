@@ -17,6 +17,7 @@
  */
 #ifndef OLIVE_HOST_H
 #define OLIVE_HOST_H
+#include "node/plugins/Plugin.h"
 #include  "ofxhHost.h"
 #include "ofxhImageEffectAPI.h"
 #include "ofxCore.h"
@@ -32,6 +33,15 @@
 #include <qlist.h>
 namespace olive {
 namespace plugin {
+enum class HostMessageType{
+	Error,
+	Warning,
+	Message
+};
+struct HostPersistentMessage{
+	HostMessageType type;
+	QString message;
+};
 
 
 void loadPlugins(QString path);
@@ -47,7 +57,7 @@ public:
 		return true;
 	};
 
-	OFX::Host::ImageEffect::Instance* newInstance(void* clientData,
+	OFX::Host::ImageEffect::Instance* newInstance(std::shared_ptr<PluginNode> ptr,
 							OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 							OFX::Host::ImageEffect::Descriptor& desc,
 							const std::string& context) override;
@@ -63,10 +73,27 @@ public:
 	OFX::Host::ImageEffect::Descriptor *makeDescriptor(
 		const std::string &bundlePath,
 		OFX::Host::ImageEffect::ImageEffectPlugin *plugin) override;
+	/// vmessage
+	virtual OfxStatus vmessage(const char *type, const char *id,
+							   const char *format, va_list args);
 
+	/// vmessage
+	virtual OfxStatus setPersistentMessage(const char *type, const char *id,
+										   const char *format, va_list args);
+	/// vmessage
+	virtual OfxStatus clearPersistentMessage();
+
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	/// @see OfxImageEffectOpenGLRenderSuiteV1.flushResources()
+	virtual OfxStatus flushOpenGLResources() const
+	{
+		return kOfxStatFailed;
+	};
+#endif
 private:
 	QList<OFX::Host::ImageEffect::Descriptor*> descriptors_;
 	QList<OFX::Host::ImageEffect::Instance*> instances_;
+	QList<HostPersistentMessage> persistent_messages_;
 };
 }
 }

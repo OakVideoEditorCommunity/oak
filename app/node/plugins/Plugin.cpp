@@ -24,6 +24,7 @@ olive::plugin::PluginNode::PluginNode(
 	OFX::Host::ImageEffect::Instance *plugin)
 {
 	plugin_instance_=plugin;
+	bool has_texture_input = false;
 
 	auto params=plugin_instance_->getParams();
 	for (auto param: params) {
@@ -70,6 +71,17 @@ olive::plugin::PluginNode::PluginNode(
 		AddInput(param.second->getName().data(), type);
 	}
 
+	const auto &clips = plugin_instance_->getDescriptor().getClips();
+	for (const auto &entry : clips) {
+		if (entry.first == kOfxImageEffectOutputClipName) {
+			continue;
+		}
+		AddInput(entry.first.data(), NodeValue::kTexture);
+		has_texture_input = true;
+	}
+	if (!has_texture_input) {
+		AddInput(kTextureInput, NodeValue::kTexture);
+	}
 }
 QString olive::plugin::PluginNode::Name() const
 {
@@ -94,9 +106,19 @@ void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 									  const NodeGlobals &globals,
 									  NodeValueTable *table) const
 {
-	TexturePtr tex = value[kTextureInput].toTexture();
+	TexturePtr tex = value.value(kTextureInput).toTexture();
+	if (!tex) {
+		for (auto it = value.cbegin(); it != value.cend(); ++it) {
+			if (it.value().type() == NodeValue::kTexture) {
+				tex = it.value().toTexture();
+				if (tex) {
+					break;
+				}
+			}
+		}
+	}
 	if (tex && plugin_instance_) {
-		PluginJob job(plugin_instance_, value);
+		PluginJob job(plugin_instance_, this, value);
 		table->Push(NodeValue::kTexture, tex->toJob(job), this);
 	}
 }

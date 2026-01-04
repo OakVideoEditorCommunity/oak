@@ -1303,6 +1303,8 @@ signals:
 
 	void KeyframeTimeChanged(NodeKeyframe *key);
 
+	void MessageCountChanged();
+
 	void KeyframeTypeChanged(NodeKeyframe *key);
 
 	void KeyframeValueChanged(NodeKeyframe *key);

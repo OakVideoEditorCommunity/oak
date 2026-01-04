@@ -43,10 +43,10 @@ public:
 	PluginRenderer(QObject *parent=nullptr):OpenGLRenderer(parent){};
 	virtual ~PluginRenderer() override{};
 protected:
-	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
+	virtual void RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
 					  olive::Texture *destination,
 					  olive::VideoParams destination_params,
-					  bool clear_destination) override;
+					  bool clear_destination, bool interactive);
 
 };
 }

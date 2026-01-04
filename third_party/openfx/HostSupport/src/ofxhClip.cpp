@@ -9,6 +9,7 @@
 #include "ofxhBinary.h"
 #include "ofxhPropertySuite.h"
 #include "ofxhClip.h"
+#include "ofxhPropertySuite.h"
 #include "ofxhImageEffect.h"
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 #include "ofxGPURender.h"

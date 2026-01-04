@@ -7,7 +7,6 @@
 
 // ofx host
 #include "ofxhBinary.h"
-#include "ofxhPropertySuite.h"
 #include "ofxhClip.h"
 #include "ofxhParam.h"
 #include "ofxhMemory.h"

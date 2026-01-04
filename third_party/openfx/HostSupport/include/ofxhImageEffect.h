@@ -14,7 +14,12 @@
 #include "ofxhParam.h"
 #include "ofxhMemory.h"
 #include "ofxhInteract.h"
-
+#include <memory>
+namespace olive {
+namespace plugin {
+class PluginNode;
+}
+}
 #ifdef _MSC_VER
 //Use visual studio extension
 #define __PRETTY_FUNCTION__ __FUNCSIG__
@@ -56,7 +61,7 @@ namespace OFX {
         ///   \arg plugin - the plugin being created
         ///   \arg desc - the descriptor for that plugin
         ///   \arg context - the context to be created in
-        virtual Instance* newInstance(void* clientData,
+        virtual Instance* newInstance(std::shared_ptr<olive::plugin::PluginNode> clientData,
                                       ImageEffectPlugin* plugin,
                                       Descriptor& desc,
                                       const std::string& context) = 0;

@@ -23,10 +23,14 @@
 
 #ifndef OLIVECLIP_H
 #define OLIVECLIP_H
+#include "image.h"
+#include "ofxCore.h"
 #include "ofxhClip.h"
+#include "render/texture.h"
 #include "render/videoparams.h"
 
 #include <QMap>
+#include <memory>
 namespace olive
 {
 namespace plugin
@@ -34,14 +38,15 @@ namespace plugin
 class OliveClipInstance: public OFX::Host::ImageEffect::ClipInstance {
 public:
 	OliveClipInstance(OFX::Host::ImageEffect::Instance* effectInstance,
-		OFX::Host::ImageEffect::ClipDescriptor& desc,VideoParams params)
+		OFX::Host::ImageEffect::ClipDescriptor& desc,VideoParams &params)
 		: ClipInstance(effectInstance, desc)
+		, name_(desc.getName())
 	{
 		params_ = params;
 	}
-	OFX::Host::ImageEffect::Image& getOutputImage()
+	std::shared_ptr<OFX::Host::ImageEffect::Image> getOutputImage(OfxTime time)
 	{
-		return image_;
+		return images_[time];
 	}
 
 	const std::string &getUnmappedBitDepth() const override;
@@ -59,11 +64,13 @@ public:
 	OfxRectD getRegionOfDefinition(OfxTime time) const override;
 
 	void setRegionOfDefinition(OfxRectD regionOfDefinition, OfxTime time);
-	void olive::plugin::OliveClipInstance::setDefaultRegionOfDefinition(
-	OfxRectD regionOfDefinition);
+	void setDefaultRegionOfDefinition(OfxRectD regionOfDefinition);
 #   ifdef OFX_SUPPORTS_OPENGLRENDER
 	OFX::Host::ImageEffect::Texture* loadTexture(OfxTime time, const char *format, const OfxRectD *optionalBounds) { return NULL; };
 #   endif
+
+	void setInputTexture(TexturePtr texture, OfxTime time);
+
 private:
 	VideoParams params_;
 
@@ -71,7 +78,8 @@ private:
 
 	OfxRectD defaultRegionOfDefinitions_;
 
-	OFX::Host::ImageEffect::Image image_;
+	std::string name_;
+	QMap<OfxTime,std::shared_ptr<Image>> images_;
 };
 }
 }

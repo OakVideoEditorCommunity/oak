@@ -7,4 +7,6 @@ target_sources(libolive-editor PRIVATE
         OliveClip.h
         paraminstance.cpp
         paraminstance.h
+        image.cpp
+        image.h
 )

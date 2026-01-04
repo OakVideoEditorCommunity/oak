@@ -232,6 +232,8 @@ protected slots:
 
 private:
 	NodeParamViewItemBody *body_;
+	QLabel *message_label_;
+	QWidget *message_container_;
 
 	Node *node_;
 
@@ -247,6 +249,7 @@ private:
 
 private slots:
 	void RecreateBody();
+	void UpdateMessagePanel();
 };
 
 }

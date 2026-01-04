@@ -154,6 +154,9 @@ public:
 	{
 		frame_=ptr;
 	}
+	AVFramePtr frame(){
+		return frame_;
+	}
 private:
 	Renderer *renderer_;
 

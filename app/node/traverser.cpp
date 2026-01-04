@@ -382,7 +382,7 @@ TexturePtr NodeTraverser::ProcessVideoCacheJob(const CacheJob *val)
 	return nullptr;
 }
 
-TexturePtr NodeTraverser::ProcessPluginJob(plugin::PluginJob *job)
+TexturePtr NodeTraverser::ProcessPluginJob(TexturePtr texture, TexturePtr destination, const Node *node,)
 {
 	// TODO
 }
@@ -496,7 +496,13 @@ void NodeTraverser::ResolveJobs(NodeValue &val)
 						val.set_value(tex);
 					}
 					else if (plugin::PluginJob* plugin_job=dynamic_cast<plugin::PluginJob*>(base_job)) {
-						ProcessPluginJob(plugin_job);
+						VideoParams tex_params = job_tex->params();
+
+						TexturePtr tex = CreateTexture(tex_params);
+
+						ProcessPluginJob(job_tex, tex, val.source());
+						val.set_value(tex);
+
 					}
 
 					// Cache resolved value

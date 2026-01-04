@@ -21,6 +21,7 @@
 #include "ofxImageEffect.h"
 #include <QString>
 #include "ofxhImageEffect.h"
+#include "node/plugins/Plugin.h"
 #include "render/videoparams.h"
 
 #include <map>
@@ -71,7 +72,7 @@ public:
 	{
 		this->params_=params;
 	}
-	void setNode(PluginNode* node)
+	void setNode(std::shared_ptr<PluginNode> node)
 	{
 		node_ = node;
 	}
@@ -90,7 +91,15 @@ public:
         const char* format,
         va_list args)  override;
 		
-    OfxStatus clearPersistentMessage() override;
+	OfxStatus clearPersistentMessage() override;
+	int persistentMessageCount() const
+	{
+		return persistentErrors_.size();
+	}
+	const QList<PersistentErrors> &persistentMessages() const
+	{
+		return persistentErrors_;
+	}
 
 	void getProjectSize(double& xSize, double& ySize) const override;
 	void getProjectOffset(double& xOffset, double& yOffset) const override;
@@ -174,6 +183,8 @@ public:
 
 	/// get the first and last times available on the effect's timeline
 	virtual void timeLineGetBounds(double &t1, double &t2);
+
+
 private:
 	QList<PersistentErrors> persistentErrors_;
 	VideoParams params_;

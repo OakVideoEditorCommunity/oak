@@ -94,12 +94,18 @@ OfxStatus OlivePluginInstance::setPersistentMessage(const char *type, const char
 	} else {
 		return kOfxStatFailed;
 	}
+	if (node_) {
+		emit node_->MessageCountChanged();
+	}
 	return kOfxStatOK;
 }
 OfxStatus OlivePluginInstance::clearPersistentMessage()
 {
 	persistentErrors_.clear();
 	// TODO: tell the shell to remove message.
+	if (node_) {
+		emit node_->MessageCountChanged();
+	}
 	return kOfxStatOK;
 }
 void OlivePluginInstance::getProjectSize(double &xSize, double &ySize) const

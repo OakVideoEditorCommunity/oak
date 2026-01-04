@@ -30,17 +30,31 @@ namespace plugin {
 
 class PluginJob :public AcceleratedJob{
 public:
-	explicit PluginJob(OFX::Host::ImageEffect::Instance* pluginInstance, NodeValueRow row): AcceleratedJob()
+	explicit PluginJob(const OFX::Host::ImageEffect::Instance* pluginInstance,
+					   const PluginNode* node, NodeValueRow row)
+		: AcceleratedJob()
 	{
-		this->pluginInstance = pluginInstance;
+		this->pluginInstance_ = pluginInstance;
+		this->node_=node;
+		Insert(row);
+	}
+
+	PluginNode *node() const {
+		return const_cast<PluginNode *>(node_);
+	}
+
+	OFX::Host::ImageEffect::Instance* pluginInstance() {
+		return const_cast<OFX::Host::ImageEffect::Instance*>(pluginInstance_);
 	}
 
 private:
-	OFX::Host::ImageEffect::Instance *pluginInstance=nullptr;
+	const OFX::Host::ImageEffect::Instance *pluginInstance_=nullptr;
 
 	QHash<OfxTime, QHash<QString, std::any>> paramsOnTime;
 
 	QHash<QString, std::any> params;
+
+	const PluginNode *node_=nullptr;
 };
 
 } // plugin

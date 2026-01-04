@@ -4,6 +4,8 @@
 #ifndef OFXH_IMAGE_EFFECT_API_H
 #define OFXH_IMAGE_EFFECT_API_H
 
+
+
 #include "ofxhPluginAPICache.h"
 #include "ofxhPluginCache.h"
 #include <string>

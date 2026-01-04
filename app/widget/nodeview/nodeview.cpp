@@ -32,6 +32,7 @@
 #include "node/group/group.h"
 #include "node/nodeundo.h"
 #include "node/project/serializer/serializer.h"
+#include "panel/panelmanager.h"
 #include "node/traverser.h"
 #include "ui/icons/icons.h"
 #include "widget/menu/menushared.h"
@@ -639,6 +640,15 @@ void NodeView::mouseDoubleClickEvent(QMouseEvent *event)
 			dynamic_cast<NodeViewItem *>(itemAt(event->pos()));
 		if (item_at_cursor) {
 			item_at_cursor->ToggleExpanded();
+			if (PanelManager::instance()) {
+				if (PanelWidget *panel = PanelManager::instance()
+												->GetPanelWithName(
+													QStringLiteral("ParamPanel"))) {
+					panel->show();
+					panel->raise();
+					panel->setFocus();
+				}
+			}
 		}
 	}
 }
