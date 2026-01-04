@@ -123,19 +123,23 @@ OFX::Host::ImageEffect::Image *
 olive::plugin::OliveClipInstance::getImage(OfxTime time,
 										   const OfxRectD *optionalBounds)
 {
-	OfxRectI bounds = {0, 0, params_.width(), params_.height()};
+	OfxRectD rod_d = getRegionOfDefinition(time);
+	OfxRectI rod = { static_cast<int>(std::floor(rod_d.x1)),
+					 static_cast<int>(std::floor(rod_d.y1)),
+					 static_cast<int>(std::ceil(rod_d.x2)),
+					 static_cast<int>(std::ceil(rod_d.y2)) };
+	OfxRectI bounds = rod;
 	if (optionalBounds) {
 		bounds.x1 = static_cast<int>(std::floor(optionalBounds->x1));
 		bounds.y1 = static_cast<int>(std::floor(optionalBounds->y1));
 		bounds.x2 = static_cast<int>(std::ceil(optionalBounds->x2));
 		bounds.y2 = static_cast<int>(std::ceil(optionalBounds->y2));
 	}
-
-	OfxRectD rod_d = getRegionOfDefinition(time);
-	OfxRectI rod = { static_cast<int>(std::floor(rod_d.x1)),
-					 static_cast<int>(std::floor(rod_d.y1)),
-					 static_cast<int>(std::ceil(rod_d.x2)),
-					 static_cast<int>(std::ceil(rod_d.y2)) };
+	// Clamp bounds to ROD to keep host/plugin coords consistent.
+	bounds.x1 = std::max(bounds.x1, rod.x1);
+	bounds.y1 = std::max(bounds.y1, rod.y1);
+	bounds.x2 = std::min(bounds.x2, rod.x2);
+	bounds.y2 = std::min(bounds.y2, rod.y2);
 
 	if (name_ == "Output") {
 		if (!images_.contains(time)) {

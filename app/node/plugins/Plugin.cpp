@@ -20,6 +20,30 @@
 
 #include "render/rendermanager.h"
 #include "render/job/pluginjob.h"
+static QString ClipLabelForName(const std::string &name,
+								const OFX::Host::ImageEffect::ClipDescriptor *desc)
+{
+	if (name == kOfxImageEffectSimpleSourceClipName) {
+		return olive::plugin::PluginNode::tr("Source");
+	}
+	if (name == kOfxImageEffectTransitionSourceFromClipName) {
+		return olive::plugin::PluginNode::tr("From");
+	}
+	if (name == kOfxImageEffectTransitionSourceToClipName) {
+		return olive::plugin::PluginNode::tr("To");
+	}
+
+	if (desc) {
+		const std::string &label =
+			desc->getProps().getStringProperty(kOfxPropLabel);
+		if (!label.empty()) {
+			return QString::fromStdString(label);
+		}
+	}
+
+	return QString::fromStdString(name);
+}
+
 olive::plugin::PluginNode::PluginNode(
 	OFX::Host::ImageEffect::Instance *plugin)
 {
@@ -76,11 +100,14 @@ olive::plugin::PluginNode::PluginNode(
 		if (entry.first == kOfxImageEffectOutputClipName) {
 			continue;
 		}
-		AddInput(entry.first.data(), NodeValue::kTexture);
+		QString input_id = QString::fromStdString(entry.first);
+		AddInput(input_id, NodeValue::kTexture);
+		SetInputName(input_id, ClipLabelForName(entry.first, entry.second));
 		has_texture_input = true;
 	}
 	if (!has_texture_input) {
 		AddInput(kTextureInput, NodeValue::kTexture);
+		SetInputName(kTextureInput, tr("Texture"));
 	}
 }
 QString olive::plugin::PluginNode::Name() const

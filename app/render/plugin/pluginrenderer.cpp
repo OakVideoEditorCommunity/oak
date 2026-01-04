@@ -220,8 +220,8 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	renderWindow.x1 = renderWindow.y1 = 0;
 
 
-	renderWindow.x2 = src->params().width();
-	renderWindow.y2 = src->params().height();
+	renderWindow.x2 = destination_params.width();
+	renderWindow.y2 = destination_params.height();
 
 	/// RoI is in canonical coords,
 	OfxRectD  regionOfInterest;
@@ -252,6 +252,9 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 
 	// call get region of interest on each of the inputs
 	OfxTime frame = 0;
+
+	clip->setParams(destination_params);
+	clip->setRegionOfDefinition(regionOfDefinition, frame);
 
 	const NodeValueRow &values = job.GetValues();
 	const auto &clips = instance->getDescriptor().getClips();
