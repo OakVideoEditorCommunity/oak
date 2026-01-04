@@ -1,0 +1,53 @@
+add_executable(olive-gtest
+  main.cpp
+  common_current_test.cpp
+  common_xmlutils_test.cpp
+  config_test.cpp
+  node_value_test.cpp
+  node_keyframe_test.cpp
+  node_serialization_test.cpp
+  render_videoparams_test.cpp
+  render_audioparams_test.cpp
+  project_serializer_test.cpp
+  timeline_marker_test.cpp
+  undo_stack_test.cpp
+  plugin_support_test.cpp
+  codec_frame_test.cpp
+  task_taskmanager_test.cpp
+  module_smoke_test.cpp
+)
+
+target_sources(olive-gtest PRIVATE $<TARGET_OBJECTS:libolive-editor>)
+
+target_include_directories(
+  olive-gtest
+  PRIVATE
+  ${CMAKE_SOURCE_DIR}/app
+  ${CMAKE_SOURCE_DIR}/tests
+  ${OLIVE_INCLUDE_DIRS}
+)
+
+target_link_libraries(
+  olive-gtest
+  PRIVATE
+  ${OLIVE_LIBRARIES}
+  GTest::gtest
+)
+
+target_compile_definitions(
+  olive-gtest
+  PRIVATE
+  ${OLIVE_DEFINITIONS}
+)
+
+target_compile_options(
+  olive-gtest
+  PRIVATE
+  ${OLIVE_COMPILE_OPTIONS}
+)
+
+if (MSVC)
+  add_test("Olive.gtest" olive-gtest)
+else()
+  add_test(olive-gtest olive-gtest)
+endif()
