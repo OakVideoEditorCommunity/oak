@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-13, windows-2022]
+        os: [ubuntu-22.04, macos-latest, windows-2022]
     env:
       CMAKE_BUILD_TYPE: Release
     steps:
@@ -53,12 +53,22 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Configure (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
         run: |
           cmake -S . -B build -G Ninja \
             -DBUILD_TESTS=ON \
             -DBUILD_QT6=ON \
+            -DOCIO_LOCATION=/usr \
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DBUILD_TESTS=ON \
+            -DBUILD_QT6=ON \
+            -DOCIO_LOCATION=$(brew --prefix opencolorio) \
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
 
       - name: Configure (Windows)

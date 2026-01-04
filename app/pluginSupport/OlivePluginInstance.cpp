@@ -43,17 +43,21 @@ namespace olive
 namespace plugin
 {
 namespace {
+const std::string kImageFieldNoneStr(kOfxImageFieldNone);
+const std::string kImageFieldUpperStr(kOfxImageFieldUpper);
+const std::string kImageFieldLowerStr(kOfxImageFieldLower);
+
 const std::string &FieldOrderForParams(const VideoParams &params)
 {
 	switch (params.interlacing()) {
 	case VideoParams::kInterlaceNone:
-		return kOfxImageFieldNone;
+		return kImageFieldNoneStr;
 	case VideoParams::kInterlacedTopFirst:
-		return kOfxImageFieldUpper;
+		return kImageFieldUpperStr;
 	case VideoParams::kInterlacedBottomFirst:
-		return kOfxImageFieldLower;
+		return kImageFieldLowerStr;
 	}
-	return kOfxImageFieldNone;
+	return kImageFieldNoneStr;
 }
 
 class DeferredRedoCommand : public UndoCommand {

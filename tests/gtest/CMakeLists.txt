@@ -7,11 +7,17 @@ add_executable(olive-gtest
   node_keyframe_test.cpp
   node_serialization_test.cpp
   render_videoparams_test.cpp
+  render_videoparams_branch_test.cpp
   render_audioparams_test.cpp
+  render_audioparams_branch_test.cpp
+  render_sampleformat_test.cpp
+  render_pixelformat_test.cpp
   project_serializer_test.cpp
   timeline_marker_test.cpp
   undo_stack_test.cpp
   plugin_support_test.cpp
+  plugin_support_image_test.cpp
+  plugin_support_clip_test.cpp
   codec_frame_test.cpp
   task_taskmanager_test.cpp
   module_smoke_test.cpp

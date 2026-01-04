@@ -39,21 +39,38 @@
 extern "C" {
 #include <libswscale/swscale.h>
 }
+namespace {
+const std::string kBitDepthNoneStr(kOfxBitDepthNone);
+const std::string kBitDepthByteStr(kOfxBitDepthByte);
+const std::string kBitDepthShortStr(kOfxBitDepthShort);
+const std::string kBitDepthHalfStr(kOfxBitDepthHalf);
+const std::string kBitDepthFloatStr(kOfxBitDepthFloat);
+const std::string kImageComponentNoneStr(kOfxImageComponentNone);
+const std::string kImageComponentAlphaStr(kOfxImageComponentAlpha);
+const std::string kImageComponentRGBStr(kOfxImageComponentRGB);
+const std::string kImageComponentRGBAStr(kOfxImageComponentRGBA);
+const std::string kImagePremultStr(kOfxImagePreMultiplied);
+const std::string kImageUnPremultStr(kOfxImageUnPreMultiplied);
+const std::string kImageFieldNoneStr(kOfxImageFieldNone);
+const std::string kImageFieldUpperStr(kOfxImageFieldUpper);
+const std::string kImageFieldLowerStr(kOfxImageFieldLower);
+}
+
 const std::string &olive::plugin::OliveClipInstance::getUnmappedBitDepth() const
 {
 	switch (params_.format()) {
 	case PixelFormat::INVALID:
-		return kOfxBitDepthNone;
+		return kBitDepthNoneStr;
 	case PixelFormat::U8:
-		return kOfxBitDepthByte;
+		return kBitDepthByteStr;
 	case PixelFormat::U16:
-		return kOfxBitDepthShort;
+		return kBitDepthShortStr;
 	case PixelFormat::F16:
-		return kOfxBitDepthHalf;
+		return kBitDepthHalfStr;
 	case PixelFormat::F32:
-		return kOfxBitDepthFloat;
+		return kBitDepthFloatStr;
 	default:
-		return kOfxBitDepthNone;
+		return kBitDepthNoneStr;
 	}
 }
 const std::string &
@@ -61,21 +78,21 @@ olive::plugin::OliveClipInstance::getUnmappedComponents() const
 {
 	switch (params_.channel_count()) {
 	case 1:
-		return kOfxImageComponentAlpha;
+		return kImageComponentAlphaStr;
 	case 3:
-		return kOfxImageComponentRGB;
+		return kImageComponentRGBStr;
 	case 4:
-		return kOfxImageComponentRGBA;
+		return kImageComponentRGBAStr;
 	default:
-		return kOfxImageComponentNone;
+		return kImageComponentNoneStr;
 	}
 }
 const std::string &olive::plugin::OliveClipInstance::getPremult() const
 {
 	if (params_.premultiplied_alpha()) {
-		return kOfxImagePreMultiplied;
+		return kImagePremultStr;
 	} else {
-		return kOfxImageUnPreMultiplied;
+		return kImageUnPremultStr;
 	}
 }
 double olive::plugin::OliveClipInstance::getAspectRatio() const
@@ -97,13 +114,13 @@ const std::string &olive::plugin::OliveClipInstance::getFieldOrder() const
 {
 	switch (params_.interlacing()) {
 	case VideoParams::kInterlaceNone:
-		return kOfxImageFieldNone;
+		return kImageFieldNoneStr;
 	case VideoParams::kInterlacedTopFirst:
-		return kOfxImageFieldUpper;
+		return kImageFieldUpperStr;
 	case VideoParams::kInterlacedBottomFirst:
-		return kOfxImageFieldLower;
+		return kImageFieldLowerStr;
 	}
-	return kOfxImageFieldNone;
+	return kImageFieldNoneStr;
 }
 bool olive::plugin::OliveClipInstance::getConnected() const
 {
