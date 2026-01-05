@@ -25,6 +25,7 @@ add_executable(olive-gtest
   task_taskmanager_test.cpp
   module_smoke_test.cpp
   shader_resources_test.cpp
+  timebased_widget_test.cpp
   timeline_coordinate_test.cpp
   timeline_workarea_test.cpp
 )

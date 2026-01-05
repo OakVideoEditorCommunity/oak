@@ -78,7 +78,7 @@ void TimeBasedWidget::SetScaleAndCenterOnPlayhead(const double &scale)
 
 ViewerOutput *TimeBasedWidget::GetConnectedNode() const
 {
-	return viewer_node_;
+	return viewer_node_.data();
 }
 
 void TimeBasedWidget::ConnectViewerNode(ViewerOutput *node)
@@ -89,10 +89,17 @@ void TimeBasedWidget::ConnectViewerNode(ViewerOutput *node)
 	}
 
 	// Set viewer node
-	ViewerOutput *old = viewer_node_;
+	ViewerOutput *old = viewer_node_.data();
 	viewer_node_ = node;
-	Current::getInstance().setCurrentVideoParams(viewer_node_->GetVideoParams());
-	Current::getInstance().setCurrentAudioParams(viewer_node_->GetAudioParams());
+	if (viewer_node_) {
+		Current::getInstance().setCurrentVideoParams(
+			viewer_node_->GetVideoParams());
+		Current::getInstance().setCurrentAudioParams(
+			viewer_node_->GetAudioParams());
+	} else {
+		Current::getInstance().setCurrentVideoParams(VideoParams());
+		Current::getInstance().setCurrentAudioParams(AudioParams());
+	}
 	if (old) {
 		// Call potential derivative functions for disconnecting the viewer node
 		DisconnectNodeEvent(old);
@@ -121,17 +128,17 @@ void TimeBasedWidget::ConnectViewerNode(ViewerOutput *node)
 
 	// Call derivatives
 	for (TimeBasedView *view : timeline_views_) {
-		view->SetViewerNode(viewer_node_);
+		view->SetViewerNode(viewer_node_.data());
 	}
-	ConnectedNodeChangeEvent(viewer_node_);
+	ConnectedNodeChangeEvent(viewer_node_.data());
 
 	if (viewer_node_) {
 		// Connect length changed signal
-		connect(viewer_node_, &ViewerOutput::LengthChanged, this,
+		connect(viewer_node_.data(), &ViewerOutput::LengthChanged, this,
 				&TimeBasedWidget::UpdateMaximumScroll);
-		connect(viewer_node_, &ViewerOutput::RemovedFromGraph, this,
+		connect(viewer_node_.data(), &ViewerOutput::RemovedFromGraph, this,
 				&TimeBasedWidget::ConnectedNodeRemovedFromGraph);
-		connect(viewer_node_, &ViewerOutput::PlayheadChanged, this,
+		connect(viewer_node_.data(), &ViewerOutput::PlayheadChanged, this,
 				&TimeBasedWidget::PlayheadTimeChanged);
 
 		// Connect ruler and scrollbar to timeline points
@@ -141,14 +148,14 @@ void TimeBasedWidget::ConnectViewerNode(ViewerOutput *node)
 		// If we're setting the timebase, set it automatically based on the video and audio parameters
 		if (auto_set_timebase_) {
 			AutoUpdateTimebase();
-			connect(viewer_node_, &ViewerOutput::FrameRateChanged, this,
+			connect(viewer_node_.data(), &ViewerOutput::FrameRateChanged, this,
 					&TimeBasedWidget::AutoUpdateTimebase);
-			connect(viewer_node_, &ViewerOutput::SampleRateChanged, this,
+			connect(viewer_node_.data(), &ViewerOutput::SampleRateChanged, this,
 					&TimeBasedWidget::AutoUpdateTimebase);
 		}
 
 		// Call derivatives
-		ConnectNodeEvent(viewer_node_);
+		ConnectNodeEvent(viewer_node_.data());
 	}
 
 	UpdateMaximumScroll();
@@ -271,6 +278,10 @@ void TimeBasedWidget::SendCatchUpScrollEvent()
 
 void TimeBasedWidget::AutoUpdateTimebase()
 {
+	if (!viewer_node_) {
+		SetTimebase(rational());
+		return;
+	}
 	rational video_tb =
 		viewer_node_->GetVideoParams().frame_rate_as_time_base();
 
@@ -448,7 +459,7 @@ void TimeBasedWidget::ZoomOut()
 void TimeBasedWidget::GoToPrevCut()
 {
 	// Cuts are only possible in sequences
-	Sequence *sequence = dynamic_cast<Sequence *>(viewer_node_);
+	Sequence *sequence = dynamic_cast<Sequence *>(viewer_node_.data());
 
 	if (!sequence) {
 		return;
@@ -480,7 +491,7 @@ void TimeBasedWidget::GoToPrevCut()
 void TimeBasedWidget::GoToNextCut()
 {
 	// Cuts are only possible in sequences
-	Sequence *sequence = dynamic_cast<Sequence *>(viewer_node_);
+	Sequence *sequence = dynamic_cast<Sequence *>(viewer_node_.data());
 
 	if (!sequence) {
 		return;

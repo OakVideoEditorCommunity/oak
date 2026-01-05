@@ -22,6 +22,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QOpenGLExtraFunctions>
+#include <QRegularExpression>
 
 #include "config/config.h"
 
@@ -834,28 +835,65 @@ void OpenGLRenderer::ClearDestinationInternal(double r, double g, double b,
 
 GLuint OpenGLRenderer::CompileShader(GLenum type, const QString &code)
 {
-	static const QString shader_preamble =
+	const bool is_gles = context_ && context_->isOpenGLES();
+	const int major = context_ ? context_->format().majorVersion() : 0;
+	const int minor = context_ ? context_->format().minorVersion() : 0;
+	const bool is_gles2 = is_gles && (major < 3);
+	const QString gles_preamble = is_gles2
+		? QStringLiteral("#version 100\n\n"
+						 "precision highp float;\n\n"
+						 "#define frag_color gl_FragColor\n")
+		: QStringLiteral("#version 300 es\n\n"
+						 "precision highp float;\n\n");
+	const QString desktop_preamble =
 		// Use appropriate GL 3.2 shader header
 		QStringLiteral("#version 150\n\n"
 					   "precision highp float;\n\n");
+	const QString shader_preamble = is_gles ? gles_preamble : desktop_preamble;
 
-	QString complete_code;
-
-	if (!code.startsWith(QStringLiteral("#version"))) {
-		complete_code = shader_preamble;
-	}
-
-	if (code.isEmpty()) {
+	QString base_code = code;
+	if (base_code.isEmpty()) {
 		// Use default code
 		if (type == GL_FRAGMENT_SHADER) {
-			complete_code.append(FileFunctions::ReadFileAsString(
-				QStringLiteral(":/shaders/default.frag")));
+			base_code = FileFunctions::ReadFileAsString(
+				QStringLiteral(":/shaders/default.frag"));
 		} else if (type == GL_VERTEX_SHADER) {
-			complete_code.append(FileFunctions::ReadFileAsString(
-				QStringLiteral(":/shaders/default.vert")));
+			base_code = FileFunctions::ReadFileAsString(
+				QStringLiteral(":/shaders/default.vert"));
+		}
+	}
+
+	QString complete_code;
+	if (base_code.startsWith(QStringLiteral("#version"))) {
+		if (is_gles || !desktop_preamble.startsWith(QStringLiteral("#version"))) {
+			int newline = base_code.indexOf('\n');
+			if (newline >= 0) {
+				complete_code = shader_preamble + base_code.mid(newline + 1);
+			} else {
+				complete_code = shader_preamble;
+			}
+		} else {
+			complete_code = base_code;
 		}
 	} else {
-		complete_code.append(code);
+		complete_code = shader_preamble + base_code;
+	}
+
+	if (is_gles2) {
+		if (type == GL_VERTEX_SHADER) {
+			complete_code.replace(QRegularExpression(QStringLiteral("\\bin\\b")),
+								  QStringLiteral("attribute"));
+			complete_code.replace(QRegularExpression(QStringLiteral("\\bout\\b")),
+								  QStringLiteral("varying"));
+		} else if (type == GL_FRAGMENT_SHADER) {
+			complete_code.replace(QRegularExpression(QStringLiteral("\\bin\\b")),
+								  QStringLiteral("varying"));
+			complete_code.replace(QRegularExpression(
+									  QStringLiteral("\\bout\\s+vec4\\s+frag_color\\s*;")),
+								  QStringLiteral("// frag_color output"));
+			complete_code.replace(QRegularExpression(QStringLiteral("\\btexture\\b")),
+								  QStringLiteral("texture2D"));
+		}
 	}
 
 	QByteArray code_utf8 = complete_code.toUtf8();
