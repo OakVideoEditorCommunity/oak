@@ -18,11 +18,14 @@
 
 #include "footagerelinkdialog.h"
 
+#include "core.h"
+
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QVBoxLayout>
@@ -104,7 +107,8 @@ void FootageRelinkDialog::BrowseForFootage()
 	QFileInfo info(f->filename());
 
 	QString new_fn = QFileDialog::getOpenFileName(
-		this, tr("Relink \"%1\"").arg(f->GetLabel()), info.absolutePath());
+		this, tr("Relink \"%1\"").arg(f->GetLabel()), info.absolutePath(),
+		Core::FootageFileDialogFilter());
 
 	// Originally, this function would attempt to filter to the exact filename of the missing file.
 	// However, this would break on Windows if the filename had any spaces in it. The reason is
@@ -117,6 +121,13 @@ void FootageRelinkDialog::BrowseForFootage()
 
 	// We received a new filename
 	if (!new_fn.isEmpty()) {
+		if (!Core::IsFootageExtensionAllowed(new_fn)) {
+			QMessageBox::warning(
+				this, tr("Unsupported media"),
+				tr("This file type is not allowed by the current media type "
+				   "filter."));
+			return;
+		}
 		// Store original dir since we might be able to use this to find other files
 		QDir original_dir = info.dir();
 		QDir new_dir = QFileInfo(new_fn).dir();

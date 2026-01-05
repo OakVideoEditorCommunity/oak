@@ -21,6 +21,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
 #include <libavutil/frame.h>
 }
 
@@ -42,6 +43,44 @@ namespace olive
 
 QVariant Yuv2RgbShader;
 QVariant DeinterlaceShader;
+
+namespace {
+
+constexpr int64_t kAnalyzeDurationUs = 5000000;
+constexpr int64_t kProbeSizeBytes = 20000000;
+
+void ApplyFormatOpenOptions(AVDictionary **opts)
+{
+	av_dict_set_int(opts, "analyzeduration", kAnalyzeDurationUs, 0);
+	av_dict_set_int(opts, "probesize", kProbeSizeBytes, 0);
+}
+
+void TuneFormatContext(AVFormatContext *ctx)
+{
+	if (!ctx) {
+		return;
+	}
+
+	ctx->probesize = kProbeSizeBytes;
+	ctx->max_analyze_duration = kAnalyzeDurationUs;
+}
+
+void DiscardSubtitleStreams(AVFormatContext *ctx)
+{
+	if (!ctx) {
+		return;
+	}
+
+	for (unsigned int i = 0; i < ctx->nb_streams; i++) {
+		AVStream *stream = ctx->streams[i];
+		if (stream && stream->codecpar &&
+			stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+			stream->discard = AVDISCARD_ALL;
+		}
+	}
+}
+
+} // namespace
 
 FFmpegDecoder::FFmpegDecoder()
 	: sws_ctx_(nullptr)
@@ -339,7 +378,12 @@ FootageDescription FFmpegDecoder::Probe(const QString &filename,
 
 	// Open file in a format context
 	AVFormatContext *fmt_ctx = nullptr;
-	error_code = avformat_open_input(&fmt_ctx, filename_c, nullptr, nullptr);
+	AVDictionary *format_opts = nullptr;
+	ApplyFormatOpenOptions(&format_opts);
+	error_code = avformat_open_input(&fmt_ctx, filename_c, nullptr, &format_opts);
+	av_dict_free(&format_opts);
+	TuneFormatContext(fmt_ctx);
+	DiscardSubtitleStreams(fmt_ctx);
 
 	// Handle format context error
 	if (error_code == 0) {
@@ -901,6 +945,7 @@ AVFramePtr FFmpegDecoder::RetrieveFrame(const rational &time,
 	int ret;
 	AVFramePtr return_frame = nullptr;
 	AVFramePtr filtered = nullptr;
+	bool retried_after_eof = false;
 
 	while (true) {
 		// Break out of loop if we've cancelled
@@ -948,6 +993,15 @@ AVFramePtr FFmpegDecoder::RetrieveFrame(const rational &time,
 			cache_at_eof_ = true;
 
 			if (cached_frames_.empty()) {
+				if (!retried_after_eof) {
+					retried_after_eof = true;
+					ClearFrameCache();
+					instance_.Seek(min_seek);
+					cache_at_zero_ = true;
+					still_seeking = true;
+					continue;
+				}
+
 				qCritical()
 					<< "Unexpected codec EOF - unable to retrieve frame";
 			} else {
@@ -1064,7 +1118,12 @@ FFmpegDecoder::Instance::Instance()
 bool FFmpegDecoder::Instance::Open(const char *filename, int stream_index)
 {
 	// Open file in a format context
-	int error_code = avformat_open_input(&fmt_ctx_, filename, nullptr, nullptr);
+	AVDictionary *format_opts = nullptr;
+	ApplyFormatOpenOptions(&format_opts);
+	int error_code = avformat_open_input(&fmt_ctx_, filename, nullptr, &format_opts);
+	av_dict_free(&format_opts);
+	TuneFormatContext(fmt_ctx_);
+	DiscardSubtitleStreams(fmt_ctx_);
 
 	// Handle format context error
 	if (error_code != 0) {

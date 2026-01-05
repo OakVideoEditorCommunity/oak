@@ -132,6 +132,10 @@ public:
    */
 	static Core *instance();
 
+	static QString FootageFileDialogFilter();
+	static QStringList AllowedFootageExtensions();
+	static bool IsFootageExtensionAllowed(const QString &path);
+
 	const CoreParams &core_params() const
 	{
 		return core_params_;
