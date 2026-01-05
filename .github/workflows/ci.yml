@@ -67,6 +67,10 @@ jobs:
           echo "VCPKG_ROOT=$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -90,11 +94,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $toolchain = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          $ninja = "$env:ChocolateyInstall\bin\ninja.exe"
           cmake -S . -B build -G Ninja `
             -DBUILD_TESTS=ON `
             -DBUILD_QT6=ON `
             -DCMAKE_BUILD_TYPE=$env:CMAKE_BUILD_TYPE `
-            -DCMAKE_TOOLCHAIN_FILE=$env:CMAKE_TOOLCHAIN_FILE `
+            -DCMAKE_TOOLCHAIN_FILE=$toolchain `
+            -DCMAKE_MAKE_PROGRAM=$ninja `
             -DCMAKE_PREFIX_PATH=$env:Qt6_DIR
 
       - name: Build
