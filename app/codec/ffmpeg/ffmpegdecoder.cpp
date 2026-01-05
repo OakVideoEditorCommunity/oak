@@ -20,23 +20,16 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
-#include <libavutil/imgutils.h>
-#include <libavutil/opt.h>
-#include <libavutil/pixdesc.h>
 #include <libavutil/frame.h>
 }
 
-#include <OpenImageIO/imagebuf.h>
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QString>
 #include <QtMath>
 #include <QThread>
-#include <QtConcurrent/QtConcurrent>
 
 #include "codec/planarfiledevice.h"
 #include "common/ffmpegutils.h"

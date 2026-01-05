@@ -29,7 +29,6 @@
 
 #include "config/config.h"
 #include "core.h"
-#include "common/channellayout.h"
 #include "common/qtutils.h"
 #include "undo/undostack.h"
 

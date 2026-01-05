@@ -23,8 +23,6 @@
 #include <QLabel>
 #include <QMessageBox>
 
-#include "config/config.h"
-#include "core.h"
 
 namespace olive
 {

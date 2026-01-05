@@ -20,9 +20,9 @@
 
 #include "config/config.h"
 #include "node/block/transition/transition.h"
-#include "node/project/sequence/sequence.h"
 #include "node/output/track/track.h"
 #include "node/output/viewer/viewer.h"
+#include "node/project/sequence/sequence.h"
 #include "widget/slider/floatslider.h"
 #include "widget/slider/rationalslider.h"
 

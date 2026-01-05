@@ -24,7 +24,6 @@
 #include <QLabel>
 #include <QPushButton>
 
-#include "core.h"
 #include "exportadvancedvideodialog.h"
 #include "node/color/colormanager/colormanager.h"
 

@@ -25,11 +25,7 @@
 #include "codec/ffmpeg/ffmpegdecoder.h"
 #include "codec/planarfiledevice.h"
 #include "codec/oiio/oiiodecoder.h"
-#include "common/ffmpegutils.h"
-#include "common/filefunctions.h"
 #include "conformmanager.h"
-#include "node/project.h"
-#include "task/taskmanager.h"
 
 namespace olive
 {

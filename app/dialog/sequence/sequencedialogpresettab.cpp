@@ -27,7 +27,6 @@
 #include <QTreeWidgetItem>
 #include <QXmlStreamWriter>
 
-#include "common/filefunctions.h"
 #include "config/config.h"
 #include "render/videoparams.h"
 #include "ui/icons/icons.h"

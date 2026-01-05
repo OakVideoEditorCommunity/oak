@@ -24,7 +24,6 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-#include "ui/icons/icons.h"
 
 namespace olive
 {

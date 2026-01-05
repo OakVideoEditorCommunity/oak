@@ -25,9 +25,6 @@
 #include <QLabel>
 
 #include "node/node.h"
-#include "widget/colorbutton/colorbutton.h"
-#include "widget/menu/menushared.h"
-#include "ui/colorcoding.h"
 
 namespace olive
 {

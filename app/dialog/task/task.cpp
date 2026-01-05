@@ -18,7 +18,8 @@
 
 #include "task.h"
 
-#include <QtConcurrent/QtConcurrent>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 
 namespace olive
 {

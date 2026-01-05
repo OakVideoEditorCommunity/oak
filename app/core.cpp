@@ -26,6 +26,7 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QStyleFactory>
 #include "window/mainwindow/mainwindowundo.h"
 #ifdef Q_OS_WINDOWS
@@ -71,9 +72,6 @@
 #include "ui/style/style.h"
 #include "undo/undostack.h"
 #include "widget/menu/menushared.h"
-#include "widget/taskview/taskviewitem.h"
-#include "widget/viewer/viewer.h"
-#include "window/mainwindow/mainstatusbar.h"
 #include "window/mainwindow/mainwindow.h"
 
 namespace olive

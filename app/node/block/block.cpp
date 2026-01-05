@@ -21,8 +21,6 @@
 #include <QDebug>
 
 #include "node/inputdragger.h"
-#include "node/output/track/track.h"
-#include "transition/transition.h"
 #include "widget/slider/rationalslider.h"
 
 namespace olive

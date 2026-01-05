@@ -24,9 +24,7 @@
 #include <QLabel>
 #include <QMessageBox>
 
-#include "common/ocioutils.h"
-#include "core.h"
-#include "undo/undostack.h"
+#include "node/project.h"
 
 namespace olive
 {

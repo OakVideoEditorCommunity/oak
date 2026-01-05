@@ -19,8 +19,6 @@
 #include "exportcodec.h"
 
 extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavutil/pixdesc.h>
 }
 
 namespace olive

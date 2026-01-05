@@ -33,6 +33,7 @@
 #include "timeline/timelinecommon.h"
 #include "ui/colorcoding.h"
 #include "ui/style/style.h"
+#include "widget/timelinewidget/tool/import.h"
 #include "window/mainwindow/mainwindow.h"
 
 namespace olive
