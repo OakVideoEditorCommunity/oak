@@ -1,4 +1,4 @@
-# Olive - Non-Linear Video Editor
+# Oak Video Editor - Non-Linear Video Editor
 # Copyright (C) 2022 Olive Team
 #
 # This program is free software: you can redistribute it and/or modify
@@ -96,7 +96,7 @@ target_include_directories(olive-editor PUBLIC pluginSupport)
 target_link_libraries(olive-editor PUBLIC OfxHost)
 # Create docs if doxygen was found
 if(DOXYGEN_FOUND)
-  set(DOXYGEN_PROJECT_NAME "Olive")
+  set(DOXYGEN_PROJECT_NAME "Oak Video Editor")
   set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/docs")
   set(DOXYGEN_EXTRACT_ALL "YES")
   set(DOXYGEN_EXTRACT_PRIVATE "YES")
@@ -120,13 +120,13 @@ elseif(APPLE)
   set_target_properties(olive-editor PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/MacOSXBundleInfo.plist.in
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.olivevideoeditor.Olive
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.oakvideoeditor.Oak
     MACOSX_BUNDLE_ICON_FILE olive.icns
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
-    MACOSX_BUNDLE_BUNDLE_NAME "Olive"
-    MACOSX_BUNDLE_INFO_STRING "Olive ${PROJECT_LONG_VERSION}"
-    MACOSX_BUNDLE_COPYRIGHT "©2018-2021 Olive Studios LLC and others. Published under the GNU General Public License version 3.0."
+    MACOSX_BUNDLE_BUNDLE_NAME "Oak Video Editor"
+    MACOSX_BUNDLE_INFO_STRING "Oak Video Editor ${PROJECT_LONG_VERSION}"
+    MACOSX_BUNDLE_COPYRIGHT "©2018-2021 Olive Studios LLC and others. Fork maintained by Oak Video Editor Team."
     RESOURCE "${OLIVE_ICON}"
     OUTPUT_NAME "Olive"
   )

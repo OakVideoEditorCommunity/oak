@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -40,7 +40,7 @@ namespace olive
 #define super KDDockWidgets::QtWidgets::MainWindow
 
 MainWindow::MainWindow(QWidget *parent)
-	: super(QStringLiteral("OliveMain"), KDDockWidgets::MainWindowOption_None,
+	: super(QStringLiteral("OakMain"), KDDockWidgets::MainWindowOption_None,
 			parent)
 	, project_(nullptr)
 {
@@ -581,9 +581,9 @@ void MainWindow::ShowNouveauWarning()
 {
 	QMessageBox::warning(
 		this, tr("Driver Warning"),
-		tr("Olive has detected your system is using the Nouveau graphics driver.\n\nThis driver is "
-		   "known to have stability and performance issues with Olive. It is highly recommended "
-		   "you install the proprietary NVIDIA driver before continuing to use Olive."),
+		tr("Oak Video Editor has detected your system is using the Nouveau graphics driver.\n\nThis driver is "
+		   "known to have stability and performance issues with Oak Video Editor. It is highly recommended "
+		   "you install the proprietary NVIDIA driver before continuing to use Oak Video Editor."),
 		QMessageBox::Ok);
 }
 #endif

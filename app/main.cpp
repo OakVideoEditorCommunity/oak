@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,9 +16,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/** \mainpage Olive Video Editor - Code Documentation
+/** \mainpage Oak Video Editor - Code Documentation
  *
- * This documentation is a primarily a developer resource. For information on using Olive, visit the website
+ * This documentation is a primarily a developer resource. For information on using Oak Video Editor, visit the website
  * https://www.olivevideoeditor.org/
  *
  * Use the navigation above to find documentation on classes or source files.
@@ -35,6 +35,7 @@ extern "C" {
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QMessageBox>
+#include <QIcon>
 #include <QSurfaceFormat>
 
 #include "core.h"
@@ -148,10 +149,10 @@ int main(int argc, char *argv[])
 	qInstallMessageHandler(olive::DebugHandler);
 
 	// Set application metadata
-	QCoreApplication::setOrganizationName("olivevideoeditor.org");
-	QCoreApplication::setOrganizationDomain("olivevideoeditor.org");
-	QCoreApplication::setApplicationName("Olive");
-	QGuiApplication::setDesktopFileName("org.olivevideoeditor.Olive");
+	QCoreApplication::setOrganizationName("oakvideoeditor.org");
+	QCoreApplication::setOrganizationDomain("oakvideoeditor.org");
+	QCoreApplication::setApplicationName("Oak Video Editor");
+	QGuiApplication::setDesktopFileName("org.oakvideoeditor.Oak");
 	QCoreApplication::setApplicationVersion(olive::kAppVersionLong);
 
 	//
@@ -324,7 +325,7 @@ int main(int argc, char *argv[])
 
 	if (startup_params.run_mode() == olive::Core::CoreParams::kRunNormal) {
 #ifdef _WIN32
-		// Since Olive is linked with the console subsystem (for better POSIX compatibility), a console
+		// Since Oak Video Editor is linked with the console subsystem (for better POSIX compatibility), a console
 		// is created by default. If the user didn't request one, we free it here.
 		if (!console_option->IsSet()) {
 			FreeConsole();
@@ -334,6 +335,10 @@ int main(int argc, char *argv[])
 		a.reset(new QApplication(argc, argv));
 	} else {
 		a.reset(new QCoreApplication(argc, argv));
+	}
+
+	if (auto *gui_app = qobject_cast<QGuiApplication *>(a.get())) {
+		gui_app->setWindowIcon(QIcon(QStringLiteral(":/graphics/oak-logo.png")));
 	}
 
 #ifdef _WIN32
@@ -362,7 +367,7 @@ int main(int argc, char *argv[])
 			QCoreApplication::translate(
 				"main",
 				"Your computer's graphics driver does not appear to support framebuffers. "
-				"This most likely means either your graphics driver is not up-to-date or your graphics card is too old to run Olive.\n\n"
+				"This most likely means either your graphics driver is not up-to-date or your graphics card is too old to run Oak Video Editor.\n\n"
 				"Please update your graphics driver to the latest version and try again.\n\n"
 				"Current driver information: %1 %2 %3")
 				.arg(QString::fromStdString(gpu_vendor),

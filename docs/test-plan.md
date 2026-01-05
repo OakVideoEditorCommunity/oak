@@ -1,6 +1,6 @@
-# Olive Testing Strategy and Plan
+# Oak Video Editor Testing Strategy and Plan
 
-This document describes the automated testing strategy for Olive, including unit tests, integration tests, and CI execution.
+This document describes the automated testing strategy for Oak Video Editor, including unit tests, integration tests, and CI execution.
 
 ## Goals
 

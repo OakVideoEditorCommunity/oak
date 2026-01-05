@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -46,11 +46,11 @@ bool ProjectLoadTask::Run()
 		break;
 	case ProjectSerializer::kProjectTooOld:
 		SetError(tr(
-			"This project is from a version of Olive that is no longer supported in this version."));
+			"This project is from a version of Oak Video Editor that is no longer supported in this version."));
 		break;
 	case ProjectSerializer::kProjectTooNew:
 		SetError(tr(
-			"This project is from a newer version of Olive and cannot be opened in this version."));
+			"This project is from a newer version of Oak Video Editor and cannot be opened in this version."));
 		break;
 	case ProjectSerializer::kUnknownVersion:
 		SetError(tr("Failed to determine project version."));

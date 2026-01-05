@@ -1,0 +1,14 @@
+{
+  "name": "oak-video-editor-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vuepress dev docs",
+    "docs:build": "vuepress build docs"
+  },
+  "devDependencies": {
+    "@vuepress/bundler-vite": "^2.0.0-rc.19",
+    "vuepress": "^2.0.0-rc.19",
+    "vuepress-theme-hope": "^2.0.0-rc.42"
+  }
+}

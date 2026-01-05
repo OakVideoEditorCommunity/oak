@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -25,15 +25,15 @@
 #define VER_PRODUCTVERSION 1, 0, 0, 0
 #define VER_PRODUCTVERSION_STR "1.0\0"
 
-#define VER_COMPANYNAME_STR "Olive Team"
-#define VER_FILEDESCRIPTION_STR "Olive"
-#define VER_INTERNALNAME_STR "Olive"
-#define VER_LEGALCOPYRIGHT_STR "Copyright © 2018 Olive Team"
+#define VER_COMPANYNAME_STR "Oak Video Editor Team"
+#define VER_FILEDESCRIPTION_STR "Oak Video Editor"
+#define VER_INTERNALNAME_STR "Oak Video Editor"
+#define VER_LEGALCOPYRIGHT_STR "Copyright © 2018 Oak Video Editor Team"
 #define VER_LEGALTRADEMARKS1_STR "All Rights Reserved"
 #define VER_LEGALTRADEMARKS2_STR VER_LEGALTRADEMARKS1_STR
-#define VER_ORIGINALFILENAME_STR "Olive.exe"
-#define VER_PRODUCTNAME_STR "Olive"
+#define VER_ORIGINALFILENAME_STR "OakVideoEditor.exe"
+#define VER_PRODUCTNAME_STR "Oak Video Editor"
 
-#define VER_COMPANYDOMAIN_STR "www.olivevideoeditor.org"
+#define VER_COMPANYDOMAIN_STR "www.oakvideoeditor.org"
 
 #endif // VERSION_H

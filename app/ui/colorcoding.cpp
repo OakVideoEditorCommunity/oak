@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -47,7 +47,7 @@ QString ColorCoding::GetColorName(int c)
 	case kYellow:
 		return tr("Yellow");
 	case kOlive:
-		return tr("Olive");
+		return tr("Oak");
 	case kLime:
 		return tr("Lime");
 	case kGreen:

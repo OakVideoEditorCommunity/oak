@@ -1,6 +1,6 @@
-# Olive Project File Reference
+# Oak Video Editor Project File Reference
 
-This document describes Olive's XML project format as implemented in the current codebase. It is intended to be detailed enough to implement a compatible reader/writer.
+This document describes Oak Video Editor's XML project format as implemented in the current codebase. It is intended to be detailed enough to implement a compatible reader/writer.
 
 > Source of truth: `app/node/project.cpp`, `app/node/node.cpp`, `app/node/value.*`, `app/node/keyframe.*`, `app/node/project/serializer/*`.
 
@@ -61,7 +61,7 @@ Attributes:
 - `file`: plugin binary path (fallback).
 
 Loading behavior:
-- If `plugins` exists, Olive adds each `bundle` (or `file` if `bundle` empty) to the OFX plugin path, scans, then registers plugin nodes before parsing `<nodes>`.
+- If `plugins` exists, Oak Video Editor adds each `bundle` (or `file` if `bundle` empty) to the OFX plugin path, scans, then registers plugin nodes before parsing `<nodes>`.
 
 ### 3.3 `nodes`
 The node graph. Each `<node>` is written by `Node::Save()` and read by `Node::Load()`.
@@ -307,11 +307,10 @@ These are written by `ProjectSerializer230220::Save()` depending on SaveData.
 ## 8. OpenFX Node Compatibility Notes
 
 - OpenFX nodes are identified by OFX plugin identifier (`Plugin::getIdentifier()`).
-- The `plugins` list ensures Olive can locate external plugins before instantiating nodes.
+- The `plugins` list ensures Oak Video Editor can locate external plugins before instantiating nodes.
 - If a plugin cannot be found at load time, the node cannot be instantiated and will be skipped.
 
 ## 9. Versioning
 
 - Root `olive` element `version` controls which serializer is used.
 - Newer files may be rejected with `kProjectTooNew` if no serializer exists.
-

@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -80,7 +80,7 @@ void PreventSleep(bool on)
 
 				if (on) {
 					reply = interface.call(QStringLiteral("Inhibit"),
-										   QStringLiteral("Olive Video Editor"),
+										   QStringLiteral("Oak Video Editor"),
 										   QStringLiteral("Video Playback"));
 				} else {
 					reply = interface.call(QStringLiteral("UnInhibit"),

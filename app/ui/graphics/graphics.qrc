@@ -1,5 +1,5 @@
 <!--
-  - Olive Community Edition - Non-Linear Video Editor
+  - Oak Video Editor - Non-Linear Video Editor
   - Copyright (C) 2025 Olive CE Team
   -
   - This program is free software: you can redistribute it and/or modify
@@ -19,6 +19,7 @@
 <RCC>
     <qresource prefix="/graphics">
         <file>throbber.png</file>
+        <file alias="oak-logo.png">../../icon.png</file>
         <file>olive-splash.png</file>
     </qresource>
 </RCC>

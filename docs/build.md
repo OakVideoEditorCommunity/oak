@@ -1,6 +1,6 @@
 # Build Guide
 
-This document describes how to build Olive from source. For Chinese, see
+This document describes how to build Oak Video Editor from source. For Chinese, see
 [`docs/build-zh.md`](docs/build-zh.md).
 
 ## Prerequisites

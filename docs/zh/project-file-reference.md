@@ -1,6 +1,6 @@
-# Olive 项目文件参考手册（详细版）
+# Oak Video Editor 项目文件参考手册（详细版）
 
-本文档基于当前源代码实现，描述 Olive 的 XML 项目文件格式，目标是足够详细以实现兼容读写器。
+本文档基于当前源代码实现，描述 Oak Video Editor 的 XML 项目文件格式，目标是足够详细以实现兼容读写器。
 
 > 代码来源：`app/node/project.cpp`、`app/node/node.cpp`、`app/node/value.*`、`app/node/keyframe.*`、`app/node/project/serializer/*`。
 
@@ -303,4 +303,3 @@
 
 - 根元素 `version` 决定使用哪个序列化器。
 - 若缺少对应版本，会报 `kProjectTooNew` 或 `kProjectTooOld`。
-

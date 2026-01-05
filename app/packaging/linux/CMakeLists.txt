@@ -1,4 +1,4 @@
-# Olive - Non-Linear Video Editor
+# Oak Video Editor - Non-Linear Video Editor
 # Copyright (C) 2022 Olive Team
 #
 # This program is free software: you can redistribute it and/or modify
@@ -27,17 +27,17 @@ else()
 endif()
 
 configure_file(
-  org.olivevideoeditor.Olive.appdata.xml.in
-  org.olivevideoeditor.Olive.appdata.xml
+  org.oakvideoeditor.Oak.appdata.xml.in
+  org.oakvideoeditor.Oak.appdata.xml
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.olivevideoeditor.Olive.appdata.xml DESTINATION share/metainfo)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.oakvideoeditor.Oak.appdata.xml DESTINATION share/metainfo)
 
-install(FILES org.olivevideoeditor.Olive.desktop DESTINATION share/applications)
-install(FILES org.olivevideoeditor.Olive.xml DESTINATION share/mime/packages)
+install(FILES org.oakvideoeditor.Oak.desktop DESTINATION share/applications)
+install(FILES org.oakvideoeditor.Oak.xml DESTINATION share/mime/packages)
 
 foreach(size 16 32 48 64 128 256 512)
   install(
-    FILES icons/${size}x${size}/org.olivevideoeditor.Olive.png
+    FILES icons/${size}x${size}/org.oakvideoeditor.Oak.png
     DESTINATION share/icons/hicolor/${size}x${size}/apps
   )
   install(

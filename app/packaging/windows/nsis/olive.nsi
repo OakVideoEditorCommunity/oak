@@ -3,7 +3,7 @@
 !define MUI_ICON "install icon.ico"
 !define MUI_UNICON "uninstall icon.ico"
 
-!define APP_NAME "Olive"
+!define APP_NAME "Oak Video Editor"
 !define APP_TARGET "olive-editor"
 
 !define MUI_FINISHPAGE_RUN "$INSTDIR\olive-editor.exe"
@@ -29,12 +29,12 @@ InstallDir "$PROGRAMFILES32\${APP_NAME}"
 
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 !define MUI_FINISHPAGE_RUN_TEXT "Run ${APP_NAME}"
-!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchOlive"
+!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchOak"
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_LANGUAGE "English"
 
-Section "Olive"
+Section "Oak Video Editor"
     SectionIn RO
     SetOutPath $INSTDIR
     File /r olive-editor\*
@@ -56,12 +56,12 @@ Section "Create Start Menu shortcut"
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
 SectionEnd
 
-Section "Associate *.ove files with Olive"
-    WriteRegStr HKCR ".ove" "" "OliveEditor.OVEFile"
+Section "Associate *.ove files with Oak Video Editor"
+    WriteRegStr HKCR ".ove" "" "OakEditor.OVEFile"
     WriteRegStr HKCR ".ove" "Content Type" "application/vnd.olive-project"
-    WriteRegStr HKCR "OliveEditor.OVEFile" "" "Olive project file"
-    WriteRegStr HKCR "OliveEditor.OVEFile\DefaultIcon" "" "$INSTDIR\olive-editor.exe,1"
-    WriteRegStr HKCR "OliveEditor.OVEFile\shell\open\command" "" "$\"$INSTDIR\olive-editor.exe$\" $\"%1$\""
+    WriteRegStr HKCR "OakEditor.OVEFile" "" "Oak project file"
+    WriteRegStr HKCR "OakEditor.OVEFile\DefaultIcon" "" "$INSTDIR\olive-editor.exe,1"
+    WriteRegStr HKCR "OakEditor.OVEFile\shell\open\command" "" "$\"$INSTDIR\olive-editor.exe$\" $\"%1$\""
     System::Call 'shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'
 SectionEnd
 
@@ -76,12 +76,12 @@ Section "uninstall"
     rmdir /r "$SMPROGRAMS\${APP_NAME}"
 
     DeleteRegKey HKCR ".ove"
-    DeleteRegKey HKCR "OliveEditor.OVEFile"
-    DeleteRegKey HKCR "OliveEditor.OVEFile\DefaultIcon" ""
-    DeleteRegKey HKCR "OliveEditor.OVEFile\shell\open\command" ""
+    DeleteRegKey HKCR "OakEditor.OVEFile"
+    DeleteRegKey HKCR "OakEditor.OVEFile\DefaultIcon" ""
+    DeleteRegKey HKCR "OakEditor.OVEFile\shell\open\command" ""
     System::Call 'shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'
 SectionEnd
 
-Function LaunchOlive
+Function LaunchOak
     ShellExecAsUser::ShellExecAsUser "" "$INSTDIR\${APP_TARGET}.exe"
 FunctionEnd

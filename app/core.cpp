@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -1060,7 +1060,7 @@ void Core::SaveAutorecovery()
 				QMessageBox::critical(
 					main_window_, tr("Auto-Recovery Error"),
 					tr("Failed to save auto-recovery to \"%1\". "
-					   "Olive may not have permission to this directory.")
+					   "Oak Video Editor may not have permission to this directory.")
 						.arg(project_autorecovery_dir.absolutePath()));
 			}
 		}
@@ -1133,11 +1133,11 @@ QString Core::PasteStringFromClipboard()
 QString Core::GetProjectFilter(bool include_any_filter)
 {
 	static const QVector<QPair<QString, QString>> FILTERS = {
-		// Standard compressed Olive project
-		{ tr("Olive Project"), QStringLiteral("ove") },
+		// Standard compressed Oak project
+		{ tr("Oak Project"), QStringLiteral("ove") },
 
-		// Uncompressed XML Olive project
-		{ tr("Olive Project (Uncompressed XML)"), QStringLiteral("ovexml") },
+		// Uncompressed XML Oak project
+		{ tr("Oak Project (Uncompressed XML)"), QStringLiteral("ovexml") },
 
 	// OpenTimelineIO project, if available
 #ifdef USE_OTIO
@@ -1248,7 +1248,7 @@ void Core::CheckForAutoRecoveries()
 				QString::fromUtf8(autorecovery_index.readAll()).split('\n');
 
 			AutoRecoveryDialog ard(
-				tr("The following projects had unsaved changes when Olive "
+				tr("The following projects had unsaved changes when Oak Video Editor "
 				   "forcefully quit. Would you like to load them?"),
 				recovery_filenames, true, main_window_);
 			ard.exec();
@@ -1305,7 +1305,7 @@ void Core::WarnCacheFull()
 
 		QMessageBox::warning(
 			main_window_, tr("Disk Cache Full"),
-			tr("The disk cache is currently full and Olive is having to delete old "
+			tr("The disk cache is currently full and Oak Video Editor is having to delete old "
 			   "frames to keep it within the limits set in the Disk preferences. This "
 			   "will result in SIGNIFICANTLY reduced cache performance.\n\n"
 			   "To remedy this, please do one of the following:\n\n"

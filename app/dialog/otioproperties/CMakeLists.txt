@@ -1,4 +1,4 @@
-# Olive - Non-Linear Video Editor
+# Oak Video Editor - Non-Linear Video Editor
 # Copyright (C) 2019 Olive Team
 #
 # This program is free software: you can redistribute it and/or modify

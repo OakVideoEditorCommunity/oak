@@ -1,5 +1,5 @@
 /*
- * Olive Community Edition - Non-Linear Video Editor
+ * Oak Video Editor - Non-Linear Video Editor
  * Copyright (C) 2025 Olive CE Team
  *
  * This program is free software: you can redistribute it and/or modify
@@ -140,9 +140,9 @@ void StyleManager::Init()
 	qApp->setStyle(QStyleFactory::create("Fusion"));
 
 	available_themes_.insert(QStringLiteral("olive-dark"),
-							 QStringLiteral("Olive Dark"));
+							 QStringLiteral("Oak Dark"));
 	available_themes_.insert(QStringLiteral("olive-light"),
-							 QStringLiteral("Olive Light"));
+							 QStringLiteral("Oak Light"));
 
 	QString config_style = OLIVE_CONFIG("Style").toString();
 
