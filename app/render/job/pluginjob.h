@@ -23,7 +23,7 @@
 #include "pluginSupport/OlivePluginInstance.h"
 
 #include <any>
-#include <OpenImageIO/detail/fmt/chrono.h>
+#include <chrono>
 
 namespace olive {
 namespace plugin {
