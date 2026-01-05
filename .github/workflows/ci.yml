@@ -13,6 +13,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-2022]
     env:
       CMAKE_BUILD_TYPE: Release
+      RUN_OFX_ITEST: "0"
     steps:
       - uses: actions/checkout@v4
         with: 
@@ -106,6 +107,40 @@ jobs:
 
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Build OpenFX misc plugins (Linux, optional)
+        if: runner.os == 'Linux' && env.RUN_OFX_ITEST == '1'
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          echo "OAK_OFX_ITEST=1" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_PATH=${PWD}/openfx-misc/build" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" >> "$GITHUB_ENV"
+
+      - name: Build OpenFX misc plugins (macOS, optional)
+        if: runner.os == 'macOS' && env.RUN_OFX_ITEST == '1'
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          echo "OAK_OFX_ITEST=1" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_PATH=${PWD}/openfx-misc/build" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" >> "$GITHUB_ENV"
+
+      - name: Build OpenFX misc plugins (Windows, optional)
+        if: runner.os == 'Windows' && env.RUN_OFX_ITEST == '1'
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          "OAK_OFX_ITEST=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OAK_OFX_PLUGIN_PATH=$env:GITHUB_WORKSPACE\\openfx-misc\\build" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Test (Linux)
         if: runner.os == 'Linux'

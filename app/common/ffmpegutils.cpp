@@ -162,7 +162,9 @@ AVPixelFormat FFmpegUtils::GetFFmpegPixelFormat(const PixelFormat &pix_fmt,
 		case PixelFormat::U16:
 			return AV_PIX_FMT_RGB48;
 		case PixelFormat::F16:
+			return AV_PIX_FMT_RGBF16;
 		case PixelFormat::F32:
+			return AV_PIX_FMT_RGBF32;
 		case PixelFormat::INVALID:
 		case PixelFormat::COUNT:
 			break;
@@ -174,7 +176,9 @@ AVPixelFormat FFmpegUtils::GetFFmpegPixelFormat(const PixelFormat &pix_fmt,
 		case PixelFormat::U16:
 			return AV_PIX_FMT_RGBA64;
 		case PixelFormat::F16:
+			return AV_PIX_FMT_RGBAF16;
 		case PixelFormat::F32:
+			return AV_PIX_FMT_RGBAF32;
 		case PixelFormat::INVALID:
 		case PixelFormat::COUNT:
 			break;

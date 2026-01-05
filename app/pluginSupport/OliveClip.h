@@ -44,10 +44,7 @@ public:
 	{
 		params_ = params;
 	}
-	std::shared_ptr<OFX::Host::ImageEffect::Image> getOutputImage(OfxTime time)
-	{
-		return images_[time];
-	}
+	std::shared_ptr<OFX::Host::ImageEffect::Image> getOutputImage(OfxTime time);
 
 	const std::string &getUnmappedBitDepth() const override;
 	const std::string &getUnmappedComponents() const override;

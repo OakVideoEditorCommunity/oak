@@ -191,6 +191,16 @@ OfxStatus olive::plugin::OliveHost::vmessage(const char *type, const char *id, c
 	vsnprintf(buffer, sizeof(buffer), format, args);
 	QString message(buffer);
 
+	auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+	if (!app) {
+		qWarning().noquote()
+			<< "OFX message:" << type << message;
+		if (strcmp(type, kOfxMessageQuestion) == 0) {
+			return kOfxStatReplyNo;
+		}
+		return kOfxStatOK;
+	}
+
 	if (strcmp(type, kOfxMessageQuestion) == 0) {
 		auto ret = QMessageBox::question(nullptr, "", message,
 										 QMessageBox::Ok, QMessageBox::Cancel);

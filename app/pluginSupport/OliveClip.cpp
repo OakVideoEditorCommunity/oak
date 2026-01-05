@@ -204,6 +204,25 @@ olive::plugin::OliveClipInstance::getImage(OfxTime time,
 		return image;
 	}
 }
+
+std::shared_ptr<OFX::Host::ImageEffect::Image>
+olive::plugin::OliveClipInstance::getOutputImage(OfxTime time)
+{
+	if (images_.contains(time)) {
+		return images_.value(time);
+	}
+
+	OfxRectD rod_d = getRegionOfDefinition(time);
+	OfxRectI rod = { static_cast<int>(std::floor(rod_d.x1)),
+					 static_cast<int>(std::floor(rod_d.y1)),
+					 static_cast<int>(std::ceil(rod_d.x2)),
+					 static_cast<int>(std::ceil(rod_d.y2)) };
+	OfxRectI bounds = rod;
+
+	auto image = std::make_shared<Image>(*this, params_, bounds, rod, true);
+	images_.insert(time, image);
+	return image;
+}
 OfxRectD
 olive::plugin::OliveClipInstance::getRegionOfDefinition(OfxTime time) const
 {
@@ -231,7 +250,14 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 	if (!texture) {
 		return;
 	}
-	this->params_ = texture->params();
+	VideoParams incoming = texture->params();
+	if (params_.format() != PixelFormat::INVALID &&
+		params_.channel_count() > 0) {
+		incoming.set_format(params_.format());
+		incoming.set_channel_count(params_.channel_count());
+		incoming.set_premultiplied_alpha(params_.premultiplied_alpha());
+	}
+	this->params_ = incoming;
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	input_textures_.insert(time, texture);
 #endif

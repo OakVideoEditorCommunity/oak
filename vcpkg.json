@@ -1,0 +1,12 @@
+{
+  "name": "oak-video-editor",
+  "version-string": "0.0.0",
+  "dependencies": [
+    "ffmpeg",
+    "openimageio",
+    "opencolorio",
+    "openexr",
+    "expat",
+    "portaudio"
+  ]
+}

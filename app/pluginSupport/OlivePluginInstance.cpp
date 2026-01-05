@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <QMessageBox>
 #include <QCoreApplication>
+#include <QApplication>
 #include <qmessagebox.h>
 #include <qobject.h>
 #include <QtGlobal>
@@ -254,9 +255,6 @@ OFX::Host::Param::Instance *
 OlivePluginInstance::newParam(const std::string &name,
 						OFX::Host::Param::Descriptor &desc)
 {
-	if (!node_) {
-		return nullptr;
-	}
 	const std::string &type = desc.getType();
 
 	if (type == kOfxParamTypeInteger) {
@@ -372,6 +370,11 @@ void OlivePluginInstance::progressStart(const std::string &message,
 	progress_cancelled_ = false;
 	progress_active_ = true;
 
+	auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+	if (!app) {
+		return;
+	}
+
 	if (progress_dialog_) {
 		progress_dialog_->close();
 		progress_dialog_->deleteLater();
@@ -480,6 +483,14 @@ OFX::Host::ImageEffect::ClipInstance *OlivePluginInstance::newClipInstance(
 	// Create a new clip instance
 	OFX::Host::ImageEffect::ClipInstance* clipInstance = new OliveClipInstance(plugin, *descriptor, params_);
 	return clipInstance;
+}
+
+OlivePluginInstance::~OlivePluginInstance()
+{
+	if (!QCoreApplication::instance() ||
+		qEnvironmentVariableIsSet("OAK_OFX_ITEST")) {
+		_created = false;
+	}
 }
 
 }

@@ -61,12 +61,18 @@ protected:
 	std::shared_ptr<PluginNode>   _node;
 	OFX::Host::Param::Descriptor& _descriptor;
 	QString id;
+	bool has_value_ = false;
+	int value_ = 0;
 public:
 	IntegerInstance(std::shared_ptr<PluginNode>node, OFX::Host::Param::Descriptor &descriptor)
 						: _node(node), _descriptor(descriptor),
 						OFX::Host::Param::IntegerInstance(_descriptor){}
 	OfxStatus get(int &a)
 	{
+		if (!_node) {
+			a = has_value_ ? value_ : 0;
+			return kOfxStatOK;
+		}
 		if (id.isEmpty()) {
 			return kOfxStatErrBadHandle;
 		}
@@ -81,6 +87,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, int &data)
 	{
+		if (!_node) {
+			data = has_value_ ? value_ : 0;
+			return kOfxStatOK;
+		}
 		if (id.isEmpty()) {
 			return kOfxStatErrBadHandle;
 		}
@@ -94,6 +104,11 @@ public:
 	}
 	OfxStatus set(int data)
 	{
+		if (!_node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kInt, data);
 
@@ -105,6 +120,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, int data)
 	{
+		if (!_node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(_node.get(), _descriptor.getName().c_str()),
@@ -119,6 +139,8 @@ class DoubleInstance : public OFX::Host::Param::DoubleInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	double value_ = 0.0;
 public:
 	DoubleInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::DoubleInstance(descriptor)
@@ -129,6 +151,10 @@ public:
 	}
 	OfxStatus get(double& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : 0.0;
+			return kOfxStatOK;
+		}
 		QVariant variant = node->GetStandardValue(_descriptor.getName().c_str());
 		if (variant.canConvert<double>()) {
 			data = variant.toDouble();
@@ -139,6 +165,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, double& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : 0.0;
+			return kOfxStatOK;
+		}
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
@@ -151,6 +181,11 @@ public:
 	}
 	OfxStatus set(double data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kFloat, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -160,6 +195,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, double data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
@@ -181,6 +221,8 @@ class BooleanInstance : public OFX::Host::Param::BooleanInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	bool value_ = false;
 public:
 	BooleanInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::BooleanInstance(descriptor)
@@ -191,6 +233,10 @@ public:
 	}
 	OfxStatus get(bool& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : false;
+			return kOfxStatOK;
+		}
 		QVariant variant = node->GetStandardValue(_descriptor.getName().c_str());
 		if (variant.canConvert<bool>()) {
 			data = variant.toBool();
@@ -201,6 +247,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, bool& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : false;
+			return kOfxStatOK;
+		}
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
@@ -213,6 +263,11 @@ public:
 	}
 	OfxStatus set(bool data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kBoolean, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -222,6 +277,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, bool data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
@@ -235,6 +295,8 @@ class ChoiceInstance : public OFX::Host::Param::ChoiceInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	int value_ = 0;
 public:
 	ChoiceInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::ChoiceInstance(descriptor)
@@ -245,6 +307,10 @@ public:
 	}
 	OfxStatus get(int& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : 0;
+			return kOfxStatOK;
+		}
 		QVariant variant = node->GetStandardValue(_descriptor.getName().c_str());
 		if (variant.canConvert<int>()) {
 			data = variant.toInt();
@@ -255,6 +321,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, int& data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : 0;
+			return kOfxStatOK;
+		}
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
@@ -267,6 +337,11 @@ public:
 	}
 	OfxStatus set(int data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kCombo, data);
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -276,6 +351,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, int data)
 	{
+		if (!node) {
+			value_ = data;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
@@ -289,6 +369,8 @@ class RGBAInstance : public OFX::Host::Param::RGBAInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	double value_[4] = {0.0, 0.0, 0.0, 0.0};
 public:
 	RGBAInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::RGBAInstance(descriptor)
@@ -299,6 +381,17 @@ public:
 	}
 	OfxStatus get(double& r,double& g,double& b,double& a)
 	{
+		if (!node) {
+			if (has_value_) {
+				r = value_[0];
+				g = value_[1];
+				b = value_[2];
+				a = value_[3];
+			} else {
+				r = g = b = a = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		olive::core::Color c =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<olive::core::Color>();
@@ -311,6 +404,17 @@ public:
 	}
 	OfxStatus get(OfxTime time, double& r,double& g,double& b,double& a)
 	{
+		if (!node) {
+			if (has_value_) {
+				r = value_[0];
+				g = value_[1];
+				b = value_[2];
+				a = value_[3];
+			} else {
+				r = g = b = a = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		olive::core::Color c =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -324,6 +428,14 @@ public:
 	}
 	OfxStatus set(double r,double g,double b,double a)
 	{
+		if (!node) {
+			value_[0] = r;
+			value_[1] = g;
+			value_[2] = b;
+			value_[3] = a;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kColor,
 			QVariant::fromValue(olive::core::Color(r, g, b, a)));
@@ -334,6 +446,14 @@ public:
 	}
 	OfxStatus set(OfxTime time, double r,double g,double b,double a)
 	{
+		if (!node) {
+			value_[0] = r;
+			value_[1] = g;
+			value_[2] = b;
+			value_[3] = a;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
@@ -354,6 +474,8 @@ class RGBInstance : public OFX::Host::Param::RGBInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	double value_[3] = {0.0, 0.0, 0.0};
 public:
 	RGBInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::RGBInstance(descriptor)
@@ -364,6 +486,16 @@ public:
 	}
 	OfxStatus get(double& r,double& g,double& b)
 	{
+		if (!node) {
+			if (has_value_) {
+				r = value_[0];
+				g = value_[1];
+				b = value_[2];
+			} else {
+				r = g = b = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		olive::core::Color c =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<olive::core::Color>();
@@ -375,6 +507,16 @@ public:
 	}
 	OfxStatus get(OfxTime time, double& r,double& g,double& b)
 	{
+		if (!node) {
+			if (has_value_) {
+				r = value_[0];
+				g = value_[1];
+				b = value_[2];
+			} else {
+				r = g = b = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		olive::core::Color c =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -387,6 +529,13 @@ public:
 	}
 	OfxStatus set(double r,double g,double b)
 	{
+		if (!node) {
+			value_[0] = r;
+			value_[1] = g;
+			value_[2] = b;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kColor,
 			QVariant::fromValue(olive::core::Color(r, g, b)));
@@ -397,6 +546,13 @@ public:
 	}
 	OfxStatus set(OfxTime time, double r,double g,double b)
 	{
+		if (!node) {
+			value_[0] = r;
+			value_[1] = g;
+			value_[2] = b;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
@@ -414,6 +570,8 @@ class Double2DInstance : public OFX::Host::Param::Double2DInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	double value_[2] = {0.0, 0.0};
 public:
 	Double2DInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::Double2DInstance(descriptor)
@@ -424,6 +582,15 @@ public:
 	}
 	OfxStatus get(double& x,double& y)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+			} else {
+				x = y = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		QVector2D vec =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<QVector2D>();
@@ -433,6 +600,15 @@ public:
 	}
 	OfxStatus get(OfxTime time,double& x,double& y)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+			} else {
+				x = y = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		QVector2D vec =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -443,6 +619,12 @@ public:
 	}
 	OfxStatus set(double x,double y)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -452,6 +634,12 @@ public:
 	}
 	OfxStatus set(OfxTime time,double x,double y)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
@@ -467,6 +655,8 @@ class Integer2DInstance : public OFX::Host::Param::Integer2DInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	int value_[2] = {0, 0};
 public:
 	Integer2DInstance(std::shared_ptr<PluginNode> effect,  const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::Integer2DInstance(descriptor)
@@ -477,6 +667,15 @@ public:
 	}
 	OfxStatus get(int& x,int& y)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+			} else {
+				x = y = 0;
+			}
+			return kOfxStatOK;
+		}
 		QVector2D vec =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<QVector2D>();
@@ -486,6 +685,15 @@ public:
 	}
 	OfxStatus get(OfxTime time,int& x,int& y)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+			} else {
+				x = y = 0;
+			}
+			return kOfxStatOK;
+		}
 		QVector2D vec =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -496,6 +704,12 @@ public:
 	}
 	OfxStatus set(int x,int y)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec2, QVector2D(x, y));
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -505,6 +719,12 @@ public:
 	}
 	OfxStatus set(OfxTime time,int x,int y)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name), rational::fromDouble(time),
@@ -520,6 +740,8 @@ class Double3DInstance : public OFX::Host::Param::Double3DInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	double value_[3] = {0.0, 0.0, 0.0};
 public:
 	Double3DInstance(std::shared_ptr<PluginNode> effect, const std::string& name,
 					 OFX::Host::Param::Descriptor& descriptor)
@@ -531,6 +753,16 @@ public:
 	}
 	OfxStatus get(double& x,double& y,double& z)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+				z = value_[2];
+			} else {
+				x = y = z = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		QVector3D vec =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<QVector3D>();
@@ -541,6 +773,16 @@ public:
 	}
 	OfxStatus get(OfxTime time,double& x,double& y,double& z)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+				z = value_[2];
+			} else {
+				x = y = z = 0.0;
+			}
+			return kOfxStatOK;
+		}
 		QVector3D vec =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -552,6 +794,13 @@ public:
 	}
 	OfxStatus set(double x,double y,double z)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			value_[2] = z;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec3, QVector3D(x, y, z));
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -561,6 +810,13 @@ public:
 	}
 	OfxStatus set(OfxTime time,double x,double y,double z)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			value_[2] = z;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name),
@@ -578,6 +834,8 @@ class Integer3DInstance : public OFX::Host::Param::Integer3DInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	int value_[3] = {0, 0, 0};
 public:
 	Integer3DInstance(std::shared_ptr<PluginNode> effect, const std::string& name,
 					  OFX::Host::Param::Descriptor& descriptor)
@@ -589,6 +847,16 @@ public:
 	}
 	OfxStatus get(int& x,int& y,int& z)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+				z = value_[2];
+			} else {
+				x = y = z = 0;
+			}
+			return kOfxStatOK;
+		}
 		QVector3D vec =
 			node->GetStandardValue(_descriptor.getName().c_str())
 				.value<QVector3D>();
@@ -599,6 +867,16 @@ public:
 	}
 	OfxStatus get(OfxTime time,int& x,int& y,int& z)
 	{
+		if (!node) {
+			if (has_value_) {
+				x = value_[0];
+				y = value_[1];
+				z = value_[2];
+			} else {
+				x = y = z = 0;
+			}
+			return kOfxStatOK;
+		}
 		QVector3D vec =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time))
@@ -610,6 +888,13 @@ public:
 	}
 	OfxStatus set(int x,int y,int z)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			value_[2] = z;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kVec3, QVector3D(x, y, z));
 		auto command = new NodeParamSetSplitStandardValueCommand(
@@ -619,6 +904,13 @@ public:
 	}
 	OfxStatus set(OfxTime time,int x,int y,int z)
 	{
+		if (!node) {
+			value_[0] = x;
+			value_[1] = y;
+			value_[2] = z;
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		const QString name = _descriptor.getName().c_str();
 		Node::SetValueAtTime(NodeInput(node.get(), name),
@@ -636,6 +928,8 @@ class StringInstance : public OFX::Host::Param::StringInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	std::string value_;
 public:
 	StringInstance(std::shared_ptr<PluginNode> effect, const std::string& name,
 				   OFX::Host::Param::Descriptor& descriptor)
@@ -647,6 +941,10 @@ public:
 	}
 	OfxStatus get(std::string &data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : std::string();
+			return kOfxStatOK;
+		}
 		QVariant variant = node->GetStandardValue(_descriptor.getName().c_str());
 		if (variant.canConvert<QString>()) {
 			data = variant.toString().toStdString();
@@ -657,6 +955,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, std::string &data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : std::string();
+			return kOfxStatOK;
+		}
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
@@ -669,6 +971,11 @@ public:
 	}
 	OfxStatus set(const char *data)
 	{
+		if (!node) {
+			value_ = data ? data : "";
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		QString v = QString::fromUtf8(data);
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kText, v);
@@ -679,6 +986,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, const char *data)
 	{
+		if (!node) {
+			value_ = data ? data : "";
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),
@@ -692,6 +1004,8 @@ class CustomInstance : public OFX::Host::Param::CustomInstance {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
+	bool has_value_ = false;
+	std::string value_;
 public:
 	CustomInstance(std::shared_ptr<PluginNode> effect, const std::string& name,
 				   OFX::Host::Param::Descriptor& descriptor)
@@ -703,6 +1017,10 @@ public:
 	}
 	OfxStatus get(std::string &data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : std::string();
+			return kOfxStatOK;
+		}
 		QVariant variant = node->GetStandardValue(_descriptor.getName().c_str());
 		if (variant.canConvert<QByteArray>()) {
 			data = variant.toByteArray().toStdString();
@@ -717,6 +1035,10 @@ public:
 	}
 	OfxStatus get(OfxTime time, std::string &data)
 	{
+		if (!node) {
+			data = has_value_ ? value_ : std::string();
+			return kOfxStatOK;
+		}
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
@@ -733,6 +1055,11 @@ public:
 	}
 	OfxStatus set(const char *data)
 	{
+		if (!node) {
+			value_ = data ? data : "";
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		QByteArray v = QByteArray(data);
 		SplitValue split = NodeValue::split_normal_value_into_track_values(
 			NodeValue::kBinary, v);
@@ -743,6 +1070,11 @@ public:
 	}
 	OfxStatus set(OfxTime time, const char *data)
 	{
+		if (!node) {
+			value_ = data ? data : "";
+			has_value_ = true;
+			return kOfxStatOK;
+		}
 		auto command = new MultiUndoCommand();
 		Node::SetValueAtTime(
 			NodeInput(node.get(), _descriptor.getName().c_str()),

@@ -67,7 +67,7 @@ public:
 
 	}
 	explicit OlivePluginInstance(Instance & instance):Instance(instance){};
-	~OlivePluginInstance() override = default;
+	~OlivePluginInstance() override;
 	const std::string &getDefaultOutputFielding() const override;
 
 	void setVideoParam(VideoParams params)
@@ -81,6 +81,10 @@ public:
 	void setOpenGLEnabled(bool enabled)
 	{
 		open_gl_enabled_ = enabled;
+	}
+	bool isCreated() const
+	{
+		return _created;
 	}
 	OFX::Host::ImageEffect::ClipInstance *newClipInstance(
 		OFX::Host::ImageEffect::Instance *plugin,
