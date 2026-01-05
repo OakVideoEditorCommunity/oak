@@ -29,7 +29,6 @@
 #include <QMap>
 #include <any>
 #include <list>
-#include <OpenImageIO/detail/fmt/chrono.h>
 #include <qlist.h>
 namespace olive {
 namespace plugin {
