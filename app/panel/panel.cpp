@@ -25,8 +25,6 @@
 #include <QStyle>
 #include <QStyleOption>
 #include <QVariant>
-#include "Window_p.h"
-
 #include "panel/panelmanager.h"
 
 #include <OpenImageIO/hash.h>
