@@ -186,6 +186,7 @@ private:
 	struct AudioCacheData {
 		RenderJobTracker job_tracker;
 		TimeRangeList needs_conform;
+		ViewerOutput *context = nullptr;
 	};
 
 	std::list<VideoJob> pending_video_jobs_;

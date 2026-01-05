@@ -211,6 +211,9 @@ namespace OFX {
         OFX::Host::Property::Set inarg(inargspec);
 
         PluginHandle *ph = getPluginHandle();
+        if (!ph) {
+          return nullptr;
+        }
         std::unique_ptr<ImageEffect::Descriptor> newContext( gImageEffectHost->makeDescriptor(getDescriptor(), this));
 
         OfxStatus stat;
@@ -238,7 +241,10 @@ namespace OFX {
         /// (not because we are expecting the results to change, but because plugin
         /// might get confused otherwise), then a describe_in_context
 
-        getPluginHandle();
+        PluginHandle *ph = getPluginHandle();
+        if (!ph) {
+          return nullptr;
+        }
 
         Descriptor *desc = getContext(context);
         
@@ -322,7 +328,16 @@ namespace OFX {
 
       /// whether we support this plugin.  
       bool PluginCache::pluginSupported(OFX::Host::Plugin *p, std::string &reason) const {
-        return gImageEffectHost->pluginSupported(dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin *>(p), reason);
+        if (!gImageEffectHost) {
+          reason = "host not initialized";
+          return false;
+        }
+        auto *plugin = dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin *>(p);
+        if (!plugin) {
+          reason = "not an image effect plugin";
+          return false;
+        }
+        return gImageEffectHost->pluginSupported(plugin, reason);
       }
 
       /// get the plugin by label.  vermaj and vermin can be specified.  if they are not it will
@@ -589,4 +604,3 @@ namespace OFX {
   } // Host
 
 } // OFX
-

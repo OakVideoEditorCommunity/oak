@@ -88,7 +88,6 @@ void NodeFactory::Initialize()
 		library_.append(created_node);
 	}
 
-	olive::plugin::loadPlugins(QString());
 	RegisterPluginNodes();
 
 }
@@ -237,9 +236,13 @@ void NodeFactory::RegisterPluginNodes()
 		}
 
 		const auto &contexts = image_effect->getContexts();
+		if (contexts.empty()) {
+			qWarning() << "Skipping OFX plugin with no contexts:"
+					   << plugin_id;
+			continue;
+		}
 		std::string context = kOfxImageEffectContextFilter;
-		if (!contexts.empty() &&
-			contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
+		if (contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
 			context = *contexts.begin();
 		}
 

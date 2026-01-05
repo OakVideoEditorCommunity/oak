@@ -287,9 +287,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (!no_plugin->IsSet()) {
-		olive::plugin::loadPlugins("plugins");
-	}
+	const bool load_plugins = !no_plugin->IsSet();
 
 	if (crash_option->IsSet()) {
 		startup_params.set_crash_on_startup(true);
@@ -339,6 +337,10 @@ int main(int argc, char *argv[])
 
 	if (auto *gui_app = qobject_cast<QGuiApplication *>(a.get())) {
 		gui_app->setWindowIcon(QIcon(QStringLiteral(":/graphics/oak-logo.png")));
+	}
+
+	if (load_plugins) {
+		olive::plugin::loadPlugins("plugins");
 	}
 
 #ifdef _WIN32

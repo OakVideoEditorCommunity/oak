@@ -393,8 +393,9 @@ void PreviewAutoCacher::StartCachingAudioRange(ViewerOutput *context,
 	cache->ClearRequestRange(range);
 
 	pending_audio_jobs_.push_back({ node, context, cache, range });
-	audio_cache_data_[cache].job_tracker.insert(range,
-												copier_->GetGraphChangeTime());
+	AudioCacheData &data = audio_cache_data_[cache];
+	data.context = context;
+	data.job_tracker.insert(range, copier_->GetGraphChangeTime());
 	TryRender();
 }
 
@@ -675,6 +676,15 @@ RenderTicketPtr PreviewAutoCacher::RenderAudio(Node *node,
 	running_audio_tasks_.append(watcher);
 
 	AudioParams p = context->GetAudioParams();
+	const bool invalid_params =
+		(p.sample_rate() <= 0 || p.channel_count() <= 0);
+	if (invalid_params) {
+		AudioParams fallback(
+			OLIVE_CONFIG("DefaultSequenceAudioFrequency").toInt(),
+			OLIVE_CONFIG("DefaultSequenceAudioLayout").toULongLong(),
+			ViewerOutput::kDefaultSampleFormat);
+		p = fallback;
+	}
 	p.set_format(ViewerOutput::kDefaultSampleFormat);
 
 	RenderManager::RenderAudioParams rap(node, r, p, RenderMode::kOffline);
@@ -692,13 +702,17 @@ void PreviewAutoCacher::ConformFinished()
 	// Got an audio conform, requeue all the audio currently needing a conform
 	last_conform_task_.Acquire();
 
-	qDebug() << "CONFORM RESPONSE TEMPORARILY DISABLED";
-	/*for (auto it=audio_cache_data_.begin(); it!=audio_cache_data_.end(); it++) {
-    foreach (const TimeRange &range, it.value().needs_conform) {
-      it.key()->Request(range);
-    }
-    it.value().needs_conform.clear();
-  }*/
+	for (auto it = audio_cache_data_.begin(); it != audio_cache_data_.end();
+		 it++) {
+		if (!it.key() || !it.value().context) {
+			continue;
+		}
+
+		for (const TimeRange &range : it.value().needs_conform) {
+			it.key()->Request(it.value().context, range);
+		}
+		it.value().needs_conform.clear();
+	}
 }
 
 void PreviewAutoCacher::CacheProxyTaskCancelled()

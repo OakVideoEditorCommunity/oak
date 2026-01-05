@@ -53,6 +53,14 @@ public:
 	bool pluginSupported(OFX::Host::ImageEffect::ImageEffectPlugin *plugin,
 		std::string &reason) const override
 	{
+		if (!plugin) {
+			reason = "null plugin";
+			return false;
+		}
+		if (plugin->getContexts().empty()) {
+			reason = "no supported contexts (describe failed)";
+			return false;
+		}
 		return true;
 	};
 

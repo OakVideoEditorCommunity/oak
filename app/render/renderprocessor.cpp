@@ -28,6 +28,8 @@
 #include "node/block/transition/transition.h"
 #include "node/project.h"
 #include "rendermanager.h"
+#include "render/opengl/openglrenderer.h"
+#include "render/plugin/pluginrenderer.h"
 #include "pluginSupport/OliveClip.h"
 #include "pluginSupport/OliveHost.h"
 
@@ -604,6 +606,44 @@ void RenderProcessor::ProcessFrameGeneration(TexturePtr destination,
 	node->GenerateFrame(frame, *job);
 
 	destination->Upload(frame->data(), frame->linesize_pixels());
+}
+
+TexturePtr RenderProcessor::ProcessPluginJob(TexturePtr texture,
+											 TexturePtr destination,
+											 const Node *node)
+{
+	(void)node;
+
+	if (!render_ctx_ || !texture || !destination) {
+		return destination;
+	}
+
+	auto *plugin_job =
+		dynamic_cast<plugin::PluginJob *>(texture->job());
+	if (!plugin_job) {
+		return destination;
+	}
+
+	if (!plugin_renderer_) {
+		auto *gl = dynamic_cast<OpenGLRenderer *>(render_ctx_);
+		if (!gl || !gl->context()) {
+			return destination;
+		}
+
+		plugin_renderer_ = std::make_unique<plugin::PluginRenderer>();
+		plugin_renderer_->Init(gl->context());
+		plugin_renderer_->PostInit();
+	}
+
+	plugin_renderer_->RenderPlugin(
+		texture,
+		*plugin_job,
+		destination.get(),
+		destination->params(),
+		true,
+		false);
+
+	return destination;
 }
 
 TexturePtr RenderProcessor::ProcessVideoCacheJob(const CacheJob *val)

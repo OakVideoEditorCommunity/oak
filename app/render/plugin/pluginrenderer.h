@@ -44,8 +44,7 @@ public:
 	virtual ~PluginRenderer() override{};
 	void AttachOutputTexture(olive::Texture *texture);
 	void DetachOutputTexture();
-protected:
-	virtual void RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
+	void RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
 					  olive::Texture *destination,
 					  olive::VideoParams destination_params,
 					  bool clear_destination, bool interactive);

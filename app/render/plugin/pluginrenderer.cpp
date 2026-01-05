@@ -296,17 +296,6 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	if (olive_instance) {
 		olive_instance->setOpenGLEnabled(use_opengl);
 	}
-	OfxStatus stat;
-	stat = instance->createInstanceAction();
-	if(stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
-		return;
-	}
-	// now we need to to call getClipPreferences on the instance so that it does the clip component/depth
-	// logic and caches away the components and depth on each clip.
-	bool ok = instance->getClipPreferences();
-	if (!ok) {
-		return;
-	}
 
 	// current render scale of 1
 	OfxPointD renderScale;
@@ -334,37 +323,22 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 
 
 	int numFramesToRender=1;
-	stat = instance->beginRenderAction(0, numFramesToRender,
-		1.0, false, renderScale, true,
-		interactive);
-	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
-		return;
-	}
-
-#ifdef OFX_SUPPORTS_OPENGLRENDER
-	if (use_opengl) {
-		instance->contextAttachedAction();
-		AttachOutputTexture(destination);
-	}
-#endif
 
 	OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
 	if (!clip) {
-#ifdef OFX_SUPPORTS_OPENGLRENDER
-		if (use_opengl) {
-			DetachOutputTexture();
-			instance->contextDetachedAction();
-		}
-#endif
-		instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
-								  );
+		return;
+	}
+	clip->setParams(destination_params);
+
+	OfxStatus stat;
+	stat = instance->createInstanceAction();
+	if(stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
 		return;
 	}
 
 	// call get region of interest on each of the inputs
 	OfxTime frame = 0;
 
-	clip->setParams(destination_params);
 	clip->setRegionOfDefinition(regionOfDefinition, frame);
 	clip->setOutputTexture(destination, frame);
 
@@ -388,6 +362,27 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			}
 		}
 	}
+
+	// now we need to call getClipPreferences on the instance so that it does
+	// the clip component/depth logic and caches away the components and depth.
+	bool ok = instance->getClipPreferences();
+	if (!ok) {
+		return;
+	}
+
+	stat = instance->beginRenderAction(0, numFramesToRender,
+		1.0, false, renderScale, true,
+		interactive);
+	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
+		return;
+	}
+
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	if (use_opengl) {
+		instance->contextAttachedAction();
+		AttachOutputTexture(destination);
+	}
+#endif
 	// get the RoI for each input clip
 	// the regions of interest for each input clip are returned in a std::map
 	// on a real host, these will be the regions of each input clip that the

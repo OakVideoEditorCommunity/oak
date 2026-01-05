@@ -140,6 +140,11 @@ Decoder::RetrieveAudio(SampleBuffer &dest, const TimeRange &range,
 		return kInvalid;
 	}
 
+	if (params.sample_rate() <= 0 || params.channel_count() <= 0) {
+		qWarning() << "Invalid audio parameters, skipping audio retrieve";
+		return kInvalid;
+	}
+
 	// Get conform state from ConformManager
 	ConformManager::Conform conform =
 		ConformManager::instance()->GetConformState(

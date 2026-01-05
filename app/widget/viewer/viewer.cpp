@@ -571,10 +571,14 @@ void ViewerWidget::UpdateAudioProcessor()
 		CloseAudioProcessor();
 
 		AudioParams ap = GetConnectedNode()->GetAudioParams();
+		if (ap.sample_rate() <= 0 || ap.channel_count() <= 0) {
+			ap = AudioParams(
+				OLIVE_CONFIG("DefaultSequenceAudioFrequency").toInt(),
+				OLIVE_CONFIG("DefaultSequenceAudioLayout").toULongLong(),
+				ViewerOutput::kDefaultSampleFormat);
+		}
 		ap.set_format(ViewerOutput::kDefaultSampleFormat);
 
-		uint64_t layout =
-			OLIVE_CONFIG("AudioOutputChannelLayout").toULongLong();
 		AudioParams packed(
 			OLIVE_CONFIG("AudioOutputSampleRate").toInt(),
 			OLIVE_CONFIG("AudioOutputChannelLayout").toULongLong(),

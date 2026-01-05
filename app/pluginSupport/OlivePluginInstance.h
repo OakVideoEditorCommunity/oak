@@ -53,7 +53,8 @@ public:
 	{
 	}
 	OlivePluginInstance(OlivePluginInstance& instance)
-		: Instance(_plugin, *_descriptor, _context, _interactive)
+		: Instance(instance._plugin, *instance._descriptor, instance._context,
+				   instance._interactive)
 	{
 		_clips=instance._clips;
 		_created=instance._created;

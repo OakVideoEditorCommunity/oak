@@ -124,7 +124,15 @@ const std::string &olive::plugin::OliveClipInstance::getFieldOrder() const
 }
 bool olive::plugin::OliveClipInstance::getConnected() const
 {
-	return params_.format() == PixelFormat::INVALID;
+	if (name_ == kOfxImageEffectOutputClipName) {
+		return true;
+	}
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+	if (!input_textures_.isEmpty()) {
+		return true;
+	}
+#endif
+	return !images_.isEmpty();
 }
 double olive::plugin::OliveClipInstance::getUnmappedFrameRate() const
 {

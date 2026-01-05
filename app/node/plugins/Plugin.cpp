@@ -20,6 +20,7 @@
 
 #include "render/rendermanager.h"
 #include "render/job/pluginjob.h"
+#include "pluginSupport/OlivePluginInstance.h"
 static QString ClipLabelForName(const std::string &name,
 								const OFX::Host::ImageEffect::ClipDescriptor *desc)
 {
@@ -222,22 +223,30 @@ QString olive::plugin::PluginNode::id() const
 	return plugin->getIdentifier().data();
 }
 
-olive::Node *olive::plugin::PluginNode::copy() const
-{
-	auto *node = new PluginNode(new OlivePluginInstance(*plugin_instance_));
-	if (!plugin_instance_) {
-		return node;
-	}
+	olive::Node *olive::plugin::PluginNode::copy() const
+	{
+		if (!plugin_instance_) {
+			return nullptr;
+		}
 
-	const auto &contexts = plugin_instance_->getPlugin()->getContexts();
-	std::string context = kOfxImageEffectContextFilter;
-	if (!contexts.empty()) {
-		if (contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
+		const auto &contexts = plugin_instance_->getPlugin()->getContexts();
+		std::string context = kOfxImageEffectContextFilter;
+		if (!contexts.empty() &&
+			contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
 			context = *contexts.begin();
 		}
-	}
 
-	node->setPluginInstance(
-		plugin_instance_->getPlugin()->createInstance(context, node));
-	return node;
-}
+		auto *instance =
+			plugin_instance_->getPlugin()->createInstance(context, nullptr);
+		if (!instance) {
+			return nullptr;
+		}
+
+		auto *node = new PluginNode(instance);
+		if (auto *olive_instance =
+				dynamic_cast<OlivePluginInstance *>(instance)) {
+			olive_instance->setNode(
+				std::shared_ptr<PluginNode>(node, [](PluginNode *) {}));
+		}
+		return node;
+	}

@@ -71,15 +71,20 @@ void AddPluginPathsFromEnv(OFX::Host::PluginCache *cache, const char *env_var)
 
 void olive::plugin::loadPlugins(QString path)
 {
-	std::shared_ptr<OliveHost> host = std::make_shared<OliveHost>();
-	Current::getInstance().setPluginHost(host);
-
+	std::shared_ptr<OliveHost> host = Current::getInstance().pluginHost();
 	std::shared_ptr<ImageEffect::PluginCache> imageEffectPluginCache =
-		std::make_shared<ImageEffect::PluginCache>(*host);
-	Current::getInstance().setPluginCache(imageEffectPluginCache);
+		Current::getInstance().pluginCache();
 
-	imageEffectPluginCache->registerInCache(
-		*OFX::Host::PluginCache::getPluginCache());
+	if (!host || !imageEffectPluginCache) {
+		host = std::make_shared<OliveHost>();
+		Current::getInstance().setPluginHost(host);
+
+		imageEffectPluginCache = std::make_shared<ImageEffect::PluginCache>(*host);
+		Current::getInstance().setPluginCache(imageEffectPluginCache);
+
+		imageEffectPluginCache->registerInCache(
+			*OFX::Host::PluginCache::getPluginCache());
+	}
 	OFX::Host::PluginCache *cache = OFX::Host::PluginCache::getPluginCache();
 	cache->setPluginHostPath("Olive");
 

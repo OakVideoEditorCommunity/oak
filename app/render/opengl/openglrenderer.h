@@ -68,6 +68,11 @@ public:
 	virtual Color GetPixelFromTexture(olive::Texture *texture,
 									  const QPointF &pt) override;
 
+	QOpenGLContext *context() const
+	{
+		return context_;
+	}
+
 protected:
 	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
 					  olive::Texture *destination,
