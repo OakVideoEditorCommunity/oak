@@ -638,7 +638,7 @@ TexturePtr RenderProcessor::ProcessPluginJob(TexturePtr texture,
 	plugin_renderer_->RenderPlugin(
 		texture,
 		*plugin_job,
-		destination.get(),
+		destination,
 		destination->params(),
 		true,
 		false);

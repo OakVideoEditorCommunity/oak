@@ -35,9 +35,11 @@
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 #include <QOpenGLFunctions>
 #endif
-
+#include "common/ffmpegutils.h"
+#include "render/renderer.h"
 extern "C" {
 #include <libswscale/swscale.h>
+#include <libavutil/pixdesc.h>
 }
 namespace {
 const std::string kBitDepthNoneStr(kOfxBitDepthNone);
@@ -54,6 +56,239 @@ const std::string kImageUnPremultStr(kOfxImageUnPreMultiplied);
 const std::string kImageFieldNoneStr(kOfxImageFieldNone);
 const std::string kImageFieldUpperStr(kOfxImageFieldUpper);
 const std::string kImageFieldLowerStr(kOfxImageFieldLower);
+
+static int BytesToPixels(int byte_linesize, const olive::VideoParams &params)
+{
+	const int bytes_per_pixel =
+		params.channel_count() * params.format().byte_count();
+	if (bytes_per_pixel <= 0) {
+		return 0;
+	}
+	return byte_linesize / bytes_per_pixel;
+}
+
+static int PackedFloatChannels(AVPixelFormat fmt)
+{
+	switch (fmt) {
+	case AV_PIX_FMT_GRAYF32LE:
+	case AV_PIX_FMT_GRAYF32BE:
+		return 1;
+	case AV_PIX_FMT_RGBF32LE:
+	case AV_PIX_FMT_RGBF32BE:
+		return 3;
+	case AV_PIX_FMT_RGBAF32LE:
+	case AV_PIX_FMT_RGBAF32BE:
+		return 4;
+	default:
+		return 0;
+	}
+}
+
+static bool PackedDstInfo(AVPixelFormat fmt, int *channels,
+						  int *bytes_per_component)
+{
+	switch (fmt) {
+	case AV_PIX_FMT_GRAY8:
+		*channels = 1;
+		*bytes_per_component = 1;
+		return true;
+	case AV_PIX_FMT_RGB24:
+		*channels = 3;
+		*bytes_per_component = 1;
+		return true;
+	case AV_PIX_FMT_RGBA:
+		*channels = 4;
+		*bytes_per_component = 1;
+		return true;
+	case AV_PIX_FMT_GRAY16LE:
+		*channels = 1;
+		*bytes_per_component = 2;
+		return true;
+	case AV_PIX_FMT_RGB48LE:
+		*channels = 3;
+		*bytes_per_component = 2;
+		return true;
+	case AV_PIX_FMT_RGBA64LE:
+		*channels = 4;
+		*bytes_per_component = 2;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static olive::AVFramePtr ReadbackTextureToFrame(olive::TexturePtr texture,
+												const olive::VideoParams &params)
+{
+	if (!texture || texture->IsDummy() || !texture->renderer()) {
+		return nullptr;
+	}
+
+	AVPixelFormat pix_fmt =
+		olive::FFmpegUtils::GetFFmpegPixelFormat(params.format(),
+										  params.channel_count());
+	if (pix_fmt == AV_PIX_FMT_NONE) {
+		return nullptr;
+	}
+
+	const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+	if (!desc) {
+		return nullptr;
+	}
+
+	if (!(desc->flags & AV_PIX_FMT_FLAG_PLANAR)) {
+		olive::AVFramePtr frame = olive::CreateAVFramePtr();
+		frame->format = pix_fmt;
+		frame->width = params.width();
+		frame->height = params.height();
+		if (av_frame_get_buffer(frame.get(), 0) < 0) {
+			return nullptr;
+		}
+		const int linesize_pixels = BytesToPixels(frame->linesize[0], params);
+		texture->renderer()->DownloadFromTexture(texture->id(), params,
+												 frame->data[0],
+												 linesize_pixels);
+		return frame;
+	}
+
+	olive::VideoParams rgba_params(
+		params.width(), params.height(), olive::core::PixelFormat::U8, 4,
+		params.pixel_aspect_ratio(), params.interlacing(), params.divider());
+
+	olive::AVFramePtr rgba_frame = olive::CreateAVFramePtr();
+	rgba_frame->format = AV_PIX_FMT_RGBA;
+	rgba_frame->width = params.width();
+	rgba_frame->height = params.height();
+	if (av_frame_get_buffer(rgba_frame.get(), 0) < 0) {
+		return nullptr;
+	}
+
+	const int linesize_pixels =
+		BytesToPixels(rgba_frame->linesize[0], rgba_params);
+	texture->renderer()->DownloadFromTexture(texture->id(), rgba_params,
+											 rgba_frame->data[0],
+											 linesize_pixels);
+
+	olive::AVFramePtr dst = olive::CreateAVFramePtr();
+	dst->format = pix_fmt;
+	dst->width = params.width();
+	dst->height = params.height();
+	if (av_frame_get_buffer(dst.get(), 0) < 0) {
+		return rgba_frame;
+	}
+
+	SwsContext *sws_ctx = sws_getContext(
+		rgba_frame->width, rgba_frame->height,
+		static_cast<AVPixelFormat>(rgba_frame->format),
+		dst->width, dst->height, pix_fmt, SWS_POINT,
+		nullptr, nullptr, nullptr);
+	if (!sws_ctx) {
+		return rgba_frame;
+	}
+
+	sws_scale(sws_ctx, rgba_frame->data, rgba_frame->linesize, 0,
+			  rgba_frame->height, dst->data, dst->linesize);
+	sws_freeContext(sws_ctx);
+	return dst;
+}
+
+static olive::AVFramePtr ConvertPackedFloatFrame(olive::AVFramePtr src,
+												 AVPixelFormat dst_fmt)
+{
+	if (!src || !src->data[0]) {
+		return nullptr;
+	}
+	const int src_channels =
+		PackedFloatChannels(static_cast<AVPixelFormat>(src->format));
+	if (src_channels == 0) {
+		return nullptr;
+	}
+
+	int dst_channels = 0;
+	int bytes_per_component = 0;
+	if (!PackedDstInfo(dst_fmt, &dst_channels, &bytes_per_component)) {
+		return nullptr;
+	}
+
+	olive::AVFramePtr dst = olive::CreateAVFramePtr();
+	dst->format = dst_fmt;
+	dst->width = src->width;
+	dst->height = src->height;
+	if (av_frame_get_buffer(dst.get(), 0) < 0) {
+		return nullptr;
+	}
+
+	auto clamp01 = [](float v) -> float {
+		return std::clamp(v, 0.0f, 1.0f);
+	};
+
+	for (int y = 0; y < src->height; ++y) {
+		const float *src_row = reinterpret_cast<const float *>(
+			src->data[0] + y * src->linesize[0]);
+		uint8_t *dst_row = dst->data[0] + y * dst->linesize[0];
+
+		if (bytes_per_component == 2) {
+			auto *dst_row_u16 = reinterpret_cast<uint16_t *>(dst_row);
+			for (int x = 0; x < src->width; ++x) {
+				const float *pix = src_row + x * src_channels;
+				float r = pix[0];
+				float g = (src_channels > 1) ? pix[1] : r;
+				float b = (src_channels > 2) ? pix[2] : r;
+				float a = (src_channels > 3) ? pix[3] : 1.0f;
+				if (dst_channels == 1) {
+					float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+					dst_row_u16[x] = static_cast<uint16_t>(
+						std::lround(clamp01(luma) * 65535.0f));
+					continue;
+				}
+				dst_row_u16[x * dst_channels + 0] =
+					static_cast<uint16_t>(
+						std::lround(clamp01(r) * 65535.0f));
+				dst_row_u16[x * dst_channels + 1] =
+					static_cast<uint16_t>(
+						std::lround(clamp01(g) * 65535.0f));
+				dst_row_u16[x * dst_channels + 2] =
+					static_cast<uint16_t>(
+						std::lround(clamp01(b) * 65535.0f));
+				if (dst_channels == 4) {
+					dst_row_u16[x * dst_channels + 3] =
+						static_cast<uint16_t>(
+							std::lround(clamp01(a) * 65535.0f));
+				}
+			}
+		} else {
+			for (int x = 0; x < src->width; ++x) {
+				const float *pix = src_row + x * src_channels;
+				float r = pix[0];
+				float g = (src_channels > 1) ? pix[1] : r;
+				float b = (src_channels > 2) ? pix[2] : r;
+				float a = (src_channels > 3) ? pix[3] : 1.0f;
+				if (dst_channels == 1) {
+					float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+					dst_row[x] = static_cast<uint8_t>(
+						std::lround(clamp01(luma) * 255.0f));
+					continue;
+				}
+				dst_row[x * dst_channels + 0] =
+					static_cast<uint8_t>(
+						std::lround(clamp01(r) * 255.0f));
+				dst_row[x * dst_channels + 1] =
+					static_cast<uint8_t>(
+						std::lround(clamp01(g) * 255.0f));
+				dst_row[x * dst_channels + 2] =
+					static_cast<uint8_t>(
+						std::lround(clamp01(b) * 255.0f));
+				if (dst_channels == 4) {
+					dst_row[x * dst_channels + 3] =
+						static_cast<uint8_t>(
+							std::lround(clamp01(a) * 255.0f));
+				}
+			}
+		}
+	}
+
+	return dst;
+}
 }
 
 const std::string &olive::plugin::OliveClipInstance::getUnmappedBitDepth() const
@@ -125,14 +360,29 @@ const std::string &olive::plugin::OliveClipInstance::getFieldOrder() const
 bool olive::plugin::OliveClipInstance::getConnected() const
 {
 	if (name_ == kOfxImageEffectOutputClipName) {
-		return true;
+#ifdef OFX_SUPPORTS_OPENGLRENDER
+		if (!output_textures_.isEmpty()) {
+			return true;
+		}
+#endif
+		for (auto it = images_.cbegin(); it != images_.cend(); ++it) {
+			if (it.value()) {
+				return true;
+			}
+		}
+		return false;
 	}
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	if (!input_textures_.isEmpty()) {
 		return true;
 	}
 #endif
-	return !images_.isEmpty();
+	for (auto it = images_.cbegin(); it != images_.cend(); ++it) {
+		if (it.value()) {
+			return true;
+		}
+	}
+	return false;
 }
 double olive::plugin::OliveClipInstance::getUnmappedFrameRate() const
 {
@@ -227,7 +477,7 @@ OfxRectD
 olive::plugin::OliveClipInstance::getRegionOfDefinition(OfxTime time) const
 {
 	if (regionOfDefinitions_.contains(time)) {
-		return regionOfDefinitions_[time];
+		return regionOfDefinitions_.value(time);
 	}
 	OfxRectD regionOfDefinition;
 	regionOfDefinition.x1 = regionOfDefinition.y1 = 0;
@@ -251,6 +501,7 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 		return;
 	}
 	VideoParams incoming = texture->params();
+	// AI wrote this. Why?
 	if (params_.format() != PixelFormat::INVALID &&
 		params_.channel_count() > 0) {
 		incoming.set_format(params_.format());
@@ -264,7 +515,7 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 
 	AVFramePtr frame = texture->frame();
 	if (!frame || !frame->data[0]) {
-		return;
+		frame = ReadbackTextureToFrame(texture, params_);
 	}
 	AVPixelFormat expected_fmt =
 		FFmpegUtils::GetFFmpegPixelFormat(params_.format(),
@@ -295,10 +546,23 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 		return;
 	}
 
+	if (!frame || !frame->data[0]) {
+		std::memset(dst, 0, image->row_bytes() * image->height());
+		return;
+	}
+
 	AVFramePtr src_frame = frame;
 	if (frame->format != expected_fmt ||
 		frame->width != params_.width() ||
 		frame->height != params_.height()) {
+		if (PackedFloatChannels(static_cast<AVPixelFormat>(frame->format)) > 0) {
+			AVFramePtr converted =
+				ConvertPackedFloatFrame(frame, expected_fmt);
+			if (converted) {
+				src_frame = converted;
+				goto copy_pixels;
+			}
+		}
 		AVFramePtr converted = CreateAVFramePtr();
 		converted->format = expected_fmt;
 		converted->width = params_.width();
@@ -324,6 +588,7 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 		src_frame = converted;
 	}
 
+copy_pixels:
 	int bytes_per_component = params_.format().byte_count();
 	int bytes_per_row = params_.width() * params_.channel_count() *
 						bytes_per_component;
@@ -340,7 +605,7 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 	}
 }
 
-void olive::plugin::OliveClipInstance::setOutputTexture(Texture *texture,
+void olive::plugin::OliveClipInstance::setOutputTexture(TexturePtr texture,
 														OfxTime time)
 {
 #ifdef OFX_SUPPORTS_OPENGLRENDER
@@ -361,12 +626,12 @@ olive::plugin::OliveClipInstance::loadTexture(OfxTime time, const char *format,
 {
 	(void)format;
 
-	Texture *gl_texture = nullptr;
+	TexturePtr gl_texture = nullptr;
 	if (isOutput()) {
 		gl_texture = output_textures_.value(time, nullptr);
 	} else {
 		TexturePtr input = input_textures_.value(time);
-		gl_texture = input ? input.get() : nullptr;
+		gl_texture = input ? input : nullptr;
 	}
 
 	if (!gl_texture || gl_texture->IsDummy() || !gl_texture->id().isValid()) {
@@ -394,7 +659,7 @@ olive::plugin::OliveClipInstance::loadTexture(OfxTime time, const char *format,
 		params_.width() * params_.channel_count() * params_.format().byte_count();
 	const std::string &field = getFieldOrder();
 	const std::string unique_id = std::to_string(
-		reinterpret_cast<uintptr_t>(gl_texture)) + "_" +
+		reinterpret_cast<uintptr_t>(gl_texture.get())) + "_" +
 		std::to_string(static_cast<long long>(time));
 
 	const int texture_id = gl_texture->id().value<GLuint>();

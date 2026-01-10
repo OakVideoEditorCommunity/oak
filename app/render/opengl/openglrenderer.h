@@ -99,6 +99,8 @@ private:
 
 	static GLenum GetPixelFormat(int channel_count);
 
+	bool EnsureContextCurrent(const char *caller);
+
 	void PrepareInputTexture(GLenum target, Texture::Interpolation interp);
 
 	void ClearDestinationInternal(double r = 0.0, double g = 0.0,

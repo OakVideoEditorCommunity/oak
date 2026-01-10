@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include  <ofxhPluginCache.h>
 #include <ofxhBinary.h>
 
@@ -108,14 +109,6 @@ void olive::plugin::loadPlugins(QString path)
 }
 OliveHost::~OliveHost()
 {
-	for(auto& descriptor:descriptors_){
-		delete descriptor;
-		descriptor=nullptr;
-	}
-	for(auto& instance:instances_){
-		delete instance;
-		instance=nullptr;
-	}
 	
 }
 
@@ -124,45 +117,37 @@ void OliveHost::destroyInstance(OFX::Host::ImageEffect::Instance* instance)
 	if (!instance) {
 		return;
 	}
-	if (instances_.contains(instance))
-	{
-		instances_.removeOne(instance);
-		delete instance;
+	for (auto it = instances_.begin(); it != instances_.end(); ++it) {
+		if (it->get() == instance) {
+			instances_.erase(it);
+			break;
+		}
 	}
 }
-ImageEffect::Descriptor *
-OliveHost::makeDescriptor(ImageEffect::ImageEffectPlugin* plugin)
+std::shared_ptr<OFX::Host::ImageEffect::Descriptor>
+OliveHost::makeDescriptor(ImageEffect::ImageEffectPlugin *plugin)
 {
-	ImageEffect::Descriptor* desc = new ImageEffect::Descriptor(plugin);
-#ifdef OFX_SUPPORTS_OPENGLRENDER
-	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
-									   "true");
-#endif
-	descriptors_.append(desc);
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor> desc =
+		std::make_shared<ImageEffect::Descriptor>(plugin);
+	descriptors_.append(std::shared_ptr<ImageEffect::Descriptor>(desc));
 	return desc;
 }
-ImageEffect::Descriptor *
+std::shared_ptr<OFX::Host::ImageEffect::Descriptor>
 OliveHost::makeDescriptor(const ImageEffect::Descriptor &rootContext,
-							ImageEffect::ImageEffectPlugin *plugin)
+						  ImageEffect::ImageEffectPlugin *plugin)
 {
-	ImageEffect::Descriptor* desc =  new ImageEffect::Descriptor(rootContext,plugin);
-#ifdef OFX_SUPPORTS_OPENGLRENDER
-	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
-									   "true");
-#endif
-	descriptors_.append(desc);
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor> desc =
+		std::make_shared<ImageEffect::Descriptor>(rootContext, plugin);
+	descriptors_.append(std::shared_ptr<ImageEffect::Descriptor>(desc));
 	return desc;
 }
-ImageEffect::Descriptor *
+std::shared_ptr<OFX::Host::ImageEffect::Descriptor>
 OliveHost::makeDescriptor(const std::string &bundlePath,
-							ImageEffect::ImageEffectPlugin *plugin)
+						  ImageEffect::ImageEffectPlugin *plugin)
 {
-	ImageEffect::Descriptor* desc =  new ImageEffect::Descriptor(bundlePath, plugin);
-#ifdef OFX_SUPPORTS_OPENGLRENDER
-	desc->getProps().setStringProperty(kOfxImageEffectPropOpenGLRenderSupported,
-									   "true");
-#endif
-	descriptors_.append(desc);
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor> desc =
+		std::make_shared<ImageEffect::Descriptor>(bundlePath, plugin);
+	descriptors_.append(std::shared_ptr<ImageEffect::Descriptor>(desc));
 	return desc;
 }
 
@@ -177,7 +162,7 @@ ImageEffect::Instance* OliveHost::newInstance(void *clientData,
 		instance->setNode(
 			std::shared_ptr<PluginNode>(node, [](PluginNode *) {}));
 	}
-	instances_.append(instance);
+	instances_.append(std::shared_ptr<OlivePluginInstance>(instance));
 	return instance;
 };
 OfxStatus olive::plugin::OliveHost::vmessage(const char *type, const char *id, const char *format,
@@ -217,7 +202,7 @@ OfxStatus olive::plugin::OliveHost::vmessage(const char *type, const char *id, c
 
 	return kOfxStatOK;
 }
-
+// TODO: Persistent messages shouldn't use pop-up window.
 OfxStatus olive::plugin::OliveHost::setPersistentMessage(
 	const char *type, const char *id, const char *format, va_list args)
 {

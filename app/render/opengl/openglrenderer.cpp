@@ -151,8 +151,9 @@ void OpenGLRenderer::DestroyInternal()
 	if (context_) {
 		GL_PREAMBLE;
 
-		// Delete framebuffer
-		functions_->glDeleteFramebuffers(1, &framebuffer_);
+		if (functions_ && framebuffer_) {
+			functions_->glDeleteFramebuffers(1, &framebuffer_);
+		}
 		framebuffer_ = 0;
 
 		// Delete context if it belongs to us
@@ -160,6 +161,7 @@ void OpenGLRenderer::DestroyInternal()
 			delete context_;
 		}
 		context_ = nullptr;
+		functions_ = nullptr;
 	}
 }
 
@@ -335,10 +337,27 @@ void OpenGLRenderer::DownloadFromTexture(const QVariant &id,
 {
 	GL_PREAMBLE;
 
+	if (!EnsureContextCurrent(__FUNCTION__)) {
+		return;
+	}
+
+	GLuint texture_id = id.value<GLuint>();
+	if (!texture_id || !functions_->glIsTexture(texture_id)) {
+		qWarning() << "DownloadFromTexture called with invalid texture";
+		return;
+	}
+
 	GLint current_tex;
 	functions_->glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_tex);
 
 	AttachTextureAsDestination(id);
+
+	GLenum status = functions_->glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE) {
+		qWarning() << "DownloadFromTexture framebuffer incomplete" << status;
+		DetachTextureAsDestination();
+		return;
+	}
 
 	functions_->glPixelStorei(GL_PACK_ROW_LENGTH, linesize);
 
@@ -919,6 +938,41 @@ GLuint OpenGLRenderer::CompileShader(GLenum type, const QString &code)
 	}
 
 	return shader;
+}
+
+bool OpenGLRenderer::EnsureContextCurrent(const char *caller)
+{
+	if (!context_) {
+		qWarning() << caller << "called without an OpenGL context";
+		return false;
+	}
+
+	if (QOpenGLContext::currentContext() != context_) {
+		if (context_->parent() == this && surface_.isValid()) {
+			if (!context_->makeCurrent(&surface_)) {
+				qWarning() << caller << "failed to make context current";
+				return false;
+			}
+		} else {
+			qWarning() << caller << "OpenGL context not current";
+			return false;
+		}
+	}
+
+	if (!functions_) {
+		functions_ = context_->functions();
+	}
+
+	if (!functions_) {
+		qWarning() << caller << "OpenGL functions not available";
+		return false;
+	}
+
+	if (!framebuffer_) {
+		functions_->glGenFramebuffers(1, &framebuffer_);
+	}
+
+	return true;
 }
 
 }

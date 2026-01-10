@@ -34,10 +34,10 @@
 
         // this comes off Descriptor's property set after a describe
         // context independent
-        Descriptor *_baseDescriptor; /// NEEDS TO BE MADE WITH A FACTORY FUNCTION ON THE HOST!!!!!!
+        std::shared_ptr<Descriptor> _baseDescriptor; /// NEEDS TO BE MADE WITH A FACTORY FUNCTION ON THE HOST!!!!!!
         
         /// map to store contexts in
-        std::map<std::string, std::unique_ptr<Descriptor>> _contexts;
+        std::map<std::string, std::shared_ptr<Descriptor>> _contexts;
 
         mutable std::set<std::string> _knownContexts;
         mutable bool _madeKnownContexts;
@@ -75,7 +75,7 @@
         Descriptor *getContext(const std::string &context);
 
         void addContext(const std::string &context);
-        void addContext(const std::string &context, std::unique_ptr<Descriptor> ied);
+        void addContext(const std::string &context, std::shared_ptr<Descriptor> ied);
 
         virtual void saveXML(std::ostream &os);
 

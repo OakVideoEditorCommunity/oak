@@ -29,6 +29,7 @@
 #include <QMap>
 #include <any>
 #include <list>
+#include <memory>
 #include <qlist.h>
 namespace olive {
 namespace plugin {
@@ -70,16 +71,16 @@ public:
 							const std::string& context) override;
 
 
-	OFX::Host::ImageEffect::Descriptor *makeDescriptor(
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor> makeDescriptor(
 		OFX::Host::ImageEffect::ImageEffectPlugin* plugin) override;
 
-	OFX::Host::ImageEffect::Descriptor *makeDescriptor(
-		const OFX::Host::ImageEffect::Descriptor &rootContext,
-		OFX::Host::ImageEffect::ImageEffectPlugin *plugin) override;
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor>
+	makeDescriptor(const OFX::Host::ImageEffect::Descriptor &rootContext,
+				   OFX::Host::ImageEffect::ImageEffectPlugin *plugin) override;
 
-	OFX::Host::ImageEffect::Descriptor *makeDescriptor(
-		const std::string &bundlePath,
-		OFX::Host::ImageEffect::ImageEffectPlugin *plugin) override;
+	std::shared_ptr<OFX::Host::ImageEffect::Descriptor>
+	makeDescriptor(const std::string &bundlePath,
+				   OFX::Host::ImageEffect::ImageEffectPlugin *plugin) override;
 	/// vmessage
 	virtual OfxStatus vmessage(const char *type, const char *id,
 							   const char *format, va_list args);
@@ -98,8 +99,8 @@ public:
 	};
 #endif
 private:
-	QList<OFX::Host::ImageEffect::Descriptor*> descriptors_;
-	QList<OFX::Host::ImageEffect::Instance*> instances_;
+	QList<std::shared_ptr<OFX::Host::ImageEffect::Descriptor>> descriptors_;
+	QList<std::shared_ptr<OFX::Host::ImageEffect::Instance>> instances_;
 	QList<HostPersistentMessage> persistent_messages_;
 };
 }

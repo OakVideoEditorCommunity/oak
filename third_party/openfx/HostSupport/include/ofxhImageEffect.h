@@ -78,13 +78,13 @@ namespace OFX {
         virtual bool pluginSupported(ImageEffectPlugin *plugin, std::string &reason) const;
 
         /// Override this to create a descriptor, this makes the 'root' descriptor
-        virtual Descriptor *makeDescriptor(ImageEffectPlugin* plugin) = 0;
+        virtual std::shared_ptr<Descriptor> makeDescriptor(ImageEffectPlugin* plugin) = 0;
 
         /// used to construct a context description, rootContext is the main context
-        virtual Descriptor *makeDescriptor(const Descriptor &rootContext, ImageEffectPlugin *plug) = 0;        
+        virtual std::shared_ptr<Descriptor> makeDescriptor(const Descriptor &rootContext, ImageEffectPlugin *plug) = 0;        
 
         /// used to construct populate the cache
-        virtual Descriptor *makeDescriptor(const std::string &bundlePath, ImageEffectPlugin *plug) = 0;
+        virtual std::shared_ptr<Descriptor> makeDescriptor(const std::string &bundlePath, ImageEffectPlugin *plug) = 0;
 
         /// Override this to initialise an image effect descriptor after it has been
         /// created.

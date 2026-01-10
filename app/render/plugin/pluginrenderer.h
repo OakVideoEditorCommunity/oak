@@ -37,15 +37,18 @@
 namespace olive
 {
 namespace plugin{
+namespace detail {
+int BytesToPixels(int byte_linesize, const olive::VideoParams &params);
+}
 class PluginRenderer : public olive::OpenGLRenderer{
 	Q_OBJECT
 public:
 	PluginRenderer(QObject *parent=nullptr):OpenGLRenderer(parent){};
 	virtual ~PluginRenderer() override{};
-	void AttachOutputTexture(olive::Texture *texture);
+	void AttachOutputTexture(olive::TexturePtr texture);
 	void DetachOutputTexture();
 	void RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
-					  olive::Texture *destination,
+					  olive::TexturePtr destination,
 					  olive::VideoParams destination_params,
 					  bool clear_destination, bool interactive);
 

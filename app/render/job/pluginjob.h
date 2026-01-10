@@ -21,6 +21,7 @@
 #define PLUGINJOB_H
 #include "acceleratedjob.h"
 #include "pluginSupport/OlivePluginInstance.h"
+#include "olive/core/util/rational.h"
 
 #include <any>
 #include <chrono>
@@ -31,12 +32,19 @@ namespace plugin {
 class PluginJob :public AcceleratedJob{
 public:
 	explicit PluginJob(const OFX::Host::ImageEffect::Instance* pluginInstance,
-					   const PluginNode* node, NodeValueRow row)
+					   const PluginNode* node, NodeValueRow row,
+					   const olive::core::rational &time)
 		: AcceleratedJob()
+		, time_seconds_(time.toDouble())
 	{
 		this->pluginInstance_ = pluginInstance;
 		this->node_=node;
 		Insert(row);
+	}
+	explicit PluginJob(const OFX::Host::ImageEffect::Instance* pluginInstance,
+					   const PluginNode* node, NodeValueRow row)
+		: PluginJob(pluginInstance, node, row, olive::core::rational(0))
+	{
 	}
 
 	PluginNode *node() const {
@@ -47,6 +55,10 @@ public:
 		return const_cast<OFX::Host::ImageEffect::Instance*>(pluginInstance_);
 	}
 
+	double time_seconds() const {
+		return time_seconds_;
+	}
+
 private:
 	const OFX::Host::ImageEffect::Instance *pluginInstance_=nullptr;
 
@@ -55,6 +67,7 @@ private:
 	QHash<QString, std::any> params;
 
 	const PluginNode *node_=nullptr;
+	double time_seconds_ = 0.0;
 };
 
 } // plugin

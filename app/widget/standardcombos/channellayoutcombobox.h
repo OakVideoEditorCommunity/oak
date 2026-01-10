@@ -59,16 +59,7 @@ public:
 			}
 		}
 	}
-	void SetChannelLayout(AVChannelLayout &ch)
-	{
-		for (int i = 0; i < this->count(); i++) {
-			if (this->itemData(i).toULongLong() == ch.u.mask) {
-				this->setCurrentIndex(i);
-				break;
-			}
-		}
-	}
-	void SetChannelLayout(AVChannelLayout &&ch)
+	void SetChannelLayout(const AVChannelLayout &ch)
 	{
 		for (int i = 0; i < this->count(); i++) {
 			if (this->itemData(i).toULongLong() == ch.u.mask) {

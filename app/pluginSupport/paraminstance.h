@@ -65,8 +65,10 @@ protected:
 	int value_ = 0;
 public:
 	IntegerInstance(std::shared_ptr<PluginNode>node, OFX::Host::Param::Descriptor &descriptor)
-						: _node(node), _descriptor(descriptor),
-						OFX::Host::Param::IntegerInstance(_descriptor){}
+		: OFX::Host::Param::IntegerInstance(descriptor)
+		, _node(node)
+		, _descriptor(descriptor)
+	{}
 	OfxStatus get(int &a)
 	{
 		if (!_node) {

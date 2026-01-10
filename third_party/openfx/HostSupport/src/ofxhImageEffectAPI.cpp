@@ -2,6 +2,7 @@
 
 #include <assert.h>
 
+#include <memory>
 #include <string>
 #include <map>
 #include <ctype.h>
@@ -83,7 +84,6 @@ namespace OFX {
           } CatchAllSetStatus(stat, gImageEffectHost, op, kOfxActionUnload);
           (void)stat;
         }
-        delete _baseDescriptor;
       }
 
       APICache::PluginAPICacheI &ImageEffectPlugin::getApiHandler()
@@ -102,9 +102,9 @@ namespace OFX {
         return *_baseDescriptor;
       }
 
-      void ImageEffectPlugin::addContext(const std::string &context, std::unique_ptr<Descriptor> ied)
+      void ImageEffectPlugin::addContext(const std::string &context, std::shared_ptr<Descriptor> ied)
       {
-        _contexts[context] = std::move(ied);
+        _contexts[context] = ied;
         _knownContexts.insert(context);
         _madeKnownContexts = true;
       }
@@ -190,7 +190,7 @@ namespace OFX {
 
       Descriptor *ImageEffectPlugin::getContext(const std::string &context) 
       {
-        std::map<std::string, std::unique_ptr<Descriptor>>::iterator it = _contexts.find(context);
+        std::map<std::string, std::shared_ptr<Descriptor>>::iterator it = _contexts.find(context);
 
         if (it != _contexts.end()) {
           //printf("found context description.\n");
@@ -214,7 +214,7 @@ namespace OFX {
         if (!ph) {
           return nullptr;
         }
-        std::unique_ptr<ImageEffect::Descriptor> newContext( gImageEffectHost->makeDescriptor(getDescriptor(), this));
+        std::shared_ptr<ImageEffect::Descriptor> newContext( gImageEffectHost->makeDescriptor(getDescriptor(), this));
 
         OfxStatus stat;
         try {
@@ -463,9 +463,9 @@ namespace OFX {
         }
 
         if (el == "context") {
-          std::unique_ptr<Descriptor> newContext(gImageEffectHost->makeDescriptor(_currentPlugin->getBinary()->getBundlePath(), _currentPlugin));
+          std::shared_ptr<Descriptor> newContext = gImageEffectHost->makeDescriptor(_currentPlugin->getBinary()->getBundlePath(), _currentPlugin);
           _currentContext = newContext.get();
-          _currentPlugin->addContext(map["name"], std::move(newContext));
+          _currentPlugin->addContext(map["name"], newContext);
           return;
         }
 

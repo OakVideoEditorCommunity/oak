@@ -122,7 +122,24 @@ olive::plugin::PluginNode::PluginNode(
 		}
 
 		const QString input_id = QString::fromStdString(param.second->getName());
+		if (input_id.isEmpty()) {
+			continue;
+		}
+		const auto &props = param.second->getProperties();
+		if (props.getIntProperty(kOfxParamPropSecret) != 0) {
+			continue;
+		}
+		if (type == NodeValue::kNone) {
+			continue;
+		}
 		AddInput(input_id, type);
+		const QString label =
+			QString::fromStdString(param.second->getLabel());
+		if (!label.isEmpty()) {
+			SetInputName(input_id, label);
+		} else {
+			SetInputName(input_id, input_id);
+		}
 		const QString parent =
 			QString::fromStdString(param.second->getParentName());
 		if (!parent.isEmpty()) {
@@ -209,7 +226,7 @@ void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 		}
 	}
 	if (tex && plugin_instance_) {
-		PluginJob job(plugin_instance_, this, value);
+		PluginJob job(plugin_instance_, this, value, globals.time().in());
 		table->Push(NodeValue::kTexture, tex->toJob(job), this);
 	}
 }

@@ -73,7 +73,7 @@ public:
 #   endif
 
 	void setInputTexture(TexturePtr texture, OfxTime time);
-	void setOutputTexture(Texture *texture, OfxTime time);
+	void setOutputTexture(TexturePtr texture, OfxTime time);
 
 private:
 	VideoParams params_;
@@ -86,7 +86,7 @@ private:
 	QMap<OfxTime,std::shared_ptr<Image>> images_;
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	QMap<OfxTime, TexturePtr> input_textures_;
-	QMap<OfxTime, Texture *> output_textures_;
+	QMap<OfxTime, TexturePtr> output_textures_;
 #endif
 };
 }

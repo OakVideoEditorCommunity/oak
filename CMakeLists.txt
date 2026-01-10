@@ -22,6 +22,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -g")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -g")
 set(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=memory)
 endif ()
+
+
+set(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} -DOFX_SUPPORTS_OPENGLRENDER)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DOFX_SUPPORTS_OPENGLRENDER")
 option(BUILD_QT6 "Build with Qt 6 over 5 (experimental)" ON)
 option(BUILD_DOXYGEN "Build Doxygen documentation" OFF)
 option(BUILD_TESTS "Build unit tests" OFF)
@@ -55,6 +59,7 @@ if(MSVC)
     /external:W0
     "$<$<CONFIG:RELEASE>:/O2>"
     "$<$<COMPILE_LANGUAGE:CXX>:/MP>"
+    /DOFX_SUPPORTS_OPENGLRENDER
   )
   if (USE_WERROR)
     list(APPEND OLIVE_COMPILE_OPTIONS "/WX")
@@ -68,6 +73,8 @@ else()
     -Wextra
     -Wno-unused-parameter
     -Wshadow
+    -DOFX_SUPPORTS_OPENGLRENDER
+
   )
   if (USE_WERROR)
     list(APPEND OLIVE_COMPILE_OPTIONS "-Werror")

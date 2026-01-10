@@ -30,11 +30,11 @@
 #include "panel/timeline/timeline.h"
 
 #include <cstdio>
-#include <QMessageBox>
-#include <QCoreApplication>
 #include <QApplication>
-#include <qmessagebox.h>
-#include <qobject.h>
+#include <QCoreApplication>
+#include <QMessageBox>
+#include <QMetaObject>
+#include <QThread>
 #include <QtGlobal>
 #include <string.h>
 #include <QString>
@@ -47,6 +47,35 @@ namespace {
 const std::string kImageFieldNoneStr(kOfxImageFieldNone);
 const std::string kImageFieldUpperStr(kOfxImageFieldUpper);
 const std::string kImageFieldLowerStr(kOfxImageFieldLower);
+
+QString FormatOfxMessage(const char *format, va_list args)
+{
+	char buffer[1024];
+	va_list args_copy;
+	va_copy(args_copy, args);
+	const int needed = vsnprintf(buffer, sizeof(buffer), format, args_copy);
+	va_end(args_copy);
+	if (needed < 0) {
+		return QString();
+	}
+	if (needed < static_cast<int>(sizeof(buffer))) {
+		return QString::fromUtf8(buffer);
+	}
+	QByteArray dynamic_buffer(needed + 1, 0);
+	const int written = vsnprintf(dynamic_buffer.data(), dynamic_buffer.size(), format, args);
+	if (written < 0) {
+		return QString();
+	}
+	return QString::fromUtf8(dynamic_buffer.constData());
+}
+
+bool IsGuiThread()
+{
+	if (auto *app = QCoreApplication::instance()) {
+		return QThread::currentThread() == app->thread();
+	}
+	return true;
+}
 
 const std::string &FieldOrderForParams(const VideoParams &params)
 {
@@ -134,75 +163,101 @@ const std::string &OlivePluginInstance::getDefaultOutputFielding() const
 OfxStatus OlivePluginInstance::vmessage(const char *type, const char *id,
 								  const char *format, va_list args)
 {
-	char *buffer = new char[1024];
-
-	memset(buffer, 0, 1024 * sizeof(char));
-	vsprintf(buffer, format, args);
-
-	QString message(buffer);
-
-	delete[] buffer;
-
-	if (strncmp(type, kOfxMessageQuestion, strlen(kOfxMessageQuestion))) {
-		auto ret = QMessageBox::information(
-			nullptr, "", message, QMessageBox::Ok, QMessageBox::Cancel);
-
-		if (ret == QMessageBox::Ok) {
-			return kOfxStatReplyYes;
-		} else {
-			return kOfxStatReplyNo;
-		}
-
-	} else {
-		QMessageBox::information(nullptr, "", message);
-		return kOfxStatOK;
+	const QString message = FormatOfxMessage(format, args);
+	if (message.isEmpty()) {
+		return kOfxStatFailed;
 	}
+
+	const bool is_question =
+		strncmp(type, kOfxMessageQuestion, strlen(kOfxMessageQuestion)) == 0;
+	OfxStatus result = kOfxStatOK;
+	auto show_message = [&]() {
+		if (is_question) {
+			const auto ret = QMessageBox::question(
+				nullptr, "", message, QMessageBox::Ok, QMessageBox::Cancel);
+			result = (ret == QMessageBox::Ok) ? kOfxStatReplyYes : kOfxStatReplyNo;
+		} else {
+			QMessageBox::information(nullptr, "", message);
+			result = kOfxStatOK;
+		}
+	};
+
+	if (IsGuiThread()) {
+		show_message();
+	} else if (auto *app = QCoreApplication::instance()) {
+		if (is_question) {
+			QMetaObject::invokeMethod(app, show_message, Qt::BlockingQueuedConnection);
+		} else {
+			QMetaObject::invokeMethod(app, show_message, Qt::QueuedConnection);
+		}
+	} else if (is_question) {
+		result = kOfxStatReplyNo;
+	}
+
+	return result;
 }
 OfxStatus OlivePluginInstance::setPersistentMessage(const char *type, const char *id,
 											  const char *format, va_list args)
 {
-	char *buffer = new char[1024];
-
-	memset(buffer, 0, 1024 * sizeof(char));
-	int ret = vsprintf(buffer, format, args);
-	if (ret < 0) {
+	const QString message = FormatOfxMessage(format, args);
+	if (message.isEmpty()) {
 		return kOfxStatFailed;
 	}
-	QString message(buffer);
 
-	delete[] buffer;
-
+	ErrorType error_type;
 	// If This is a error message
 	if (strncmp(type, kOfxMessageError, strlen(kOfxMessageError)) == 0) {
-		persistentErrors_.append({ ErrorType::Error, message });
-		QMessageBox::critical(nullptr, "", message);
-		// TODO: tell the shell to show the error
+		error_type = ErrorType::Error;
 	}
 	// A warning
-	else if (strncmp(type, kOfxMessageWarning, strlen(kOfxMessageError)) == 0) {
-		persistentErrors_.append({ ErrorType::Warning, message });
-		QMessageBox::warning(nullptr, "", message);
-		// TODO: tell the shell to show the warning
-
+	else if (strncmp(type, kOfxMessageWarning, strlen(kOfxMessageWarning)) == 0) {
+		error_type = ErrorType::Warning;
 	}
 	// A simple information
-	else if (strncmp(type, kOfxMessageMessage, strlen(kOfxMessageError)) == 0) {
-		persistentErrors_.append({ ErrorType::Message, message });
-		QMessageBox::information(nullptr, "", message);
+	else if (strncmp(type, kOfxMessageMessage, strlen(kOfxMessageMessage)) == 0) {
+		error_type = ErrorType::Message;
 	} else {
 		return kOfxStatFailed;
 	}
-	if (node_) {
-		emit node_->MessageCountChanged();
+
+	auto update_ui = [this, error_type, message]() {
+		persistentErrors_.append({ error_type, message });
+		switch (error_type) {
+		case ErrorType::Error:
+			QMessageBox::critical(nullptr, "", message);
+			break;
+		case ErrorType::Warning:
+			QMessageBox::warning(nullptr, "", message);
+			break;
+		case ErrorType::Message:
+			QMessageBox::information(nullptr, "", message);
+			break;
+		}
+		if (node_) {
+			emit node_->MessageCountChanged();
+		}
+	};
+
+	if (IsGuiThread()) {
+		update_ui();
+	} else if (auto *app = QCoreApplication::instance()) {
+		QMetaObject::invokeMethod(app, update_ui, Qt::QueuedConnection);
 	}
 	return kOfxStatOK;
 }
 OfxStatus OlivePluginInstance::clearPersistentMessage()
 {
-	persistentErrors_.clear();
-	// TODO: tell the shell to remove message.
-	if (node_) {
-		emit node_->MessageCountChanged();
+	auto clear_ui = [this]() {
+		persistentErrors_.clear();
+		// TODO: tell the shell to remove message.
+		if (node_) {
+			emit node_->MessageCountChanged();
+		}
+	};
+	if (IsGuiThread()) {
+		clear_ui();
+	} else if (auto *app = QCoreApplication::instance()) {
+		QMetaObject::invokeMethod(app, clear_ui, Qt::QueuedConnection);
 	}
 	return kOfxStatOK;
 }
