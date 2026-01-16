@@ -20,27 +20,44 @@
 //
 // Created by mikesolar on 25-10-19.
 //
+#include "ofxCore.h"
+#include "ofxhPropertySuite.h"
+#include "olive/core/render/pixelformat.h"
 #include "render/texture.h"
+#include "render/opengl/openglrenderer.h"
+#include "node/value.h"
+#include "render/videoparams.h"
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <qtypes.h>
+#include <string>
+#include <vector>
 #include <QDebug>
+#include <QVector2D>
+#include <QVector3D>
+#include <QVector4D>
 #define GL_PREAMBLE //QMutexLocker __l(&global_opengl_mutex);
 #include "pluginrenderer.h"
 #include "pluginSupport/OliveClip.h"
 #include "pluginSupport/OlivePluginInstance.h"
 #include "common/ffmpegutils.h"
+#include "ofxhParam.h"
 #include "ofxImageEffect.h"
 #include "ofxhUtilities.h"
 #include "ofxGPURender.h"
+#include "olive/core/util/color.h"
 extern "C"{
 #include <libavutil/pixfmt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 }
 
+
+// 作用：从 OFX Image 属性推导 FFmpeg 像素格式，并返回每像素字节数。
+// Purpose: Infer FFmpeg pixel format from OFX image properties and return bytes-per-pixel.
 static AVPixelFormat GetOfxAVPixelFormat(const OFX::Host::ImageEffect::Image &image,
 										 int *bytes_per_pixel)
 {
@@ -98,8 +115,158 @@ static AVPixelFormat GetOfxAVPixelFormat(const OFX::Host::ImageEffect::Image &im
 	return pix_fmt;
 }
 
+// 作用：为插件实例注入当前帧的参数值，避免依赖节点实时回读。
+static void ApplyParamOverrides(OFX::Host::ImageEffect::Instance &instance,
+								const olive::NodeValueRow &values,
+								OfxTime time)
+{
+	const auto &params = instance.getParams();
+	for (const auto &entry : params) {
+		if (!entry.second) {
+			continue;
+		}
+		const QString key = QString::fromStdString(entry.first);
+		if (!values.contains(key)) {
+			continue;
+		}
+		const olive::NodeValue &value = values.value(key);
+		if (value.type() == olive::NodeValue::kNone ||
+			value.type() == olive::NodeValue::kTexture ||
+			value.type() == olive::NodeValue::kSamples) {
+			continue;
+		}
+		const std::string &type = entry.second->getType();
+
+		if (type == kOfxParamTypeInteger) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::IntegerInstance *>(
+						entry.second)) {
+				param->set(time, value.data().toInt());
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeDouble) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::DoubleInstance *>(
+						entry.second)) {
+				param->set(time, value.data().toDouble());
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeBoolean) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::BooleanInstance *>(
+						entry.second)) {
+				param->set(time, value.data().toBool());
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeChoice) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::ChoiceInstance *>(
+						entry.second)) {
+				param->set(time, value.data().toInt());
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeString || type == kOfxParamTypeCustom ||
+			type == kOfxParamTypeBytes || type == kOfxParamTypeStrChoice) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::StringInstance *>(
+						entry.second)) {
+				const QByteArray utf8 = value.data().toString().toUtf8();
+				param->set(time, utf8.constData());
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeRGBA) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::RGBAInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<olive::core::Color>()) {
+					const auto c = value.data().value<olive::core::Color>();
+					param->set(time, c.red(), c.green(), c.blue(), c.alpha());
+				} else if (value.data().canConvert<QVector4D>()) {
+					const QVector4D v = value.data().value<QVector4D>();
+					param->set(time, v.x(), v.y(), v.z(), v.w());
+				} else if (value.data().canConvert<QVector3D>()) {
+					const QVector3D v = value.data().value<QVector3D>();
+					param->set(time, v.x(), v.y(), v.z(), 1.0);
+				}
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeRGB) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::RGBInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<olive::core::Color>()) {
+					const auto c = value.data().value<olive::core::Color>();
+					param->set(time, c.red(), c.green(), c.blue());
+				} else if (value.data().canConvert<QVector4D>()) {
+					const QVector4D v = value.data().value<QVector4D>();
+					param->set(time, v.x(), v.y(), v.z());
+				} else if (value.data().canConvert<QVector3D>()) {
+					const QVector3D v = value.data().value<QVector3D>();
+					param->set(time, v.x(), v.y(), v.z());
+				}
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeDouble2D) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::Double2DInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<QVector2D>()) {
+					const QVector2D v = value.data().value<QVector2D>();
+					param->set(time, v.x(), v.y());
+				}
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeInteger2D) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::Integer2DInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<QVector2D>()) {
+					const QVector2D v = value.data().value<QVector2D>();
+					param->set(time, static_cast<int>(v.x()),
+							   static_cast<int>(v.y()));
+				}
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeDouble3D) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::Double3DInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<QVector3D>()) {
+					const QVector3D v = value.data().value<QVector3D>();
+					param->set(time, v.x(), v.y(), v.z());
+				}
+			}
+			continue;
+		}
+		if (type == kOfxParamTypeInteger3D) {
+			if (auto *param =
+					dynamic_cast<OFX::Host::Param::Integer3DInstance *>(
+						entry.second)) {
+				if (value.data().canConvert<QVector3D>()) {
+					const QVector3D v = value.data().value<QVector3D>();
+					param->set(time, static_cast<int>(v.x()),
+							   static_cast<int>(v.y()),
+							   static_cast<int>(v.z()));
+				}
+			}
+			continue;
+		}
+	}
+}
+
 static AVPixelFormat GetDestinationAVPixelFormat(const olive::VideoParams &params);
 
+// 作用：读取 clip 偏好（像素深度与分量）并更新 VideoParams。
+// Purpose: Apply clip preferences (depth/components) into VideoParams.
 static bool ApplyClipPreferencesToParams(
 	const OFX::Host::ImageEffect::ClipInstance &clip,
 	olive::VideoParams *params)
@@ -139,6 +306,344 @@ static bool ApplyClipPreferencesToParams(
 	return true;
 }
 
+// 作用：将 OFX bit depth 字符串映射为内部 PixelFormat。
+// Purpose: Map OFX bit depth string to internal PixelFormat.
+static olive::core::PixelFormat PixelFormatFromOfxDepth(
+	const std::string &depth)
+{
+	if (depth == kOfxBitDepthByte) {
+		return olive::core::PixelFormat::U8;
+	}
+	if (depth == kOfxBitDepthShort) {
+		return olive::core::PixelFormat::U16;
+	}
+	if (depth == kOfxBitDepthHalf) {
+		return olive::core::PixelFormat::F16;
+	}
+	if (depth == kOfxBitDepthFloat) {
+		return olive::core::PixelFormat::F32;
+	}
+	return olive::core::PixelFormat::INVALID;
+}
+
+// 作用：将内部 PixelFormat 转为 OFX bit depth 字符串。
+// Purpose: Map internal PixelFormat to OFX bit depth string.
+static const char *OfxDepthFromPixelFormat(olive::core::PixelFormat format)
+{
+	switch (format) {
+	case olive::core::PixelFormat::U8:
+		return kOfxBitDepthByte;
+	case olive::core::PixelFormat::U16:
+		return kOfxBitDepthShort;
+	case olive::core::PixelFormat::F16:
+		return kOfxBitDepthHalf;
+	case olive::core::PixelFormat::F32:
+		return kOfxBitDepthFloat;
+	case olive::core::PixelFormat::INVALID:
+	case olive::core::PixelFormat::COUNT:
+		break;
+	}
+	return kOfxBitDepthNone;
+}
+
+// 作用：将 OFX components 字符串映射为通道数。
+// Purpose: Map OFX components string to channel count.
+static int ChannelCountFromOfxComponent(const std::string &components)
+{
+	if (components == kOfxImageComponentRGBA) {
+		return 4;
+	}
+	if (components == kOfxImageComponentRGB) {
+		return 3;
+	}
+	if (components == kOfxImageComponentAlpha) {
+		return 1;
+	}
+	return 0;
+}
+
+// 作用：将通道数映射为 OFX components 字符串。
+// Purpose: Map channel count to OFX components string.
+static const char *OfxComponentsFromChannels(int channel_count)
+{
+	switch (channel_count) {
+	case 1:
+		return kOfxImageComponentAlpha;
+	case 3:
+		return kOfxImageComponentRGB;
+	case 4:
+		return kOfxImageComponentRGBA;
+	default:
+		break;
+	}
+	return kOfxImageComponentNone;
+}
+
+// 作用：判断插件是否支持指定像素深度。
+// Purpose: Check whether effect supports a given pixel depth.
+static bool EffectSupportsPixelDepth(
+	const OFX::Host::ImageEffect::Instance &instance,
+	const std::string &depth)
+{
+	const auto &effect_props = instance.getDescriptor().getProps();
+	const int depth_count =
+		effect_props.getDimension(kOfxImageEffectPropSupportedPixelDepths);
+	for (int i = 0; i < depth_count; ++i) {
+		if (effect_props.getStringProperty(
+				kOfxImageEffectPropSupportedPixelDepths, i) == depth) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// 作用：判断 clip 是否支持指定组件格式。
+// Purpose: Check whether clip supports a given components string.
+static bool ClipSupportsComponents(
+	const OFX::Host::ImageEffect::ClipInstance &clip,
+	const std::string &components)
+{
+	const auto &supported_components = clip.getSupportedComponents();
+	for (const auto &comp : supported_components) {
+		if (comp == components) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// 作用：估算从源参数到目标参数的转换代价，用于排序选择。
+// Purpose: Estimate conversion cost from source to target params for ranking.
+static int ConversionCost(const olive::VideoParams &src,
+						  const olive::VideoParams &dst)
+{
+	const int src_bpp = src.channel_count() * src.format().byte_count();
+	const int dst_bpp = dst.channel_count() * dst.format().byte_count();
+	int cost = std::abs(dst_bpp - src_bpp);
+	if (src.format() != dst.format()) {
+		cost += 4;
+	}
+	if (src.channel_count() != dst.channel_count()) {
+		cost += 2;
+	}
+	return cost;
+}
+
+// 作用：判断目标参数能否转换为可用的 AVPixelFormat。
+// Purpose: Check if params map to a valid AVPixelFormat.
+static bool ParamsConvertible(const olive::VideoParams &params)
+{
+	return GetDestinationAVPixelFormat(params) != AV_PIX_FMT_NONE;
+}
+
+// 作用：在 clip 偏好无效时，选择一个插件支持的输出格式。
+// Purpose: Pick a supported output format when clip preferences are invalid.
+static void ChooseSupportedOutputParams(
+	const OFX::Host::ImageEffect::Instance &instance,
+	const OFX::Host::ImageEffect::ClipInstance &clip,
+	const olive::VideoParams &preferred,
+	olive::VideoParams *out)
+{
+	if (!out) {
+		return;
+	}
+
+	*out = preferred;
+
+	const char *preferred_components =
+		OfxComponentsFromChannels(preferred.channel_count());
+	if (std::strcmp(preferred_components, kOfxImageComponentNone) != 0 &&
+		ClipSupportsComponents(clip, preferred_components)) {
+		out->set_channel_count(preferred.channel_count());
+	} else if (ClipSupportsComponents(clip, kOfxImageComponentRGBA)) {
+		out->set_channel_count(4);
+	} else if (ClipSupportsComponents(clip, kOfxImageComponentRGB)) {
+		out->set_channel_count(3);
+	} else if (ClipSupportsComponents(clip, kOfxImageComponentAlpha)) {
+		out->set_channel_count(1);
+	}
+
+	const olive::core::PixelFormat preferred_format = preferred.format();
+	const std::array<olive::core::PixelFormat, 5> candidates = {
+		preferred_format,
+		olive::core::PixelFormat::F16,
+		olive::core::PixelFormat::F32,
+		olive::core::PixelFormat::U16,
+		olive::core::PixelFormat::U8,
+	};
+	for (const auto &candidate : candidates) {
+		if (candidate == olive::core::PixelFormat::INVALID) {
+			continue;
+		}
+		if (!EffectSupportsPixelDepth(
+				instance, OfxDepthFromPixelFormat(candidate))) {
+			continue;
+		}
+		olive::VideoParams test_params = *out;
+		test_params.set_format(candidate);
+		if (!ParamsConvertible(test_params)) {
+			continue;
+		}
+		out->set_format(candidate);
+		return;
+	}
+}
+
+static olive::TexturePtr ConvertTextureForParams(
+	olive::TexturePtr src,
+	const olive::VideoParams &dst_params);
+
+// 作用：根据插件能力与偏好选择输入格式并执行转换。
+// Purpose: Select a supported input format and convert texture for the clip.
+static olive::TexturePtr ConvertTextureForClip(
+	const OFX::Host::ImageEffect::Instance &instance,
+	const OFX::Host::ImageEffect::ClipInstance &clip,
+	olive::TexturePtr src,
+	const olive::VideoParams &preferred_params,
+	bool force_preferred,
+	olive::VideoParams *out_params)
+{
+	if (!src || !out_params) {
+		return nullptr;
+	}
+
+	const olive::VideoParams &src_params = src->params();
+	auto add_candidate = [](std::vector<olive::VideoParams> &list,
+							const olive::VideoParams &params) {
+		for (const auto &existing : list) {
+			if (existing.format() == params.format() &&
+				existing.channel_count() == params.channel_count()) {
+				return;
+			}
+		}
+		list.push_back(params);
+	};
+
+	std::vector<int> channel_candidates;
+	const auto &supported_components = clip.getSupportedComponents();
+	for (const auto &comp : supported_components) {
+		int channels = ChannelCountFromOfxComponent(comp);
+		if (channels > 0 &&
+			std::find(channel_candidates.begin(),
+					  channel_candidates.end(),
+					  channels) == channel_candidates.end()) {
+			channel_candidates.push_back(channels);
+		}
+	}
+	if (channel_candidates.empty() && preferred_params.channel_count() > 0) {
+		channel_candidates.push_back(preferred_params.channel_count());
+	}
+
+	std::vector<olive::core::PixelFormat> format_candidates;
+	const auto &effect_props = instance.getDescriptor().getProps();
+	const int depth_count =
+		effect_props.getDimension(kOfxImageEffectPropSupportedPixelDepths);
+	for (int i = 0; i < depth_count; ++i) {
+		olive::core::PixelFormat fmt =
+			PixelFormatFromOfxDepth(effect_props.getStringProperty(
+				kOfxImageEffectPropSupportedPixelDepths, i));
+		if (fmt != olive::core::PixelFormat::INVALID &&
+			std::find(format_candidates.begin(),
+					  format_candidates.end(),
+					  fmt) == format_candidates.end()) {
+			format_candidates.push_back(fmt);
+		}
+	}
+	if (format_candidates.empty() &&
+		preferred_params.format() != olive::core::PixelFormat::INVALID) {
+		format_candidates.push_back(preferred_params.format());
+	}
+
+	std::vector<olive::VideoParams> candidates;
+	add_candidate(candidates, preferred_params);
+
+	const bool prefer_rgba8 =
+		(preferred_params.format() == olive::core::PixelFormat::U8 ||
+		 preferred_params.format() == olive::core::PixelFormat::INVALID) &&
+		ClipSupportsComponents(clip, kOfxImageComponentRGBA) &&
+		EffectSupportsPixelDepth(instance, kOfxBitDepthByte);
+	if (prefer_rgba8) {
+		olive::VideoParams rgba_candidate = src_params;
+		rgba_candidate.set_format(olive::core::PixelFormat::U8);
+		rgba_candidate.set_channel_count(4);
+		if (ParamsConvertible(rgba_candidate)) {
+			add_candidate(candidates, rgba_candidate);
+		}
+	}
+
+	for (olive::core::PixelFormat fmt : format_candidates) {
+		for (int channels : channel_candidates) {
+			if (fmt == olive::core::PixelFormat::INVALID || channels <= 0) {
+				continue;
+			}
+			olive::VideoParams candidate = src_params;
+			candidate.set_format(fmt);
+			candidate.set_channel_count(channels);
+			if (!ParamsConvertible(candidate)) {
+				continue;
+			}
+			add_candidate(candidates, candidate);
+		}
+	}
+
+	if (candidates.empty()) {
+		return nullptr;
+	}
+
+	std::stable_sort(candidates.begin(), candidates.end(),
+					 [&src_params, &preferred_params, prefer_rgba8, force_preferred](const auto &a,
+													 const auto &b) {
+		if (force_preferred) {
+			const bool a_pref = (a.format() == preferred_params.format() &&
+								 a.channel_count() == preferred_params.channel_count());
+			const bool b_pref = (b.format() == preferred_params.format() &&
+								 b.channel_count() == preferred_params.channel_count());
+			if (a_pref != b_pref) {
+				return a_pref;
+			}
+		}
+		if (prefer_rgba8) {
+			const bool a_rgba8 =
+				a.format() == olive::core::PixelFormat::U8 &&
+				a.channel_count() == 4;
+			const bool b_rgba8 =
+				b.format() == olive::core::PixelFormat::U8 &&
+				b.channel_count() == 4;
+			if (a_rgba8 != b_rgba8) {
+				return a_rgba8;
+			}
+		}
+		const int cost_a = ConversionCost(src_params, a);
+		const int cost_b = ConversionCost(src_params, b);
+		if (cost_a != cost_b) {
+			return cost_a < cost_b;
+		}
+		if (a.format() == preferred_params.format() &&
+			a.channel_count() == preferred_params.channel_count()) {
+			return true;
+		}
+		return false;
+	});
+
+	for (const auto &candidate : candidates) {
+		if (candidate.format() == src_params.format() &&
+			candidate.channel_count() == src_params.channel_count()) {
+			*out_params = src_params;
+			return src;
+		}
+		olive::TexturePtr converted =
+			ConvertTextureForParams(src, candidate);
+		if (converted) {
+			*out_params = candidate;
+			return converted;
+		}
+	}
+
+	return nullptr;
+}
+
+// 作用：从 OFX Image 复制数据到 AVFrame（按图像属性推导格式）。
+// Purpose: Copy OFX Image data into an AVFrame with inferred format.
 static olive::AVFramePtr create_avframe_from_ofx_image(OFX::Host::ImageEffect::Image &image)
 {
 	void *data_ptr = image.getPointerProperty(kOfxImagePropData);
@@ -198,6 +703,8 @@ static olive::AVFramePtr create_avframe_from_ofx_image(OFX::Host::ImageEffect::I
 	return frame;
 }
 
+// 作用：按指定 VideoParams 复制 OFX Image 到 AVFrame。
+// Purpose: Copy OFX Image data into an AVFrame using target VideoParams.
 static olive::AVFramePtr create_avframe_from_ofx_image_with_params(
 	OFX::Host::ImageEffect::Image &image,
 	const olive::VideoParams &params)
@@ -253,6 +760,8 @@ static olive::AVFramePtr create_avframe_from_ofx_image_with_params(
 	return frame;
 }
 
+// 作用：将 VideoParams 映射为最终输出的 AVPixelFormat。
+// Purpose: Map VideoParams to the final AVPixelFormat.
 static AVPixelFormat GetDestinationAVPixelFormat(const olive::VideoParams &params)
 {
 	AVPixelFormat pix_fmt =
@@ -272,6 +781,8 @@ static AVPixelFormat GetDestinationAVPixelFormat(const olive::VideoParams &param
 	return pix_fmt;
 }
 
+// 作用：根据交错设置返回 OFX render field 字符串。
+// Purpose: Return OFX render field string based on interlacing.
 static const char *GetRenderFieldForParams(const olive::VideoParams &params)
 {
 	switch (params.interlacing()) {
@@ -284,6 +795,8 @@ static const char *GetRenderFieldForParams(const olive::VideoParams &params)
 	return kOfxImageFieldNone;
 }
 
+// 作用：从 GPU 纹理回读到 AVFrame（必要时做格式转换）。
+// Purpose: Read back GPU texture into AVFrame with format conversion if needed.
 static olive::AVFramePtr ReadbackTextureToFrame(olive::TexturePtr texture,
 												const olive::VideoParams &params)
 {
@@ -365,6 +878,8 @@ static olive::AVFramePtr ReadbackTextureToFrame(olive::TexturePtr texture,
 	return dst;
 }
 
+// 作用：将字节行跨度转换为像素行跨度。
+// Purpose: Convert byte stride to pixel stride.
 int olive::plugin::detail::BytesToPixels(int byte_linesize,
 										 const olive::VideoParams &params)
 {
@@ -377,6 +892,8 @@ int olive::plugin::detail::BytesToPixels(int byte_linesize,
 	return byte_linesize / bytes_per_pixel;
 }
 
+// 作用：必要时将 AVFrame 转换为目标 VideoParams 对应格式。
+// Purpose: Convert AVFrame to match destination VideoParams when needed.
 static olive::AVFramePtr ConvertFrameIfNeeded(olive::AVFramePtr src,
 											  const olive::VideoParams &dst_params)
 {
@@ -652,6 +1169,8 @@ static olive::AVFramePtr ConvertFrameIfNeeded(olive::AVFramePtr src,
 	return dst;
 }
 
+// 作用：从字节行跨度换算像素行跨度。
+// Purpose: Convert byte line size to pixel line size.
 static int LinesizeToPixels(const olive::VideoParams &params, int linesize_bytes)
 {
 	const int bytes_per_pixel =
@@ -662,6 +1181,8 @@ static int LinesizeToPixels(const olive::VideoParams &params, int linesize_bytes
 	return linesize_bytes / bytes_per_pixel;
 }
 
+// 作用：将纹理转换为指定 VideoParams（CPU 路径，必要时回读）。
+// Purpose: Convert texture to target VideoParams (CPU path with readback).
 static olive::TexturePtr ConvertTextureForParams(olive::TexturePtr src,
 												 const olive::VideoParams &dst_params)
 {
@@ -681,23 +1202,43 @@ static olive::TexturePtr ConvertTextureForParams(olive::TexturePtr src,
 		frame = ReadbackTextureToFrame(src, src_params);
 	}
 	if (!frame || !frame->data[0]) {
-		return src;
+		return nullptr;
 	}
 
 	olive::AVFramePtr converted = ConvertFrameIfNeeded(frame, dst_params);
 	if (!converted || !converted->data[0]) {
-		return src;
+		return nullptr;
+	}
+	if (converted->linesize[0] <= 0) {
+		return nullptr;
 	}
 
-	auto dst = std::make_shared<olive::Texture>(dst_params);
-	int linesize_pixels = LinesizeToPixels(dst_params, converted->linesize[0]);
-	if (linesize_pixels <= 0) {
-		linesize_pixels = dst_params.effective_width();
+	olive::TexturePtr dst;
+	if (auto *renderer = src->renderer()) {
+		int linesize_pixels =
+			LinesizeToPixels(dst_params, converted->linesize[0]);
+		if (linesize_pixels <= 0) {
+			linesize_pixels = dst_params.effective_width();
+		}
+		dst = renderer->CreateTexture(dst_params, converted->data[0],
+									  linesize_pixels);
+	} else {
+		dst = std::make_shared<olive::Texture>(dst_params);
+		int linesize_pixels =
+			LinesizeToPixels(dst_params, converted->linesize[0]);
+		if (linesize_pixels <= 0) {
+			linesize_pixels = dst_params.effective_width();
+		}
+		dst->Upload(converted->data[0], linesize_pixels);
 	}
-	dst->Upload(converted->data[0], linesize_pixels);
+	if (dst) {
+		dst->handleFrame(converted);
+	}
 	return dst;
 }
 
+// 作用：安全获取插件标识符，便于日志输出。
+// Purpose: Safely fetch plugin identifier for logging.
 static QString PluginIdForInstance(const OFX::Host::ImageEffect::Instance *instance)
 {
 	if (!instance) {
@@ -710,6 +1251,8 @@ static QString PluginIdForInstance(const OFX::Host::ImageEffect::Instance *insta
 	return QString::fromStdString(plugin->getIdentifier());
 }
 
+// 作用：统一 OFX 调用失败日志输出。
+// Purpose: Centralized logging for OFX action failures.
 static void LogOfxFailure(const char *action, OfxStatus stat,
 						  const OFX::Host::ImageEffect::Instance *instance)
 {
@@ -723,13 +1266,77 @@ static void LogOfxFailure(const char *action, OfxStatus stat,
 		<< "(" << stat << ")";
 }
 
+// 作用：输出 clip 的声明属性与关联 VideoParams，辅助定位格式不一致。
+// Purpose: Log clip declared properties and VideoParams for debugging.
+static void LogClipState(const char *label,
+						 const OFX::Host::ImageEffect::ClipInstance *clip,
+						 const olive::VideoParams *params)
+{
+	if (!clip) {
+		qWarning().noquote() << "OFX clip state" << label << "<null>";
+		return;
+	}
+	qWarning().noquote()
+		<< "OFX clip state" << label
+		<< "name=" << QString::fromStdString(clip->getName())
+		<< "pixelDepth=" << QString::fromStdString(clip->getPixelDepth())
+		<< "components=" << QString::fromStdString(clip->getComponents());
+	if (params) {
+		qWarning().noquote()
+			<< "OFX clip params" << label
+			<< "width=" << params->width()
+			<< "height=" << params->height()
+			<< "format=" << static_cast<int>(params->format())
+			<< "channels=" << params->channel_count();
+	}
+}
+
+// 作用：输出 OFX Image 的属性（深度/组件/行跨度/边界）。
+// Purpose: Log OFX image properties (depth/components/stride/bounds).
+static void LogImageProps(const char *label,
+						  OFX::Host::ImageEffect::Image *image)
+{
+	if (!image) {
+		qWarning().noquote() << "OFX image props" << label << "<null>";
+		return;
+	}
+	int bounds[4] = {0, 0, 0, 0};
+	int rod[4] = {0, 0, 0, 0};
+	image->getIntPropertyN(kOfxImagePropBounds, bounds, 4);
+	image->getIntPropertyN(kOfxImagePropRegionOfDefinition, rod, 4);
+	const int row_bytes = image->getIntProperty(kOfxImagePropRowBytes);
+	const std::string &depth =
+		image->getStringProperty(kOfxImageEffectPropPixelDepth);
+	const std::string &components =
+		image->getStringProperty(kOfxImageEffectPropComponents);
+	qWarning().noquote()
+		<< "OFX image props" << label
+		<< "pixelDepth=" << QString::fromStdString(depth)
+		<< "components=" << QString::fromStdString(components)
+		<< "rowBytes=" << row_bytes
+		<< "bounds=" << bounds[0] << bounds[1] << bounds[2] << bounds[3]
+		<< "rod=" << rod[0] << rod[1] << rod[2] << rod[3];
+}
+
+// 作用：渲染失败时标记目标画面（紫色）提示错误。
+// Purpose: Mark render failure on destination (magenta).
 static void MarkRenderFailure(olive::TexturePtr destination)
 {
 	if (destination && destination->renderer()) {
 		destination->renderer()->ClearDestination(destination.get(), 1.0, 0.0, 1.0, 1.0);
 	}
 }
+static olive::AVFramePtr DownloadTextureToFrame(const olive::TexturePtr &tex)
+{
+	if (!tex || tex->IsDummy() || !tex->renderer()) {
+		return nullptr;
+	}
+	const olive::VideoParams &params = tex->params();
+	return ReadbackTextureToFrame(tex, params);
+}
 
+// 作用：执行 OFX 插件渲染全流程（准备输入、调用动作、处理输出）。
+// Purpose: Run full OFX plugin render flow (inputs, actions, outputs).
 void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::PluginJob& job,
 					  olive::TexturePtr destination,
 					  olive::VideoParams destination_params,
@@ -752,7 +1359,6 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		supports_opengl && destination && destination->renderer() &&
 		destination->id().isValid();
 	if (olive_instance) {
-		olive_instance->setOpenGLEnabled(use_opengl);
 		olive_instance->setVideoParam(destination_params);
 	}
 
@@ -760,35 +1366,16 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	OfxPointD renderScale;
 	renderScale.x = renderScale.y = 1.0;
 
-	// The render window is in pixel coordinates
-	// ie: render scale and a PAR of not 1
-	OfxRectI  renderWindow;
-	renderWindow.x1 = renderWindow.y1 = 0;
-
-
-	renderWindow.x2 = destination_params.width();
-	renderWindow.y2 = destination_params.height();
-
-	/// RoI is in canonical coords,
-	OfxRectD  regionOfInterest;
-	regionOfInterest.x1 = regionOfInterest.y1 = 0;
-	regionOfInterest.x2 = renderWindow.x2 * instance->getProjectPixelAspectRatio();
-	regionOfInterest.y2 = renderWindow.y2 * instance->getProjectPixelAspectRatio();
-
-	OfxRectD regionOfDefinition;
-	regionOfDefinition.x1 = regionOfDefinition.y1 = 0;
-	regionOfDefinition.x2 = destination_params.width();
-	regionOfDefinition.y2 = destination_params.height();
-
 
 	int numFramesToRender=1;
 
-	OliveClipInstance *clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
-	if (!clip) {
+	OliveClipInstance *output_clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
+	if (!output_clip) {
 		return;
 	}
-	clip->setParams(destination_params);
+	output_clip->setParams(destination_params);
 
+	// ensure the instance was created
 	OfxStatus stat = kOfxStatOK;
 	if (olive_instance && !olive_instance->isCreated()) {
 		stat = instance->createInstanceAction();
@@ -802,9 +1389,25 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	// call get region of interest on each of the inputs
 	OfxTime frame = job.time_seconds();
 
-	const NodeValueRow &values = job.GetValues();
-	const auto &clips = instance->getDescriptor().getClips();
+	const auto &clips = olive_instance->getDescriptor().getClips();
+	QString effect_input_id;
+	if (const auto *node = job.node()) {
+		effect_input_id = node->GetEffectInputID();
+	}
+	auto is_usable_input = [](const TexturePtr &tex) {
+		if (!tex) {
+			return false;
+		}
+		if (!tex->IsDummy() && tex->renderer()) {
+			return true;
+		}
+		AVFramePtr frame = tex->frame();
+		return frame && frame->data[0];
+	};
 	std::map<std::string, TexturePtr> input_textures;
+	std::map<std::string, OliveClipInstance *> input_clips;
+	std::map<std::string, olive::VideoParams> input_params;
+	auto values = job.GetValues();
 	for (const auto &entry : clips) {
 		if (entry.first == kOfxImageEffectOutputClipName) {
 			continue;
@@ -814,17 +1417,66 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		if (!input_clip) {
 			continue;
 		}
-		QString clip_key = QString::fromStdString(entry.first);
-		TexturePtr input_tex = values.value(clip_key).toTexture();
-		if (!input_tex &&
-			entry.first == kOfxImageEffectSimpleSourceClipName) {
-			input_tex = values.value(kTextureInput).toTexture();
+		const QString clip_key = QString::fromStdString(entry.first);
+		TexturePtr input_tex = nullptr;
+		if (!effect_input_id.isEmpty() && clip_key == effect_input_id &&
+			is_usable_input(src)) {
+			input_tex = src;
+		} else {
+			input_tex = values.value(clip_key).toTexture();
+			if (!input_tex &&
+				entry.first == kOfxImageEffectSimpleSourceClipName) {
+				input_tex = values.value(kTextureInput).toTexture();
+			}
 		}
-		if (input_tex) {
+		if (!is_usable_input(input_tex) &&
+			entry.first == kOfxImageEffectSimpleSourceClipName &&
+			is_usable_input(src)) {
+			input_tex = src;
+		}
+		if (is_usable_input(input_tex)) {
 			input_textures[entry.first] = input_tex;
+			olive::VideoParams params = input_tex->params();
+			input_clip->setInputTexture(input_tex, frame);
+			input_clips[entry.first] = input_clip;
 		}
 	}
-
+	OFX::Host::Property::Set args;
+	args.setDoubleProperty(kOfxPropTime, frame);
+	double render_scale_array[] = {
+		renderScale.x, renderScale.y
+	} ;args.setDoublePropertyN(kOfxImageEffectPropRenderScale, render_scale_array, 2);
+	instance->setupClipPreferencesArgs(args);
+	instance->getClipPreferences();
+	for (const auto &entry : input_clips) {
+		if (entry.first == kOfxImageEffectOutputClipName) {
+			continue;
+		}
+		OliveClipInstance *input_clip = entry.second;
+		if (!input_clip) {
+			continue;
+		}
+		const QString clip_key = QString::fromStdString(entry.first);
+		TexturePtr input_tex = input_textures[entry.first];
+		if (!use_opengl) {
+			AVFramePtr ptr =
+				ReadbackTextureToFrame(input_tex, input_tex->params());
+			input_tex->handleFrame(ptr);
+		}
+		if (is_usable_input(input_tex)) {
+			input_textures[entry.first] = input_tex;
+			std::string bitdepth = input_clip->getProps()
+				.getStringProperty(kOfxImageEffectPropPixelDepth);
+			std::string component = input_clip->getProps()
+				.getStringProperty(kOfxImageEffectPropComponents);
+			VideoParams params = input_tex->params();
+			params.set_format(PixelFormat::from_ofx(bitdepth));
+			params.set_channel_count(component);
+			ConvertTextureForParams(input_tex, params) ;
+			input_clip->setInputTexture(input_tex,frame);
+			input_clips[entry.first] = input_clip;
+		}
+	}
 	// now we need to call getClipPreferences on the instance so that it does
 	// the clip component/depth logic and caches away the components and depth.
 	bool ok = instance->getClipPreferences();
@@ -835,41 +1487,24 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		MarkRenderFailure(destination);
 		return;
 	}
+	// The render window is in pixel coordinates
+	// ie: render scale and a PAR of not 1
+	OfxRectI renderWindow;
+	renderWindow.x1 = renderWindow.y1 = 0;
+	renderWindow.x2 = destination_params.width();
+	renderWindow.y2 = destination_params.height();
 
+	/// RoI is in canonical coords.
+	OfxRectD regionOfInterest;
+	regionOfInterest.x1 = 0.0;
+	regionOfInterest.y1 = 0.0;
+	regionOfInterest.x2 = destination_params.width();
+	regionOfInterest.y2 = destination_params.height();
 
+	OfxRectD regionOfDefinition = regionOfInterest;
 
-	olive::VideoParams output_params = destination_params;
-	if (ApplyClipPreferencesToParams(*clip, &output_params)) {
-		clip->setParams(output_params);
-	}
-
-	for (const auto &entry : input_textures) {
-		OliveClipInstance *input_clip =
-			dynamic_cast<OliveClipInstance *>(instance->getClip(entry.first));
-		if (!input_clip) {
-			continue;
-		}
-		olive::VideoParams input_params = entry.second->params();
-		if (ApplyClipPreferencesToParams(*input_clip, &input_params)) {
-			/* 
-			input_params.set_width(entry.second->params().width());
-			input_params.set_height(entry.second->params().height());
-			input_params.set_depth(entry.second->params().depth());
-			input_params.set_pixel_aspect_ratio(
-				entry.second->params().pixel_aspect_ratio());
-			input_params.set_interlacing(entry.second->params().interlacing());
-			input_params.set_premultiplied_alpha(
-				entry.second->params().premultiplied_alpha());
-			input_params.set_divider(entry.second->params().divider());*/
-			input_clip->setParams(input_params);
-		}
-		olive::TexturePtr converted =
-			ConvertTextureForParams(entry.second, input_params);
-		input_clip->setInputTexture(converted, frame);
-	}
-
-	clip->setRegionOfDefinition(regionOfDefinition, frame);
-	clip->setOutputTexture(destination, frame);
+	output_clip->setRegionOfDefinition(regionOfDefinition, frame);
+	output_clip->setOutputTexture(destination, frame);
 
 	stat = instance->beginRenderAction(frame, numFramesToRender,
 		1.0, false, renderScale, true,
@@ -901,7 +1536,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		return;
 	}
 
-	if (!output_params.is_valid()) {
+	if (!destination_params.is_valid()) {
 		qWarning().noquote()
 			<< "OFX render skipped due to invalid output params for plugin="
 			<< PluginIdForInstance(instance);
@@ -917,6 +1552,23 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 								  true, interactive, interactive);
 	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
 		LogOfxFailure("render", stat, instance);
+		LogClipState("output", output_clip, &destination_params);
+		for (const auto &entry : input_clips) {
+			const auto params_it = input_params.find(entry.first);
+			const olive::VideoParams *params =
+				(params_it != input_params.end()) ? &params_it->second
+												  : nullptr;
+			LogClipState("input", entry.second, params);
+			OFX::Host::ImageEffect::Image *image =
+				entry.second->getImage(frame, nullptr);
+			LogImageProps("input", image);
+			//if (image) {
+				//image->releaseReference();
+			//}
+		}
+		OFX::Host::ImageEffect::Image* output_image =
+			output_clip->getOutputImage(frame);
+		LogImageProps("output", output_image);
 		MarkRenderFailure(destination);
 		instance->endRenderAction(frame, numFramesToRender, 1.0, interactive,
 								  renderScale, true, interactive);
@@ -924,9 +1576,9 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	}
 
 	// get the output image buffer (CPU path only)
-	std::shared_ptr<OFX::Host::ImageEffect::Image> output_image;
+	OFX::Host::ImageEffect::Image* output_image;
 	if (!use_opengl) {
-		output_image = clip->getOutputImage(frame);
+		output_image = output_clip->getOutputImage(frame);
 		if (!output_image) {
 			qWarning().noquote()
 				<< "OFX getOutputImage returned null for plugin="
@@ -936,7 +1588,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 									  renderScale, true, interactive);
 			return;
 		}
-	} else {
+		} else {
 		if (!destination || !destination->id().isValid()) {
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 			DetachOutputTexture();
@@ -952,7 +1604,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		AVFramePtr frame_ptr = create_avframe_from_ofx_image(*output_image);
 		if (!frame_ptr) {
 			frame_ptr = create_avframe_from_ofx_image_with_params(
-				*output_image, output_params);
+				*output_image, destination_params);
 		}
 		if (!frame_ptr) {
 			qWarning().noquote()
@@ -962,20 +1614,20 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 							  renderScale, true, interactive);
 			return;
 		}
-		AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
+		//AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
 		const AVPixelFormat expected_fmt =
 			GetDestinationAVPixelFormat(destination_params);
-		destination->handleFrame(converted);
-		if (destination->renderer() && converted && converted->data[0] &&
+		destination->handleFrame(frame_ptr);
+		if (destination->renderer() && frame_ptr && frame_ptr->data[0] &&
 			(expected_fmt == AV_PIX_FMT_NONE ||
-			 converted->format == expected_fmt)) {
+			 frame_ptr->format == expected_fmt)) {
 			int linesize_pixels =
-				LinesizeToPixels(destination_params, converted->linesize[0]);
+				LinesizeToPixels(destination_params, frame_ptr->linesize[0]);
 			if (linesize_pixels <= 0) {
 				linesize_pixels = destination_params.effective_width();
 			}
-			destination->Upload(converted->data[0], linesize_pixels);
-		} else if (destination->renderer() && converted && converted->data[0]) {
+			destination->Upload(frame_ptr->data[0], linesize_pixels);
+		} else if (destination->renderer() && frame_ptr && frame_ptr->data[0]) {
 			qWarning().noquote()
 				<< "OFX output pixel format mismatch for plugin="
 				<< PluginIdForInstance(instance);
@@ -987,18 +1639,39 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		DetachOutputTexture();
 		instance->contextDetachedAction();
 #endif
-		if (frame_ptr) {
+	}
+/*
+		if (frame_ptr && destination) {
 			AVFramePtr converted =
 				ConvertFrameIfNeeded(frame_ptr, destination_params);
+			const AVPixelFormat expected_fmt =
+				GetDestinationAVPixelFormat(destination_params);
 			destination->handleFrame(converted);
+			if (destination->renderer() && converted && converted->data[0] &&
+				(expected_fmt == AV_PIX_FMT_NONE ||
+				 converted->format == expected_fmt)) {
+				int linesize_pixels =
+					LinesizeToPixels(destination_params, converted->linesize[0]);
+				if (linesize_pixels <= 0) {
+					linesize_pixels = destination_params.effective_width();
+				}
+				destination->Upload(converted->data[0], linesize_pixels);
+			} else if (destination->renderer() && converted &&
+					   converted->data[0]) {
+				qWarning().noquote()
+					<< "OFX output pixel format mismatch for plugin="
+					<< PluginIdForInstance(instance);
+			}
 		}
 	}
-
-	instance->endRenderAction(0, numFramesToRender, 1.0, interactive, renderScale, true,interactive
+*/
+	instance->endRenderAction(frame, numFramesToRender, 1.0, interactive, renderScale, true,interactive
 							  );
 
 }
 
+// 作用：绑定输出纹理到 OFX 的 GL 输出路径。
+// Purpose: Attach output texture for OFX GL rendering.
 void olive::plugin::PluginRenderer::AttachOutputTexture(olive::TexturePtr texture)
 {
 	if (!texture) {
@@ -1007,6 +1680,8 @@ void olive::plugin::PluginRenderer::AttachOutputTexture(olive::TexturePtr textur
 	AttachTextureAsDestination(texture->id());
 }
 
+// 作用：解除 OFX 的 GL 输出绑定。
+// Purpose: Detach OFX GL output binding.
 void olive::plugin::PluginRenderer::DetachOutputTexture()
 {
 	DetachTextureAsDestination();

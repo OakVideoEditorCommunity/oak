@@ -74,7 +74,7 @@ void NodeParamViewContext::RemoveNode(Node *node, Node *ctx)
 
 		if (item->GetNode() == node && item->GetContext() == ctx) {
 			emit AboutToDeleteItem(item);
-			delete item;
+			dock_area_->RemoveItem(item);
 			it = items_.erase(it);
 		} else {
 			it++;
@@ -89,7 +89,7 @@ void NodeParamViewContext::RemoveNodesWithContext(Node *ctx)
 
 		if (item->GetContext() == ctx) {
 			emit AboutToDeleteItem(item);
-			delete item;
+			dock_area_->RemoveItem(item);
 			it = items_.erase(it);
 		} else {
 			it++;

@@ -406,23 +406,14 @@ olive::plugin::OliveClipInstance::getImage(OfxTime time,
 					 static_cast<int>(std::floor(rod_d.y1)),
 					 static_cast<int>(std::ceil(rod_d.x2)),
 					 static_cast<int>(std::ceil(rod_d.y2)) };
+	(void)optionalBounds;
+	// Always return full-frame images to keep input data consistent.
 	OfxRectI bounds = rod;
-	if (optionalBounds) {
-		bounds.x1 = static_cast<int>(std::floor(optionalBounds->x1));
-		bounds.y1 = static_cast<int>(std::floor(optionalBounds->y1));
-		bounds.x2 = static_cast<int>(std::ceil(optionalBounds->x2));
-		bounds.y2 = static_cast<int>(std::ceil(optionalBounds->y2));
-	}
-	// Clamp bounds to ROD to keep host/plugin coords consistent.
-	bounds.x1 = std::max(bounds.x1, rod.x1);
-	bounds.y1 = std::max(bounds.y1, rod.y1);
-	bounds.x2 = std::min(bounds.x2, rod.x2);
-	bounds.y2 = std::min(bounds.y2, rod.y2);
 
 	if (name_ == "Output") {
 		if (!images_.contains(time)) {
 			// make a new ref counted image
-			images_.insert(time, std::make_shared<Image>(*const_cast<OliveClipInstance *>(this),
+			images_.insert(time, new Image(*const_cast<OliveClipInstance *>(this),
 											 params_, bounds, rod, true));
 		}
 
@@ -435,13 +426,13 @@ olive::plugin::OliveClipInstance::getImage(OfxTime time,
 		images_[time]->EnsureAllocatedFromParams(params_, bounds, rod, true);
 
 		// return it
-		return images_[time].get();
+		return images_[time];
 	} else {
 		if (images_.contains(time)) {
-			std::shared_ptr<Image> image = images_.value(time);
+			Image* image = images_.value(time);
 			image->EnsureAllocatedFromParams(params_, bounds, rod, false);
 			image->addReference();
-			return image.get();
+			return image;
 		}
 
 		// Fetch on demand for the input clip.
@@ -455,7 +446,7 @@ olive::plugin::OliveClipInstance::getImage(OfxTime time,
 	}
 }
 
-std::shared_ptr<OFX::Host::ImageEffect::Image>
+OFX::Host::ImageEffect::Image*
 olive::plugin::OliveClipInstance::getOutputImage(OfxTime time)
 {
 	if (images_.contains(time)) {
@@ -469,7 +460,7 @@ olive::plugin::OliveClipInstance::getOutputImage(OfxTime time)
 					 static_cast<int>(std::ceil(rod_d.y2)) };
 	OfxRectI bounds = rod;
 
-	auto image = std::make_shared<Image>(*this, params_, bounds, rod, true);
+	auto image = new Image(*this, params_, bounds, rod, true);
 	images_.insert(time, image);
 	return image;
 }
@@ -530,18 +521,18 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 									static_cast<int>(std::ceil(rod_d.x2)),
 									static_cast<int>(std::ceil(rod_d.y2)) };
 
-	std::shared_ptr<Image> image;
+	Image* image;
 	if (images_.contains(time)) {
 		image = images_.value(time);
 		image->EnsureAllocatedFromParams(params_, bounds, regionOfDefinition,
 										 false);
 	} else {
-		image = std::make_shared<Image>(*this, params_, bounds,
+		image = new Image(*this, params_, bounds,
 										regionOfDefinition, false);
 		images_.insert(time, image);
 	}
 
-	uint8_t *dst = image->data();
+	uint8_t *dst = (uint8_t*)image->data();
 	if (!dst) {
 		return;
 	}
@@ -603,6 +594,8 @@ copy_pixels:
 		std::memcpy(dst + y * dst_row_bytes, src + y * src_row_bytes,
 					copy_bytes);
 	}
+
+	
 }
 
 void olive::plugin::OliveClipInstance::setOutputTexture(TexturePtr texture,

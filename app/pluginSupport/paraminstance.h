@@ -42,7 +42,14 @@ inline QString ParamChangeLabel(const OFX::Host::Param::Descriptor &descriptor)
 void SubmitUndoCommand(const std::shared_ptr<PluginNode> &node,
 					   UndoCommand *command, const QString &label);
 
-class PushbuttonInstance : public OFX::Host::Param::PushbuttonInstance {
+class NodeBoundParam {
+public:
+	virtual ~NodeBoundParam() = default;
+	virtual void SetNode(const std::shared_ptr<PluginNode> &node) = 0;
+};
+
+class PushbuttonInstance : public OFX::Host::Param::PushbuttonInstance,
+							public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor *_descriptor;
@@ -54,9 +61,14 @@ public:
 	{
 		_descriptor = &descriptor;
 	};
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
+	}
 };
 
-class IntegerInstance : public OFX::Host::Param::IntegerInstance {
+class IntegerInstance : public OFX::Host::Param::IntegerInstance,
+						public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   _node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -69,6 +81,10 @@ public:
 		, _node(node)
 		, _descriptor(descriptor)
 	{}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		_node = new_node;
+	}
 	OfxStatus get(int &a)
 	{
 		if (!_node) {
@@ -137,7 +153,8 @@ public:
 	}
 };
 
-class DoubleInstance : public OFX::Host::Param::DoubleInstance {
+class DoubleInstance : public OFX::Host::Param::DoubleInstance,
+					   public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -150,6 +167,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(double& data)
 	{
@@ -219,7 +240,8 @@ public:
 	}
 };
 
-class BooleanInstance : public OFX::Host::Param::BooleanInstance {
+class BooleanInstance : public OFX::Host::Param::BooleanInstance,
+						public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -232,6 +254,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(bool& data)
 	{
@@ -293,7 +319,8 @@ public:
 	}
 };
 
-class ChoiceInstance : public OFX::Host::Param::ChoiceInstance {
+class ChoiceInstance : public OFX::Host::Param::ChoiceInstance,
+					   public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -306,6 +333,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(int& data)
 	{
@@ -367,7 +398,8 @@ public:
 	}
 };
 
-class RGBAInstance : public OFX::Host::Param::RGBAInstance {
+class RGBAInstance : public OFX::Host::Param::RGBAInstance,
+					 public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -380,6 +412,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(double& r,double& g,double& b,double& a)
 	{
@@ -472,7 +508,8 @@ public:
 };
 
 
-class RGBInstance : public OFX::Host::Param::RGBInstance {
+class RGBInstance : public OFX::Host::Param::RGBInstance,
+					public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -485,6 +522,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(double& r,double& g,double& b)
 	{
@@ -568,7 +609,8 @@ public:
 	}
 };
 
-class Double2DInstance : public OFX::Host::Param::Double2DInstance {
+class Double2DInstance : public OFX::Host::Param::Double2DInstance,
+						 public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -581,6 +623,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(double& x,double& y)
 	{
@@ -653,7 +699,8 @@ public:
 	}
 };
 
-class Integer2DInstance : public OFX::Host::Param::Integer2DInstance {
+class Integer2DInstance : public OFX::Host::Param::Integer2DInstance,
+						  public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -666,6 +713,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(int& x,int& y)
 	{
@@ -738,7 +789,8 @@ public:
 	}
 };
 
-class Double3DInstance : public OFX::Host::Param::Double3DInstance {
+class Double3DInstance : public OFX::Host::Param::Double3DInstance,
+						 public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -752,6 +804,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(double& x,double& y,double& z)
 	{
@@ -832,7 +888,8 @@ public:
 	}
 };
 
-class Integer3DInstance : public OFX::Host::Param::Integer3DInstance {
+class Integer3DInstance : public OFX::Host::Param::Integer3DInstance,
+						  public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -846,6 +903,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(int& x,int& y,int& z)
 	{
@@ -926,7 +987,8 @@ public:
 	}
 };
 
-class StringInstance : public OFX::Host::Param::StringInstance {
+class StringInstance : public OFX::Host::Param::StringInstance,
+					   public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -940,6 +1002,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(std::string &data)
 	{
@@ -1002,7 +1068,8 @@ public:
 	}
 };
 
-class CustomInstance : public OFX::Host::Param::CustomInstance {
+class CustomInstance : public OFX::Host::Param::CustomInstance,
+					   public NodeBoundParam {
 protected:
 	std::shared_ptr<PluginNode>   node;
 	OFX::Host::Param::Descriptor& _descriptor;
@@ -1016,6 +1083,10 @@ public:
 		, _descriptor(descriptor)
 	{
 		(void)name;
+	}
+	void SetNode(const std::shared_ptr<PluginNode> &new_node) override
+	{
+		node = new_node;
 	}
 	OfxStatus get(std::string &data)
 	{

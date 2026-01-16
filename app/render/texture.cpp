@@ -28,7 +28,7 @@ const Texture::Interpolation Texture::kDefaultInterpolation =
 
 Texture::~Texture()
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->DestroyTexture(this);
 	}
 
@@ -39,14 +39,14 @@ Texture::~Texture()
 
 void Texture::Upload(void *data, int linesize)
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->UploadToTexture(this->id(), this->params(), data, linesize);
 	}
 }
 
 void Texture::Download(void *data, int linesize)
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->DownloadFromTexture(this->id(), this->params(), data,
 									   linesize);
 	}

@@ -19,10 +19,12 @@
 #ifndef VIDEOPARAMS_H
 #define VIDEOPARAMS_H
 
+#include "ofxImageEffect.h"
 #include <olive/core/core.h>
 #include <QVector2D>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <string>
 
 namespace olive
 {
@@ -173,7 +175,18 @@ public:
 	{
 		channel_count_ = c;
 	}
-
+	void set_channel_count(std::string ofxComponent)
+	{
+		if (ofxComponent == kOfxImageComponentAlpha){
+			channel_count_ = 1;
+		}
+		else if (ofxComponent == kOfxImageComponentRGB){
+			channel_count_ = kRGBChannelCount;
+		}
+		else if(ofxComponent == kOfxImageComponentRGBA){
+			channel_count_ = kRGBAChannelCount;
+		}
+	}
 	const rational &pixel_aspect_ratio() const
 	{
 		return pixel_aspect_ratio_;

@@ -10,6 +10,7 @@
 #include <list>
 #include <vector>
 #include "ofxCore.h"
+#include "ofxImageEffect.h"
 
 // macro that intercepts any exception that passes through a plugin's entry point, and transforms it into a message on the host using Host::vmessage()
 #define CatchAllSetStatus(stat,host,plugin,msg)                         \
@@ -138,6 +139,8 @@ namespace OFX {
                 return "kOfxStatErrBadIndex";
             case kOfxStatErrValue:
                 return "kOfxStatErrValue";
+            case kOfxStatErrImageFormat:
+                return "kOfxStatErrImageFormat";
             case kOfxStatReplyYes:
                 return "kOfxStatReplyYes";
             case kOfxStatReplyNo:
@@ -150,5 +153,4 @@ namespace OFX {
     }
 }
 #endif
-
 

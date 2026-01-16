@@ -90,7 +90,7 @@ RenderThread *RenderManager::CreateThread(Renderer *renderer)
 {
 	auto t = new RenderThread(renderer, decoder_cache_, shader_cache_, this);
 	render_threads_.push_back(t);
-	t->start(QThread::IdlePriority);
+	t->start(QThread::NormalPriority);
 	return t;
 }
 

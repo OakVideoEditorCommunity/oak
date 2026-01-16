@@ -22,6 +22,8 @@
 #include <QMutex>
 #include <QObject>
 #include <QVariant>
+#include <atomic>
+#include <memory>
 
 #include "common/define.h"
 #include "node/node.h"
@@ -40,6 +42,7 @@ class Renderer : public QObject {
 	Q_OBJECT
 public:
 	Renderer(QObject *parent = nullptr);
+	virtual ~Renderer() override;
 
 	virtual bool Init() = 0;
 
@@ -106,6 +109,10 @@ public:
 
 	virtual Color GetPixelFromTexture(olive::Texture *texture,
 									  const QPointF &pt) = 0;
+	std::shared_ptr<RendererLifetime> GetLifetime() const
+	{
+		return lifetime_;
+	}
 
 protected:
 	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
@@ -122,6 +129,8 @@ protected:
 	virtual void DestroyInternal() = 0;
 
 private:
+	std::atomic<bool> destroyed_{false};
+	std::shared_ptr<RendererLifetime> lifetime_;
 	struct ColorContext {
 		struct LUT {
 			TexturePtr texture;

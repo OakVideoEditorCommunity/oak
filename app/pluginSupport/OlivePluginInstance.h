@@ -74,9 +74,10 @@ public:
 	{
 		this->params_=params;
 	}
-	void setNode(std::shared_ptr<PluginNode> node)
+	void setNode(std::shared_ptr<PluginNode> node);
+	std::shared_ptr<PluginNode> node() const
 	{
-		node_ = node;
+		return node_;
 	}
 	void setOpenGLEnabled(bool enabled)
 	{

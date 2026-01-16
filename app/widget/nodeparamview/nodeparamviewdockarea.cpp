@@ -47,4 +47,14 @@ void NodeParamViewDockArea::AddItem(QDockWidget *item)
 	addDockWidget(Qt::LeftDockWidgetArea, item);
 }
 
+void NodeParamViewDockArea::RemoveItem(QDockWidget *item)
+{
+	if (!item) {
+		return;
+	}
+	removeDockWidget(item);
+	item->setParent(nullptr);
+	item->deleteLater();
+}
+
 }

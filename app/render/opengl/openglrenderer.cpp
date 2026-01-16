@@ -187,6 +187,9 @@ QVariant OpenGLRenderer::CreateNativeTexture(int width, int height, int depth,
 											 const void *data, int linesize)
 {
 	GL_PREAMBLE;
+	if (!EnsureContextCurrent(__FUNCTION__)) {
+		return QVariant();
+	}
 
 	bool is_3d = depth > 1;
 
@@ -237,7 +240,10 @@ void OpenGLRenderer::AttachTextureAsDestination(const QVariant &texture)
 
 void OpenGLRenderer::DetachTextureAsDestination()
 {
-	functions_->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	// QOpenGLWidget renders to a non-zero default FBO.
+	const GLuint default_fbo =
+		context_ ? context_->defaultFramebufferObject() : 0;
+	functions_->glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
 }
 
 void OpenGLRenderer::DestroyNativeTexture(QVariant texture)
@@ -423,6 +429,12 @@ void OpenGLRenderer::Blit(QVariant s, AcceleratedJob& a_job, Texture *destinatio
 {
 	GL_PREAMBLE;
 	try {
+		if (!destination) {
+			// Ensure we're drawing to the default framebuffer for this context.
+			GLuint fbo = context_ ? context_->defaultFramebufferObject() : 0;
+			functions_->glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		}
+
 		ShaderJob &s_job=dynamic_cast<ShaderJob &>(a_job);
 		ShaderJob job(s_job);
 		// If this node is iterative, we'll pick up which input here
@@ -694,6 +706,7 @@ void OpenGLRenderer::Blit(QVariant s, AcceleratedJob& a_job, Texture *destinatio
 				PRINT_GL_ERRORS;
 				functions_->glDrawArrays(GL_TRIANGLES, 0, blit_vertices.size() / 3);
 			}
+
 		}
 
 		if (destination) {

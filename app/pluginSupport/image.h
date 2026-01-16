@@ -21,10 +21,13 @@
 #define OLIVE_EDITOR_PLUGIN_IMAGE_H
 
 #include "ofxCore.h"
+#include "ofxImageEffect.h"
 #include "ofxhClip.h"
 #include "olive/core/render/pixelformat.h"
 #include "render/loopmode.h"
 #include "render/videoparams.h"
+#include <cstdint>
+#include <qtypes.h>
 #include <string>
 #include <vector>
 namespace olive
@@ -41,7 +44,7 @@ public:
 		  bool clear = true);
 	~Image();
 	uint8_t *data() {
-		return image_.empty() ? nullptr : image_.data();
+		return (uint8_t *)getPointerProperty(kOfxImagePropData);
 	}
 	int width();
 	int height();

@@ -21,6 +21,7 @@
 
 #include "common/ffmpegutils.h"
 
+#include <atomic>
 #include <memory>
 #include <QVariant>
 
@@ -31,6 +32,9 @@ namespace olive
 
 class AcceleratedJob;
 class Renderer;
+struct RendererLifetime {
+	std::atomic<bool> alive{true};
+};
 
 class Texture;
 using TexturePtr = std::shared_ptr<Texture>;
@@ -46,6 +50,7 @@ public:
    */
 	Texture(const VideoParams &param)
 		: renderer_(nullptr)
+		, renderer_lifetime_(nullptr)
 		, params_(param)
 		, job_(nullptr)
 	{
@@ -62,8 +67,10 @@ public:
    * @brief Construct a real texture linked to a renderer backend
    */
 	Texture(Renderer *renderer, const QVariant &native,
-			const VideoParams &param)
+			const VideoParams &param,
+			std::shared_ptr<RendererLifetime> lifetime = nullptr)
 		: renderer_(renderer)
+		, renderer_lifetime_(lifetime)
 		, params_(param)
 		, id_(native)
 		, job_(nullptr)
@@ -158,7 +165,14 @@ public:
 		return frame_;
 	}
 private:
+	bool IsRendererAlive() const
+	{
+		return renderer_ &&
+			(!renderer_lifetime_ || renderer_lifetime_->alive.load());
+	}
+
 	Renderer *renderer_;
+	std::shared_ptr<RendererLifetime> renderer_lifetime_;
 
 	VideoParams params_;
 

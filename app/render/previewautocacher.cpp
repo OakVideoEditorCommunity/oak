@@ -530,8 +530,11 @@ void PreviewAutoCacher::TryRender()
 				t->property("dry").toBool());
 			video_immediate_passthroughs_[watcher].append(t);
 		} else {
-			qWarning() << "Failed to find copied node for SFR ticket";
-			t->Finish();
+			qWarning() << "Failed to find copied node for SFR ticket, requeueing";
+			single_frame_render_ = t;
+			if (!delayed_requeue_timer_.isActive()) {
+				delayed_requeue_timer_.start();
+			}
 		}
 	}
 
@@ -560,7 +563,11 @@ void PreviewAutoCacher::TryRender()
 						}
 					}
 				} else {
-					qCritical() << "Failed to find node copy for video job";
+					qWarning() << "Failed to find node copy for video job, retrying";
+					if (!delayed_requeue_timer_.isActive()) {
+						delayed_requeue_timer_.start();
+					}
+					break;
 				}
 
 				if (d.iterator.HasNext()) {
@@ -598,7 +605,12 @@ void PreviewAutoCacher::TryRender()
 
 				RenderAudio(copy, d.context, use_range, d.cache);
 			} else {
-				qCritical() << "Failed to find node copy for audio job";
+				qWarning() << "Failed to find node copy for audio job, retrying";
+				pop = false;
+				if (!delayed_requeue_timer_.isActive()) {
+					delayed_requeue_timer_.start();
+				}
+				break;
 			}
 
 			if (pop) {

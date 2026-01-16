@@ -1270,6 +1270,7 @@ RenderTicketWatcher *ViewerWidget::RequestNextFrameForQueue(bool increment)
 		}
 
 		watcher = new RenderTicketWatcher();
+		watcher->setProperty("start", QDateTime::currentMSecsSinceEpoch());
 		watcher->setProperty("time", QVariant::fromValue(next_time));
 		DetectMulticamNode(next_time);
 		connect(watcher, &RenderTicketWatcher::Finished, this,
@@ -1283,6 +1284,10 @@ RenderTicketWatcher *ViewerWidget::RequestNextFrameForQueue(bool increment)
 
 RenderTicketPtr ViewerWidget::GetFrame(const rational &t)
 {
+	if (IsPlaying() || prequeuing_video_) {
+		return GetSingleFrame(t);
+	}
+
 	QString cache_fn =
 		GetConnectedNode()->video_frame_cache()->GetValidCacheFilename(t);
 
@@ -1447,21 +1452,45 @@ void ViewerWidget::RendererGeneratedFrameForQueue()
 
 		if (watcher->HasResult()) {
 			QVariant frame = watcher->Get();
+			bool drop_frame = false;
 
 			// Ignore this signal if we've paused now
 			if (IsPlaying() || prequeuing_video_) {
+				const qint64 start_ms =
+					watcher->property("start").toLongLong();
+				const qint64 now_ms =
+					QDateTime::currentMSecsSinceEpoch();
+				const int playback_step = qMax(1, qAbs(playback_speed_));
+				const double frame_interval_ms = qMax(
+					1.0,
+					timebase().toDouble() * 1000.0 /
+						static_cast<double>(playback_step));
+				if (start_ms > 0 &&
+					(now_ms - start_ms) > frame_interval_ms) {
+					drop_frame = true;
+				}
+
 				rational ts = watcher->property("time").value<rational>();
 
-				foreach (ViewerDisplayWidget *dw, playback_devices_) {
-					QVariant push;
-					if (dynamic_cast<MulticamDisplay *>(dw)) {
-						push =
-							watcher->GetTicket()->property("multicam_output");
-					} else {
-						push = frame;
-					}
+				if (!drop_frame) {
+					foreach (ViewerDisplayWidget *dw, playback_devices_) {
+						const bool is_multicam =
+							dynamic_cast<MulticamDisplay *>(dw);
+						QVariant push;
+						if (is_multicam) {
+							push = watcher->GetTicket()->property(
+								"multicam_output");
+							if (!push.isValid() || push.isNull()) {
+								// Fall back to the primary frame when multicam isn't available.
+								push = frame;
+							}
+						} else {
+							push = frame;
+						}
 
-					dw->queue()->AppendTimewise({ ts, push }, playback_speed_);
+						dw->queue()->AppendTimewise({ ts, push },
+												   playback_speed_);
+					}
 				}
 
 				if (prequeuing_video_) {

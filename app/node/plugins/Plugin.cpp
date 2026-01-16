@@ -21,6 +21,9 @@
 #include "render/rendermanager.h"
 #include "render/job/pluginjob.h"
 #include "pluginSupport/OlivePluginInstance.h"
+
+#include <algorithm>
+#include <cstring>
 static QString ClipLabelForName(const std::string &name,
 								const OFX::Host::ImageEffect::ClipDescriptor *desc)
 {
@@ -150,6 +153,71 @@ olive::plugin::PluginNode::PluginNode(
 			SetInputProperty(input_id, QStringLiteral("ui_page"),
 							 page_for_param.value(input_id));
 		}
+		if (type == NodeValue::kCombo || type == NodeValue::kStrCombo) {
+			QStringList option_labels;
+			QStringList option_values;
+			const int label_count =
+				props.getDimension(kOfxParamPropChoiceOption);
+			const int value_count =
+				props.getDimension(kOfxParamPropChoiceEnum);
+
+			for (int i = 0; i < label_count; ++i) {
+				const std::string &label =
+					props.getStringProperty(kOfxParamPropChoiceOption, i);
+				option_labels.append(QString::fromStdString(label));
+			}
+
+			for (int i = 0; i < value_count; ++i) {
+				const std::string &value =
+					props.getStringProperty(kOfxParamPropChoiceEnum, i);
+				option_values.append(QString::fromStdString(value));
+			}
+
+			if (option_labels.isEmpty() && !option_values.isEmpty()) {
+				option_labels = option_values;
+			}
+			if (option_values.isEmpty() && !option_labels.isEmpty()) {
+				option_values = option_labels;
+			}
+
+			const int order_count =
+				props.getDimension(kOfxParamPropChoiceOrder);
+			if (order_count == option_labels.size() &&
+				option_labels.size() == option_values.size()) {
+				QVector<int> indices(option_labels.size());
+				for (int i = 0; i < indices.size(); ++i) {
+					indices[i] = i;
+				}
+
+				std::stable_sort(indices.begin(), indices.end(),
+								 [&](int a, int b) {
+									 return props.getIntProperty(
+												kOfxParamPropChoiceOrder,
+												a) <
+											props.getIntProperty(
+												kOfxParamPropChoiceOrder,
+												b);
+								 });
+
+				QStringList ordered_labels;
+				QStringList ordered_values;
+				for (int index : indices) {
+					ordered_labels.append(option_labels.at(index));
+					ordered_values.append(option_values.at(index));
+				}
+				option_labels = ordered_labels;
+				option_values = ordered_values;
+			}
+
+			if (!option_labels.isEmpty()) {
+				SetComboBoxStrings(input_id, option_labels);
+				if (type == NodeValue::kStrCombo) {
+					SetInputProperty(input_id,
+									 QStringLiteral("combo_value_str"),
+									 option_values);
+				}
+			}
+		}
 	}
 
 	const auto &clips = plugin_instance_->getDescriptor().getClips();
@@ -162,9 +230,21 @@ olive::plugin::PluginNode::PluginNode(
 		SetInputName(input_id, ClipLabelForName(entry.first, entry.second));
 		has_texture_input = true;
 	}
-	if (!has_texture_input) {
-		AddInput(kTextureInput, NodeValue::kTexture);
-		SetInputName(kTextureInput, tr("Texture"));
+	
+
+	const QString source_id =
+		QString::fromUtf8(kOfxImageEffectSimpleSourceClipName);
+	if (HasInputWithID(source_id)) {
+		SetEffectInput(source_id);
+	} else if (HasInputWithID(kTextureInput)) {
+		SetEffectInput(kTextureInput);
+	}
+	else {
+		if (has_texture_input) {
+			AddInput(kTextureInput, NodeValue::kTexture);
+			SetInputName(kTextureInput, tr("Texture"));
+			SetEffectInput(kTextureInput);
+		}
 	}
 }
 
@@ -198,23 +278,77 @@ void olive::plugin::PluginNode::ProcessSamples(const NodeValueRow &values,
 											   SampleBuffer &output,
 											   int index) const
 {
-	(void)values;
-	(void)input;
-	(void)output;
-	(void)index;
+	Q_UNUSED(values)
+	Q_UNUSED(index)
+
+	if (!input.is_allocated() || input.channel_count() == 0 ||
+		input.sample_count() == 0) {
+		if (output.is_allocated()) {
+			output.silence();
+		}
+		return;
+	}
+
+	if (!output.is_allocated() ||
+		output.channel_count() != input.channel_count() ||
+		output.sample_count() != input.sample_count()) {
+		output.set_audio_params(input.audio_params());
+		output.set_sample_count(input.sample_count());
+		output.allocate();
+	}
+
+	if (!output.is_allocated()) {
+		return;
+	}
+
+	for (int channel = 0; channel < input.channel_count(); ++channel) {
+		output.fast_set(input, channel);
+	}
 }
 
 void olive::plugin::PluginNode::GenerateFrame(FramePtr frame,
 											  const GenerateJob &job) const
 {
-	(void)frame;
-	(void)job;
+	Q_UNUSED(job)
+
+	if (!frame) {
+		return;
+	}
+
+	if (!frame->is_allocated()) {
+		frame->allocate();
+	}
+
+	if (!frame->is_allocated()) {
+		return;
+	}
+
+	std::memset(frame->data(), 0, static_cast<size_t>(frame->allocated_size()));
 }
 void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 									  const NodeGlobals &globals,
 									  NodeValueTable *table) const
 {
-	TexturePtr tex = value.value(kTextureInput).toTexture();
+	for (auto it = value.cbegin(); it != value.cend(); ++it) {
+		const NodeValue &input_value = it.value();
+		if (input_value.type() == NodeValue::kTexture ||
+			input_value.type() == NodeValue::kNone) {
+			continue;
+		}
+		NodeValue tagged = input_value;
+		tagged.set_tag(it.key());
+		table->Push(tagged);
+	}
+
+	TexturePtr tex = nullptr;
+	const QString source_key =
+		QString::fromUtf8(kOfxImageEffectSimpleSourceClipName);
+	if (value.contains(source_key)) {
+		tex = value.value(source_key).toTexture();
+	}
+	if (!tex) {
+		tex = value.value(kTextureInput).toTexture();
+	}
 	if (!tex) {
 		for (auto it = value.cbegin(); it != value.cend(); ++it) {
 			if (it.value().type() == NodeValue::kTexture) {
@@ -227,6 +361,7 @@ void olive::plugin::PluginNode::Value(const NodeValueRow &value,
 	}
 	if (tex && plugin_instance_) {
 		PluginJob job(plugin_instance_, this, value, globals.time().in());
+		
 		table->Push(NodeValue::kTexture, tex->toJob(job), this);
 	}
 }

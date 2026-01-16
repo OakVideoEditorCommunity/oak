@@ -635,8 +635,56 @@ TexturePtr RenderProcessor::ProcessPluginJob(TexturePtr texture,
 		plugin_renderer_->PostInit();
 	}
 
+	NodeValueRow &values = plugin_job->GetValues();
+
+	auto is_usable_texture = [](const TexturePtr &tex) {
+		if (!tex) {
+			return false;
+		}
+		if (!tex->IsDummy() && tex->renderer()) {
+			return true;
+		}
+		AVFramePtr frame = tex->frame();
+		return frame && frame->data[0];
+	};
+
+	TexturePtr src = nullptr;
+	QString effect_input_id;
+	if (plugin_job->node()) {
+		effect_input_id = plugin_job->node()->GetEffectInputID();
+	}
+	if (!effect_input_id.isEmpty()) {
+		if (TexturePtr effect_tex = values.value(effect_input_id).toTexture();
+			is_usable_texture(effect_tex)) {
+			src = effect_tex;
+		}
+	}
+	if (!src) {
+		const QString source_key =
+			QString::fromUtf8(kOfxImageEffectSimpleSourceClipName);
+		if (TexturePtr source_tex = values.value(source_key).toTexture();
+			is_usable_texture(source_tex)) {
+			src = source_tex;
+		} else if (TexturePtr effect_tex =
+					   values.value(plugin::kTextureInput).toTexture();
+				   is_usable_texture(effect_tex)) {
+			src = effect_tex;
+		}
+	}
+	if (!src) {
+		for (auto it = values.cbegin(); it != values.cend(); ++it) {
+			if (it.value().type() == NodeValue::kTexture) {
+				if (TexturePtr any_tex = it.value().toTexture();
+					is_usable_texture(any_tex)) {
+					src = any_tex;
+					break;
+				}
+			}
+		}
+	}
+
 	plugin_renderer_->RenderPlugin(
-		texture,
+		src,
 		*plugin_job,
 		destination,
 		destination->params(),

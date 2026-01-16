@@ -44,7 +44,7 @@ public:
 	{
 		params_ = params;
 	}
-	std::shared_ptr<OFX::Host::ImageEffect::Image> getOutputImage(OfxTime time);
+    OFX::Host::ImageEffect::Image* getOutputImage(OfxTime time);
 
 	const std::string &getUnmappedBitDepth() const override;
 	const std::string &getUnmappedComponents() const override;
@@ -83,7 +83,7 @@ private:
 	OfxRectD defaultRegionOfDefinitions_;
 
 	std::string name_;
-	QMap<OfxTime,std::shared_ptr<Image>> images_;
+	QMap<OfxTime, Image*> images_;
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	QMap<OfxTime, TexturePtr> input_textures_;
 	QMap<OfxTime, TexturePtr> output_textures_;

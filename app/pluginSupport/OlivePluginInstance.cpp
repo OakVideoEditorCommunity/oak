@@ -160,6 +160,19 @@ const std::string &OlivePluginInstance::getDefaultOutputFielding() const
 	return FieldOrderForParams(params_);
 }
 
+void OlivePluginInstance::setNode(std::shared_ptr<PluginNode> node)
+{
+	node_ = node;
+	for (const auto &entry : getParams()) {
+		if (!entry.second) {
+			continue;
+		}
+		if (auto *bound = dynamic_cast<NodeBoundParam *>(entry.second)) {
+			bound->SetNode(node_);
+		}
+	}
+}
+
 OfxStatus OlivePluginInstance::vmessage(const char *type, const char *id,
 								  const char *format, va_list args)
 {

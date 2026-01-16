@@ -110,12 +110,22 @@ void NodeParamViewWidgetBridge::CreateWidgets()
 			CreateSliders<FloatSlider>(GetSliderCount(t), parent);
 			break;
 		}
-		case NodeValue::kCombo: {
+		case NodeValue::kCombo:
+		case NodeValue::kStrCombo: {
 			QComboBox *combobox = new QComboBox(parent);
 
 			QStringList items = GetInnerInput().GetComboBoxStrings();
-			foreach (const QString &s, items) {
-				combobox->addItem(s);
+			QStringList values =
+				GetInnerInput().GetProperty("combo_value_str").toStringList();
+			const bool use_value_data =
+				(t == NodeValue::kStrCombo) && !values.isEmpty();
+			for (int i = 0; i < items.size(); ++i) {
+				const QString &label = items.at(i);
+				if (use_value_data && i < values.size()) {
+					combobox->addItem(label, values.at(i));
+				} else {
+					combobox->addItem(label);
+				}
 			}
 
 			widgets_.append(combobox);
@@ -378,6 +388,16 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 		SetInputValue(index, 0);
 		break;
 	}
+	case NodeValue::kStrCombo: {
+		QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
+		const QVariant data = cb->currentData();
+		if (data.isValid()) {
+			SetInputValue(data.toString(), 0);
+		} else {
+			SetInputValue(cb->currentText(), 0);
+		}
+		break;
+	}
 	case NodeValue::kBezier: {
 		// Widget is a FloatSlider (child of BezierWidget)
 		BezierWidget *bw = static_cast<BezierWidget *>(widgets_.first());
@@ -556,6 +576,22 @@ void NodeParamViewWidgetBridge::UpdateWidgetValues()
 		for (int i = 0; i < cb->count(); i++) {
 			if (cb->itemData(i).toInt() == index) {
 				cb->setCurrentIndex(i);
+			}
+		}
+		cb->blockSignals(false);
+		break;
+	}
+	case NodeValue::kStrCombo: {
+		QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
+		cb->blockSignals(true);
+		const QString current =
+			GetInnerInput().GetValueAtTime(node_time).toString();
+		for (int i = 0; i < cb->count(); ++i) {
+			const QVariant data = cb->itemData(i);
+			if ((data.isValid() && data.toString() == current) ||
+				(!data.isValid() && cb->itemText(i) == current)) {
+				cb->setCurrentIndex(i);
+				break;
 			}
 		}
 		cb->blockSignals(false);
@@ -772,7 +808,7 @@ void NodeParamViewWidgetBridge::SetProperty(const QString &key,
 	}
 
 	// ComboBox strings changing
-	if (data_type == NodeValue::kCombo) {
+	if (data_type == NodeValue::kCombo || data_type == NodeValue::kStrCombo) {
 		if (key == QStringLiteral("combo_str")) {
 			QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
 
@@ -784,14 +820,23 @@ void NodeParamViewWidgetBridge::SetProperty(const QString &key,
 			cb->clear();
 
 			QStringList items = value.toStringList();
+			QStringList values =
+				GetInnerInput().GetProperty("combo_value_str").toStringList();
+			const bool use_value_data =
+				(data_type == NodeValue::kStrCombo) && !values.isEmpty();
 			int index = 0;
-			foreach (const QString &s, items) {
+			for (int i = 0; i < items.size(); ++i) {
+				const QString &s = items.at(i);
 				if (s.isEmpty()) {
 					cb->insertSeparator(cb->count());
 					cb->setItemData(cb->count() - 1, -1);
 				} else {
-					cb->addItem(s, index);
-					index++;
+					if (use_value_data && i < values.size()) {
+						cb->addItem(s, values.at(i));
+					} else {
+						cb->addItem(s, index);
+						index++;
+					}
 				}
 			}
 

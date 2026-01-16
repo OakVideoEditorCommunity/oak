@@ -73,6 +73,8 @@ public:
 		return context_;
 	}
 
+	bool EnsureContextCurrent(const char *caller);
+
 protected:
 	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
 					  olive::Texture *destination,
@@ -98,8 +100,6 @@ private:
 	static GLenum GetPixelType(PixelFormat format);
 
 	static GLenum GetPixelFormat(int channel_count);
-
-	bool EnsureContextCurrent(const char *caller);
 
 	void PrepareInputTexture(GLenum target, Texture::Interpolation interp);
 
