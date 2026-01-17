@@ -1646,7 +1646,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			if (linesize_pixels <= 0) {
 				linesize_pixels = destination_params.effective_width();
 			}
-			//destination->Upload(converted->data[0], linesize_pixels);
+			destination->Upload(converted->data[0], linesize_pixels);
 		} else if (destination->renderer() && converted && converted->data[0]) {
 			qWarning().noquote()
 				<< "OFX output pixel format mismatch for plugin="
