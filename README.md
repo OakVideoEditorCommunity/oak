@@ -17,11 +17,11 @@ The original author compiled following binaries:
 
 ## TODO List
 
-[x] OpenFX Plugin support
+- [x] OpenFX Plugin support
 
-[ ] LRU Cache support
+- [ ] LRU Cache support
 
-[ ] Video proxy support
+- [ ] Video proxy support
 
-[ ] UI change
+- [ ] UI change
 
