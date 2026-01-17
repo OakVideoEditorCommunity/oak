@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -253,6 +254,10 @@ bool NodeKeyframe::load(QXmlStreamReader *reader, NodeValue::Type data_type)
 
 	this->set_value(
 		NodeValue::StringToValue(data_type, reader->readElementText(), true));
+
+	if (!key_input.isEmpty()) {
+		this->set_input(key_input);
+	}
 
 	this->set_bezier_control_in(key_in_handle);
 	this->set_bezier_control_out(key_out_handle);

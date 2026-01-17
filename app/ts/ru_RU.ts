@@ -6075,4 +6075,19 @@ Duration: %3</source>
         <translation>Сэмплы</translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>Изменить %1</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1 (+%2)</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>Изменить параметры</translation>
+  </message>
+</context>
 </TS>

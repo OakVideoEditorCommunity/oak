@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -35,22 +36,22 @@ public:
 	{
 	}
 
-	NodeValue Get(const QString &input) const
+	virtual NodeValue Get(const QString &input) const
 	{
 		return value_map_.value(input);
 	}
 
-	void Insert(const QString &input, const NodeValueRow &row)
+	virtual void Insert(const QString &input, const NodeValueRow &row)
 	{
 		value_map_.insert(input, row.value(input));
 	}
 
-	void Insert(const QString &input, const NodeValue &value)
+	virtual void Insert(const QString &input, const NodeValue &value)
 	{
 		value_map_.insert(input, value);
 	}
 
-	void Insert(const NodeValueRow &row)
+	virtual void Insert(const NodeValueRow &row)
 	{
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 		value_map_.insert(row);
@@ -61,16 +62,16 @@ public:
 #endif
 	}
 
-	const NodeValueRow &GetValues() const
+	virtual const NodeValueRow &GetValues() const
 	{
 		return value_map_;
 	}
-	NodeValueRow &GetValues()
+	virtual NodeValueRow &GetValues()
 	{
 		return value_map_;
 	}
 
-private:
+protected:
 	NodeValueRow value_map_;
 };
 

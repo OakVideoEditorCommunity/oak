@@ -51,4 +51,19 @@
         </translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>Change %1</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1 (+%2)</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>Edit Parameters</translation>
+  </message>
+</context>
 </TS>

@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -29,18 +30,20 @@
 #include <QOffscreenSurface>
 #endif
 
+#include "KDDockWidgets/src/qtwidgets/Window_p.h"
 #include "dialog/about/about.h"
 #include "mainmenu.h"
 #include "mainstatusbar.h"
+#include "KDDockWidgets/src/LayoutSaver.h"
 #include "timeline/timelineundoworkarea.h"
 
 namespace olive
 {
 
-#define super KDDockWidgets::MainWindow
+#define super KDDockWidgets::QtWidgets::MainWindow
 
 MainWindow::MainWindow(QWidget *parent)
-	: super(QStringLiteral("OliveMain"), KDDockWidgets::MainWindowOption_None,
+	: super(QStringLiteral("OakMain"), KDDockWidgets::MainWindowOption_None,
 			parent)
 	, project_(nullptr)
 {
@@ -95,7 +98,7 @@ MainWindow::MainWindow(QWidget *parent)
 	//       emit the "shown" signal before emitting the "hidden" signals, resulting
 	//       in Core thinking there are -1 pixel samplers open. To mitigate that,
 	//       we force "shown" to emit ourselves here.
-	emit pixel_sampler_panel_->shown();
+	emit pixel_sampler_panel_->shown(Qt::OtherFocusReason);
 
 	// Make node-related connections
 	connect(node_panel_, &NodePanel::NodeSelectionChangedWithContexts,
@@ -382,7 +385,7 @@ void MainWindow::ToggleMaximizedPanel()
 		premaximized_state_.clear();
 
 		currently_focused_panel->raise();
-		currently_focused_panel->setFocus();
+		currently_focused_panel->setFocus(Qt::ActiveWindowFocusReason);
 
 		PanelManager::instance()->SetSuppressChangedSignal(false);
 	}
@@ -430,7 +433,7 @@ void MainWindow::SetProject(Project *p)
 	project_panel_->set_project(p);
 
 	if (project_) {
-		project_panel_->setFocus();
+		project_panel_->setFocus(Qt::OtherFocusReason);
 	}
 }
 
@@ -581,9 +584,9 @@ void MainWindow::ShowNouveauWarning()
 {
 	QMessageBox::warning(
 		this, tr("Driver Warning"),
-		tr("Olive has detected your system is using the Nouveau graphics driver.\n\nThis driver is "
-		   "known to have stability and performance issues with Olive. It is highly recommended "
-		   "you install the proprietary NVIDIA driver before continuing to use Olive."),
+		tr("Oak Video Editor has detected your system is using the Nouveau graphics driver.\n\nThis driver is "
+		   "known to have stability and performance issues with Oak Video Editor. It is highly recommended "
+		   "you install the proprietary NVIDIA driver before continuing to use Oak Video Editor."),
 		QMessageBox::Ok);
 }
 #endif

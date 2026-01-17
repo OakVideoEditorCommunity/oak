@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -61,16 +62,7 @@ public:
 			}
 		}
 	}
-	void SetChannelLayout(AVChannelLayout &ch)
-	{
-		for (int i = 0; i < this->count(); i++) {
-			if (this->itemData(i).toULongLong() == ch.u.mask) {
-				this->setCurrentIndex(i);
-				break;
-			}
-		}
-	}
-	void SetChannelLayout(AVChannelLayout &&ch)
+	void SetChannelLayout(const AVChannelLayout &ch)
 	{
 		for (int i = 0; i < this->count(); i++) {
 			if (this->itemData(i).toULongLong() == ch.u.mask) {

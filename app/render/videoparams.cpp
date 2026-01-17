@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -73,11 +74,15 @@ VideoParams::VideoParams()
 	: width_(0)
 	, height_(0)
 	, depth_(0)
+	, time_base_(0)
 	, format_(PixelFormat::INVALID)
 	, channel_count_(0)
+	, pixel_aspect_ratio_(1)
 	, interlacing_(Interlacing::kInterlaceNone)
 	, divider_(1)
 {
+	calculate_effective_size();
+	validate_pixel_aspect_ratio();
 	set_defaults_for_footage();
 }
 
@@ -234,8 +239,8 @@ QString VideoParams::GetFormatName(PixelFormat format)
 		break;
 	}
 
-	return QCoreApplication::translate("VideoParams", "Unknown (0x%1)")
-		.arg(format, 0, 16);
+		return QCoreApplication::translate("VideoParams", "Unknown (0x%1)")
+				.arg(static_cast<int>(format), 0, 16);
 }
 
 int VideoParams::GetDividerForTargetResolution(int src_width, int src_height,

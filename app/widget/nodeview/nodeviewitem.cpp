@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -30,6 +31,7 @@
 #include "config/config.h"
 #include "core.h"
 #include "node/nodeundo.h"
+#include "pluginSupport/OlivePluginInstance.h"
 #include "nodeview.h"
 #include "nodeviewscene.h"
 #include "ui/colorcoding.h"
@@ -69,6 +71,8 @@ NodeViewItem::NodeViewItem(Node *node, const QString &input, int element,
 	connect(node_, &Node::LabelChanged, this,
 			&NodeViewItem::NodeAppearanceChanged);
 	connect(node_, &Node::ColorChanged, this,
+			&NodeViewItem::NodeAppearanceChanged);
+	connect(node_, &Node::MessageCountChanged, this,
 			&NodeViewItem::NodeAppearanceChanged);
 
 	if (IsOutputItem()) {
@@ -428,6 +432,41 @@ void NodeViewItem::paint(QPainter *painter,
 		painter->setFont(f);
 		DrawNodeTitle(painter, node_name, safe_label_bounds, Qt::AlignBottom,
 					  arrow_size);
+	}
+
+	if (IsOutputItem()) {
+		auto *instance = node_->getPluginInstance();
+		auto *olive_instance =
+			dynamic_cast<plugin::OlivePluginInstance *>(instance);
+		int message_count =
+			olive_instance ? olive_instance->persistentMessageCount() : 0;
+
+		if (message_count > 0) {
+			QString badge_text = QString::number(message_count);
+			QFont badge_font = painter->font();
+			badge_font.setPointSizeF(badge_font.pointSizeF() * 0.7);
+			painter->setFont(badge_font);
+
+			QFontMetrics badge_metrics(badge_font);
+			int text_width = badge_metrics.horizontalAdvance(badge_text);
+			int text_height = badge_metrics.height();
+			int pad = text_height / 3;
+			int badge_width = qMax(text_width + pad * 2, text_height + pad);
+			int badge_height = text_height + pad;
+
+			QRectF badge_rect(
+				single_unit_rect.right() - badge_width - 4,
+				single_unit_rect.top() + 4,
+				badge_width, badge_height);
+
+			painter->setPen(Qt::NoPen);
+			painter->setBrush(QColor(220, 50, 47));
+			painter->drawRoundedRect(badge_rect, badge_height / 2,
+									 badge_height / 2);
+
+			painter->setPen(Qt::white);
+			painter->drawText(badge_rect, Qt::AlignCenter, badge_text);
+		}
 	}
 
 	// Draw final border (output only)

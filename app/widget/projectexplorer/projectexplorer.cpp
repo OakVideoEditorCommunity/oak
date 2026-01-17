@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -508,8 +509,18 @@ void ProjectExplorer::ReplaceSelectedFootage()
 {
 	Footage *footage = static_cast<Footage *>(context_menu_items_.first());
 
-	QString file = QFileDialog::getOpenFileName(this, tr("Replace Footage"));
+	QString file = QFileDialog::getOpenFileName(
+		this, tr("Replace Footage"), QString(),
+		Core::FootageFileDialogFilter());
 	if (!file.isEmpty()) {
+		if (!Core::IsFootageExtensionAllowed(file)) {
+			QMessageBox::warning(
+				this, tr("Unsupported media"),
+				tr("This file type is not allowed by the current media type "
+				   "filter."));
+			return;
+		}
+
 		auto p = new MultiUndoCommand();
 
 		// Change filename parameter

@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -35,6 +36,7 @@
 #include "timeline/timelinecommon.h"
 #include "ui/colorcoding.h"
 #include "ui/style/style.h"
+#include "widget/timelinewidget/tool/import.h"
 #include "window/mainwindow/mainwindow.h"
 
 namespace olive

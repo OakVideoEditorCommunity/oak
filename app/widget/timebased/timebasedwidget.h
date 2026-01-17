@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,6 +22,7 @@
 #ifndef TIMEBASEDWIDGET_H
 #define TIMEBASEDWIDGET_H
 
+#include <QPointer>
 #include <QWidget>
 
 #include "node/output/viewer/viewer.h"
@@ -241,7 +243,7 @@ private:
 
 	bool UserIsDraggingPlayhead() const;
 
-	ViewerOutput *viewer_node_;
+	QPointer<ViewerOutput> viewer_node_;
 
 	TimeRuler *ruler_;
 

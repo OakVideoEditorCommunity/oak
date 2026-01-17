@@ -1,5 +1,6 @@
 # Olive - Non-Linear Video Editor
 # Copyright (C) 2022 Olive Team
+# Modifications Copyright (C) 2025 mikesolar
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,5 +23,7 @@ set(OLIVE_SOURCES
   render/job/generatejob.h
   render/job/samplejob.h
   render/job/shaderjob.h
-  PARENT_SCOPE
+  render/job/pluginjob.h
+  render/job/pluginjob.cpp
+        PARENT_SCOPE
 )

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Copyright (c) Contributors to the aswf-docker Project. All rights reserved.
+# Modifications Copyright (C) 2025 mikesolar
 # SPDX-License-Identifier: Apache-2.0
+
+
+
+
 
 set -ex
 

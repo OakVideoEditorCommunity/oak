@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -53,7 +54,7 @@ namespace olive
 /**
  * @brief Olive's main window responsible for docking widgets and the main menu bar.
  */
-class MainWindow : public KDDockWidgets::MainWindow {
+class MainWindow : public KDDockWidgets::QtWidgets::MainWindow {
 	Q_OBJECT
 public:
 	MainWindow(QWidget *parent = nullptr);

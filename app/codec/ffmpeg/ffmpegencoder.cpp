@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -24,6 +25,7 @@ extern "C" {
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavutil/pixdesc.h>
+#include <libavformat/avformat.h>
 }
 
 #include <QFile>
@@ -868,7 +870,7 @@ void FFmpegEncoder::FlushEncoders()
 	}
 
 	if (fmt_ctx_) {
-		if (fmt_ctx_->oformat->flags & AVFMT_ALLOW_FLUSH) {
+		if (fmt_ctx_->oformat->flags) {
 			int r = av_interleaved_write_frame(fmt_ctx_, nullptr);
 			if (r < 0) {
 				FFmpegError(tr("Failed to write interleaved packet"), r);

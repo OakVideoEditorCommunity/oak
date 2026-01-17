@@ -4915,4 +4915,19 @@ y salida.</translation>
         <translation>Muestras</translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>Cambiar %1</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1 (+%2)</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>Editar parámetros</translation>
+  </message>
+</context>
 </TS>

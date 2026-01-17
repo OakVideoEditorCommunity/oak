@@ -1,5 +1,6 @@
 # Olive - Non-Linear Video Editor
 # Copyright (C) 2023 Olive Studios LLC
+# Modifications Copyright (C) 2025 mikesolar
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +18,15 @@
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(olive-editor VERSION 0.2.0 LANGUAGES CXX)
+if(${CMAKE_BUILD_TYPE} EQUAL Debug)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -g")
+set(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAGS} -fsanitize=memory)
+endif ()
 
+
+set(CMAKE_C_FLAGS ${CMAKE_C_FLAGS} -DOFX_SUPPORTS_OPENGLRENDER)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DOFX_SUPPORTS_OPENGLRENDER")
 option(BUILD_QT6 "Build with Qt 6 over 5 (experimental)" ON)
 option(BUILD_DOXYGEN "Build Doxygen documentation" OFF)
 option(BUILD_TESTS "Build unit tests" OFF)
@@ -51,6 +60,7 @@ if(MSVC)
     /external:W0
     "$<$<CONFIG:RELEASE>:/O2>"
     "$<$<COMPILE_LANGUAGE:CXX>:/MP>"
+    /DOFX_SUPPORTS_OPENGLRENDER
   )
   if (USE_WERROR)
     list(APPEND OLIVE_COMPILE_OPTIONS "/WX")
@@ -64,6 +74,8 @@ else()
     -Wextra
     -Wno-unused-parameter
     -Wshadow
+    -DOFX_SUPPORTS_OPENGLRENDER
+
   )
   if (USE_WERROR)
     list(APPEND OLIVE_COMPILE_OPTIONS "-Werror")
@@ -76,6 +88,12 @@ if (WIN32)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+# OFX HostSupport requires expat::expat
+find_package(EXPAT REQUIRED)
+if (TARGET EXPAT::EXPAT AND NOT TARGET expat::expat)
+  add_library(expat::expat ALIAS EXPAT::EXPAT)
+endif()
 
 # Link OpenGL
 if(UNIX AND NOT APPLE AND NOT DEFINED OpenGL_GL_PREFERENCE)
@@ -102,6 +120,7 @@ list(APPEND OLIVE_INCLUDE_DIRS ${OPENEXR_INCLUDES})
 # Link Olive
 list(APPEND OLIVE_LIBRARIES olivecore)
 list(APPEND OLIVE_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/ext/core/include)
+
 
 # Link Qt
 set(QT_LIBRARIES
@@ -167,8 +186,11 @@ list(APPEND OLIVE_LIBRARIES
   KDAB::kddockwidgets
 )
 
+# Link OFX HostSupport wherever libolive-editor objects are used.
+list(APPEND OLIVE_LIBRARIES OfxHost)
+
 # Link FFmpeg
-find_package(FFMPEG 3.0 REQUIRED
+find_package(FFMPEG REQUIRED
   COMPONENTS
   avutil
   avcodec
@@ -257,6 +279,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 list(APPEND OLIVE_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/ext)
 
 add_subdirectory(ext)
+add_subdirectory(third_party/openfx/HostSupport)
 add_subdirectory(app)
 
 if (BUILD_TESTS)

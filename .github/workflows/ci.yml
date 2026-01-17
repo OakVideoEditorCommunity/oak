@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    env:
+      CMAKE_BUILD_TYPE: Release
+      RUN_OFX_ITEST: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          submodules: 'true'
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build pkg-config \
+            qt6-base-dev qt6-base-dev-tools qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
+            libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            libopencolorio-dev libopenimageio-dev libopenexr-dev libexpat1-dev \
+            portaudio19-dev libgl1-mesa-dev libxkbcommon-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install ninja pkg-config qt@6 ffmpeg openimageio opencolorio openexr portaudio expat
+          echo "$(brew --prefix qt@6)/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix qt@6)" >> "$GITHUB_ENV"
+
+      - name: Build OpenTimelineIO (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          git clone --depth 1 --branch v0.16.0 https://github.com/PixarAnimationStudios/OpenTimelineIO.git
+          cmake -S OpenTimelineIO -B OpenTimelineIO/build -G Ninja \
+            -DOTIO_SHARED_LIBS=ON \
+            -DOTIO_PYTHON_BINDINGS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${PWD}/otio-install"
+          cmake --build OpenTimelineIO/build
+          cmake --install OpenTimelineIO/build
+          echo "OTIO_LOCATION=${PWD}/otio-install" >> "$GITHUB_ENV"
+
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.5.3
+          cache: true
+          tools: 'tools_ninja'
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y ninja
+          $env:VCPKG_ROOT = "C:\vcpkg"
+          & "$env:VCPKG_ROOT\vcpkg.exe" install ffmpeg openimageio opencolorio openexr expat portaudio --triplet x64-windows
+          echo "VCPKG_ROOT=$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DBUILD_TESTS=ON \
+            -DBUILD_QT6=ON \
+            -DOCIO_LOCATION=/usr \
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DBUILD_TESTS=ON \
+            -DBUILD_QT6=ON \
+            -DOCIO_LOCATION=$(brew --prefix opencolorio) \
+            -DOTIO_LOCATION=${OTIO_LOCATION} \
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $toolchain = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          $ninja = "$env:ChocolateyInstall\bin\ninja.exe"
+          cmake -S . -B build -G Ninja `
+            -DBUILD_TESTS=ON `
+            -DBUILD_QT6=ON `
+            -DCMAKE_BUILD_TYPE=$env:CMAKE_BUILD_TYPE `
+            -DCMAKE_TOOLCHAIN_FILE=$toolchain `
+            -DCMAKE_MAKE_PROGRAM=$ninja `
+            -DCMAKE_PREFIX_PATH=$env:Qt6_DIR
+
+      - name: Build
+        run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Build OpenFX misc plugins (Linux, optional)
+        if: runner.os == 'Linux' && env.RUN_OFX_ITEST == '1'
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          echo "OAK_OFX_ITEST=1" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_PATH=${PWD}/openfx-misc/build" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" >> "$GITHUB_ENV"
+
+      - name: Build OpenFX misc plugins (macOS, optional)
+        if: runner.os == 'macOS' && env.RUN_OFX_ITEST == '1'
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          echo "OAK_OFX_ITEST=1" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_PATH=${PWD}/openfx-misc/build" >> "$GITHUB_ENV"
+          echo "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" >> "$GITHUB_ENV"
+
+      - name: Build OpenFX misc plugins (Windows, optional)
+        if: runner.os == 'Windows' && env.RUN_OFX_ITEST == '1'
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/NatronGitHub/openfx-misc.git
+          cmake -S openfx-misc -B openfx-misc/build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build openfx-misc/build
+          "OAK_OFX_ITEST=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OAK_OFX_PLUGIN_PATH=$env:GITHUB_WORKSPACE\\openfx-misc\\build" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OAK_OFX_PLUGIN_ID=net.sf.openfx.ChromaKeyerPlugin" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure -C ${{ env.CMAKE_BUILD_TYPE }}
+
+      - name: Test (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build --output-on-failure -C ${{ env.CMAKE_BUILD_TYPE }}

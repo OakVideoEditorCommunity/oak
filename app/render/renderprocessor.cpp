@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -30,6 +31,10 @@
 #include "node/block/transition/transition.h"
 #include "node/project.h"
 #include "rendermanager.h"
+#include "render/opengl/openglrenderer.h"
+#include "render/plugin/pluginrenderer.h"
+#include "pluginSupport/OliveClip.h"
+#include "pluginSupport/OliveHost.h"
 
 namespace olive
 {
@@ -159,6 +164,7 @@ void RenderProcessor::Run()
 
 	SetCancelPointer(ticket_->GetCancelAtom());
 
+	VideoParams params=ticket_->property("vparam").value<VideoParams>();
 	SetCacheVideoParams(ticket_->property("vparam").value<VideoParams>());
 	SetCacheAudioParams(ticket_->property("aparam").value<AudioParams>());
 
@@ -166,6 +172,17 @@ void RenderProcessor::Run()
 		ticket_->Finish();
 		return;
 	}
+
+	// if is a plugin
+	/*Node *node=ticket_->property("node").value<Node*>();
+	if (node && node->getPlugin()) {
+		std::shared_ptr<OFX::Host::ImageEffect::ImageEffectPlugin> plugin
+			= node->getPlugin();
+		std::unique_ptr<OFX::Host::ImageEffect::Instance> instance(plugin->createInstance(kOfxImageEffectContextFilter, NULL));
+
+
+	}
+	*/
 
 	switch (type) {
 	case RenderManager::kTypeVideo: {
@@ -527,7 +544,7 @@ void RenderProcessor::ProcessShader(TexturePtr destination, const Node *node,
 	locker.unlock();
 
 	// Run shader
-	render_ctx_->BlitToTexture(shader, *job, destination.get());
+	render_ctx_->BlitToTexture(shader, const_cast<ShaderJob&>(*job), destination.get());
 }
 
 void RenderProcessor::ProcessSamples(SampleBuffer &destination,
@@ -592,6 +609,92 @@ void RenderProcessor::ProcessFrameGeneration(TexturePtr destination,
 	node->GenerateFrame(frame, *job);
 
 	destination->Upload(frame->data(), frame->linesize_pixels());
+}
+
+TexturePtr RenderProcessor::ProcessPluginJob(TexturePtr texture,
+											 TexturePtr destination,
+											 const Node *node)
+{
+	(void)node;
+
+	if (!render_ctx_ || !texture || !destination) {
+		return destination;
+	}
+
+	auto *plugin_job =
+		dynamic_cast<plugin::PluginJob *>(texture->job());
+	if (!plugin_job) {
+		return destination;
+	}
+
+	if (!plugin_renderer_) {
+		auto *gl = dynamic_cast<OpenGLRenderer *>(render_ctx_);
+		if (!gl || !gl->context()) {
+			return destination;
+		}
+
+		plugin_renderer_ = std::make_unique<plugin::PluginRenderer>();
+		plugin_renderer_->Init(gl->context());
+		plugin_renderer_->PostInit();
+	}
+
+	NodeValueRow &values = plugin_job->GetValues();
+
+	auto is_usable_texture = [](const TexturePtr &tex) {
+		if (!tex) {
+			return false;
+		}
+		if (!tex->IsDummy() && tex->renderer()) {
+			return true;
+		}
+		AVFramePtr frame = tex->frame();
+		return frame && frame->data[0];
+	};
+
+	TexturePtr src = nullptr;
+	QString effect_input_id;
+	if (plugin_job->node()) {
+		effect_input_id = plugin_job->node()->GetEffectInputID();
+	}
+	if (!effect_input_id.isEmpty()) {
+		if (TexturePtr effect_tex = values.value(effect_input_id).toTexture();
+			is_usable_texture(effect_tex)) {
+			src = effect_tex;
+		}
+	}
+	if (!src) {
+		const QString source_key =
+			QString::fromUtf8(kOfxImageEffectSimpleSourceClipName);
+		if (TexturePtr source_tex = values.value(source_key).toTexture();
+			is_usable_texture(source_tex)) {
+			src = source_tex;
+		} else if (TexturePtr effect_tex =
+					   values.value(plugin::kTextureInput).toTexture();
+				   is_usable_texture(effect_tex)) {
+			src = effect_tex;
+		}
+	}
+	if (!src) {
+		for (auto it = values.cbegin(); it != values.cend(); ++it) {
+			if (it.value().type() == NodeValue::kTexture) {
+				if (TexturePtr any_tex = it.value().toTexture();
+					is_usable_texture(any_tex)) {
+					src = any_tex;
+					break;
+				}
+			}
+		}
+	}
+
+	plugin_renderer_->RenderPlugin(
+		src,
+		*plugin_job,
+		destination,
+		destination->params(),
+		true,
+		false);
+
+	return destination;
 }
 
 TexturePtr RenderProcessor::ProcessVideoCacheJob(const CacheJob *val)

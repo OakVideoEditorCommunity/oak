@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -49,7 +50,7 @@ QString ColorCoding::GetColorName(int c)
 	case kYellow:
 		return tr("Yellow");
 	case kOlive:
-		return tr("Olive");
+		return tr("Oak");
 	case kLime:
 		return tr("Lime");
 	case kGreen:

@@ -4777,4 +4777,19 @@ What would you like to do with these clips?</translation>
       <translation>取樣</translation>
     </message>
   </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>變更 %1</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1（+%2）</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>編輯參數</translation>
+  </message>
+</context>
 </TS>

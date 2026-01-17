@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -45,7 +46,7 @@ namespace olive
 
 CrashHandlerDialog::CrashHandlerDialog(const QString &report_path)
 {
-	setWindowTitle(tr("Olive"));
+	setWindowTitle(tr("Oak Video Editor"));
 	setWindowFlags(Qt::WindowStaysOnTopHint);
 
 	report_filename_ = report_path;
@@ -54,7 +55,7 @@ CrashHandlerDialog::CrashHandlerDialog(const QString &report_path)
 	QVBoxLayout *layout = new QVBoxLayout(this);
 
 	layout->addWidget(new QLabel(
-		tr("We're sorry, Olive has crashed. Please help us fix it by "
+		tr("We're sorry, Oak Video Editor has crashed. Please help us fix it by "
 		   "sending an error report.")));
 
 	QSplitter *splitter = new QSplitter(Qt::Vertical);

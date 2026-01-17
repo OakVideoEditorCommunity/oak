@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -181,7 +182,7 @@ ExportDialog::ExportDialog(ViewerOutput *viewer_node, bool stills_only_mode,
 
 		export_bkg_box_ = new QCheckBox(tr("Run In Background"));
 		export_bkg_box_->setToolTip(tr(
-			"Exporting in the background allows you to continue using Olive while "
+			"Exporting in the background allows you to continue using Oak Video Editor while "
 			"exporting, but may result in slower export speeds, and may"
 			"severely impact editing and playback performance."));
 		options_layout->addWidget(export_bkg_box_, opt_row, 0);
@@ -343,7 +344,7 @@ void ExportDialog::StartExport()
 		QtUtils::MsgBox(
 			this, QMessageBox::Critical,
 			tr("Failed to create output directory"),
-			tr("The intended output directory doesn't exist and Olive couldn't create it. "
+			tr("The intended output directory doesn't exist and Oak Video Editor couldn't create it. "
 			   "Please choose a different filename."));
 		return;
 	}

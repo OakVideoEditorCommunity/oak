@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -29,6 +30,7 @@
 #include "node/group/group.h"
 #include "node/nodeundo.h"
 #include "node/project/sequence/sequence.h"
+#include "pluginSupport/OlivePluginInstance.h"
 
 namespace olive
 {
@@ -51,6 +53,9 @@ NodeParamViewItem::NodeParamViewItem(
 	QWidget *parent)
 	: super(parent)
 	, body_(nullptr)
+	, message_label_(nullptr)
+	, message_clear_button_(nullptr)
+	, message_container_(nullptr)
 	, node_(node)
 	, create_checkboxes_(create_checkboxes)
 	, ctx_(nullptr)
@@ -64,6 +69,8 @@ NodeParamViewItem::NodeParamViewItem(
 	connect(node_, &Node::LabelChanged, this, &NodeParamViewItem::Retranslate);
 	connect(node_, &Node::InputArraySizeChanged, this,
 			&NodeParamViewItem::InputArraySizeChanged);
+	connect(node_, &Node::MessageCountChanged, this,
+			&NodeParamViewItem::UpdateMessagePanel);
 
 	// FIXME: Implemented to pick up when an input is set to hidden or not - DEFINITELY not a fast
 	//        way of doing this, but "fine" for now.
@@ -95,6 +102,13 @@ void NodeParamViewItem::RecreateBody()
 		body_->setParent(nullptr);
 		body_->deleteLater();
 	}
+	if (message_container_) {
+		message_container_->setParent(nullptr);
+		message_container_->deleteLater();
+		message_container_ = nullptr;
+		message_label_ = nullptr;
+		message_clear_button_ = nullptr;
+	}
 
 	body_ = new NodeParamViewItemBody(node_, create_checkboxes_, this);
 	connect(body_, &NodeParamViewItemBody::RequestSelectNode, this,
@@ -108,7 +122,73 @@ void NodeParamViewItem::RecreateBody()
 	body_->Retranslate();
 	body_->SetTimebase(timebase_);
 	body_->SetTimeTarget(time_target_);
-	SetBody(body_);
+
+	message_container_ = new QWidget(this);
+	QVBoxLayout *message_layout = new QVBoxLayout(message_container_);
+	message_layout->setContentsMargins(0, 0, 0, 0);
+	message_layout->setSpacing(4);
+
+	QHBoxLayout *message_header = new QHBoxLayout();
+	message_header->setContentsMargins(0, 0, 0, 0);
+	message_header->addStretch();
+	message_clear_button_ = new QPushButton(tr("Clear"), message_container_);
+	message_clear_button_->setVisible(false);
+	connect(message_clear_button_, &QPushButton::clicked, this,
+			&NodeParamViewItem::ClearMessages);
+	message_header->addWidget(message_clear_button_);
+	message_layout->addLayout(message_header);
+
+	message_label_ = new QLabel(message_container_);
+	message_label_->setWordWrap(true);
+	message_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	message_label_->setStyleSheet(
+		QStringLiteral("background: rgba(0, 0, 0, 0.06); padding: 6px;"));
+	message_layout->addWidget(message_label_);
+	message_layout->addWidget(body_);
+
+	SetBody(message_container_);
+	UpdateMessagePanel();
+}
+
+void NodeParamViewItem::UpdateMessagePanel()
+{
+	if (!message_label_) {
+		return;
+	}
+
+	auto *instance = node_->getPluginInstance();
+	auto *olive_instance =
+		dynamic_cast<plugin::OlivePluginInstance *>(instance);
+	if (!olive_instance || olive_instance->persistentMessageCount() == 0) {
+		message_label_->setVisible(false);
+		if (message_clear_button_) {
+			message_clear_button_->setVisible(false);
+		}
+		return;
+	}
+
+	QStringList lines;
+	for (const auto &msg : olive_instance->persistentMessages()) {
+		QString prefix;
+		switch (msg.type) {
+		case plugin::ErrorType::Error:
+			prefix = QStringLiteral("Error");
+			break;
+		case plugin::ErrorType::Warning:
+			prefix = QStringLiteral("Warning");
+			break;
+		case plugin::ErrorType::Message:
+			prefix = QStringLiteral("Message");
+			break;
+		}
+		lines.append(QStringLiteral("%1: %2").arg(prefix, msg.message));
+	}
+
+	message_label_->setText(lines.join('\n'));
+	message_label_->setVisible(true);
+	if (message_clear_button_) {
+		message_clear_button_->setVisible(true);
+	}
 }
 
 int NodeParamViewItem::GetElementY(const NodeInput &c) const
@@ -126,6 +206,18 @@ void NodeParamViewItem::SetInputChecked(const NodeInput &input, bool e)
 	body_->SetInputChecked(input, e);
 }
 
+void NodeParamViewItem::ClearMessages()
+{
+	auto *instance = node_->getPluginInstance();
+	auto *olive_instance =
+		dynamic_cast<plugin::OlivePluginInstance *>(instance);
+	if (!olive_instance) {
+		return;
+	}
+
+	olive_instance->clearPersistentMessage();
+}
+
 NodeParamViewItemBody::NodeParamViewItemBody(
 	Node *node, NodeParamViewCheckBoxBehavior create_checkboxes,
 	QWidget *parent)
@@ -137,6 +229,8 @@ NodeParamViewItemBody::NodeParamViewItemBody(
 	QGridLayout *root_layout = new QGridLayout(this);
 
 	int insert_row = 0;
+	QString current_page;
+	QString current_group;
 
 	QVector<Node *> connected_signals;
 
@@ -160,6 +254,27 @@ NodeParamViewItemBody::NodeParamViewItemBody(
 								   { n, input });
 
 		if (!(n->GetInputFlags(input) & kInputFlagHidden)) {
+			QString page_label = n->GetInputProperty(input, QStringLiteral("ui_page")).toString();
+			QString group_label = n->GetInputProperty(input, QStringLiteral("ui_group")).toString();
+			if (!page_label.isEmpty() && page_label != current_page) {
+				QLabel *page_title = new QLabel(page_label, this);
+				QFont f = page_title->font();
+				f.setBold(true);
+				page_title->setFont(f);
+				root_layout->addWidget(page_title, insert_row, 0, 1, 10);
+				insert_row++;
+				current_page = page_label;
+				current_group.clear();
+			}
+			if (!group_label.isEmpty() && group_label != current_group) {
+				QLabel *group_title = new QLabel(group_label, this);
+				QFont f = group_title->font();
+				f.setBold(true);
+				group_title->setFont(f);
+				root_layout->addWidget(group_title, insert_row, 0, 1, 10);
+				insert_row++;
+				current_group = group_label;
+			}
 			CreateWidgets(root_layout, n, input, -1, insert_row);
 
 			insert_row++;

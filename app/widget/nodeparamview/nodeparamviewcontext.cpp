@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -76,7 +77,7 @@ void NodeParamViewContext::RemoveNode(Node *node, Node *ctx)
 
 		if (item->GetNode() == node && item->GetContext() == ctx) {
 			emit AboutToDeleteItem(item);
-			delete item;
+			dock_area_->RemoveItem(item);
 			it = items_.erase(it);
 		} else {
 			it++;
@@ -91,7 +92,7 @@ void NodeParamViewContext::RemoveNodesWithContext(Node *ctx)
 
 		if (item->GetContext() == ctx) {
 			emit AboutToDeleteItem(item);
-			delete item;
+			dock_area_->RemoveItem(item);
 			it = items_.erase(it);
 		} else {
 			it++;

@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -24,6 +25,7 @@
 #include "node/block/clip/clip.h"
 #include "render/job/footagejob.h"
 #include "render/rendermanager.h"
+#include "render/job/pluginjob.h"
 
 namespace olive
 {
@@ -383,12 +385,23 @@ TexturePtr NodeTraverser::ProcessVideoCacheJob(const CacheJob *val)
 	return nullptr;
 }
 
+TexturePtr NodeTraverser::ProcessPluginJob(TexturePtr texture,
+										   TexturePtr destination,
+										   const Node *node)
+{
+	// TODO
+	return nullptr;
+}
 QVector2D NodeTraverser::GenerateResolution() const
 {
 	return QVector2D(video_params_.square_pixel_width(),
 					 video_params_.height());
 }
 
+/**
+ * Resolve Jobs. I need to add a PluginJob here and move the plugin code here.
+ * @param val
+ */
 void NodeTraverser::ResolveJobs(NodeValue &val)
 {
 	if (val.type() == NodeValue::kTexture) {
@@ -487,6 +500,15 @@ void NodeTraverser::ResolveJobs(NodeValue &val)
 						}
 
 						val.set_value(tex);
+					}
+					else if (plugin::PluginJob* plugin_job=dynamic_cast<plugin::PluginJob*>(base_job)) {
+						VideoParams tex_params = job_tex->params();
+
+						TexturePtr tex = CreateTexture(tex_params);
+
+						ProcessPluginJob(job_tex, tex, val.source());
+						val.set_value(tex);
+
 					}
 
 					// Cache resolved value

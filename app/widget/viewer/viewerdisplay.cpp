@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -40,6 +41,7 @@
 #include "config/config.h"
 #include "core.h"
 #include "node/block/subtitle/subtitle.h"
+#include "codec/frame.h"
 #include "node/gizmo/path.h"
 #include "node/gizmo/point.h"
 #include "node/gizmo/polygon.h"
@@ -374,7 +376,7 @@ bool ViewerDisplayWidget::eventFilter(QObject *o, QEvent *e)
 void ViewerDisplayWidget::OnPaint()
 {
 	// Clear background to empty
-	QColor bg_color = show_widget_background_ ? palette().window().color() :
+ 	QColor bg_color = show_widget_background_ ? palette().window().color() :
 												Qt::black;
 	renderer()->ClearDestination(nullptr, bg_color.redF(), bg_color.greenF(),
 								 bg_color.blueF());
@@ -403,8 +405,35 @@ void ViewerDisplayWidget::OnPaint()
 					texture_->Upload(frame->data(), frame->linesize_pixels());
 				}
 			} else if (TexturePtr texture = load_frame_.value<TexturePtr>()) {
-				// This is a GPU texture, switch to it directly
-				texture_ = texture;
+				// This is a GPU texture, switch to it directly when possible.
+				if (texture && texture->renderer() &&
+					texture->renderer() != renderer()) {
+					bool copied = false;
+					QOpenGLContext *ctx = QOpenGLContext::currentContext();
+					if (ctx) {
+						QOpenGLFunctions *funcs = ctx->functions();
+						GLuint tex_id = texture->id().value<GLuint>();
+						if (funcs && tex_id && funcs->glIsTexture(tex_id)) {
+							FramePtr frame = Frame::Create();
+							frame->set_video_params(texture->params());
+							if (frame->allocate()) {
+								renderer()->DownloadFromTexture(
+									texture->id(), texture->params(),
+									frame->data(), frame->linesize_pixels());
+								texture_ = renderer()->CreateTexture(
+									frame->video_params(), frame->data(),
+									frame->linesize_pixels());
+								copied = true;
+							}
+						}
+					}
+
+					if (!copied) {
+						texture_ = texture;
+					}
+				} else {
+					texture_ = texture;
+				}
 			} else {
 				texture_ = LoadCustomTextureFromFrame(load_frame_);
 			}

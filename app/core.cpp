@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -28,6 +29,7 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QStyleFactory>
 #include "window/mainwindow/mainwindowundo.h"
 #ifdef Q_OS_WINDOWS
@@ -73,10 +75,73 @@
 #include "ui/style/style.h"
 #include "undo/undostack.h"
 #include "widget/menu/menushared.h"
-#include "widget/taskview/taskviewitem.h"
-#include "widget/viewer/viewer.h"
-#include "window/mainwindow/mainstatusbar.h"
 #include "window/mainwindow/mainwindow.h"
+
+namespace {
+
+QStringList FootageVideoExtensions()
+{
+	return QStringList{
+		QStringLiteral("mp4"),  QStringLiteral("mov"),  QStringLiteral("m4v"),
+		QStringLiteral("avi"),  QStringLiteral("mpg"),  QStringLiteral("mpeg"),
+		QStringLiteral("m2ts"), QStringLiteral("mts"),  QStringLiteral("ts"),
+		QStringLiteral("webm"), QStringLiteral("wmv"),  QStringLiteral("flv"),
+		QStringLiteral("3gp"),  QStringLiteral("3g2"),  QStringLiteral("mxf")
+	};
+}
+
+QStringList FootageAudioExtensions()
+{
+	return QStringList{
+		QStringLiteral("wav"),  QStringLiteral("mp3"), QStringLiteral("flac"),
+		QStringLiteral("aac"),  QStringLiteral("ogg"), QStringLiteral("opus"),
+		QStringLiteral("m4a"),  QStringLiteral("alac"), QStringLiteral("aif"),
+		QStringLiteral("aiff"), QStringLiteral("aifc"), QStringLiteral("wma")
+	};
+}
+
+QStringList FootageImageExtensions()
+{
+	return QStringList{
+		QStringLiteral("png"),  QStringLiteral("jpg"),  QStringLiteral("jpeg"),
+		QStringLiteral("tif"),  QStringLiteral("tiff"), QStringLiteral("bmp"),
+		QStringLiteral("gif"),  QStringLiteral("exr"),  QStringLiteral("dpx"),
+		QStringLiteral("webp")
+	};
+}
+
+QString BuildFootageFilterGroup(const QString &label,
+								const QStringList &extensions)
+{
+	QStringList patterns;
+	patterns.reserve(extensions.size());
+	for (const QString &ext : extensions) {
+		patterns.append(QStringLiteral("*.%1").arg(ext));
+	}
+
+	return QStringLiteral("%1 (%2)")
+		.arg(label, patterns.join(QLatin1Char(' ')));
+}
+
+QString BuildFootageFileDialogFilter()
+{
+	QStringList all = FootageVideoExtensions() + FootageAudioExtensions() +
+					  FootageImageExtensions();
+	all.removeDuplicates();
+
+	QStringList groups;
+	groups << BuildFootageFilterGroup(QObject::tr("Common Media Files"), all);
+	groups << BuildFootageFilterGroup(QObject::tr("Video Files"),
+									  FootageVideoExtensions());
+	groups << BuildFootageFilterGroup(QObject::tr("Audio Files"),
+									  FootageAudioExtensions());
+	groups << BuildFootageFilterGroup(QObject::tr("Image Files"),
+									  FootageImageExtensions());
+
+	return groups.join(QStringLiteral(";;"));
+}
+
+} // namespace
 
 namespace olive
 {
@@ -104,6 +169,29 @@ Core::Core(const CoreParams &params)
 Core *Core::instance()
 {
 	return instance_;
+}
+
+QString Core::FootageFileDialogFilter()
+{
+	return BuildFootageFileDialogFilter();
+}
+
+QStringList Core::AllowedFootageExtensions()
+{
+	QStringList all = FootageVideoExtensions() + FootageAudioExtensions() +
+					  FootageImageExtensions();
+	all.removeDuplicates();
+	return all;
+}
+
+bool Core::IsFootageExtensionAllowed(const QString &path)
+{
+	const QString ext = QFileInfo(path).suffix().toLower();
+	if (ext.isEmpty()) {
+		return false;
+	}
+
+	return AllowedFootageExtensions().contains(ext);
 }
 
 void Core::DeclareTypesForQt()
@@ -244,7 +332,31 @@ void Core::ImportFiles(const QStringList &urls, Folder *parent)
 		return;
 	}
 
-	ProjectImportTask *pim = new ProjectImportTask(parent, urls);
+	QStringList filtered_urls;
+	QStringList rejected_urls;
+	filtered_urls.reserve(urls.size());
+
+	for (const QString &url : urls) {
+		if (IsFootageExtensionAllowed(url)) {
+			filtered_urls.append(url);
+		} else {
+			rejected_urls.append(url);
+		}
+	}
+
+	if (!rejected_urls.isEmpty()) {
+		QMessageBox::warning(
+			main_window_, tr("Unsupported media"),
+			tr("Skipped %1 file(s) that are not allowed by the current media "
+			   "type filter.")
+				.arg(rejected_urls.size()));
+	}
+
+	if (filtered_urls.isEmpty()) {
+		return;
+	}
+
+	ProjectImportTask *pim = new ProjectImportTask(parent, filtered_urls);
 
 	if (!pim->GetFileCount()) {
 		// No files to import
@@ -337,8 +449,9 @@ void Core::DialogAboutShow()
 void Core::DialogImportShow()
 {
 	// Open dialog for user to select files
-	QStringList files =
-		QFileDialog::getOpenFileNames(main_window_, tr("Import footage..."));
+	QStringList files = QFileDialog::getOpenFileNames(
+		main_window_, tr("Import footage..."), QString(),
+		FootageFileDialogFilter());
 
 	// Check if the user actually selected files to import
 	if (!files.isEmpty()) {
@@ -776,6 +889,7 @@ void Core::StartGUI(bool full_screen)
 	connect(qApp, &QApplication::focusChanged, PanelManager::instance(),
 			&PanelManager::FocusChanged);
 
+	KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtWidgets);
 	// Set KDDockWidgets flags
 	auto &config = KDDockWidgets::Config::self();
 	auto flags = config.flags();
@@ -1063,7 +1177,7 @@ void Core::SaveAutorecovery()
 				QMessageBox::critical(
 					main_window_, tr("Auto-Recovery Error"),
 					tr("Failed to save auto-recovery to \"%1\". "
-					   "Olive may not have permission to this directory.")
+					   "Oak Video Editor may not have permission to this directory.")
 						.arg(project_autorecovery_dir.absolutePath()));
 			}
 		}
@@ -1136,11 +1250,11 @@ QString Core::PasteStringFromClipboard()
 QString Core::GetProjectFilter(bool include_any_filter)
 {
 	static const QVector<QPair<QString, QString>> FILTERS = {
-		// Standard compressed Olive project
-		{ tr("Olive Project"), QStringLiteral("ove") },
+		// Standard compressed Oak project
+		{ tr("Oak Project"), QStringLiteral("ove") },
 
-		// Uncompressed XML Olive project
-		{ tr("Olive Project (Uncompressed XML)"), QStringLiteral("ovexml") },
+		// Uncompressed XML Oak project
+		{ tr("Oak Project (Uncompressed XML)"), QStringLiteral("ovexml") },
 
 	// OpenTimelineIO project, if available
 #ifdef USE_OTIO
@@ -1251,7 +1365,7 @@ void Core::CheckForAutoRecoveries()
 				QString::fromUtf8(autorecovery_index.readAll()).split('\n');
 
 			AutoRecoveryDialog ard(
-				tr("The following projects had unsaved changes when Olive "
+				tr("The following projects had unsaved changes when Oak Video Editor "
 				   "forcefully quit. Would you like to load them?"),
 				recovery_filenames, true, main_window_);
 			ard.exec();
@@ -1308,7 +1422,7 @@ void Core::WarnCacheFull()
 
 		QMessageBox::warning(
 			main_window_, tr("Disk Cache Full"),
-			tr("The disk cache is currently full and Olive is having to delete old "
+			tr("The disk cache is currently full and Oak Video Editor is having to delete old "
 			   "frames to keep it within the limits set in the Disk preferences. This "
 			   "will result in SIGNIFICANTLY reduced cache performance.\n\n"
 			   "To remedy this, please do one of the following:\n\n"

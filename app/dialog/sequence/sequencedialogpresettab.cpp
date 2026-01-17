@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -29,7 +30,6 @@
 #include <QTreeWidgetItem>
 #include <QXmlStreamWriter>
 
-#include "common/filefunctions.h"
 #include "config/config.h"
 #include "render/videoparams.h"
 #include "ui/icons/icons.h"

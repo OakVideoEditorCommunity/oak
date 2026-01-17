@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -32,6 +33,7 @@
 #include "render/job/colortransformjob.h"
 #include "render/job/footagejob.h"
 #include "value.h"
+#include "render/job/pluginjob.h"
 
 namespace olive
 {
@@ -145,6 +147,7 @@ protected:
 		return SampleBuffer();
 	}
 
+	virtual TexturePtr ProcessPluginJob(TexturePtr texture, TexturePtr destination, const Node *node);
 	SampleBuffer CreateSampleBuffer(const AudioParams &params,
 									const rational &length)
 	{

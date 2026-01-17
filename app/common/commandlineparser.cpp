@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -113,7 +114,7 @@ void CommandLineParser::PrintHelp(const char *filename)
 	printf("%s %s\n", QCoreApplication::applicationName().toUtf8().constData(),
 		   QCoreApplication::applicationVersion().toUtf8().constData());
 
-	printf("Copyright (C) 2018-2022 Olive Team\n");
+	printf("Copyright (C) 2018-2022 Oak Video Editor Team\n");
 
 	QString positional_args;
 	for (int i = 0; i < positional_args_.size(); i++) {

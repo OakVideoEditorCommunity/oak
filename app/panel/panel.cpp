@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,23 +28,24 @@
 #include <QStyle>
 #include <QStyleOption>
 #include <QVariant>
-
 #include "panel/panelmanager.h"
+
+#include <OpenImageIO/hash.h>
 
 namespace olive
 {
 
-#define super KDDockWidgets::DockWidget
+#define super KDDockWidgets::QtWidgets::DockWidget
 
 PanelWidget::PanelWidget(const QString &object_name)
 	: super(object_name)
 	, border_visible_(false)
 	, signal_instead_of_close_(false)
 {
-	setFocusPolicy(Qt::ClickFocus);
+	View<QWidget>::setFocusPolicy(Qt::ClickFocus);
 
 	connect(this, &PanelWidget::shown, this,
-			static_cast<void (PanelWidget::*)()>(&PanelWidget::setFocus));
+			reinterpret_cast<void (PanelWidget::*)()>(&PanelWidget::setFocus));
 
 	PanelManager::instance()->RegisterPanel(this);
 }
@@ -124,6 +126,15 @@ void PanelWidget::changeEvent(QEvent *e)
 {
 	if (e->type() == QEvent::LanguageChange) {
 		Retranslate();
+	}
+
+	if (e->type() == QEvent::WindowStateChange) {
+		if (isVisible() && !isMinimized()) {
+			emit shown(Qt::OtherFocusReason);
+		}
+		else {
+			emit hidden();
+		}
 	}
 	super::changeEvent(e);
 }

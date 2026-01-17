@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -20,6 +21,8 @@
 
 #ifndef NODE_H
 #define NODE_H
+
+#include "ofxhImageEffectAPI.h"
 
 #include <map>
 #include <QMutex>
@@ -1126,7 +1129,24 @@ public:
 
 	static const QString kEnabledInput;
 
+	OFX::Host::ImageEffect::Instance* getPluginInstance() const
+	{
+		return plugin_instance_;
+	}
+	OFX::Host::ImageEffect::ImageEffectPlugin* getPlugin() const
+	{
+		return plugin_instance_ ? plugin_instance_->getPlugin() : nullptr;
+	}
 protected:
+
+	// If set, this node owns a plugin instance.
+	OFX::Host::ImageEffect::Instance* plugin_instance_ = nullptr;
+
+	void setPluginInstance(OFX::Host::ImageEffect::Instance* instance)
+	{
+		plugin_instance_ = instance;
+	}
+
 	void InsertInput(const QString &id, NodeValue::Type type,
 					 const QVariant &default_value, InputFlags flags,
 					 int index);
@@ -1285,6 +1305,8 @@ signals:
 	void KeyframeRemoved(NodeKeyframe *key);
 
 	void KeyframeTimeChanged(NodeKeyframe *key);
+
+	void MessageCountChanged();
 
 	void KeyframeTypeChanged(NodeKeyframe *key);
 

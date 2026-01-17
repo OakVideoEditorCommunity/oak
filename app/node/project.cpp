@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -23,6 +24,7 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include "common/Current.h"
 #include "common/qtutils.h"
 #include "common/xmlutils.h"
 #include "core.h"
@@ -30,6 +32,8 @@
 #include "node/color/ociobase/ociobase.h"
 #include "node/factory.h"
 #include "node/serializeddata.h"
+#include "pluginSupport/OliveHost.h"
+#include "ofxhPluginCache.h"
 #include "render/diskmanager.h"
 #include "window/mainwindow/mainwindow.h"
 
@@ -97,10 +101,52 @@ void Project::Clear()
 SerializedData Project::Load(QXmlStreamReader *reader)
 {
 	SerializedData data;
+	QSet<QString> plugin_paths;
 
 	while (XMLReadNextStartElement(reader)) {
 		if (reader->name() == QStringLiteral("uuid")) {
 			this->SetUuid(QUuid::fromString(reader->readElementText()));
+
+		} else if (reader->name() == QStringLiteral("plugins")) {
+			while (XMLReadNextStartElement(reader)) {
+				if (reader->name() == QStringLiteral("plugin")) {
+					QString bundle_path;
+					QString file_path;
+					XMLAttributeLoop(reader, attr)
+					{
+						if (attr.name() == QStringLiteral("bundle")) {
+							bundle_path = attr.value().toString();
+						} else if (attr.name() == QStringLiteral("file")) {
+							file_path = attr.value().toString();
+						}
+					}
+
+					const QString path = bundle_path.isEmpty()
+						? file_path
+						: bundle_path;
+					if (!path.isEmpty()) {
+						plugin_paths.insert(path);
+					}
+
+					reader->skipCurrentElement();
+				} else {
+					reader->skipCurrentElement();
+				}
+			}
+
+			if (!plugin_paths.isEmpty()) {
+				if (!Current::getInstance().pluginHost() ||
+					!Current::getInstance().pluginCache()) {
+					plugin::loadPlugins(QString());
+				}
+
+				auto *cache = OFX::Host::PluginCache::getPluginCache();
+				for (const QString &path : plugin_paths) {
+					cache->addFileToPath(path.toStdString(), true);
+				}
+				cache->scanPluginFiles();
+				NodeFactory::RegisterPluginNodes();
+			}
 
 		} else if (reader->name() == QStringLiteral("nodes")) {
 			while (XMLReadNextStartElement(reader)) {
@@ -172,6 +218,65 @@ void Project::Save(QXmlStreamWriter *writer) const
 
 	writer->writeTextElement(QStringLiteral("uuid"),
 							 this->GetUuid().toString());
+
+	QVector<QPair<QString, QMap<QString, QString>>> plugins_to_save;
+	{
+		QSet<QString> seen;
+		for (Node *node : this->nodes()) {
+			auto *plugin = node->getPlugin();
+			if (!plugin) {
+				continue;
+			}
+
+			const std::string id = plugin->getIdentifier();
+			const int major = plugin->getVersionMajor();
+			const int minor = plugin->getVersionMinor();
+			QString bundle_path;
+			QString file_path;
+			if (auto *binary = plugin->getBinary()) {
+				bundle_path = QString::fromStdString(binary->getBundlePath());
+				file_path = QString::fromStdString(binary->getFilePath());
+			}
+
+			const QString key = QStringLiteral("%1|%2|%3|%4|%5")
+				.arg(QString::fromStdString(id))
+				.arg(major)
+				.arg(minor)
+				.arg(bundle_path)
+				.arg(file_path);
+			if (seen.contains(key)) {
+				continue;
+			}
+			seen.insert(key);
+
+			QMap<QString, QString> attrs;
+			attrs.insert(QStringLiteral("id"),
+						 QString::fromStdString(id));
+			attrs.insert(QStringLiteral("major"), QString::number(major));
+			attrs.insert(QStringLiteral("minor"), QString::number(minor));
+			if (!bundle_path.isEmpty()) {
+				attrs.insert(QStringLiteral("bundle"), bundle_path);
+			}
+			if (!file_path.isEmpty()) {
+				attrs.insert(QStringLiteral("file"), file_path);
+			}
+
+			plugins_to_save.append({ QString::fromStdString(id), attrs });
+		}
+	}
+
+	if (!plugins_to_save.isEmpty()) {
+		writer->writeStartElement(QStringLiteral("plugins"));
+		for (const auto &entry : plugins_to_save) {
+			writer->writeStartElement(QStringLiteral("plugin"));
+			for (auto it = entry.second.cbegin();
+				 it != entry.second.cend(); ++it) {
+				writer->writeAttribute(it.key(), it.value());
+			}
+			writer->writeEndElement();
+		}
+		writer->writeEndElement();
+	}
 
 	if (!this->nodes().isEmpty()) {
 		writer->writeStartElement(QStringLiteral("nodes"));

@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -22,6 +23,7 @@
 #define RENDERPROCESSOR_H
 
 #include "node/block/clip/clip.h"
+#include <memory>
 #include "node/traverser.h"
 #include "render/renderer.h"
 #include "rendercache.h"
@@ -29,6 +31,10 @@
 
 namespace olive
 {
+
+namespace plugin {
+class PluginRenderer;
+}
 
 class RenderProcessor : public NodeTraverser {
 public:
@@ -68,6 +74,10 @@ protected:
 										const Node *node,
 										const GenerateJob *job) override;
 
+	virtual TexturePtr ProcessPluginJob(TexturePtr texture,
+										TexturePtr destination,
+										const Node *node) override;
+
 	virtual TexturePtr ProcessVideoCacheJob(const CacheJob *val) override;
 
 	virtual TexturePtr CreateTexture(const VideoParams &p) override;
@@ -101,6 +111,8 @@ private:
 	RenderTicketPtr ticket_;
 
 	Renderer *render_ctx_;
+
+	std::unique_ptr<olive::plugin::PluginRenderer> plugin_renderer_;
 
 	DecoderCache *decoder_cache_;
 

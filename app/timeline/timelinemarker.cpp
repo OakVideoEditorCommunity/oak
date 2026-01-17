@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -308,9 +309,11 @@ void TimelineMarkerList::HandleMarkerTimeChange()
 MarkerAddCommand::MarkerAddCommand(TimelineMarkerList *marker_list,
 								   const TimeRange &range, const QString &name,
 								   int color)
-	: MarkerAddCommand(marker_list,
-					   new TimelineMarker(color, range, name, &memory_manager_))
+	: marker_list_(marker_list)
+	, added_marker_(nullptr)
 {
+	added_marker_ = new TimelineMarker(color, range, name, &memory_manager_);
+	added_marker_->setParent(&memory_manager_);
 }
 
 MarkerAddCommand::MarkerAddCommand(TimelineMarkerList *marker_list,

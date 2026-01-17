@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -165,7 +166,13 @@ public:
      * Resolves to `int` - the index currently selected
      */
 		kCombo,
-
+		/**
+	 * ComboBox type
+	 *
+	 * Resolves to `QString` - the text of choice currently selected
+	 * This is to support the OpenFX type kOfxParamTypeStrChoice
+	 */
+		kStrCombo,
 		/**
      * Video Parameters type
      *
@@ -192,6 +199,10 @@ public:
      */
 		kBinary,
 
+		/**
+		 *Push Button
+		 */
+		kPushButton,
 		/**
      * End of list
      */

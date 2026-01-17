@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,10 +22,15 @@
 #ifndef PANEL_WIDGET_H
 #define PANEL_WIDGET_H
 
+#include "KDDockWidgets/src/core/Window_p.h"
+#include "KDDockWidgets/src/qtwidgets/views/TabBar.h"
+
 #include <kddockwidgets/DockWidget.h>
 #include <QEvent>
 
 #include "common/define.h"
+
+#include <QTabWidget>
 
 namespace olive
 {
@@ -32,7 +38,7 @@ namespace olive
 /**
  * @brief A widget that is always dockable within the MainWindow.
  */
-class PanelWidget : public KDDockWidgets::DockWidget {
+class PanelWidget : public KDDockWidgets::QtWidgets::DockWidget {
 	Q_OBJECT
 public:
 	/**
@@ -279,7 +285,8 @@ public:
 
 signals:
 	void CloseRequested();
-
+	void shown(Qt::FocusReason reason);
+	void hidden();
 protected:
 	/**
    * @brief paintEvent
@@ -323,7 +330,7 @@ protected slots:
    * String to set the subtitle to
    */
 	void SetSubtitle(const QString &t);
-
+protected slots:
 private:
 	/**
    * @brief Internal function that sets the QDockWidget's window title whenever the title/subtitle change.
@@ -339,6 +346,10 @@ private:
 	bool border_visible_;
 
 	bool signal_instead_of_close_;
+
+	QMetaObject::Connection m_tabBarConnection;
+	QMetaObject::Connection m_windowConnection;
+	bool m_lastVisibleState = false;
 };
 
 }

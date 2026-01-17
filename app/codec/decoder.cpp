@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,11 +28,7 @@
 #include "codec/ffmpeg/ffmpegdecoder.h"
 #include "codec/planarfiledevice.h"
 #include "codec/oiio/oiiodecoder.h"
-#include "common/ffmpegutils.h"
-#include "common/filefunctions.h"
 #include "conformmanager.h"
-#include "node/project.h"
-#include "task/taskmanager.h"
 
 namespace olive
 {
@@ -143,6 +140,11 @@ Decoder::RetrieveAudio(SampleBuffer &dest, const TimeRange &range,
 
 	if (!SupportsAudio()) {
 		qCritical() << "Decoder doesn't support audio";
+		return kInvalid;
+	}
+
+	if (params.sample_rate() <= 0 || params.channel_count() <= 0) {
+		qWarning() << "Invalid audio parameters, skipping audio retrieve";
 		return kInvalid;
 	}
 

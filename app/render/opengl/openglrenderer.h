@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -70,8 +71,15 @@ public:
 	virtual Color GetPixelFromTexture(olive::Texture *texture,
 									  const QPointF &pt) override;
 
+	QOpenGLContext *context() const
+	{
+		return context_;
+	}
+
+	bool EnsureContextCurrent(const char *caller);
+
 protected:
-	virtual void Blit(QVariant shader, olive::ShaderJob job,
+	virtual void Blit(QVariant shader, olive::AcceleratedJob& job,
 					  olive::Texture *destination,
 					  olive::VideoParams destination_params,
 					  bool clear_destination) override;
@@ -85,16 +93,16 @@ protected:
 
 	virtual void DestroyInternal() override;
 
+	void AttachTextureAsDestination(const QVariant &texture);
+
+	void DetachTextureAsDestination();
+
 private:
 	static GLint GetInternalFormat(PixelFormat format, int channel_layout);
 
 	static GLenum GetPixelType(PixelFormat format);
 
 	static GLenum GetPixelFormat(int channel_count);
-
-	void AttachTextureAsDestination(const QVariant &texture);
-
-	void DetachTextureAsDestination();
 
 	void PrepareInputTexture(GLenum target, Texture::Interpolation interp);
 

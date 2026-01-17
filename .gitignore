@@ -1,8 +1,7 @@
 # CMake artifacts
 /build*/
-
+build
 # Doxygen
-/docs/
 
 # Visual Studio (Code)
 .localhistory/
@@ -100,3 +99,8 @@ compile_flags.txt
 *_qmlcache.qrc
 .idea/
 .vimspector.json
+
+AGENTS.md
+.codex
+operations-log.md
+verification.md

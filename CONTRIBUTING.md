@@ -16,3 +16,21 @@ of code comments, including Javadoc in header files. Feel free to reach out via
 an issue or pull request if you have questions about the architecture or
 implementation details.
 
+### Code Standards
+
+In order to keep the code as readable and maintainable as possible, code
+submitted should abide by the following standards:
+
+* The code style generally follows the
+  [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html)
+  including, but not limited to:
+  * Indentation is 4 spaces wide, spaces only (no tabs)
+  * `lowercase_underscored_variable_names`
+  * `lowercase_underscored_functions()` or `SentenceCaseFunctions()`
+  * `class SentenceCaseClassesAndStructs {}`
+  * `kSentenceCaseConstants` prepended with a lowercase `k`
+  * `UPPERCASE_UNDERSCORED_MACROS` for variables or same style as functions for macro functions
+  * `class_member_variables_` end with a `_`
+* 100 column limit (where it doesn't impair readability)
+* Unix line endings (only LF no CRLF)
+* Javadoc documentation where appropriate

@@ -5462,4 +5462,19 @@ Are you sure you wish to delete this footage?</source>
         <translation>サンプル</translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>%1 を変更</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1（+%2）</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>パラメーターを編集</translation>
+  </message>
+</context>
 </TS>

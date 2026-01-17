@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -48,11 +49,11 @@ bool ProjectLoadTask::Run()
 		break;
 	case ProjectSerializer::kProjectTooOld:
 		SetError(tr(
-			"This project is from a version of Olive that is no longer supported in this version."));
+			"This project is from a version of Oak Video Editor that is no longer supported in this version."));
 		break;
 	case ProjectSerializer::kProjectTooNew:
 		SetError(tr(
-			"This project is from a newer version of Olive and cannot be opened in this version."));
+			"This project is from a newer version of Oak Video Editor and cannot be opened in this version."));
 		break;
 	case ProjectSerializer::kUnknownVersion:
 		SetError(tr("Failed to determine project version."));

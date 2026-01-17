@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -30,7 +31,16 @@ namespace olive
 
 Renderer::Renderer(QObject *parent)
 	: QObject(parent)
+	, lifetime_(std::make_shared<RendererLifetime>())
 {
+}
+
+Renderer::~Renderer()
+{
+	destroyed_ = true;
+	if (lifetime_) {
+		lifetime_->alive = false;
+	}
 }
 
 TexturePtr Renderer::CreateTexture(const VideoParams &params, const void *data,
@@ -70,6 +80,9 @@ TexturePtr Renderer::CreateTexture(const VideoParams &params, const void *data,
 
 void Renderer::DestroyTexture(Texture *texture)
 {
+	if (destroyed_) {
+		return;
+	}
 	if (USE_TEXTURE_CACHE) {
 		// HACK: Dirty, dirty hack. OpenGL uses "contexts" to store all of its data, and each context
 		//       can only be used by the thread that created it. However there are also "shared contexts"
@@ -144,6 +157,10 @@ QVariant Renderer::GetDefaultShader()
 
 void Renderer::Destroy()
 {
+	destroyed_ = true;
+	if (lifetime_) {
+		lifetime_->alive = false;
+	}
 	if (!default_shader_.isNull()) {
 		DestroyNativeShader(default_shader_);
 		default_shader_.clear();
@@ -171,7 +188,7 @@ TexturePtr Renderer::CreateTextureFromNativeHandle(const QVariant &v,
 		return nullptr;
 	}
 
-	return std::make_shared<Texture>(this, v, params);
+	return std::make_shared<Texture>(this, v, params, lifetime_);
 }
 
 bool Renderer::GetColorContext(const ColorTransformJob &color_job,
@@ -325,6 +342,20 @@ void Renderer::BlitColorManaged(const ColorTransformJob &color_job,
 {
 	ColorContext color_ctx;
 	if (!GetColorContext(color_job, &color_ctx)) {
+		ShaderJob fallback_job;
+		fallback_job.Insert(QStringLiteral("ove_maintex"),
+							color_job.GetInputTexture());
+		fallback_job.Insert(
+			QStringLiteral("ove_mvpmat"),
+			NodeValue(NodeValue::kMatrix, color_job.GetTransformMatrix()));
+
+		if (destination) {
+			BlitToTexture(GetDefaultShader(), fallback_job, destination,
+						  color_job.IsClearDestinationEnabled());
+		} else {
+			Blit(GetDefaultShader(), fallback_job, params,
+				 color_job.IsClearDestinationEnabled());
+		}
 		return;
 	}
 

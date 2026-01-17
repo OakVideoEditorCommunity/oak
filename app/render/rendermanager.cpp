@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -92,7 +93,7 @@ RenderThread *RenderManager::CreateThread(Renderer *renderer)
 {
 	auto t = new RenderThread(renderer, decoder_cache_, shader_cache_, this);
 	render_threads_.push_back(t);
-	t->start(QThread::IdlePriority);
+	t->start(QThread::NormalPriority);
 	return t;
 }
 

@@ -1,5 +1,6 @@
 # Olive - Non-Linear Video Editor
 # Copyright (C) 2022 Olive Team
+# Modifications Copyright (C) 2025 mikesolar
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +18,7 @@
 add_subdirectory(job)
 add_subdirectory(ocioconf)
 add_subdirectory(opengl)
-
+add_subdirectory(plugin)
 set(OLIVE_SOURCES
   ${OLIVE_SOURCES}
   render/audioplaybackcache.cpp

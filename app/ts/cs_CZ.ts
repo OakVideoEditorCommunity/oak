@@ -4684,4 +4684,19 @@ Opravdu chcete tento záznam smazat?</translation>
         <translation>Vzorky</translation>
     </message>
 </context>
+<context>
+  <name>OlivePluginInstance</name>
+  <message>
+    <source>Change %1</source>
+    <translation>Změnit %1</translation>
+  </message>
+  <message>
+    <source>%1 (+%2)</source>
+    <translation>%1 (+%2)</translation>
+  </message>
+  <message>
+    <source>Edit Parameters</source>
+    <translation>Upravit parametry</translation>
+  </message>
+</context>
 </TS>

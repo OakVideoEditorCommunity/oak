@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -47,6 +48,16 @@ void NodeParamViewDockArea::AddItem(QDockWidget *item)
 	item->setFeatures(QDockWidget::DockWidgetClosable |
 					  QDockWidget::DockWidgetMovable);
 	addDockWidget(Qt::LeftDockWidgetArea, item);
+}
+
+void NodeParamViewDockArea::RemoveItem(QDockWidget *item)
+{
+	if (!item) {
+		return;
+	}
+	removeDockWidget(item);
+	item->setParent(nullptr);
+	item->deleteLater();
 }
 
 }

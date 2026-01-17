@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -25,7 +26,6 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
-#include "common/qtutils.h"
 #include "config/config.h"
 #include "patreon.h"
 #include "scrollinglabel.h"
@@ -55,7 +55,7 @@ AboutDialog::AboutDialog(bool welcome_dialog, QWidget *parent)
 	horiz_layout->setSpacing(fm.height() * 2);
 
 	QLabel *icon = new QLabel(
-		QStringLiteral("<html><img src=':/graphics/olive-splash.png'></html>"));
+		QStringLiteral("<html><img src=':/graphics/oak-logo.png'></html>"));
 	icon->setAlignment(Qt::AlignCenter);
 	horiz_layout->addWidget(icon);
 
@@ -63,15 +63,15 @@ AboutDialog::AboutDialog(bool welcome_dialog, QWidget *parent)
 	QLabel *label = new QLabel(
 		QStringLiteral("<html><head/><body>"
 					   "<p><b>%1</b> %2</p>" // AppName (version identifier)
-					   "<p><a href=\"https://www.olivevideoeditor.org/\">"
-					   "https://www.olivevideoeditor.org/"
-					   "</a></p>"
-					   "<p>%3</p>" // First statement
+					   "<p>%3</p>" // Description
+					   "<p>%4</p>" // Fork notice
 					   "</body></html>")
 			.arg(QApplication::applicationName(),
 				 QApplication::applicationVersion(),
-				 tr("Olive is a free open source non-linear video editor. "
-					"This software is licensed under the GNU GPL Version 3.")));
+				 tr("Oak Video Editor is a free open source non-linear video editor. "
+					"This software is licensed under the GNU GPL Version 3."),
+				 tr("This project is a fork of "
+					"<a href=\"https://github.com/olive-editor/olive\">Olive Video Editor</a>.")));
 
 	// Set text formatting
 	label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -92,18 +92,16 @@ AboutDialog::AboutDialog(bool welcome_dialog, QWidget *parent)
 
 	if (welcome_dialog || patrons.isEmpty()) {
 		opening_statement = tr(
-			"<b>Olive relies on support from the community to continue its development.</b>");
+			"<b>Oak Video Editor relies on support from the community to continue its development.</b>");
 	} else {
 		opening_statement = tr(
-			"Olive wouldn't be possible without the support of gracious donations from the following people.");
+			"Oak Video Editor wouldn't be possible without the support of gracious donations from the following people.");
 	}
 
 	QLabel *support_lbl = new QLabel(
 		tr("<html>%1 "
 		   "If you like this project, please consider making a "
-		   "<a href='https://olivevideoeditor.org/donate.php'>one-time donation</a> or "
-		   "<a href='https://www.patreon.com/olivevideoeditor'>pledging monthly</a> to "
-		   "support its development.</html>")
+		   "one-time donation or pledging monthly to support its development.</html>")
 			.arg(opening_statement));
 	support_lbl->setWordWrap(true);
 	support_lbl->setAlignment(Qt::AlignCenter);

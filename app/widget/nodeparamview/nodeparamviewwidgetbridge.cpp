@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -28,6 +29,7 @@
 
 #include "common/qtutils.h"
 #include "core.h"
+#include "nodeparambutton.h"
 #include "node/group/group.h"
 #include "node/node.h"
 #include "node/nodeundo.h"
@@ -41,6 +43,8 @@
 #include "widget/slider/floatslider.h"
 #include "widget/slider/integerslider.h"
 #include "widget/slider/rationalslider.h"
+
+#include <OpenImageIO/detail/fmt/base.h>
 
 namespace olive
 {
@@ -109,12 +113,22 @@ void NodeParamViewWidgetBridge::CreateWidgets()
 			CreateSliders<FloatSlider>(GetSliderCount(t), parent);
 			break;
 		}
-		case NodeValue::kCombo: {
+		case NodeValue::kCombo:
+		case NodeValue::kStrCombo: {
 			QComboBox *combobox = new QComboBox(parent);
 
 			QStringList items = GetInnerInput().GetComboBoxStrings();
-			foreach (const QString &s, items) {
-				combobox->addItem(s);
+			QStringList values =
+				GetInnerInput().GetProperty("combo_value_str").toStringList();
+			const bool use_value_data =
+				(t == NodeValue::kStrCombo) && !values.isEmpty();
+			for (int i = 0; i < items.size(); ++i) {
+				const QString &label = items.at(i);
+				if (use_value_data && i < values.size()) {
+					combobox->addItem(label, values.at(i));
+				} else {
+					combobox->addItem(label);
+				}
 			}
 
 			widgets_.append(combobox);
@@ -180,6 +194,13 @@ void NodeParamViewWidgetBridge::CreateWidgets()
 			connect(bezier->cp2_y_slider(), &FloatSlider::ValueChanged, this,
 					&NodeParamViewWidgetBridge::WidgetCallback);
 			break;
+		}
+		case NodeValue::kPushButton: {
+			NodeInput input=GetInnerInput();
+			NodeParamButton *button=new NodeParamButton(input.name(),parent);
+			widgets_.append(button);
+			plugin::PluginNode* plugin_node=dynamic_cast<plugin::PluginNode*>(input.node());
+			connect(button, &NodeParamButton::onPressed, plugin_node, &plugin::PluginNode::pushButtonClicked);
 		}
 		}
 
@@ -253,7 +274,6 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 	case NodeValue::kVideoParams:
 	case NodeValue::kAudioParams:
 	case NodeValue::kSubtitleParams:
-	case NodeValue::kBinary:
 	case NodeValue::kDataTypeCount:
 		break;
 	case NodeValue::kInt: {
@@ -334,6 +354,16 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 					  0);
 		break;
 	}
+	case NodeValue::kBinary: {
+		QString text = static_cast<NodeParamViewTextEdit *>(sender())->text();
+		QByteArray raw = text.toUtf8();
+		QByteArray decoded = QByteArray::fromBase64(raw);
+		if (decoded.isEmpty() && !raw.isEmpty()) {
+			decoded = raw;
+		}
+		SetInputValue(decoded, 0);
+		break;
+	}
 	case NodeValue::kBoolean: {
 		// Widget is a QCheckBox
 		SetInputValue(static_cast<QCheckBox *>(sender())->isChecked(), 0);
@@ -359,6 +389,16 @@ void NodeParamViewWidgetBridge::WidgetCallback()
 		}
 
 		SetInputValue(index, 0);
+		break;
+	}
+	case NodeValue::kStrCombo: {
+		QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
+		const QVariant data = cb->currentData();
+		if (data.isValid()) {
+			SetInputValue(data.toString(), 0);
+		} else {
+			SetInputValue(cb->currentText(), 0);
+		}
 		break;
 	}
 	case NodeValue::kBezier: {
@@ -432,9 +472,15 @@ void NodeParamViewWidgetBridge::UpdateWidgetValues()
 	case NodeValue::kVideoParams:
 	case NodeValue::kAudioParams:
 	case NodeValue::kSubtitleParams:
-	case NodeValue::kBinary:
 	case NodeValue::kDataTypeCount:
 		break;
+	case NodeValue::kBinary: {
+		NodeParamViewTextEdit *e =
+			static_cast<NodeParamViewTextEdit *>(widgets_.first());
+		QByteArray bytes = GetInnerInput().GetValueAtTime(node_time).toByteArray();
+		e->setTextPreservingCursor(QString::fromUtf8(bytes.toBase64()));
+		break;
+	}
 	case NodeValue::kInt: {
 		static_cast<IntegerSlider *>(widgets_.first())
 			->SetValue(GetInnerInput().GetValueAtTime(node_time).toLongLong());
@@ -533,6 +579,22 @@ void NodeParamViewWidgetBridge::UpdateWidgetValues()
 		for (int i = 0; i < cb->count(); i++) {
 			if (cb->itemData(i).toInt() == index) {
 				cb->setCurrentIndex(i);
+			}
+		}
+		cb->blockSignals(false);
+		break;
+	}
+	case NodeValue::kStrCombo: {
+		QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
+		cb->blockSignals(true);
+		const QString current =
+			GetInnerInput().GetValueAtTime(node_time).toString();
+		for (int i = 0; i < cb->count(); ++i) {
+			const QVariant data = cb->itemData(i);
+			if ((data.isValid() && data.toString() == current) ||
+				(!data.isValid() && cb->itemText(i) == current)) {
+				cb->setCurrentIndex(i);
+				break;
 			}
 		}
 		cb->blockSignals(false);
@@ -749,7 +811,7 @@ void NodeParamViewWidgetBridge::SetProperty(const QString &key,
 	}
 
 	// ComboBox strings changing
-	if (data_type == NodeValue::kCombo) {
+	if (data_type == NodeValue::kCombo || data_type == NodeValue::kStrCombo) {
 		if (key == QStringLiteral("combo_str")) {
 			QComboBox *cb = static_cast<QComboBox *>(widgets_.first());
 
@@ -761,14 +823,23 @@ void NodeParamViewWidgetBridge::SetProperty(const QString &key,
 			cb->clear();
 
 			QStringList items = value.toStringList();
+			QStringList values =
+				GetInnerInput().GetProperty("combo_value_str").toStringList();
+			const bool use_value_data =
+				(data_type == NodeValue::kStrCombo) && !values.isEmpty();
 			int index = 0;
-			foreach (const QString &s, items) {
+			for (int i = 0; i < items.size(); ++i) {
+				const QString &s = items.at(i);
 				if (s.isEmpty()) {
 					cb->insertSeparator(cb->count());
 					cb->setItemData(cb->count() - 1, -1);
 				} else {
-					cb->addItem(s, index);
-					index++;
+					if (use_value_data && i < values.size()) {
+						cb->addItem(s, values.at(i));
+					} else {
+						cb->addItem(s, index);
+						index++;
+					}
 				}
 			}
 

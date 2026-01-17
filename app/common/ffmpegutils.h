@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -87,7 +88,7 @@ public:
 using AVFramePtr = std::shared_ptr<AVFrame>;
 inline AVFramePtr CreateAVFramePtr(AVFrame *f)
 {
-	return std::shared_ptr<AVFrame>(f, [](AVFrame *g) { av_frame_free(&g); });
+ 	return std::shared_ptr<AVFrame>(f, [](AVFrame *g) { av_frame_free(&g); });
 }
 inline AVFramePtr CreateAVFramePtr()
 {

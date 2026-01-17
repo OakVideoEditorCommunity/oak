@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2023 Olive Studios LLC
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -17,6 +18,8 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ***/
+#include <QString>
+
 #include <QString>
 
 #include "serializer230220.h"

@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -30,7 +31,7 @@ const Texture::Interpolation Texture::kDefaultInterpolation =
 
 Texture::~Texture()
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->DestroyTexture(this);
 	}
 
@@ -41,14 +42,14 @@ Texture::~Texture()
 
 void Texture::Upload(void *data, int linesize)
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->UploadToTexture(this->id(), this->params(), data, linesize);
 	}
 }
 
 void Texture::Download(void *data, int linesize)
 {
-	if (renderer_) {
+	if (IsRendererAlive()) {
 		renderer_->DownloadFromTexture(this->id(), this->params(), data,
 									   linesize);
 	}

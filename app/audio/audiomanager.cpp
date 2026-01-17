@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -318,7 +319,7 @@ AudioManager::AudioManager()
 #ifdef PA_HAS_JACK
 	// PortAudio doesn't do a strcpy, so we need a const char that's readily accessible (i.e. not
 	// a QString converted to UTF-8)
-	PaJack_SetClientName("Olive");
+	PaJack_SetClientName("Oak Video Editor");
 #endif
 
 	Pa_Initialize();

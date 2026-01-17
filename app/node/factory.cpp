@@ -2,6 +2,7 @@
 
   Olive - Non-Linear Video Editor
   Copyright (C) 2022 Olive Team
+  Modifications Copyright (C) 2025 mikesolar
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -31,6 +32,7 @@
 #include "block/transition/diptocolor/diptocolortransition.h"
 #include "color/displaytransform/displaytransform.h"
 #include "color/ociogradingtransformlinear/ociogradingtransformlinear.h"
+#include "common/Current.h"
 #include "distort/cornerpin/cornerpindistortnode.h"
 #include "distort/crop/cropdistortnode.h"
 #include "distort/flip/flipdistortnode.h"
@@ -64,6 +66,8 @@
 #include "math/trigonometry/trigonometry.h"
 #include "output/track/track.h"
 #include "output/viewer/viewer.h"
+#include "pluginSupport/OliveHost.h"
+#include "plugins/Plugin.h"
 #include "project/folder/folder.h"
 #include "project/footage/footage.h"
 #include "project/sequence/sequence.h"
@@ -86,6 +90,9 @@ void NodeFactory::Initialize()
 
 		library_.append(created_node);
 	}
+
+	RegisterPluginNodes();
+
 }
 
 void NodeFactory::Destroy()
@@ -209,6 +216,48 @@ Node *NodeFactory::CreateFromID(const QString &id)
 	}
 
 	return nullptr;
+}
+
+void NodeFactory::RegisterPluginNodes()
+{
+	QSet<QString> existing_ids;
+	for (Node *node : library_) {
+		existing_ids.insert(node->id());
+	}
+
+	for (auto plugin : OFX::Host::PluginCache::getPluginCache()->getPlugins()) {
+		auto *image_effect =
+			dynamic_cast<OFX::Host::ImageEffect::ImageEffectPlugin *>(plugin);
+		if (!image_effect) {
+			continue;
+		}
+
+		const QString plugin_id = QString::fromStdString(
+			image_effect->getIdentifier());
+		if (existing_ids.contains(plugin_id)) {
+			continue;
+		}
+
+		const auto &contexts = image_effect->getContexts();
+		if (contexts.empty()) {
+			qWarning() << "Skipping OFX plugin with no contexts:"
+					   << plugin_id;
+			continue;
+		}
+		std::string context = kOfxImageEffectContextFilter;
+		if (contexts.find(kOfxImageEffectContextFilter) == contexts.end()) {
+			context = *contexts.begin();
+		}
+
+		auto *instance = image_effect->createInstance(context, nullptr);
+		if (!instance) {
+			continue;
+		}
+
+		plugin::PluginNode *plugin_node = new plugin::PluginNode(instance);
+		library_.append(plugin_node);
+		existing_ids.insert(plugin_id);
+	}
 }
 
 Node *NodeFactory::CreateFromFactoryIndex(const NodeFactory::InternalID &id)
