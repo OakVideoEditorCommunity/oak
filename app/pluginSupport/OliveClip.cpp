@@ -365,24 +365,18 @@ bool olive::plugin::OliveClipInstance::getConnected() const
 			return true;
 		}
 #endif
-		for (auto it = images_.cbegin(); it != images_.cend(); ++it) {
-			if (it.value()) {
-				return true;
-			}
-		}
-		return false;
+		if(images_.empty())
+			return false;
+		return true;
 	}
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	if (!input_textures_.isEmpty()) {
 		return true;
 	}
 #endif
-	for (auto it = images_.cbegin(); it != images_.cend(); ++it) {
-		if (it.value()) {
-			return true;
-		}
-	}
-	return false;
+	if(images_.empty())
+		return false;
+	return true;
 }
 double olive::plugin::OliveClipInstance::getUnmappedFrameRate() const
 {
@@ -492,13 +486,7 @@ void olive::plugin::OliveClipInstance::setInputTexture(TexturePtr texture, OfxTi
 		return;
 	}
 	VideoParams incoming = texture->params();
-	// AI wrote this. Why?
-	if (params_.format() != PixelFormat::INVALID &&
-		params_.channel_count() > 0) {
-		incoming.set_format(params_.format());
-		incoming.set_channel_count(params_.channel_count());
-		incoming.set_premultiplied_alpha(params_.premultiplied_alpha());
-	}
+	
 	this->params_ = incoming;
 #ifdef OFX_SUPPORTS_OPENGLRENDER
 	input_textures_.insert(time, texture);

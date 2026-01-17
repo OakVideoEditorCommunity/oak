@@ -1369,11 +1369,11 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 
 	int numFramesToRender=1;
 
+	// Output Clip
 	OliveClipInstance *output_clip=dynamic_cast<plugin::OliveClipInstance *>(instance->getClip("Output"));
 	if (!output_clip) {
 		return;
 	}
-	output_clip->setParams(destination_params);
 
 	// ensure the instance was created
 	OfxStatus stat = kOfxStatOK;
@@ -1386,7 +1386,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		}
 	}
 
-	// call get region of interest on each of the inputs
+
 	OfxTime frame = job.time_seconds();
 
 	const auto &clips = olive_instance->getDescriptor().getClips();
@@ -1441,13 +1441,45 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			input_clips[entry.first] = input_clip;
 		}
 	}
+	
+	// call getClipPreferences to know which format plugin requires
 	OFX::Host::Property::Set args;
 	args.setDoubleProperty(kOfxPropTime, frame);
 	double render_scale_array[] = {
 		renderScale.x, renderScale.y
-	} ;args.setDoublePropertyN(kOfxImageEffectPropRenderScale, render_scale_array, 2);
+	};
+	args.setDoublePropertyN(kOfxImageEffectPropRenderScale, render_scale_array, 2);
 	instance->setupClipPreferencesArgs(args);
-	instance->getClipPreferences();
+	// now we need to call getClipPreferences on the instance so that it does
+	// the clip component/depth logic and caches away the components and depth.
+	bool ok = instance->getClipPreferences();
+	if (!ok) {
+		qWarning().noquote() << "OFX getClipPreferences failed for plugin="
+							 << PluginIdForInstance(instance);
+		MarkRenderFailure(destination);
+		return;
+	}
+	/// RoI is in canonical coords.
+	OfxRectD regionOfInterest;
+	regionOfInterest.x1 = 0.0;
+	regionOfInterest.y1 = 0.0;
+	regionOfInterest.x2 = destination_params.width() * destination_params.pixel_aspect_ratio().toDouble();
+	regionOfInterest.y2 = destination_params.height();
+
+	OfxRectD regionOfDefinition = regionOfInterest;
+
+	output_clip->setRegionOfDefinition(regionOfDefinition, frame);
+	output_clip->setOutputTexture(destination, frame);
+
+	// get the RoI for each input clip
+	// the regions of interest for each input clip are returned in a std::map
+	// on a real host, these will be the regions of each input clip that the
+	// effect needs to render a given frame (clipped to the RoD).
+	//
+	// In our example we are doing full frame fetches regardless.
+	
+
+	// set correct format for input
 	for (const auto &entry : input_clips) {
 		if (entry.first == kOfxImageEffectOutputClipName) {
 			continue;
@@ -1472,21 +1504,35 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			VideoParams params = input_tex->params();
 			params.set_format(PixelFormat::from_ofx(bitdepth));
 			params.set_channel_count(component);
-			ConvertTextureForParams(input_tex, params) ;
+			ConvertTextureForParams(input_tex, params);
+			OfxRectD rod;
+			rod.x1 = 0;
+			rod.y1 = 0;
+			rod.x2 = params.width() * params.pixel_aspect_ratio().toDouble();
+			rod.y2 = params.height();
+			input_clip->setRegionOfDefinition(rod, frame);
 			input_clip->setInputTexture(input_tex,frame);
 			input_clips[entry.first] = input_clip;
 		}
 	}
-	// now we need to call getClipPreferences on the instance so that it does
-	// the clip component/depth logic and caches away the components and depth.
-	bool ok = instance->getClipPreferences();
-	if (!ok) {
-		qWarning().noquote()
-			<< "OFX getClipPreferences failed for plugin="
-			<< PluginIdForInstance(instance);
+	std::map<OFX::Host::ImageEffect::ClipInstance *, OfxRectD> rois;
+	stat = instance->getRegionOfInterestAction(frame, renderScale,
+											   regionOfInterest, rois);
+	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
+		LogOfxFailure("getRegionOfInterest", stat, instance);
 		MarkRenderFailure(destination);
 		return;
 	}
+	// set correct format for output
+	VideoParams output_params = destination_params; // params for plugin
+	std::string bitdepth =
+		output_clip->getProps().getStringProperty(kOfxImageEffectPropPixelDepth);
+	std::string component =
+		output_clip->getProps().getStringProperty(kOfxImageEffectPropComponents);
+	output_params.set_format(PixelFormat::from_ofx(bitdepth));
+	output_params.set_channel_count(component);
+	output_clip->setParams(output_params);
+
 	// The render window is in pixel coordinates
 	// ie: render scale and a PAR of not 1
 	OfxRectI renderWindow;
@@ -1494,18 +1540,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	renderWindow.x2 = destination_params.width();
 	renderWindow.y2 = destination_params.height();
 
-	/// RoI is in canonical coords.
-	OfxRectD regionOfInterest;
-	regionOfInterest.x1 = 0.0;
-	regionOfInterest.y1 = 0.0;
-	regionOfInterest.x2 = destination_params.width();
-	regionOfInterest.y2 = destination_params.height();
-
-	OfxRectD regionOfDefinition = regionOfInterest;
-
-	output_clip->setRegionOfDefinition(regionOfDefinition, frame);
-	output_clip->setOutputTexture(destination, frame);
-
+	
 	stat = instance->beginRenderAction(frame, numFramesToRender,
 		1.0, false, renderScale, true,
 		interactive);
@@ -1521,22 +1556,9 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		AttachOutputTexture(destination);
 	}
 #endif
-	// get the RoI for each input clip
-	// the regions of interest for each input clip are returned in a std::map
-	// on a real host, these will be the regions of each input clip that the
-	// effect needs to render a given frame (clipped to the RoD).
-	//
-	// In our example we are doing full frame fetches regardless.
-	std::map<OFX::Host::ImageEffect::ClipInstance *, OfxRectD> rois;
-	stat = instance->getRegionOfInterestAction(frame, renderScale,
-											   regionOfInterest, rois);
-	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
-		LogOfxFailure("getRegionOfInterest", stat, instance);
-		MarkRenderFailure(destination);
-		return;
-	}
+	
 
-	if (!destination_params.is_valid()) {
+	if (!output_params.is_valid()) {
 		qWarning().noquote()
 			<< "OFX render skipped due to invalid output params for plugin="
 			<< PluginIdForInstance(instance);
@@ -1547,12 +1569,12 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	}
 
 	// render a frame
-	const char *render_field = GetRenderFieldForParams(destination_params);
+	const char *render_field = GetRenderFieldForParams(output_params);
 	stat = instance->renderAction(frame, render_field, renderWindow, renderScale,
 								  true, interactive, interactive);
 	if (stat != kOfxStatOK && stat != kOfxStatReplyDefault) {
 		LogOfxFailure("render", stat, instance);
-		LogClipState("output", output_clip, &destination_params);
+		LogClipState("output", output_clip, &output_params);
 		for (const auto &entry : input_clips) {
 			const auto params_it = input_params.find(entry.first);
 			const olive::VideoParams *params =
@@ -1601,11 +1623,9 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 	}
 
 	if (!use_opengl) {
-		AVFramePtr frame_ptr = create_avframe_from_ofx_image(*output_image);
-		if (!frame_ptr) {
-			frame_ptr = create_avframe_from_ofx_image_with_params(
-				*output_image, destination_params);
-		}
+		AVFramePtr frame_ptr = 
+			create_avframe_from_ofx_image_with_params(*output_image,
+													  output_params);
 		if (!frame_ptr) {
 			qWarning().noquote()
 				<< "OFX output image conversion failed for plugin="
@@ -1614,20 +1634,20 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 							  renderScale, true, interactive);
 			return;
 		}
-		//AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
+		AVFramePtr converted = ConvertFrameIfNeeded(frame_ptr, destination_params);
 		const AVPixelFormat expected_fmt =
 			GetDestinationAVPixelFormat(destination_params);
-		destination->handleFrame(frame_ptr);
-		if (destination->renderer() && frame_ptr && frame_ptr->data[0] &&
+		destination->handleFrame(converted);
+		if (destination->renderer() && converted && converted->data[0] &&
 			(expected_fmt == AV_PIX_FMT_NONE ||
-			 frame_ptr->format == expected_fmt)) {
+			 converted->format == expected_fmt)) {
 			int linesize_pixels =
-				LinesizeToPixels(destination_params, frame_ptr->linesize[0]);
+				LinesizeToPixels(destination_params, converted->linesize[0]);
 			if (linesize_pixels <= 0) {
 				linesize_pixels = destination_params.effective_width();
 			}
-			destination->Upload(frame_ptr->data[0], linesize_pixels);
-		} else if (destination->renderer() && frame_ptr && frame_ptr->data[0]) {
+			//destination->Upload(converted->data[0], linesize_pixels);
+		} else if (destination->renderer() && converted && converted->data[0]) {
 			qWarning().noquote()
 				<< "OFX output pixel format mismatch for plugin="
 				<< PluginIdForInstance(instance);
@@ -1639,8 +1659,6 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 		DetachOutputTexture();
 		instance->contextDetachedAction();
 #endif
-	}
-/*
 		if (frame_ptr && destination) {
 			AVFramePtr converted =
 				ConvertFrameIfNeeded(frame_ptr, destination_params);
@@ -1650,8 +1668,8 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			if (destination->renderer() && converted && converted->data[0] &&
 				(expected_fmt == AV_PIX_FMT_NONE ||
 				 converted->format == expected_fmt)) {
-				int linesize_pixels =
-					LinesizeToPixels(destination_params, converted->linesize[0]);
+				int linesize_pixels = LinesizeToPixels(destination_params,
+													   converted->linesize[0]);
 				if (linesize_pixels <= 0) {
 					linesize_pixels = destination_params.effective_width();
 				}
@@ -1664,7 +1682,7 @@ void olive::plugin::PluginRenderer::RenderPlugin(TexturePtr src, olive::plugin::
 			}
 		}
 	}
-*/
+
 	instance->endRenderAction(frame, numFramesToRender, 1.0, interactive, renderScale, true,interactive
 							  );
 

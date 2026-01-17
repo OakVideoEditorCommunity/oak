@@ -24,6 +24,111 @@
 
 #include <algorithm>
 #include <cstring>
+#include <olive/core/core.h>
+#include <QByteArray>
+#include <QHash>
+#include <QVariant>
+#include <QVector2D>
+#include <QVector3D>
+
+namespace {
+QHash<QString, QHash<QString, QVariant>> g_plugin_param_defaults;
+
+QVariant DefaultValueForParam(const OFX::Host::Param::Base *param)
+{
+	if (!param) {
+		return QVariant();
+	}
+	const std::string &ofxType = param->getType();
+	const auto &props = param->getProperties();
+
+	if (ofxType == kOfxParamTypeInteger ||
+		ofxType == kOfxParamTypeChoice) {
+		return props.getIntProperty(kOfxParamPropDefault);
+	}
+	if (ofxType == kOfxParamTypeBoolean) {
+		return props.getIntProperty(kOfxParamPropDefault) != 0;
+	}
+	if (ofxType == kOfxParamTypeDouble) {
+		return props.getDoubleProperty(kOfxParamPropDefault);
+	}
+	if (ofxType == kOfxParamTypeString ||
+		ofxType == kOfxParamTypeStrChoice ||
+		ofxType == kOfxParamTypeCustom) {
+		return QString::fromStdString(
+			props.getStringProperty(kOfxParamPropDefault));
+	}
+	if (ofxType == kOfxParamTypeRGB ||
+		ofxType == kOfxParamTypeRGBA) {
+		const int count = (ofxType == kOfxParamTypeRGBA) ? 4 : 3;
+		double values[4] = {0.0, 0.0, 0.0, 1.0};
+		props.getDoublePropertyN(kOfxParamPropDefault, values, count);
+		const double alpha = (count == 4) ? values[3] : 1.0;
+		return QVariant::fromValue(
+			olive::core::Color(values[0], values[1], values[2], alpha));
+	}
+	if (ofxType == kOfxParamTypeDouble2D ||
+		ofxType == kOfxParamTypeDouble3D ||
+		ofxType == kOfxParamTypeInteger2D ||
+		ofxType == kOfxParamTypeInteger3D) {
+		const bool is_double =
+			(ofxType == kOfxParamTypeDouble2D ||
+			 ofxType == kOfxParamTypeDouble3D);
+		const int count = (ofxType == kOfxParamTypeDouble2D ||
+						   ofxType == kOfxParamTypeInteger2D)
+			? 2
+			: 3;
+		if (is_double) {
+			double values[3] = {0.0, 0.0, 0.0};
+			props.getDoublePropertyN(kOfxParamPropDefault, values, count);
+			if (count == 2) {
+				return QVector2D(values[0], values[1]);
+			}
+			return QVector3D(values[0], values[1], values[2]);
+		}
+		int values[3] = {0, 0, 0};
+		props.getIntPropertyN(kOfxParamPropDefault, values, count);
+		if (count == 2) {
+			return QVector2D(values[0], values[1]);
+		}
+		return QVector3D(values[0], values[1], values[2]);
+	}
+	if (ofxType == kOfxParamTypeBytes) {
+		return QByteArray();
+	}
+
+	return QVariant();
+}
+
+QHash<QString, QVariant>
+BuildDefaultValues(const std::map<std::string, OFX::Host::Param::Instance *> &params)
+{
+	QHash<QString, QVariant> defaults;
+	for (const auto &param : params) {
+		const std::string &ofxType = param.second->getType();
+		if (ofxType == kOfxParamTypeGroup ||
+			ofxType == kOfxParamTypePage ||
+			ofxType == kOfxParamTypePushButton) {
+			continue;
+		}
+		const auto &props = param.second->getProperties();
+		if (props.getIntProperty(kOfxParamPropSecret) != 0) {
+			continue;
+		}
+		const QString input_id =
+			QString::fromStdString(param.second->getName());
+		if (input_id.isEmpty()) {
+			continue;
+		}
+		QVariant default_value = DefaultValueForParam(param.second);
+		if (!default_value.isValid()) {
+			continue;
+		}
+		defaults.insert(input_id, default_value);
+	}
+	return defaults;
+}
+}
 static QString ClipLabelForName(const std::string &name,
 								const OFX::Host::ImageEffect::ClipDescriptor *desc)
 {
@@ -58,6 +163,14 @@ olive::plugin::PluginNode::PluginNode(
 	QHash<QString, QString> page_for_param;
 
 	auto params=plugin_instance_->getParams();
+	const QString plugin_id = QString::fromStdString(
+		plugin_instance_->getPlugin()->getIdentifier());
+	auto defaults_iter = g_plugin_param_defaults.find(plugin_id);
+	if (defaults_iter == g_plugin_param_defaults.end()) {
+		g_plugin_param_defaults.insert(plugin_id, BuildDefaultValues(params));
+		defaults_iter = g_plugin_param_defaults.find(plugin_id);
+	}
+	const QHash<QString, QVariant> &defaults = defaults_iter.value();
 	for (auto param: params) {
 		const std::string &ofxType = param.second->getType();
 		if (ofxType == kOfxParamTypeGroup) {
@@ -135,7 +248,15 @@ olive::plugin::PluginNode::PluginNode(
 		if (type == NodeValue::kNone) {
 			continue;
 		}
-		AddInput(input_id, type);
+		QVariant default_value = defaults.value(input_id, QVariant());
+		if (default_value.isValid()) {
+			AddInput(input_id, type, default_value);
+			if (type != NodeValue::kPushButton) {
+				SetStandardValue(input_id, default_value);
+			}
+		} else {
+			AddInput(input_id, type);
+		}
 		const QString label =
 			QString::fromStdString(param.second->getLabel());
 		if (!label.isEmpty()) {

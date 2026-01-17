@@ -21,6 +21,8 @@
 #ifndef PARAM_INSTANCE_H
 #define PARAM_INSTANCE_H
 
+#include "olive/core/util/rational.h"
+#include "pluginSupport/OlivePluginInstance.h"
 #include <QString>
 #include <QVector2D>
 #include <QVector3D>
@@ -30,6 +32,8 @@
 #include "node/plugins/Plugin.h"
 #include "core.h"
 #include "undo/undocommand.h"
+#include <iostream>
+#include <qlogging.h>
 namespace olive
 {
 namespace plugin
@@ -247,6 +251,11 @@ protected:
 	OFX::Host::Param::Descriptor& _descriptor;
 	bool has_value_ = false;
 	bool value_ = false;
+	bool DefaultValue() const
+	{
+		return _descriptor.getProperties()
+			.getIntProperty(kOfxParamPropDefault) != 0;
+	}
 public:
 	BooleanInstance(std::shared_ptr<PluginNode> effect, const std::string& name, OFX::Host::Param::Descriptor& descriptor)
 		: OFX::Host::Param::BooleanInstance(descriptor)
@@ -270,8 +279,8 @@ public:
 			data = variant.toBool();
 			return kOfxStatOK;
 		}
-		data = false;
-		return kOfxStatErrValue;
+		data = DefaultValue();
+		return kOfxStatOK;
 	}
 	OfxStatus get(OfxTime time, bool& data)
 	{
@@ -282,12 +291,20 @@ public:
 		QVariant variant =
 			node->GetValueAtTime(_descriptor.getName().c_str(),
 								 rational::fromDouble(time));
+		if (variant.isNull()){
+			qWarning().noquote()<<"Boolean get failed: Varient is null" << time << rational::fromDouble(time).toDouble();
+		}
+		if (!variant.isValid()) {
+			qWarning().noquote()
+				<< "Boolean get failed: Varient is invalid" << time
+				<< rational::fromDouble(time).toDouble();
+		}
 		if (variant.canConvert<bool>()) {
 			data = variant.toBool();
 			return kOfxStatOK;
 		}
-		data = false;
-		return kOfxStatErrValue;
+		data = DefaultValue();
+		return kOfxStatOK;
 	}
 	OfxStatus set(bool data)
 	{
