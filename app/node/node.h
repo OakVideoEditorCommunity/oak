@@ -24,6 +24,7 @@
 
 #include "ofxhImageEffectAPI.h"
 
+#include <cstdint>
 #include <map>
 #include <QMutex>
 #include <QObject>
@@ -249,7 +250,15 @@ public:
 		Mode mode_;
 		std::list<int> elements_;
 	};
-
+	uint64_t nodeVersion(){
+		return node_version;
+	}
+	void addNodeVersion(){
+		node_version++;
+	}
+private:
+	uint64_t node_version = 0;
+public:
 	virtual ActiveElements GetActiveElementsAtTime(const QString &input,
 												   const TimeRange &r) const
 	{

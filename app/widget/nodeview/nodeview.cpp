@@ -123,6 +123,7 @@ void NodeView::SetContexts(const QVector<Node *> &nodes)
 
 	contexts_ = nodes;
 
+	
 	CenterOnItemsBoundingRect();
 }
 
