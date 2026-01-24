@@ -98,8 +98,8 @@ void FrameCache::thread(){
 
         if(total_cache_size > cache_size){
             while(total_cache_size > cache_size){
-                FrameCacheKey key = lru_list.last();
-                lru_list.removeLast();
+                FrameCacheKey key = lru_list.first();
+                lru_list.removeFirst();
                 size_t size=map_[key]->size();
                 map_.remove(key);
                 total_cache_size -= size;
