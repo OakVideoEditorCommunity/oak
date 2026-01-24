@@ -47,6 +47,7 @@
 #include "render/job/shaderjob.h"
 #include "render/shadercode.h"
 #include "splitvalue.h"
+#include <mutex>
 
 namespace olive
 {
@@ -254,10 +255,12 @@ public:
 		return node_version;
 	}
 	void addNodeVersion(){
+		std::lock_guard<std::mutex> lock_guard(node_versiqn_mutex);
 		node_version++;
 	}
 private:
 	uint64_t node_version = 0;
+	std::mutex node_versiqn_mutex;
 public:
 	virtual ActiveElements GetActiveElementsAtTime(const QString &input,
 												   const TimeRange &r) const

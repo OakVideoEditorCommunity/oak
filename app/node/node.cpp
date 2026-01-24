@@ -2347,7 +2347,7 @@ void Node::ParameterValueChanged(const QString &input, int element,
 	if (GetInputFlags(input) & kInputFlagIgnoreInvalidations) {
 		return;
 	}
-
+	addNodeVersion();
 	InvalidateCache(range, input, element);
 }
 
@@ -2410,6 +2410,7 @@ void Node::InputValueChangedEvent(const QString &input, int element)
 
 void Node::InputConnectedEvent(const QString &input, int element, Node *output)
 {
+	addNodeVersion();
 	Q_UNUSED(input)
 	Q_UNUSED(element)
 	Q_UNUSED(output)
@@ -2418,6 +2419,7 @@ void Node::InputConnectedEvent(const QString &input, int element, Node *output)
 void Node::InputDisconnectedEvent(const QString &input, int element,
 								  Node *output)
 {
+	addNodeVersion();
 	Q_UNUSED(input)
 	Q_UNUSED(element)
 	Q_UNUSED(output)

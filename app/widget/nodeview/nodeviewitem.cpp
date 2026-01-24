@@ -255,13 +255,11 @@ qreal NodeViewItem::DefaultItemVerticalPadding() const
 
 void NodeViewItem::AddEdge(NodeViewEdge *edge)
 {
-	node_->addNodeVersion();
 	edges_.append(edge);
 }
 
 void NodeViewItem::RemoveEdge(NodeViewEdge *edge)
 {
-	node_->addNodeVersion();
 	edges_.removeOne(edge);
 }
 
