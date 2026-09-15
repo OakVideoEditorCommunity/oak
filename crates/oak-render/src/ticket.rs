@@ -465,6 +465,7 @@ impl TicketArena {
 		let params = Arc::new(params);
 		let producer = self.producer.clone();
 		let slot_done = slot.clone();
+		let slot_cancelled = slot.clone();
 		let job = crate::worker::Job {
 			node_identity: params.viewer,
 			time: params.time,
@@ -473,6 +474,13 @@ impl TicketArena {
 			produce: producer,
 			done: Box::new(move |result| slot_done.finish(result)),
 			schedule,
+			// Audit B: let the dispatcher skip producing a frame whose
+			// ticket was cancelled after posting (exactly-once delivery is
+			// unchanged — `finish` still fires, here with the same
+			// `Error::State` a cancelled result would get).
+			cancelled: Some(Arc::new(move || {
+				slot_cancelled.cancel.load(Ordering::Acquire)
+			})),
 		};
 		if !self.dispatch.post(job) {
 			// Backend is gone (shutdown raced the submit): deliver now.
@@ -507,11 +515,7 @@ impl TicketArena {
 
 	/// Submit a Background-priority frame (M15 S2 exports/precache): the
 	/// scheduler renders it whenever no Seek/Playback work is pending.
-	pub fn submit_video_background(
-		&self,
-		params: VideoTicketParams,
-		done: Completion,
-	) -> TicketId {
+	pub fn submit_video_background(&self, params: VideoTicketParams, done: Completion) -> TicketId {
 		let id = self.next_id();
 		self.submit_video_background_with_id(id, params, done)
 	}
@@ -590,6 +594,7 @@ impl TicketArena {
 		let make_job = |slot_done: Arc<TicketSlot>| {
 			let ap_job = ap.clone();
 			let ap_prod = ap.clone();
+			let slot_cancelled = slot_done.clone();
 			let producer: Producer = Arc::new(move |_, _| eval::render_audio_samples(&ap_prod));
 			crate::worker::Job {
 				node_identity: viewer,
@@ -612,6 +617,9 @@ impl TicketArena {
 				produce: producer,
 				done: Box::new(move |result| slot_done.finish(result)),
 				schedule: JobSchedule::seek(),
+				cancelled: Some(Arc::new(move || {
+					slot_cancelled.cancel.load(Ordering::Acquire)
+				})),
 			}
 		};
 		let job = make_job(slot.clone());

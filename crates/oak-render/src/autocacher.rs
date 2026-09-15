@@ -139,8 +139,15 @@ impl PreviewAutoCacher {
 	}
 
 	/// Start a caching job for `range` of `owner`.
+	///
+	/// M4 priority fix: the range job is Background (§3.3 交互 > 播放 >
+	/// 导出 > 自动缓存). It used to go through `submit_video` (Seek), which
+	/// after the M4 seek over-admission let every autocache frame jump
+	/// ahead of playback *and* past the render-queue bound. The
+	/// interactive single-frame preview ([`PreviewAutoCacher::single_frame`])
+	/// keeps Seek.
 	fn start_range_job(&mut self, owner: u64, range: TimeRange) {
-		let id = self.arena.submit_video(
+		let id = self.arena.submit_video_background(
 			VideoTicketParams {
 				viewer: owner,
 				project: String::new(),
@@ -324,6 +331,44 @@ mod tests {
 		(PreviewAutoCacher::new(arena), d)
 	}
 
+	/// A dispatcher that records the posted schedules instead of running
+	/// them (the priority test only needs the posted `JobSchedule`).
+	#[derive(Default)]
+	struct RecordingDispatcher {
+		schedules: Mutex<Vec<crate::worker::JobSchedule>>,
+	}
+
+	impl JobDispatch for RecordingDispatcher {
+		fn post(&self, job: crate::worker::Job) -> bool {
+			lock(&self.schedules).push(job.schedule);
+			true
+		}
+
+		fn shutdown(&self) {}
+	}
+
+	#[test]
+	fn range_jobs_are_background_and_single_frames_stay_seek() {
+		let d = Arc::new(RecordingDispatcher::default());
+		let arena = Arc::new(TicketArena::new(d.clone(), frame_producer()));
+		let mut c = PreviewAutoCacher::new(arena);
+		c.attach(7).unwrap();
+		c.on_cache_request(7, TimeRange::new(Rational::new(0, 1), Rational::new(10, 1)));
+		c.single_frame(Rational::new(0, 1));
+		let schedules = lock(&d.schedules);
+		assert_eq!(schedules.len(), 2, "one range job + one single frame");
+		assert_eq!(
+			schedules[0].priority,
+			crate::scheduler::FramePriority::Background,
+			"autocache must yield to playback (§3.3)"
+		);
+		assert_eq!(
+			schedules[1].priority,
+			crate::scheduler::FramePriority::Seek,
+			"the interactive single-frame preview stays Seek"
+		);
+	}
+
 	#[test]
 	fn attach_detach_lifecycle() {
 		let (mut c, d) = new_cacher();
@@ -417,7 +462,6 @@ mod tests {
 		progress: AtomicU32,
 		stop: AtomicU32,
 	}
-
 
 	#[test]
 	fn events_deliver_progress() {

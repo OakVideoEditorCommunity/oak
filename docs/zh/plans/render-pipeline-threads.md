@@ -273,6 +273,20 @@
 >   生效——若 Seek 被挡在门外，UI 会等一个导出/缓存帧跑完。`cancel_preview_frame`
 >   丢弃已过 playhead 的排队帧，按 `(sequence, frame, version)` 全键匹配
 >   （两个监视器可同帧号同版本，只按帧匹配会误杀另一序列）。
+> - 自动缓存优先级修正：`PreviewAutoCacher::start_range_job` 改走
+>   `submit_video_background`（Background），不再以 Seek 插到播放之前——
+>   否则 Seek 超额插队会让逐张 autocache 帧绕过队列容量约束、倒挂
+>   §3.3 的"交互 > 播放 > 导出 > 自动缓存"；`single_frame` 交互帧保持
+>   Seek（`range_jobs_are_background_and_single_frames_stay_seek`）。
+> - 取消即停（审计 B）：`Job.cancelled` 钩子由 arena 从 slot 的 cancel 原子
+>   安装，`execute_job` 在生产前检查——`TicketArena::cancel` 之后仍未开跑的
+>   帧直接以 `Error::State` 完成，不再烧一遍 GPU/CPU 再丢弃；交付仍是
+>   exactly-once（`pipeline_skips_a_cancelled_job` 断言 producer 未运行）。
+> - 双份帧缓存（审计 C）：eval 内层 `decoded_frames`（24 帧）才是缓存主拷贝，
+>   `DecodeService` LRU 只是解码线程→渲染请求的交接缓冲，已由 8 帧降到
+>   `DECODE_LRU_CAP=2`；1080p F32 下副缓存常驻 ~8×33MB → ~2×33MB，交接
+>   未命中由 eval 缓存兜底（不再解码，只多一次拷贝）。彻底合并两份缓存需
+>   让 Texture/缓存持有共享 Arc 帧，另行立项。
 > - **基准对比**（本机 release，`oak-render/examples/bench_playback`，
 >   1080p/25fps MPEG-2 源、240 帧@480p(853×480) / 128 帧@1080p；两个后端
 >   统一输出 F32 帧、同尺寸，否则进程池的 BGRA8 槽位与管线的 in-process

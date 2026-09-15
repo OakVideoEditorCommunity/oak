@@ -42,9 +42,7 @@ use oak_render::ipc::SLOT_FORMAT_BGRA8;
 use oak_render::procpool::{
 	main_heap_frame_copies, reset_main_heap_frame_copies, DispatcherConfig, ProcessDispatcher,
 };
-use oak_render::ticket::{
-	AudioTicketParams, TicketPayload, TicketResult, VideoTicketParams,
-};
+use oak_render::ticket::{AudioTicketParams, TicketPayload, TicketResult, VideoTicketParams};
 use oak_render::worker::{Job, JobDispatch, JobSchedule};
 
 /// Serialize every test in this file (shared process environment +
@@ -117,9 +115,13 @@ fn submit(
 				))
 			}),
 			done: Box::new(move |result| {
-				results.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+				results
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.push(result);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		};
 		assert!(dispatcher.post(job), "post accepted while alive");
 	}
@@ -166,8 +168,11 @@ fn pool_resize_drains_shrunk_workers_and_regrows() {
 	let deadline = Instant::now() + Duration::from_secs(60);
 	while completed < 12 {
 		dispatcher.poll();
-		let drained: Vec<TicketResult> =
-			results.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+		let drained: Vec<TicketResult> = results
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.drain(..)
+			.collect();
 		for result in drained {
 			let payload = result.expect("frame rendered");
 			let TicketPayload::ShmFrame(frame) = payload else {
@@ -181,7 +186,10 @@ fn pool_resize_drains_shrunk_workers_and_regrows() {
 		}
 		std::thread::sleep(Duration::from_millis(2));
 	}
-	assert_eq!(completed, 12, "all tickets completed before the resize settles");
+	assert_eq!(
+		completed, 12,
+		"all tickets completed before the resize settles"
+	);
 	// The pool reached the target (the shrink took effect).
 	assert_eq!(dispatcher.worker_count(), 1);
 	// Let the retired children exit naturally (their EOF is reaped on
@@ -200,8 +208,11 @@ fn pool_resize_drains_shrunk_workers_and_regrows() {
 	let results2 = Arc::new(Mutex::new(Vec::new()));
 	submit(&dispatcher, &results2, 6, None);
 	pump_until(&dispatcher, &results2, 6);
-	let frames: Vec<TicketResult> =
-		results2.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+	let frames: Vec<TicketResult> = results2
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.drain(..)
+		.collect();
 	assert_eq!(frames.len(), 6, "the regrown pool renders a new wave");
 	for result in frames {
 		let payload = result.expect("regrown wave rendered");
@@ -237,8 +248,11 @@ fn two_workers_render_two_waves_zero_copy() {
 	let deadline = Instant::now() + Duration::from_secs(60);
 	while completed < 12 {
 		dispatcher.poll();
-		let drained: Vec<TicketResult> =
-			results.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+		let drained: Vec<TicketResult> = results
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.drain(..)
+			.collect();
 		for result in drained {
 			let payload = result.expect("frame rendered");
 			let TicketPayload::ShmFrame(frame) = payload else {
@@ -304,10 +318,8 @@ fn crash_isolation_restarts_worker_and_frame_still_renders() {
 	// One-shot crash hook: the worker dies with SIGSEGV while rendering
 	// ticket 1; the marker file it leaves behind makes the restarted
 	// worker render the re-queued frame for real.
-	let marker = std::env::temp_dir().join(format!(
-		"oak-procpool-crash-marker-{}",
-		std::process::id()
-	));
+	let marker =
+		std::env::temp_dir().join(format!("oak-procpool-crash-marker-{}", std::process::id()));
 	let _ = std::fs::remove_file(&marker);
 	std::env::set_var("OAK_WORKER_CRASH_ON_TICKET", "1");
 	std::env::set_var("OAK_WORKER_CRASH_MARKER", &marker);
@@ -387,7 +399,9 @@ fn worker_decodes_real_footage_into_slot() {
 		// Decoded video is opaque: every BGRA alpha byte is 255.
 		let pixels = &frame.shm.slot_bytes(frame.slot)[..frame.meta.data_size as usize];
 		let alpha_ok = pixels
-			.chunks_exact(4)
+			.as_chunks::<4>()
+			.0
+			.iter()
 			.filter(|px| px[3] == 255)
 			.count();
 		assert!(
@@ -431,10 +445,7 @@ fn montage_effects_render_through_the_worker() {
 			type_id: "org.olivevideoeditor.Olive.opacity".into(),
 			enabled: true,
 			effect_input_id: Some("tex_in".into()),
-			params: vec![(
-				"opacity_in".into(),
-				oak_node::value::NodeValue::Float(0.5),
-			)],
+			params: vec![("opacity_in".into(), oak_node::value::NodeValue::Float(0.5))],
 		}])],
 	];
 
@@ -455,9 +466,13 @@ fn montage_effects_render_through_the_worker() {
 				))
 			}),
 			done: Box::new(move |result| {
-				results.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+				results
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.push(result);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		};
 		assert!(dispatcher.post(job), "post accepted while alive");
 	}
@@ -480,7 +495,9 @@ fn montage_effects_render_through_the_worker() {
 	};
 	// Pick an opaque, non-black pixel in the plain render as the probe.
 	let probe = plain
-		.chunks_exact(4)
+		.as_chunks::<4>()
+		.0
+		.iter()
 		.position(|px| px[3] == 255 && px[0] > 40)
 		.expect("the fixture frame has an opaque non-black pixel");
 	let p = &plain[probe * 4..probe * 4 + 4];
@@ -549,9 +566,13 @@ fn submit_audio(
 			))
 		}),
 		done: Box::new(move |result| {
-			results.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+			results
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.push(result);
 		}),
 		schedule: JobSchedule::seek(),
+		cancelled: None,
 	};
 	assert!(dispatcher.post(job), "post accepted while alive");
 }
@@ -572,7 +593,13 @@ fn audio_tickets_roundtrip_through_shm_slots() {
 	// 1/24 s at 48 kHz stereo = 2000 sample frames x 2 ch = 16000 bytes —
 	// fits the 64x64 BGRA8 slot (16384 bytes).
 	for i in 0..4 {
-		submit_audio(&dispatcher, &results, 1, Rational::new(i, 24), Rational::new(1, 24));
+		submit_audio(
+			&dispatcher,
+			&results,
+			1,
+			Rational::new(i, 24),
+			Rational::new(1, 24),
+		);
 	}
 	pump_until(&dispatcher, &results, 4);
 
@@ -590,7 +617,10 @@ fn audio_tickets_roundtrip_through_shm_slots() {
 		// Empty montage: total silence, parsed back as f32.
 		let samples = audio.samples();
 		assert_eq!(samples.len(), 2000 * 2);
-		assert!(samples.iter().all(|&v| v == 0.0), "empty montage is silence");
+		assert!(
+			samples.iter().all(|&v| v == 0.0),
+			"empty montage is silence"
+		);
 		// Audio tickets are Seek priority — claimable by ANY worker (the
 		// seek-starvation fix), so there is no shard-spread assertion; what
 		// matters is that every ticket rendered on a live worker.
@@ -692,7 +722,13 @@ fn audio_crash_isolation_restarts_worker_and_audio_still_renders() {
 	// The dispatcher's first ticket id is 1 — exactly the crash ticket
 	// (an audio ticket this time).
 	for i in 0..4 {
-		submit_audio(&dispatcher, &results, 1, Rational::new(i, 24), Rational::new(1, 24));
+		submit_audio(
+			&dispatcher,
+			&results,
+			1,
+			Rational::new(i, 24),
+			Rational::new(1, 24),
+		);
 	}
 	pump_until(&dispatcher, &results, 4);
 
@@ -769,6 +805,7 @@ fn oversized_audio_ticket_is_refused_by_process_backend() {
 			results2.lock().unwrap_or_else(|e| e.into_inner()).push(());
 		}),
 		schedule: JobSchedule::seek(),
+		cancelled: None,
 	};
 	assert!(
 		!dispatcher.post(job),
@@ -792,7 +829,12 @@ fn f32_ticket_gets_f32_slot_and_bgra8_stays_bgra8() {
 	let results = Arc::new(Mutex::new(Vec::new()));
 	submit(&dispatcher, &results, 1, None);
 	pump_until(&dispatcher, &results, 1);
-	let bg = results.lock().unwrap().pop().unwrap().expect("frame rendered");
+	let bg = results
+		.lock()
+		.unwrap()
+		.pop()
+		.unwrap()
+		.expect("frame rendered");
 	let TicketPayload::ShmFrame(frame) = bg else {
 		panic!("ShmFrame payload");
 	};
@@ -829,14 +871,23 @@ fn f32_ticket_gets_f32_slot_and_bgra8_stays_bgra8() {
 				))
 			}),
 			done: Box::new(move |result| {
-				results2.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+				results2
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.push(result);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		};
 		assert!(dispatcher.post(job), "f32 post accepted");
 	}
 	pump_until(&dispatcher, &results2, 1);
-	let f32res = results2.lock().unwrap().pop().unwrap().expect("f32 frame rendered");
+	let f32res = results2
+		.lock()
+		.unwrap()
+		.pop()
+		.unwrap()
+		.expect("f32 frame rendered");
 	let TicketPayload::ShmFrame(frame) = f32res else {
 		panic!("ShmFrame payload");
 	};
@@ -845,7 +896,9 @@ fn f32_ticket_gets_f32_slot_and_bgra8_stays_bgra8() {
 	// The F32 bytes are zero (transparent black pipeline output).
 	let pixels = frame.shm.slot_bytes(frame.slot);
 	assert!(
-		pixels[..frame.meta.data_size as usize].iter().all(|&b| b == 0),
+		pixels[..frame.meta.data_size as usize]
+			.iter()
+			.all(|&b| b == 0),
 		"generated F32 frame is transparent black"
 	);
 	dispatcher.release_frame(&frame);
@@ -854,7 +907,12 @@ fn f32_ticket_gets_f32_slot_and_bgra8_stays_bgra8() {
 	//    segment (the wire format is per ticket).
 	submit(&dispatcher, &results, 1, None);
 	pump_until(&dispatcher, &results, 1);
-	let bg2 = results.lock().unwrap().pop().unwrap().expect("frame rendered");
+	let bg2 = results
+		.lock()
+		.unwrap()
+		.pop()
+		.unwrap()
+		.expect("frame rendered");
 	let TicketPayload::ShmFrame(frame) = bg2 else {
 		panic!("ShmFrame payload");
 	};
@@ -892,7 +950,12 @@ fn build_graph_project(clip: &std::path::Path) -> (Arc<Mutex<Project>>, NodeId) 
 		let (ccore, cbehavior) = oak_node::block::clip_create();
 		let clip_node = p.graph.add_node(ccore, cbehavior);
 		p.graph
-			.connect(footage, clip_node, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+			.connect(
+				footage,
+				clip_node,
+				oak_node::block::clip_input::TEXTURE_INPUT,
+				-1,
+			)
 			.expect("connect footage to clip");
 
 		let clip_behavior = p
@@ -974,9 +1037,13 @@ fn post_graph_job(
 			))
 		}),
 		done: Box::new(move |result| {
-			results.lock().unwrap_or_else(|e| e.into_inner()).push(result);
+			results
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.push(result);
 		}),
 		schedule: JobSchedule::seek(),
+		cancelled: None,
 	};
 	assert!(dispatcher.post(job), "post accepted while alive");
 }
@@ -995,7 +1062,12 @@ fn assert_graph_frame_opaque(dispatcher: &ProcessDispatcher, payload: TicketResu
 	assert_eq!(frame.meta.format, SLOT_FORMAT_BGRA8);
 	assert_eq!(frame.meta.data_size, 64 * 64 * 4);
 	let pixels = &frame.shm.slot_bytes(frame.slot)[..frame.meta.data_size as usize];
-	let alpha_ok = pixels.chunks_exact(4).filter(|px| px[3] == 255).count();
+	let alpha_ok = pixels
+		.as_chunks::<4>()
+		.0
+		.iter()
+		.filter(|px| px[3] == 255)
+		.count();
 	assert!(
 		alpha_ok as f64 >= 0.99 * (64 * 64) as f64,
 		"graph-rendered frame must be opaque ({alpha_ok}/4096)"
@@ -1042,11 +1114,19 @@ fn graph_mode_renders_sequence_viewer_from_snapshot() {
 	dispatcher.start().expect("worker starts");
 
 	let results = Arc::new(Mutex::new(Vec::new()));
-	let project_uuid = project.lock().unwrap_or_else(|e| e.into_inner()).uuid.clone();
+	let project_uuid = project
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.uuid
+		.clone();
 	post_graph_job(&dispatcher, &results, viewer, &project_uuid);
 	pump_until(&dispatcher, &results, 1);
 
-	let result = results.lock().unwrap_or_else(|e| e.into_inner()).pop().unwrap();
+	let result = results
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.pop()
+		.unwrap();
 	assert_graph_frame_opaque(&dispatcher, result);
 
 	dispatcher.shutdown();
@@ -1088,11 +1168,19 @@ fn set_graph_snapshot_after_start_reroutes_tickets() {
 	dispatcher.set_graph_snapshot(Some(snapshot.display().to_string()));
 
 	let results = Arc::new(Mutex::new(Vec::new()));
-	let project_uuid = project.lock().unwrap_or_else(|e| e.into_inner()).uuid.clone();
+	let project_uuid = project
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.uuid
+		.clone();
 	post_graph_job(&dispatcher, &results, viewer, &project_uuid);
 	pump_until(&dispatcher, &results, 1);
 
-	let result = results.lock().unwrap_or_else(|e| e.into_inner()).pop().unwrap();
+	let result = results
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.pop()
+		.unwrap();
 	assert_graph_frame_opaque(&dispatcher, result);
 
 	dispatcher.shutdown();

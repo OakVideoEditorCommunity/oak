@@ -39,9 +39,7 @@ use std::time::{Duration, Instant};
 
 use oak_core::{PixelFormat, Rational};
 use oak_render::procpool::{DispatcherConfig, ProcessDispatcher};
-use oak_render::ticket::{
-	Completion, Producer, TicketPayload, TicketResult, VideoTicketParams,
-};
+use oak_render::ticket::{Completion, Producer, TicketPayload, TicketResult, VideoTicketParams};
 use oak_render::worker::{Job, JobDispatch, JobSchedule};
 
 /// The comparison frame format: both backends must produce the same
@@ -80,10 +78,7 @@ fn cpu_times() -> (f64, f64) {
 	}
 	let self_times = rusage(libc::RUSAGE_SELF);
 	let children = rusage(libc::RUSAGE_CHILDREN);
-	(
-		self_times.0 + children.0,
-		self_times.1 + children.1,
-	)
+	(self_times.0 + children.0, self_times.1 + children.1)
 }
 
 /// One footage ticket over the whole timeline.
@@ -141,10 +136,7 @@ fn report(entries: &[(i64, Instant, Instant)], start: Instant, elapsed: Duration
 			),
 		);
 	}
-	report(
-		"cpu user + sys",
-		format!("{:.2} + {:.2} s", cpu.0, cpu.1),
-	);
+	report("cpu user + sys", format!("{:.2} + {:.2} s", cpu.0, cpu.1));
 	report(
 		"main-heap frame copies",
 		oak_render::procpool::main_heap_frame_copies().to_string(),
@@ -182,7 +174,12 @@ fn run_processes(media: &str, frames: usize, width: i32, height: i32, workers: O
 		let job = Job {
 			node_identity: 1,
 			time: Rational::new(frame, 25),
-			params: Arc::new(footage_params(&media_clone, Rational::new(frame, 25), width, height)),
+			params: Arc::new(footage_params(
+				&media_clone,
+				Rational::new(frame, 25),
+				width,
+				height,
+			)),
 			audio: None,
 			produce: Arc::new(|_, _| {
 				Err(oak_render::error::Error::Failed(
@@ -191,10 +188,11 @@ fn run_processes(media: &str, frames: usize, width: i32, height: i32, workers: O
 			}),
 			done: Box::new(move |result: TicketResult| match result {
 				Ok(TicketPayload::ShmFrame(f)) => {
-					results
-						.lock()
-						.unwrap_or_else(|e| e.into_inner())
-						.push((frame, start, Instant::now()));
+					results.lock().unwrap_or_else(|e| e.into_inner()).push((
+						frame,
+						start,
+						Instant::now(),
+					));
 					dc.release_frame(&f);
 				}
 				Ok(TicketPayload::ShmAudio(a)) => {
@@ -208,6 +206,7 @@ fn run_processes(media: &str, frames: usize, width: i32, height: i32, workers: O
 				}
 			}),
 			schedule: JobSchedule::playback(frame, frame, 0),
+			cancelled: None,
 		};
 		if !dispatcher.post(job) {
 			eprintln!("post refused at frame {frame}");
@@ -262,25 +261,30 @@ fn run_pipeline(media: &str, frames: usize, width: i32, height: i32) {
 		let submitted = Instant::now();
 		let done: Completion = Box::new(move |result: TicketResult| {
 			if let Ok(TicketPayload::Video(_)) = result {
-				results
-					.lock()
-					.unwrap_or_else(|e| e.into_inner())
-					.push((frame, submitted, Instant::now()));
+				results.lock().unwrap_or_else(|e| e.into_inner()).push((
+					frame,
+					submitted,
+					Instant::now(),
+				));
 			}
 		});
-		let producer: Producer =
-			Arc::new(|time, params| {
-				oak_render::eval::render_produced_frame(time, params)
-					.map(TicketPayload::Video)
-			});
+		let producer: Producer = Arc::new(|time, params| {
+			oak_render::eval::render_produced_frame(time, params).map(TicketPayload::Video)
+		});
 		let job = Job {
 			node_identity: 1,
 			time: Rational::new(frame, 25),
-			params: Arc::new(footage_params(media, Rational::new(frame, 25), width, height)),
+			params: Arc::new(footage_params(
+				media,
+				Rational::new(frame, 25),
+				width,
+				height,
+			)),
 			audio: None,
 			produce: producer,
 			done,
 			schedule: JobSchedule::playback(frame, frame, 0),
+			cancelled: None,
 		};
 		// The blocking post is the pipeline's backpressure: once the render
 		// queue is full the submitter waits (the app's window is capped by
@@ -332,7 +336,9 @@ fn main() {
 		.nth(4)
 		.and_then(|s| s.parse().ok())
 		.unwrap_or(480);
-	let mode = std::env::args().nth(5).unwrap_or_else(|| "processes".to_string());
+	let mode = std::env::args()
+		.nth(5)
+		.unwrap_or_else(|| "processes".to_string());
 
 	// The app's preview proxy size: the sequence's aspect scaled to the
 	// long edge (demo.mp4 is 16:9 1080p).

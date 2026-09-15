@@ -57,8 +57,7 @@ fn worker_bin() -> PathBuf {
 		// target/<profile>/examples/bench_process -> target/<profile>/oak-worker
 		if let Some(examples) = exe.parent() {
 			if let Some(profile) = examples.parent() {
-				let candidate =
-					profile.join(format!("oak-worker{}", std::env::consts::EXE_SUFFIX));
+				let candidate = profile.join(format!("oak-worker{}", std::env::consts::EXE_SUFFIX));
 				if candidate.exists() {
 					return candidate;
 				}
@@ -91,9 +90,7 @@ fn main() {
 	let dispatcher = ProcessDispatcher::new(config).expect("dispatcher config");
 	dispatcher.start().expect("workers start + handshake");
 	let worker_count = dispatcher.worker_count();
-	println!(
-		"oak-worker pool: {worker_count} worker(s), {frames} x {width}x{height} BGRA8 frames"
-	);
+	println!("oak-worker pool: {worker_count} worker(s), {frames} x {width}x{height} BGRA8 frames");
 
 	// One completion record per frame: (frame number, wall-clock completion).
 	let results = Arc::new(Mutex::new(Vec::<(i64, Instant)>::new()));
@@ -152,6 +149,7 @@ fn main() {
 			// Playback priority: the pre-render window schedule (seek/playback
 			// prioritization is what the scheduler benchmark measures).
 			schedule: JobSchedule::playback(frame, 0, 0),
+			cancelled: None,
 		};
 		if !dispatcher.post(job) {
 			eprintln!("post refused at frame {frame}");
@@ -175,7 +173,11 @@ fn main() {
 	}
 	let elapsed = start.elapsed();
 
-	let mut entries: Vec<(i64, Instant)> = results.lock().unwrap_or_else(|e| e.into_inner()).drain(..).collect();
+	let mut entries: Vec<(i64, Instant)> = results
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.drain(..)
+		.collect();
 	entries.sort_by_key(|(id, _)| *id);
 	let completed = entries.len();
 	let throughput = completed as f64 / elapsed.as_secs_f64();
@@ -195,18 +197,30 @@ fn main() {
 	};
 	report("frames completed", completed.to_string());
 	report("total wall time", format!("{:.2} s", elapsed.as_secs_f64()));
-	report("throughput", format!("{throughput:.1} fps ({:.1} ms/frame)", 1000.0 / throughput));
+	report(
+		"throughput",
+		format!("{throughput:.1} fps ({:.1} ms/frame)", 1000.0 / throughput),
+	);
 	if !deltas.is_empty() {
 		let mean = deltas.iter().sum::<f64>() / deltas.len() as f64;
 		let p95 = deltas[((deltas.len() as f64 * 0.95) as usize).min(deltas.len() - 1)];
 		report("adjacent-frame delta (pairs)", deltas.len().to_string());
-		report("  max", format!("{:.3} ms", deltas.last().unwrap() * 1000.0));
+		report(
+			"  max",
+			format!("{:.3} ms", deltas.last().unwrap() * 1000.0),
+		);
 		report("  mean", format!("{:.3} ms", mean * 1000.0));
 		report("  p95", format!("{:.3} ms", p95 * 1000.0));
 	} else {
-		report("adjacent-frame delta", "no adjacent pairs completed".to_string());
+		report(
+			"adjacent-frame delta",
+			"no adjacent pairs completed".to_string(),
+		);
 	}
-	report("main-heap frame copies", oak_render::procpool::main_heap_frame_copies().to_string());
+	report(
+		"main-heap frame copies",
+		oak_render::procpool::main_heap_frame_copies().to_string(),
+	);
 
 	dispatcher.shutdown();
 }

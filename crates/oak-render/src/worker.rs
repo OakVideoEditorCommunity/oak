@@ -69,6 +69,11 @@ pub struct Job {
 	pub done: Completion,
 	/// Scheduler hints (M15 S2). Defaults to a Seek single-frame request.
 	pub schedule: JobSchedule,
+	/// Mid-flight cancellation probe (audit B): when it returns true the
+	/// dispatcher must finish the job with `Error::State` without running
+	/// the producer. The ticket arena installs the slot's cancel atom;
+	/// hand-built jobs (tests, non-ticket callers) pass `None`.
+	pub cancelled: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 /// Scheduler hints a posted job carries (M15 S2). The process dispatcher
@@ -234,8 +239,14 @@ impl InlineDispatcher {
 
 /// Run one job on the calling thread: the producer, then its completion
 /// (used by the inline dispatcher and by [`crate::pipeline::PipelineBackend`],
-/// which runs the same producer on its render thread).
+/// which runs the same producer on its render thread). A job the arena
+/// already cancelled (audit B) is short-circuited with `Error::State` —
+/// a cancelled frame must not burn render/GPU work only to be discarded.
 pub(crate) fn execute_job(job: Job) {
+	if job.cancelled.as_ref().is_some_and(|cancelled| cancelled()) {
+		(job.done)(Err(Error::State));
+		return;
+	}
 	let result = catch_unwind(AssertUnwindSafe(|| (job.produce)(job.time, &job.params)))
 		.unwrap_or_else(|_| Err(Error::Failed("frame producer panicked".into())));
 	(job.done)(result);
@@ -302,8 +313,8 @@ impl GraphSnapshotStore {
 			"oakrender-snapshots-{}-{:x}",
 			std::process::id(),
 			{
-                use std::sync::atomic::{AtomicU64, Ordering};
-                static SEQ: AtomicU64 = AtomicU64::new(0);
+				use std::sync::atomic::{AtomicU64, Ordering};
+				static SEQ: AtomicU64 = AtomicU64::new(0);
 				SEQ.fetch_add(1, Ordering::Relaxed)
 			}
 		));
@@ -350,9 +361,10 @@ impl GraphSnapshotStore {
 		// Atomic staging: temp file + rename. The rename is a single
 		// directory entry swap, so a concurrent worker load observes
 		// either the old file or the complete new one.
-		let tmp = self
-			.dir
-			.join(format!("graph-{uuid}-{revision}.{}.tmp", std::process::id()));
+		let tmp = self.dir.join(format!(
+			"graph-{uuid}-{revision}.{}.tmp",
+			std::process::id()
+		));
 		std::fs::write(&tmp, &xml)
 			.map_err(|e| Error::Failed(format!("write snapshot temp: {e}")))?;
 		if let Err(e) = std::fs::rename(&tmp, &path) {
@@ -390,9 +402,10 @@ impl GraphSnapshotStore {
 		let path = self.dir.join(format!("graph-{uuid}-{revision}.xml"));
 		let path_str = path.to_string_lossy().into_owned();
 		// Atomic staging: temp file + rename (see [`acquire`]).
-		let tmp = self
-			.dir
-			.join(format!("graph-{uuid}-{revision}.{}.tmp", std::process::id()));
+		let tmp = self.dir.join(format!(
+			"graph-{uuid}-{revision}.{}.tmp",
+			std::process::id()
+		));
 		std::fs::write(&tmp, &xml)
 			.map_err(|e| Error::Failed(format!("write snapshot temp: {e}")))?;
 		if let Err(e) = std::fs::rename(&tmp, &path) {
@@ -466,13 +479,13 @@ impl Default for GraphSnapshotStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::mpsc;
-    use std::time::Duration;
+	use super::*;
+	use std::sync::mpsc;
+	use std::time::Duration;
 
-    use oak_core::texture::Texture;
+	use oak_core::texture::Texture;
 
-    fn job(tag: u64, tx: mpsc::Sender<u64>, gate: Option<Arc<AtomicBool>>) -> Job {
+	fn job(tag: u64, tx: mpsc::Sender<u64>, gate: Option<Arc<AtomicBool>>) -> Job {
 		let produce: Producer = Arc::new(move |_, _| {
 			if let Some(g) = &gate {
 				if g.load(Ordering::Acquire) {
@@ -505,6 +518,7 @@ mod tests {
 				let _ = tx.send(tag);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		}
 	}
 
@@ -552,7 +566,8 @@ mod tests {
 		let (tx, rx) = mpsc::channel();
 		for _ in 0..4 {
 			let tx = tx.clone();
-			let p: Producer = Arc::new(|_, _| Ok(crate::ticket::TicketPayload::Video(Texture::dummy())));
+			let p: Producer =
+				Arc::new(|_, _| Ok(crate::ticket::TicketPayload::Video(Texture::dummy())));
 			d.post(Job {
 				node_identity: 1,
 				time: Rational::new(0, 1),
@@ -576,6 +591,7 @@ mod tests {
 					let _ = tx.send(r.is_err());
 				}),
 				schedule: JobSchedule::seek(),
+				cancelled: None,
 			});
 		}
 		drop(tx);
@@ -585,7 +601,10 @@ mod tests {
 			delivered.push(err);
 		}
 		assert_eq!(delivered.len(), 4, "all queued completions fire");
-		assert!(delivered.iter().all(|&e| e), "queued jobs cancel at shutdown");
+		assert!(
+			delivered.iter().all(|&e| e),
+			"queued jobs cancel at shutdown"
+		);
 	}
 
 	#[test]
@@ -594,7 +613,8 @@ mod tests {
 		let (tx, rx) = mpsc::channel();
 		let tx1 = tx.clone();
 		let boom: Producer = Arc::new(|_, _| panic!("boom"));
-		let ok: Producer = Arc::new(|_, _| Ok(crate::ticket::TicketPayload::Video(Texture::dummy())));
+		let ok: Producer =
+			Arc::new(|_, _| Ok(crate::ticket::TicketPayload::Video(Texture::dummy())));
 		let params = Arc::new(VideoTicketParams {
 			viewer: 0,
 			project: String::new(),
@@ -620,6 +640,7 @@ mod tests {
 				let _ = tx1.send(1u64);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		});
 		d.post(Job {
 			node_identity: 1,
@@ -632,6 +653,7 @@ mod tests {
 				let _ = tx.send(2u64);
 			}),
 			schedule: JobSchedule::seek(),
+			cancelled: None,
 		});
 		let mut got = Vec::new();
 		while let Ok(v) = rx.recv_timeout(Duration::from_secs(5)) {
@@ -681,10 +703,7 @@ mod tests {
 		// First snapshot: the default project (working space ACEScg).
 		let p1 = store.acquire(&project, 1).unwrap();
 		let before = std::fs::read_to_string(&p1).unwrap();
-		assert!(
-			std::path::Path::new(&p1).exists(),
-			"snapshot file written"
-		);
+		assert!(std::path::Path::new(&p1).exists(), "snapshot file written");
 		assert_eq!(store.refs(&p1), 1);
 
 		// A settings change with no revision bump: plain acquire must NOT
@@ -695,7 +714,11 @@ mod tests {
 		}
 		let p2 = store.acquire(&project, 1).unwrap();
 		assert_eq!(p1, p2, "same (uuid, revision) key reuses the file");
-		assert_eq!(std::fs::read_to_string(&p1).unwrap(), before, "acquire never rewrites");
+		assert_eq!(
+			std::fs::read_to_string(&p1).unwrap(),
+			before,
+			"acquire never rewrites"
+		);
 		store.release(&p2);
 
 		// ...while acquire_rewrite rewrites it in place at the same key.

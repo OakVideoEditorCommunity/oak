@@ -25,6 +25,7 @@
 //! and each creates and tears its manager down explicitly.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -44,8 +45,7 @@ use oak_render::error::Error;
 use oak_render::eval::{decode_invocations, reset_decode_invocations};
 use oak_render::manager::{RenderBackendChoice, RenderManager};
 use oak_render::pipeline::{
-	decode_service, DecodeRequest, DecodeStats, PipelineBackend, PipelineStats,
-	RENDER_QUEUE_CAP,
+	decode_service, DecodeRequest, DecodeStats, PipelineBackend, PipelineStats, RENDER_QUEUE_CAP,
 };
 use oak_render::ticket::{
 	Completion, MontageClip, Producer, TicketPayload, TicketResult, VideoTicketParams,
@@ -71,8 +71,7 @@ fn test_clip(tag: &str) -> PathBuf {
 		"oakrender_threads_{tag}_{}.mp4",
 		std::process::id()
 	));
-	oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10)
-		.expect("test clip generation");
+	oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("test clip generation");
 	path
 }
 
@@ -211,7 +210,8 @@ fn assert_known_pattern(frame: &Frame, index: i32, tag: &str) {
 		let off = y * stride + x * 16;
 		let mut out = [0f32; 4];
 		for i in 0..4 {
-			out[i] = f32::from_le_bytes(frame.data[off + i * 4..off + i * 4 + 4].try_into().unwrap());
+			out[i] =
+				f32::from_le_bytes(frame.data[off + i * 4..off + i * 4 + 4].try_into().unwrap());
 		}
 		out
 	};
@@ -221,7 +221,10 @@ fn assert_known_pattern(frame: &Frame, index: i32, tag: &str) {
 	assert!(r > 0.5 && g < 0.4 && b < 0.4, "{tag}: red half {r},{g},{b}");
 	assert!(a > 0.9, "{tag}: opaque {a}");
 	let [r, g, b, a] = read((48 - shift).rem_euclid(64) as usize, 32);
-	assert!(b > 0.5 && r < 0.4 && g < 0.4, "{tag}: blue half {r},{g},{b}");
+	assert!(
+		b > 0.5 && r < 0.4 && g < 0.4,
+		"{tag}: blue half {r},{g},{b}"
+	);
 	assert!(a > 0.9, "{tag}: opaque {a}");
 }
 
@@ -306,10 +309,9 @@ fn filler_job() -> Job {
 		Path::new("/definitely/not/here-filler.mp4"),
 		Rational::new(0, 1),
 	));
-	let produce: Producer =
-		Arc::new(|_time: Rational, _params: &VideoTicketParams| -> TicketResult {
-			Err(Error::State)
-		});
+	let produce: Producer = Arc::new(
+		|_time: Rational, _params: &VideoTicketParams| -> TicketResult { Err(Error::State) },
+	);
 	Job {
 		node_identity: 0,
 		time: Rational::new(0, 1),
@@ -318,6 +320,7 @@ fn filler_job() -> Job {
 		produce,
 		done: Box::new(|_result: TicketResult| {}),
 		schedule: JobSchedule::seek(),
+		cancelled: None,
 	}
 }
 
@@ -468,8 +471,18 @@ fn build_layered_project(
 		// V1: A [0,1) + transition [0.5,1.5) + B [1,2).
 		let (v1_core, v1_beh) = TrackBehavior::create();
 		let v1 = p.graph.add_node(v1_core, v1_beh);
-		let a = add_clip(&mut p.graph, first, Rational::new(0, 1), Rational::new(1, 1));
-		let b = add_clip(&mut p.graph, second, Rational::new(1, 1), Rational::new(2, 1));
+		let a = add_clip(
+			&mut p.graph,
+			first,
+			Rational::new(0, 1),
+			Rational::new(1, 1),
+		);
+		let b = add_clip(
+			&mut p.graph,
+			second,
+			Rational::new(1, 1),
+			Rational::new(2, 1),
+		);
 		let (tcore, tbehavior) = oak_node::block::transition_create();
 		let transition = p.graph.add_node(tcore, tbehavior);
 		{
@@ -507,7 +520,12 @@ fn build_layered_project(
 		// V2: C [0,2), overlapping the transition track.
 		let (v2_core, v2_beh) = TrackBehavior::create();
 		let v2 = p.graph.add_node(v2_core, v2_beh);
-		let c = add_clip(&mut p.graph, below, Rational::new(0, 1), Rational::new(2, 1));
+		let c = add_clip(
+			&mut p.graph,
+			below,
+			Rational::new(0, 1),
+			Rational::new(2, 1),
+		);
 		track_mut(&mut p.graph, v2).append_block(c);
 
 		// V3: an adjustment layer [0,2) with an Opacity(0.75) chain.
@@ -774,7 +792,8 @@ fn pipeline_graph_playback_has_zero_gpu_readbacks() {
 #[test]
 fn pipeline_layered_playback_has_zero_gpu_readbacks() {
 	let _lock = lock();
-	if oak_core::backend::shared_gpu_or_skip("the layered playback zero-readback assertion").is_none()
+	if oak_core::backend::shared_gpu_or_skip("the layered playback zero-readback assertion")
+		.is_none()
 	{
 		return;
 	}
@@ -899,10 +918,7 @@ fn parked_producer(
 		while !*released {
 			released = work.wait(released).unwrap_or_else(|e| e.into_inner());
 		}
-		order
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.push(tag);
+		order.lock().unwrap_or_else(|e| e.into_inner()).push(tag);
 		Err(Error::State)
 	})
 }
@@ -910,10 +926,7 @@ fn parked_producer(
 /// A producer that records `tag` when the render thread runs it and fails.
 fn recording_producer(order: Arc<Mutex<Vec<&'static str>>>, tag: &'static str) -> Producer {
 	Arc::new(move |_time: Rational, _params: &VideoTicketParams| {
-		order
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.push(tag);
+		order.lock().unwrap_or_else(|e| e.into_inner()).push(tag);
 		Err(Error::State)
 	})
 }
@@ -928,6 +941,7 @@ fn scheduled_job(produce: Producer, schedule: JobSchedule) -> Job {
 		produce,
 		done: Box::new(|_result: TicketResult| {}),
 		schedule,
+		cancelled: None,
 	}
 }
 
@@ -950,12 +964,7 @@ fn pipeline_orders_seek_ahead_of_background_end_to_end() {
 	let started = Arc::new((Mutex::new(false), Condvar::new()));
 	let release = Arc::new((Mutex::new(false), Condvar::new()));
 
-	let produce = parked_producer(
-		started.clone(),
-		release.clone(),
-		order.clone(),
-		"in-flight",
-	);
+	let produce = parked_producer(started.clone(), release.clone(), order.clone(), "in-flight");
 	assert!(
 		backend.try_post(scheduled_job(produce, JobSchedule::playback(0, 0, 0))),
 		"the in-flight playback frame is accepted"
@@ -1044,6 +1053,7 @@ fn pipeline_prefetch_is_the_frame_the_render_request_uses() {
 			let _ = done_tx.send(matches!(result, Ok(TicketPayload::Video(_))));
 		}),
 		schedule: JobSchedule::playback(0, 0, 0),
+		cancelled: None,
 	};
 	assert!(backend.post(playback), "the playback frame is accepted");
 	assert!(
@@ -1051,7 +1061,10 @@ fn pipeline_prefetch_is_the_frame_the_render_request_uses() {
 		"the read-ahead decode completes while the render thread is parked"
 	);
 	let after_prefetch = service.stats();
-	assert_eq!(after_prefetch.prefetches, 1, "the post queued one read-ahead");
+	assert_eq!(
+		after_prefetch.prefetches, 1,
+		"the post queued one read-ahead"
+	);
 	assert_eq!(after_prefetch.decodes, 1, "the read-ahead decoded once");
 
 	open_gate(&release);
@@ -1098,10 +1111,9 @@ fn pipeline_cancel_preview_frame_matches_the_sequence() {
 	let (tx, rx) = mpsc::channel();
 	for identity in [1u64, 2] {
 		let tx = tx.clone();
-		let produce: Producer =
-			Arc::new(|_time: Rational, _params: &VideoTicketParams| {
-				Ok(TicketPayload::Video(Texture::dummy()))
-			});
+		let produce: Producer = Arc::new(|_time: Rational, _params: &VideoTicketParams| {
+			Ok(TicketPayload::Video(Texture::dummy()))
+		});
 		let job = Job {
 			node_identity: identity,
 			time: Rational::new(0, 1),
@@ -1113,6 +1125,7 @@ fn pipeline_cancel_preview_frame_matches_the_sequence() {
 			}),
 			// Same frame number, same version — only the sequence differs.
 			schedule: JobSchedule::playback(5, 0, 0),
+			cancelled: None,
 		};
 		assert!(backend.post(job), "viewer {identity}'s frame is queued");
 	}
@@ -1131,6 +1144,48 @@ fn pipeline_cancel_preview_frame_matches_the_sequence() {
 		results,
 		vec![(1, false), (2, true)],
 		"only the cancelled sequence's frame is dropped"
+	);
+	backend.shutdown();
+}
+
+/// Audit B: a job whose ticket was cancelled after posting must not run
+/// its producer. The arena installs `Job.cancelled` from the slot's cancel
+/// atom; this hand-built job pins the dispatcher behaviour and the
+/// exactly-once completion (`Error::State`).
+#[test]
+fn pipeline_skips_a_cancelled_job() {
+	let _lock = lock();
+	let backend = PipelineBackend::new().expect("pipeline backend starts");
+	let ran = Arc::new(AtomicBool::new(false));
+	let flag = Arc::new(AtomicBool::new(true));
+	let ran_producer = ran.clone();
+	let produce: Producer = Arc::new(move |_time: Rational, _params: &VideoTicketParams| {
+		ran_producer.store(true, Ordering::Release);
+		Ok(TicketPayload::Video(Texture::dummy()))
+	});
+	let probe = flag.clone();
+	let (tx, rx) = mpsc::channel();
+	let job = Job {
+		node_identity: 0,
+		time: Rational::new(0, 1),
+		params: Arc::new(base_params(Rational::new(0, 1))),
+		audio: None,
+		produce,
+		done: Box::new(move |result: TicketResult| {
+			let _ = tx.send(result.is_err());
+		}),
+		schedule: JobSchedule::seek(),
+		cancelled: Some(Arc::new(move || probe.load(Ordering::Acquire))),
+	};
+	assert!(backend.try_post(job), "the cancelled job is still accepted");
+	assert!(
+		rx.recv_timeout(Duration::from_secs(10))
+			.expect("the completion fires exactly once"),
+		"a cancelled job completes with Error::State"
+	);
+	assert!(
+		!ran.load(Ordering::Acquire),
+		"the producer must not run for a cancelled job"
 	);
 	backend.shutdown();
 }
@@ -1158,8 +1213,12 @@ fn pipeline_queue_backpressure_closes_the_prefetch_gate() {
 		move |_time: Rational, _params: &VideoTicketParams| -> TicketResult {
 			{
 				let (name, work) = &*job_started;
-				*name.lock().unwrap_or_else(|e| e.into_inner()) =
-					Some(std::thread::current().name().unwrap_or_default().to_string());
+				*name.lock().unwrap_or_else(|e| e.into_inner()) = Some(
+					std::thread::current()
+						.name()
+						.unwrap_or_default()
+						.to_string(),
+				);
 				work.notify_all();
 			}
 			let (released, work) = &*job_release;
@@ -1181,21 +1240,21 @@ fn pipeline_queue_backpressure_closes_the_prefetch_gate() {
 		produce,
 		done: Box::new(|_result: TicketResult| {}),
 		schedule: JobSchedule::seek(),
+		cancelled: None,
 	};
 
 	assert!(backend.try_post(hold_job), "the in-flight job is accepted");
-	wait_until("the render thread to pick up the in-flight job", &mut || {
-		started
-			.0
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.is_some()
-	});
-	let thread_name = started
-		.0
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.clone();
+	wait_until(
+		"the render thread to pick up the in-flight job",
+		&mut || {
+			started
+				.0
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.is_some()
+		},
+	);
+	let thread_name = started.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
 	assert_eq!(
 		thread_name.as_deref(),
 		Some("oak-render"),
@@ -1238,8 +1297,7 @@ fn pipeline_queue_backpressure_closes_the_prefetch_gate() {
 		work.notify_all();
 	}
 	wait_until("every queued job to execute", &mut || {
-		backend.stats().executed == RENDER_QUEUE_CAP as u64 + 1
-			&& backend.queue_depth() == 0
+		backend.stats().executed == RENDER_QUEUE_CAP as u64 + 1 && backend.queue_depth() == 0
 	});
 	let stats = backend.stats();
 	assert_eq!(
@@ -1249,11 +1307,11 @@ fn pipeline_queue_backpressure_closes_the_prefetch_gate() {
 	);
 
 	backend.shutdown();
+	assert!(!backend.try_post(filler_job()), "shutdown rejects new work");
 	assert!(
-		!backend.try_post(filler_job()),
-		"shutdown rejects new work"
+		decode_service().is_none(),
+		"shutdown uninstalls the service"
 	);
-	assert!(decode_service().is_none(), "shutdown uninstalls the service");
 }
 
 /// The backend owns the process-wide decode service slot: it is installed
@@ -1274,8 +1332,5 @@ fn pipeline_installs_and_uninstalls_the_decode_service() {
 		decode_service().is_none(),
 		"shutdown uninstalls the decode service"
 	);
-	assert!(
-		!backend.try_post(filler_job()),
-		"shutdown rejects new work"
-	);
+	assert!(!backend.try_post(filler_job()), "shutdown rejects new work");
 }

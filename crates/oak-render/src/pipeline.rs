@@ -96,10 +96,15 @@ pub const RENDER_QUEUE_CAP: usize = 8;
 /// path to the media, but still small enough to bound latency.
 pub const DECODE_QUEUE_CAP: usize = 16;
 
-/// Decoded-frame LRU capacity, in frames (~31 MB each at 1080p F32, so a
-/// handful of frames is already hundreds of MB). Sized for a playback
-/// window plus the montage baseline; the M2 decoder work lands here.
-pub const DECODE_LRU_CAP: usize = 8;
+/// Decoded-frame LRU capacity, in frames (~33 MB each at 1080p F32, so a
+/// small hand-off buffer, not a cache of record). The eval-side
+/// `decoded_frames` LRU (24 frames) is the cache of record; this one only
+/// bridges the decode thread and the render request. Keeping it at the
+/// read-ahead window bounds the double-cache overhead: at 1080p F32 the
+/// service copy stays ~2 frames instead of 8 (~200 MB saved). A request
+/// the hand-off missed is served from the eval cache without a decode —
+/// only the deep copy is paid again.
+pub const DECODE_LRU_CAP: usize = 2;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 	m.lock().unwrap_or_else(|e| e.into_inner())
@@ -388,7 +393,10 @@ impl DecodeService {
 			return false;
 		}
 		if self.enqueue(DecodeCommand::Prefetch { request }, false) {
-			self.inner.counters.prefetches.fetch_add(1, Ordering::Relaxed);
+			self.inner
+				.counters
+				.prefetches
+				.fetch_add(1, Ordering::Relaxed);
 			true
 		} else {
 			self.inner
@@ -506,7 +514,14 @@ fn serve(
 		return Ok(texture);
 	}
 	let texture = decode(request, inner)?;
-	lru_insert(lru, request.clone(), texture.clone(), lru_capacity, inner, tick);
+	lru_insert(
+		lru,
+		request.clone(),
+		texture.clone(),
+		lru_capacity,
+		inner,
+		tick,
+	);
 	inner.lru_len.store(lru.len(), Ordering::Relaxed);
 	Ok(texture)
 }
@@ -670,9 +685,8 @@ impl PipelineBackend {
 		// Prefetch is allowed only while the render queue has room: it must
 		// never fill the decode queue behind a saturated pipeline.
 		let gate_depth = depth.clone();
-		let gate: PrefetchGate = Arc::new(move || {
-			gate_depth.load(Ordering::Relaxed) < RENDER_QUEUE_CAP
-		});
+		let gate: PrefetchGate =
+			Arc::new(move || gate_depth.load(Ordering::Relaxed) < RENDER_QUEUE_CAP);
 		let decode = DecodeService::new(DECODE_LRU_CAP, gate);
 		let inner = Arc::new(PipelineInner {
 			queue: Mutex::new(VecDeque::new()),
@@ -687,7 +701,9 @@ impl PipelineBackend {
 			executed: AtomicU64::new(0),
 			drained: AtomicU64::new(0),
 		});
-		let backend = Arc::new(Self { inner: inner.clone() });
+		let backend = Arc::new(Self {
+			inner: inner.clone(),
+		});
 		let handle = std::thread::Builder::new()
 			.name("oak-render".into())
 			.spawn(move || render_loop(inner))
@@ -797,7 +813,9 @@ impl PipelineBackend {
 			inner.depth.store(0, Ordering::Relaxed);
 			jobs
 		};
-		inner.drained.fetch_add(jobs.len() as u64, Ordering::Relaxed);
+		inner
+			.drained
+			.fetch_add(jobs.len() as u64, Ordering::Relaxed);
 		inner.work.notify_all();
 		inner.room.notify_all();
 		for job in jobs {
@@ -921,8 +939,7 @@ mod tests {
 			"oakrender_pipeline_{tag}_{}.mp4",
 			std::process::id()
 		));
-		oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10)
-			.expect("test clip generation");
+		oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("test clip generation");
 		path
 	}
 
@@ -971,7 +988,9 @@ mod tests {
 			let off = y * stride + x * 16;
 			let mut out = [0f32; 4];
 			for i in 0..4 {
-				out[i] = f32::from_le_bytes(frame.data[off + i * 4..off + i * 4 + 4].try_into().unwrap());
+				out[i] = f32::from_le_bytes(
+					frame.data[off + i * 4..off + i * 4 + 4].try_into().unwrap(),
+				);
 			}
 			out
 		};
@@ -981,7 +1000,10 @@ mod tests {
 		assert!(r > 0.5 && g < 0.4 && b < 0.4, "{tag}: red half {r},{g},{b}");
 		assert!(a > 0.9, "{tag}: opaque {a}");
 		let [r, g, b, a] = read((48 - shift).rem_euclid(64) as usize, 32);
-		assert!(b > 0.5 && r < 0.4 && g < 0.4, "{tag}: blue half {r},{g},{b}");
+		assert!(
+			b > 0.5 && r < 0.4 && g < 0.4,
+			"{tag}: blue half {r},{g},{b}"
+		);
 		assert!(a > 0.9, "{tag}: opaque {a}");
 	}
 
@@ -1056,8 +1078,7 @@ mod tests {
 		let err = service
 			.request(req)
 			.expect("service available")
-			.err()
-			.expect("decoding a missing file must fail");
+			.expect_err("decoding a missing file must fail");
 		let _ = err.code(); // an explainable error, not a panic
 		let stats = service.stats();
 		assert_eq!(stats.errors, 1);
@@ -1108,9 +1129,10 @@ mod tests {
 		let path = test_clip("gate");
 		let open = Arc::new(AtomicBool::new(false));
 		let gate_open = open.clone();
-		let service = DecodeService::new(DECODE_LRU_CAP, Arc::new(move || {
-			gate_open.load(Ordering::Relaxed)
-		}));
+		let service = DecodeService::new(
+			DECODE_LRU_CAP,
+			Arc::new(move || gate_open.load(Ordering::Relaxed)),
+		);
 
 		let req = request(&path, Rational::new(1, 10));
 		assert!(!service.prefetch(req.clone()), "closed gate refuses");
@@ -1136,7 +1158,10 @@ mod tests {
 	fn wait_idle_barrier_covers_queued_commands() {
 		pin_legacy_working_space();
 		let path = test_clip("barrier");
-		let service = DecodeService::new(DECODE_LRU_CAP, always());
+		// The barrier test needs four live entries; the production
+		// hand-off capacity is deliberately tiny (see DECODE_LRU_CAP), so
+		// this test sizes its own service.
+		let service = DecodeService::new(4, always());
 		for n in 0..4 {
 			assert!(service.prefetch(request(&path, Rational::new(n, 10))));
 		}
@@ -1158,7 +1183,9 @@ mod tests {
 		let service = DecodeService::new(DECODE_LRU_CAP, always());
 		service.shutdown();
 		service.shutdown(); // idempotent
-		assert!(service.request(request(&path, Rational::new(0, 1))).is_none());
+		assert!(service
+			.request(request(&path, Rational::new(0, 1)))
+			.is_none());
 		assert!(!service.prefetch(request(&path, Rational::new(0, 1))));
 		assert!(!service.wait_idle());
 		let _ = std::fs::remove_file(&path);
@@ -1195,6 +1222,7 @@ mod tests {
 				distance: frame,
 				version: 0,
 			},
+			cancelled: None,
 		}
 	}
 
@@ -1302,15 +1330,29 @@ mod tests {
 			cache_timebase: None,
 			footage: None,
 			montage: vec![
-				clip("covered.mp4", Rational::new(0, 1), Rational::new(1, 1), Rational::new(2, 1)),
-				clip("outside.mp4", Rational::new(1, 1), Rational::new(2, 1), Rational::new(0, 1)),
+				clip(
+					"covered.mp4",
+					Rational::new(0, 1),
+					Rational::new(1, 1),
+					Rational::new(2, 1),
+				),
+				clip(
+					"outside.mp4",
+					Rational::new(1, 1),
+					Rational::new(2, 1),
+					Rational::new(0, 1),
+				),
 			],
 			adjustments: Vec::new(),
 		};
 		let requests = playback_decode_requests(&params, Rational::new(5, 10));
 		assert_eq!(requests.len(), 1, "only the covering clip is prefetched");
 		assert_eq!(requests[0].filename, "covered.mp4");
-		assert_eq!(requests[0].time, Rational::new(5, 2), "media_in + (time - in)");
+		assert_eq!(
+			requests[0].time,
+			Rational::new(5, 2),
+			"media_in + (time - in)"
+		);
 		assert_eq!(requests[0].size, (64, 32));
 		assert_eq!(requests[0].format, PixelFormat::F32);
 
