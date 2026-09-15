@@ -271,7 +271,30 @@ struct PreviewWindow {
 	/// Rendered frames held in shm slots, keyed by frame number. A frame
 	/// is consumed by `cpu_frame` (slot released after the display image
 	/// is built) or released when it falls out of the window.
-	slots: BTreeMap<i64, ShmFrameRef>,
+	slots: BTreeMap<i64, PreviewSlot>,
+}
+
+/// A finished frame in the playback pre-render window: a process-backend
+/// shm slot (released back to its worker) or an in-process pipeline
+/// texture (M4; dropped, the engine texture lease frees it).
+enum PreviewSlot {
+	/// Process backend: a frame in a worker's shm slot.
+	Shm(ShmFrameRef),
+	/// Thread pipeline: an engine texture (GPU-resident on a shared
+	/// device, or an in-process CPU frame).
+	Video(oak_core::texture::Texture),
+}
+
+impl PreviewSlot {
+	/// Release the slot's backend resource (no-op for pipeline textures,
+	/// whose `Drop` returns the GPU token / pixels).
+	fn release(self) {
+		if let PreviewSlot::Shm(frame) = self {
+			if let Some(m) = RenderManager::global() {
+				m.release_frame(&frame);
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2207,7 +2230,7 @@ impl RealEngine {
 		// guard is dropped (calling them here self-deadlocks the UI thread).
 		let mut stale_sequences: Vec<u64> = Vec::new();
 		let mut stale_keys: Vec<(u64, i64, u64)> = Vec::new();
-		let mut stale_slots: Vec<ShmFrameRef> = Vec::new();
+		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
 		if window.sequence != node_id || window.generation != self.preview_generation {
 			stale_sequences.push(window.sequence);
 			stale_slots.extend(std::mem::take(&mut window.slots).into_values());
@@ -2264,8 +2287,8 @@ impl RealEngine {
 		for (sequence, frame, version) in stale_keys {
 			m.dispatch.cancel_preview_frame(sequence, frame, version);
 		}
-		for slot in &stale_slots {
-			m.release_frame(slot);
+		for slot in stale_slots {
+			slot.release();
 		}
 
 		for frame in new_frames {
@@ -2293,25 +2316,35 @@ impl RealEngine {
 					let window = windows.entry(monitor).or_default();
 					if window.sequence == node_id && window.generation == version {
 						match result {
+							// The rendered frame is cached (shm slot for the
+							// process pool, engine texture for the M4 thread
+							// pipeline) until the playhead reaches it
+							// (cpu_frame) or it falls out of the window.
 							Ok(oak_render::ticket::TicketPayload::ShmFrame(slot)) => {
-								// The rendered frame is cached in its shm slot
-								// until the playhead reaches it (cpu_frame)
-								// or it falls out of the window.
-								window.slots.insert(frame, slot);
+								window.slots.insert(frame, PreviewSlot::Shm(slot));
+							}
+							Ok(oak_render::ticket::TicketPayload::Video(texture)) => {
+								window.slots.insert(frame, PreviewSlot::Video(texture));
 							}
 							_ => {
 								// Render failed / cancelled: allow a re-request.
 								window.submitted.remove(&frame);
 							}
 						}
-					} else if let Ok(oak_render::ticket::TicketPayload::ShmFrame(slot)) = result {
-						stale_slot = Some(slot);
+					} else {
+						stale_slot = match result {
+							Ok(oak_render::ticket::TicketPayload::ShmFrame(slot)) => {
+								Some(PreviewSlot::Shm(slot))
+							}
+							Ok(oak_render::ticket::TicketPayload::Video(texture)) => {
+								Some(PreviewSlot::Video(texture))
+							}
+							_ => None,
+						};
 					}
 				}
 				if let Some(slot) = stale_slot {
-					if let Some(m) = RenderManager::global() {
-						m.release_frame(&slot);
-					}
+					slot.release();
 				}
 			});
 			m.tickets
@@ -2349,34 +2382,51 @@ impl RealEngine {
 			return None;
 		}
 		let slot = window.slots.remove(&frame.0)?;
-		let out = {
-			let meta = &slot.meta;
-			let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
-			if meta.format == super::renderops::PIXEL_FORMAT_F32 {
-				// M15 S3: the worker rendered F32 (the 10-bit display
-				// path) — repack/transform via `to_display` and register
-				// the RGBA16F texture for the viewer; the BGRA8 image it
-				// also builds is the CPU fallback only.
-				let (image, scope, samples) =
-					super::renderops::RenderedFrame::Shm(slot.clone()).to_display()?;
-				if let Some(samples) = samples {
-					super::gpu::register_display_frame(image.id.0, w, h, &samples);
+		match slot {
+			PreviewSlot::Shm(slot) => {
+				let out = {
+					let meta = &slot.meta;
+					let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
+					if meta.format == super::renderops::PIXEL_FORMAT_F32 {
+						// M15 S3: the worker rendered F32 (the 10-bit display
+						// path) — repack/transform via `to_display` and register
+						// the RGBA16F texture for the viewer; the BGRA8 image it
+						// also builds is the CPU fallback only.
+						let (image, scope, samples) =
+							super::renderops::RenderedFrame::Shm(slot.clone()).to_display()?;
+						if let Some(samples) = samples {
+							super::gpu::register_display_frame(image.id.0, w, h, &samples);
+						}
+						(Arc::new(image), scope)
+					} else {
+						let data = slot
+							.shm
+							.slot_bytes(slot.slot)
+							.get(..meta.data_size.max(0) as usize)?;
+						let image = bgra_bytes_to_render_image(w, h, data)?;
+						let scope = analyze_bgra8(w, h, data);
+						(Arc::new(image), scope)
+					}
+				};
+				if let Some(m) = RenderManager::global() {
+					m.release_frame(&slot);
 				}
-				(Arc::new(image), scope)
-			} else {
-				let data = slot
-					.shm
-					.slot_bytes(slot.slot)
-					.get(..meta.data_size.max(0) as usize)?;
-				let image = bgra_bytes_to_render_image(w, h, data)?;
-				let scope = analyze_bgra8(w, h, data);
-				(Arc::new(image), scope)
+				Some(out)
 			}
-		};
-		if let Some(m) = RenderManager::global() {
-			m.release_frame(&slot);
+			PreviewSlot::Video(texture) => {
+				// M4: the thread pipeline keeps frames on the GPU (or as an
+				// in-process CPU texture); `to_display` presents a GPU frame
+				// zero-copy when the device is shared and registers it for
+				// the viewer, or hands back samples for the staging upload.
+				let (w, h) = texture.size();
+				let (image, scope, samples) =
+					super::renderops::RenderedFrame::Gpu(texture).to_display()?;
+				if let Some(samples) = samples {
+					super::gpu::register_display_frame(image.id.0, w.max(0) as u32, h.max(0) as u32, &samples);
+				}
+				Some((Arc::new(image), scope))
+			}
 		}
-		Some(out)
 	}
 
 	/// Cancels every monitor's pre-render window and releases its held
@@ -2386,14 +2436,14 @@ impl RealEngine {
 		// Collect the teardown work under the lock, then run it outside:
 		// `cancel_preview_sequence` fires completions synchronously and those
 		// completions lock `preview_windows` (self-deadlock otherwise).
-		let mut pending: Vec<(u64, Vec<ShmFrameRef>)> = Vec::new();
+		let mut pending: Vec<(u64, Vec<PreviewSlot>)> = Vec::new();
 		{
 			let mut windows = self
 				.preview_windows
 				.lock()
 				.unwrap_or_else(|e| e.into_inner());
 			for window in windows.values_mut() {
-				let slots: Vec<ShmFrameRef> =
+				let slots: Vec<PreviewSlot> =
 					std::mem::take(&mut window.slots).into_values().collect();
 				pending.push((window.sequence, slots));
 				window.submitted.clear();
@@ -2402,8 +2452,8 @@ impl RealEngine {
 		if let Some(m) = RenderManager::global() {
 			for (sequence, slots) in pending {
 				m.cancel_preview_sequence(sequence);
-				for slot in &slots {
-					m.release_frame(slot);
+				for slot in slots {
+					slot.release();
 				}
 			}
 		}
@@ -2423,14 +2473,14 @@ impl RealEngine {
 			let Some(window) = windows.get_mut(&monitor) else {
 				return;
 			};
-			let slots: Vec<ShmFrameRef> = std::mem::take(&mut window.slots).into_values().collect();
+			let slots: Vec<PreviewSlot> = std::mem::take(&mut window.slots).into_values().collect();
 			window.submitted.clear();
 			(window.sequence, slots)
 		};
 		if let Some(m) = RenderManager::global() {
 			m.cancel_preview_sequence(pending.0);
-			for slot in &pending.1 {
-				m.release_frame(slot);
+			for slot in pending.1 {
+				slot.release();
 			}
 		}
 	}

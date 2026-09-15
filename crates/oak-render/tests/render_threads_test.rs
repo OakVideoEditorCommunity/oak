@@ -823,6 +823,318 @@ fn pipeline_layered_playback_has_zero_gpu_readbacks() {
 	let _ = std::fs::remove_file(&below);
 }
 
+/// M4: every playback post queues its footage read-ahead and every
+/// distinct frame ends up decoded exactly once — by the prefetch or, if
+/// the render request wins the race, by the rendezvous. This is a smoke
+/// test for the wiring; that the read-ahead is actually *used* is proven
+/// deterministically by `pipeline_prefetch_is_the_frame_the_render_request_uses`,
+/// and the priority order by `pipeline_orders_seek_ahead_of_background_end_to_end`.
+#[test]
+fn pipeline_playback_prefetches_ahead_of_the_render() {
+	let _lock = lock();
+	pin_legacy_working_space();
+	let guard = common::ManagerGuard::init_with(RenderBackendChoice::Pipeline);
+	let manager = RenderManager::global().expect("manager installed");
+	let backend = manager.pipeline_backend().expect("pipeline selected");
+	let path = test_clip("playback_prefetch");
+	let times: Vec<Rational> = (0..6).map(|n| Rational::new(n, 10)).collect();
+	let (tx, rx) = mpsc::channel();
+	for (n, time) in times.iter().enumerate() {
+		let tx = tx.clone();
+		let done: Completion = Box::new(move |result| {
+			let ok = matches!(result, Ok(TicketPayload::Video(_)));
+			let _ = tx.send((n, ok));
+		});
+		manager
+			.tickets
+			.submit_playback(montage_params(&path, *time), n as i64, n as i64, 0, done);
+	}
+	drop(tx);
+	for _ in 0..times.len() {
+		match rx.recv_timeout(Duration::from_secs(60)) {
+			Ok((n, true)) => {
+				let _ = n;
+			}
+			Ok((n, false)) => panic!("frame {n} did not produce a video payload"),
+			Err(err) => panic!("playback completion timeout: {err}"),
+		}
+	}
+	let stats = backend.decode_service().stats();
+	assert_eq!(
+		stats.prefetches,
+		times.len() as u64,
+		"every playback post queued its footage prefetch"
+	);
+	assert_eq!(
+		stats.decodes,
+		times.len() as u64,
+		"each distinct frame decodes exactly once (prefetch or rendezvous)"
+	);
+	// Note: `procpool::main_heap_frame_copies` only counts the shm path,
+	// which the thread pipeline never touches, so asserting it here would
+	// be vacuous. The in-process frame path does clone `Frame.data` at the
+	// eval-cache and service-LRU boundaries (M5 narrows this); the bench
+	// comparison must not claim "no heap copies" for the pipeline.
+	drop(guard);
+	let _ = std::fs::remove_file(&path);
+}
+
+/// A producer that parks the render thread until `release` is signalled,
+/// recording `tag` when it finally runs. Two independent gates let a test
+/// keep a frame in flight while it posts more work.
+fn parked_producer(
+	started: Arc<(Mutex<bool>, Condvar)>,
+	release: Arc<(Mutex<bool>, Condvar)>,
+	order: Arc<Mutex<Vec<&'static str>>>,
+	tag: &'static str,
+) -> Producer {
+	Arc::new(move |_time: Rational, _params: &VideoTicketParams| {
+		{
+			let (started, work) = &*started;
+			*started.lock().unwrap_or_else(|e| e.into_inner()) = true;
+			work.notify_all();
+		}
+		let (released, work) = &*release;
+		let mut released = released.lock().unwrap_or_else(|e| e.into_inner());
+		while !*released {
+			released = work.wait(released).unwrap_or_else(|e| e.into_inner());
+		}
+		order
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.push(tag);
+		Err(Error::State)
+	})
+}
+
+/// A producer that records `tag` when the render thread runs it and fails.
+fn recording_producer(order: Arc<Mutex<Vec<&'static str>>>, tag: &'static str) -> Producer {
+	Arc::new(move |_time: Rational, _params: &VideoTicketParams| {
+		order
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.push(tag);
+		Err(Error::State)
+	})
+}
+
+/// A no-footage job (no prefetch side effects) carrying `produce`.
+fn scheduled_job(produce: Producer, schedule: JobSchedule) -> Job {
+	Job {
+		node_identity: 0,
+		time: Rational::new(0, 1),
+		params: Arc::new(base_params(Rational::new(0, 1))),
+		audio: None,
+		produce,
+		done: Box::new(|_result: TicketResult| {}),
+		schedule,
+	}
+}
+
+fn open_gate(gate: &Arc<(Mutex<bool>, Condvar)>) {
+	let (open, work) = &**gate;
+	*open.lock().unwrap_or_else(|e| e.into_inner()) = true;
+	work.notify_all();
+}
+
+/// M4: priorities are real end to end, not just a `VecDeque` sort. With
+/// the render thread parked on an in-flight playback frame and the queue
+/// full of background work, a Seek (a) is accepted without blocking its
+/// submitter — it over-admits past the bound — and (b) runs before every
+/// queued background job once the in-flight frame finishes.
+#[test]
+fn pipeline_orders_seek_ahead_of_background_end_to_end() {
+	let _lock = lock();
+	let backend = PipelineBackend::new().expect("pipeline backend starts");
+	let order = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+	let started = Arc::new((Mutex::new(false), Condvar::new()));
+	let release = Arc::new((Mutex::new(false), Condvar::new()));
+
+	let produce = parked_producer(
+		started.clone(),
+		release.clone(),
+		order.clone(),
+		"in-flight",
+	);
+	assert!(
+		backend.try_post(scheduled_job(produce, JobSchedule::playback(0, 0, 0))),
+		"the in-flight playback frame is accepted"
+	);
+	wait_until("the in-flight playback frame to start", &mut || {
+		*started.0.lock().unwrap_or_else(|e| e.into_inner())
+	});
+
+	// Fill the bounded queue to capacity with background work.
+	for _ in 0..RENDER_QUEUE_CAP {
+		assert!(backend.try_post(scheduled_job(
+			recording_producer(order.clone(), "background"),
+			JobSchedule::background(),
+		)));
+	}
+	assert_eq!(backend.queue_depth(), RENDER_QUEUE_CAP);
+
+	// The seek must not block on the full queue: it over-admits and sits
+	// in front of everything queued (the UI thread never stalls here).
+	assert!(
+		backend.post(scheduled_job(
+			recording_producer(order.clone(), "seek"),
+			JobSchedule::seek(),
+		)),
+		"the seek is accepted despite the full queue"
+	);
+	assert_eq!(
+		backend.queue_depth(),
+		RENDER_QUEUE_CAP + 1,
+		"the seek over-admits instead of waiting for room"
+	);
+
+	open_gate(&release);
+	wait_until("every queued job to execute", &mut || {
+		backend.stats().executed == RENDER_QUEUE_CAP as u64 + 2
+	});
+	let mut expected = vec!["in-flight", "seek"];
+	expected.extend(vec!["background"; RENDER_QUEUE_CAP]);
+	assert_eq!(
+		*order.lock().unwrap_or_else(|e| e.into_inner()),
+		expected,
+		"the seek preempts the queued background work end to end"
+	);
+	backend.shutdown();
+}
+
+/// M4: the read-ahead claim is falsifiable here. The in-flight job parks
+/// the render thread, so the playback post's prefetch has the decode
+/// thread to itself; when the render request then runs it must reuse that
+/// decoded frame — a second decode or zero LRU hits fails the test.
+#[test]
+fn pipeline_prefetch_is_the_frame_the_render_request_uses() {
+	let _lock = lock();
+	pin_legacy_working_space();
+	let path = test_clip("prefetch_hit");
+	let backend = PipelineBackend::new().expect("pipeline backend starts");
+	let started = Arc::new((Mutex::new(false), Condvar::new()));
+	let release = Arc::new((Mutex::new(false), Condvar::new()));
+	let produce = parked_producer(
+		started.clone(),
+		release.clone(),
+		Arc::new(Mutex::new(Vec::new())),
+		"parking",
+	);
+	assert!(backend.try_post(scheduled_job(produce, JobSchedule::seek())));
+	wait_until("the parking job to start", &mut || {
+		*started.0.lock().unwrap_or_else(|e| e.into_inner())
+	});
+
+	let params = Arc::new(VideoTicketParams {
+		footage: Some((path.to_string_lossy().to_string(), 0)),
+		..base_params(Rational::new(0, 1))
+	});
+	let service = backend.decode_service();
+	let (done_tx, done_rx) = mpsc::channel();
+	let produce: Producer = Arc::new(|time: Rational, params: &VideoTicketParams| {
+		oak_render::eval::render_produced_frame(time, params).map(TicketPayload::Video)
+	});
+	let playback = Job {
+		node_identity: 1,
+		time: Rational::new(0, 1),
+		params,
+		audio: None,
+		produce,
+		done: Box::new(move |result: TicketResult| {
+			let _ = done_tx.send(matches!(result, Ok(TicketPayload::Video(_))));
+		}),
+		schedule: JobSchedule::playback(0, 0, 0),
+	};
+	assert!(backend.post(playback), "the playback frame is accepted");
+	assert!(
+		service.wait_idle(),
+		"the read-ahead decode completes while the render thread is parked"
+	);
+	let after_prefetch = service.stats();
+	assert_eq!(after_prefetch.prefetches, 1, "the post queued one read-ahead");
+	assert_eq!(after_prefetch.decodes, 1, "the read-ahead decoded once");
+
+	open_gate(&release);
+	assert!(
+		done_rx
+			.recv_timeout(Duration::from_secs(60))
+			.expect("the playback frame renders"),
+		"the playback frame produced a video payload"
+	);
+	let stats = service.stats();
+	assert!(
+		stats.lru_hits >= 1,
+		"the render request reused the prefetched frame (lru_hits {})",
+		stats.lru_hits
+	);
+	assert_eq!(
+		stats.decodes, 1,
+		"the render request must not decode the frame a second time"
+	);
+	backend.shutdown();
+	let _ = std::fs::remove_file(&path);
+}
+
+/// M4: cancelling a preview window drops only that window's queued frame.
+/// Two viewers can queue the same frame number in the same version; the
+/// cancel must match on the sequence identity too.
+#[test]
+fn pipeline_cancel_preview_frame_matches_the_sequence() {
+	let _lock = lock();
+	let backend = PipelineBackend::new().expect("pipeline backend starts");
+	let started = Arc::new((Mutex::new(false), Condvar::new()));
+	let release = Arc::new((Mutex::new(false), Condvar::new()));
+	let produce = parked_producer(
+		started.clone(),
+		release.clone(),
+		Arc::new(Mutex::new(Vec::new())),
+		"parking",
+	);
+	assert!(backend.try_post(scheduled_job(produce, JobSchedule::seek())));
+	wait_until("the parking job to start", &mut || {
+		*started.0.lock().unwrap_or_else(|e| e.into_inner())
+	});
+
+	let (tx, rx) = mpsc::channel();
+	for identity in [1u64, 2] {
+		let tx = tx.clone();
+		let produce: Producer =
+			Arc::new(|_time: Rational, _params: &VideoTicketParams| {
+				Ok(TicketPayload::Video(Texture::dummy()))
+			});
+		let job = Job {
+			node_identity: identity,
+			time: Rational::new(0, 1),
+			params: Arc::new(base_params(Rational::new(0, 1))),
+			audio: None,
+			produce,
+			done: Box::new(move |result: TicketResult| {
+				let _ = tx.send((identity, result.is_ok()));
+			}),
+			// Same frame number, same version — only the sequence differs.
+			schedule: JobSchedule::playback(5, 0, 0),
+		};
+		assert!(backend.post(job), "viewer {identity}'s frame is queued");
+	}
+	backend.cancel_preview_frame(1, 5, 0);
+
+	open_gate(&release);
+	let mut results = Vec::new();
+	for _ in 0..2 {
+		results.push(
+			rx.recv_timeout(Duration::from_secs(60))
+				.expect("both queued frames complete"),
+		);
+	}
+	results.sort_unstable();
+	assert_eq!(
+		results,
+		vec![(1, false), (2, true)],
+		"only the cancelled sequence's frame is dropped"
+	);
+	backend.shutdown();
+}
+
 /// A saturated render queue closes the decode service's prefetch gate: a
 /// speculative decode must be refused while a frame is in flight and the
 /// queue is full, and everything queued must still run once the in-flight

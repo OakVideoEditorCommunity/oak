@@ -73,7 +73,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 
@@ -81,6 +81,7 @@ use oak_core::texture::Texture;
 use oak_core::{PixelFormat, Rational};
 
 use crate::error::{Error, Result};
+use crate::scheduler::FramePriority;
 use crate::worker::{execute_job, Job, JobDispatch};
 
 /// Render-queue bound (jobs). Small on purpose: the queue exists to keep
@@ -102,6 +103,66 @@ pub const DECODE_LRU_CAP: usize = 8;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 	m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Render-queue priority class (lower first): interactive seeks jump the
+/// queue, playback stays in playhead order, background work (exports,
+/// autocache) yields.
+fn job_class(job: &Job) -> u8 {
+	job.schedule.priority as u8
+}
+
+/// Insert `job` keeping the queue ordered by priority class; stable within
+/// a class (FIFO). Callers ensure capacity first (except Seek, which may
+/// over-admit — see `PipelineBackend::push`).
+fn enqueue_job(queue: &mut VecDeque<Job>, job: Job) {
+	let class = job_class(&job);
+	let position = queue
+		.iter()
+		.position(|queued| job_class(queued) > class)
+		.unwrap_or(queue.len());
+	queue.insert(position, job);
+}
+
+/// The decode requests a playback frame needs (M4 read-ahead): one per
+/// montage clip covering `time`, plus the single-footage ticket's stream.
+/// The media arithmetic mirrors `eval::render_montage_frame_into`
+/// (`media_in + (time - in_time)`) so a prefetched frame is the exact key
+/// the render rendezvous asks for.
+fn playback_decode_requests(
+	params: &crate::ticket::VideoTicketParams,
+	time: Rational,
+) -> Vec<DecodeRequest> {
+	let size = params.render_size();
+	if size.0 <= 0 || size.1 <= 0 {
+		return Vec::new();
+	}
+	let mut requests = Vec::new();
+	for clip in &params.montage {
+		if time < clip.in_time || time >= clip.out_time {
+			continue;
+		}
+		requests.push(DecodeRequest {
+			filename: clip.filename.clone(),
+			stream_index: clip.stream_index,
+			time: clip.media_in + (time - clip.in_time),
+			size,
+			format: PixelFormat::F32,
+		});
+	}
+	if let Some((filename, stream_index)) = &params.footage {
+		// The read-ahead must decode exactly what the render request will
+		// ask for, or the cache never hits: the eval path uses
+		// `force_format.unwrap_or(F32)`, so mirror that here.
+		requests.push(DecodeRequest {
+			filename: filename.clone(),
+			stream_index: *stream_index,
+			time,
+			size,
+			format: params.force_format.unwrap_or(PixelFormat::F32),
+		});
+	}
+	requests
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +251,24 @@ enum DecodeCommand {
 	/// Barrier: replies once every command sent before it has been fully
 	/// processed (used by tests and by the decode-service contract).
 	Sync { reply: SyncSender<()> },
-	/// Stop the thread (it drains, then exits).
-	Shutdown,
+}
+
+/// The decode command queue (M4): bounded, with rendezvous requests
+/// served ahead of prefetches — a render that needs a frame must never
+/// wait behind speculative decode work; prefetches only fill idle decode
+/// time. `Sync` barriers stay in FIFO order (they cover everything sent
+/// before them).
+struct DecodeQueue {
+	pending: VecDeque<DecodeCommand>,
+	shutting_down: bool,
+}
+
+struct DecodeShared {
+	queue: Mutex<DecodeQueue>,
+	/// A command arrived.
+	work: Condvar,
+	/// A slot freed (or shutdown started).
+	room: Condvar,
 }
 
 struct DecodeInner {
@@ -211,7 +288,7 @@ struct DecodeInner {
 /// there); [`DecodeService::stats`] and [`DecodeService::lru_len`] read
 /// shared counters, so they are safe from any thread.
 pub struct DecodeService {
-	commands: SyncSender<DecodeCommand>,
+	shared: Arc<DecodeShared>,
 	gate: PrefetchGate,
 	inner: Arc<DecodeInner>,
 	handle: Mutex<Option<JoinHandle<()>>>,
@@ -222,26 +299,61 @@ impl DecodeService {
 	/// `gate` deciding whether prefetch work is wanted. `lru_capacity` 0
 	/// disables caching (every request decodes).
 	pub fn new(lru_capacity: usize, gate: PrefetchGate) -> Arc<Self> {
-		let (tx, rx) = mpsc::sync_channel(DECODE_QUEUE_CAP);
+		let shared = Arc::new(DecodeShared {
+			queue: Mutex::new(DecodeQueue {
+				pending: VecDeque::new(),
+				shutting_down: false,
+			}),
+			work: Condvar::new(),
+			room: Condvar::new(),
+		});
 		let inner = Arc::new(DecodeInner {
 			counters: DecodeCounters::default(),
 			lru_len: AtomicUsize::new(0),
 		});
 		let service = Arc::new(Self {
-			commands: tx,
+			shared: shared.clone(),
 			gate,
 			inner: inner.clone(),
 			handle: Mutex::new(None),
 		});
 		let spawned = std::thread::Builder::new()
 			.name("oak-decode".into())
-			.spawn(move || decode_loop(rx, inner, lru_capacity));
-		// A failed spawn leaves the receiver dropped, so `request` reports
-		// the service as unavailable and the caller decodes inline.
+			.spawn(move || decode_loop(shared, inner, lru_capacity));
+		// A failed spawn leaves the queue unreachable, so `request`
+		// reports the service as unavailable and the caller decodes
+		// inline.
 		if let Ok(handle) = spawned {
 			*lock(&service.handle) = Some(handle);
 		}
 		service
+	}
+
+	/// Queue a command: `blocking` waits for room when the queue is full,
+	/// otherwise a full queue refuses (`false`). Also `false` once the
+	/// service is stopping.
+	fn enqueue(&self, command: DecodeCommand, blocking: bool) -> bool {
+		let shared = &self.shared;
+		let mut queue = lock(&shared.queue);
+		if queue.shutting_down {
+			return false;
+		}
+		if !blocking {
+			if queue.pending.len() >= DECODE_QUEUE_CAP {
+				return false;
+			}
+		} else {
+			while queue.pending.len() >= DECODE_QUEUE_CAP {
+				if queue.shutting_down {
+					return false;
+				}
+				queue = shared.room.wait(queue).unwrap_or_else(|e| e.into_inner());
+			}
+		}
+		queue.pending.push_back(command);
+		drop(queue);
+		shared.work.notify_one();
+		true
 	}
 
 	/// Decode `request`, returning the frame. `None` means the service is
@@ -253,9 +365,8 @@ impl DecodeService {
 	/// the render side propagates to submission.
 	pub fn request(&self, request: DecodeRequest) -> Option<Result<Texture>> {
 		let (reply, rx) = mpsc::sync_channel(1);
-		match self.commands.send(DecodeCommand::Request { request, reply }) {
-			Ok(()) => {}
-			Err(_) => return None,
+		if !self.enqueue(DecodeCommand::Request { request, reply }, true) {
+			return None;
 		}
 		match rx.recv() {
 			Ok(result) => Some(result),
@@ -276,27 +387,24 @@ impl DecodeService {
 				.fetch_add(1, Ordering::Relaxed);
 			return false;
 		}
-		match self.commands.try_send(DecodeCommand::Prefetch { request }) {
-			Ok(()) => {
-				self.inner.counters.prefetches.fetch_add(1, Ordering::Relaxed);
-				true
-			}
-			Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
-				self.inner
-					.counters
-					.prefetch_refused
-					.fetch_add(1, Ordering::Relaxed);
-				false
-			}
+		if self.enqueue(DecodeCommand::Prefetch { request }, false) {
+			self.inner.counters.prefetches.fetch_add(1, Ordering::Relaxed);
+			true
+		} else {
+			self.inner
+				.counters
+				.prefetch_refused
+				.fetch_add(1, Ordering::Relaxed);
+			false
 		}
 	}
 
 	/// Wait until every command sent before this call has been processed
-	/// (a barrier through the same FIFO queue). `false` when the service is
+	/// (a barrier through the same queue). `false` when the service is
 	/// already gone.
 	pub fn wait_idle(&self) -> bool {
 		let (reply, rx) = mpsc::sync_channel(0);
-		if self.commands.send(DecodeCommand::Sync { reply }).is_err() {
+		if !self.enqueue(DecodeCommand::Sync { reply }, true) {
 			return false;
 		}
 		rx.recv().is_ok()
@@ -314,21 +422,56 @@ impl DecodeService {
 
 	/// Stop the decode thread and wait for it to exit. Idempotent; a
 	/// request arriving after this (or racing it) reports `None` and the
-	/// caller decodes inline.
+	/// caller decodes inline. Queued commands are drained first (bounded
+	/// by the queue cap), so a `wait_idle` sent before shutdown still
+	/// answers.
 	pub fn shutdown(&self) {
 		let handle = lock(&self.handle).take();
 		let Some(handle) = handle else { return };
-		let _ = self.commands.send(DecodeCommand::Shutdown);
+		{
+			let mut queue = lock(&self.shared.queue);
+			queue.shutting_down = true;
+		}
+		self.shared.work.notify_all();
+		self.shared.room.notify_all();
 		let _ = handle.join();
+	}
+}
+
+/// Pop the next command: a rendezvous request first, else FIFO; `None`
+/// once the queue is empty and shutdown was requested. Removing a command
+/// opens queue room, so blocked requesters are woken.
+fn pop_command(shared: &DecodeShared) -> Option<DecodeCommand> {
+	let mut queue = lock(&shared.queue);
+	loop {
+		if let Some(pos) = queue
+			.pending
+			.iter()
+			.position(|c| matches!(c, DecodeCommand::Request { .. }))
+		{
+			let command = queue.pending.remove(pos).expect("just found");
+			drop(queue);
+			shared.room.notify_one();
+			return Some(command);
+		}
+		if let Some(command) = queue.pending.pop_front() {
+			drop(queue);
+			shared.room.notify_one();
+			return Some(command);
+		}
+		if queue.shutting_down {
+			return None;
+		}
+		queue = shared.work.wait(queue).unwrap_or_else(|e| e.into_inner());
 	}
 }
 
 /// The decode thread: one command at a time, LRU in a plain `HashMap`
 /// keyed by [`DecodeRequest`] with a monotonic recency tick.
-fn decode_loop(rx: mpsc::Receiver<DecodeCommand>, inner: Arc<DecodeInner>, lru_capacity: usize) {
+fn decode_loop(shared: Arc<DecodeShared>, inner: Arc<DecodeInner>, lru_capacity: usize) {
 	let mut lru: HashMap<DecodeRequest, (Texture, u64)> = HashMap::new();
 	let mut tick: u64 = 1;
-	while let Ok(command) = rx.recv() {
+	while let Some(command) = pop_command(&shared) {
 		match command {
 			DecodeCommand::Request { request, reply } => {
 				let result = serve(&request, &mut lru, &mut tick, lru_capacity, &inner);
@@ -342,12 +485,11 @@ fn decode_loop(rx: mpsc::Receiver<DecodeCommand>, inner: Arc<DecodeInner>, lru_c
 			DecodeCommand::Sync { reply } => {
 				let _ = reply.send(());
 			}
-			DecodeCommand::Shutdown => break,
 		}
 	}
-	// Anything still queued is dropped with the receiver: the pending
-	// reply senders disconnect, so blocked requesters see `None` and fall
-	// back to the inline decode.
+	// Anything still queued is dropped with the thread: the pending reply
+	// senders disconnect, so blocked requesters see `None` and fall back
+	// to the inline decode.
 	inner.lru_len.store(0, Ordering::Relaxed);
 }
 
@@ -588,6 +730,10 @@ impl PipelineBackend {
 	}
 
 	fn push(&self, job: Job, blocking: bool) -> bool {
+		// M4 playback read-ahead: queue the job's footage decodes before it
+		// reaches the render thread, so the decode thread works on frame
+		// N+1 while the render thread evaluates frame N.
+		self.prefetch_decodes(&job);
 		let inner = &self.inner;
 		let mut queue = lock(&inner.queue);
 		if inner.stopping.load(Ordering::Acquire) {
@@ -596,12 +742,19 @@ impl PipelineBackend {
 		if !blocking && queue.len() >= RENDER_QUEUE_CAP {
 			return false;
 		}
-		// Backpressure, with one exception: the render thread itself may
-		// re-post from a completion callback (a producer that submits
-		// follow-up work). It can never make room by waiting — it is the
-		// only thread that drains the queue — so it is allowed to run one
-		// ahead of the bound instead of deadlocking.
-		if blocking && !is_render_thread(inner) {
+		// Backpressure, with two exceptions:
+		// - The render thread itself may re-post from a completion callback
+		//   (a producer that submits follow-up work). It can never make room
+		//   by waiting — it is the only thread that drains the queue — so it
+		//   is allowed to run one ahead of the bound instead of deadlocking.
+		// - A Seek (the UI's interactive frame) may over-admit: priority
+		//   reordering only helps jobs already in the queue, and a full
+		//   queue of background/playback work must not stall the UI thread
+		//   until a whole export/cache frame finishes. Playback posts are
+		//   capacity-capped by the app window, background posts are off the
+		//   UI thread, so over-admission stays bounded in practice.
+		let seek = matches!(job.schedule.priority, FramePriority::Seek);
+		if blocking && !is_render_thread(inner) && !seek {
 			while queue.len() >= RENDER_QUEUE_CAP {
 				if inner.stopping.load(Ordering::Acquire) {
 					return false;
@@ -609,12 +762,25 @@ impl PipelineBackend {
 				queue = inner.room.wait(queue).unwrap_or_else(|e| e.into_inner());
 			}
 		}
-		queue.push_back(job);
+		enqueue_job(&mut queue, job);
 		inner.depth.store(queue.len(), Ordering::Relaxed);
 		inner.posted.fetch_add(1, Ordering::Relaxed);
 		drop(queue);
 		inner.work.notify_one();
 		true
+	}
+
+	/// M4 playback read-ahead: a Playback job's footage decodes are queued
+	/// speculatively as soon as the job is submitted. The requests mirror
+	/// the montage/footage eval exactly (same media time, size and format),
+	/// so a completed prefetch is an LRU hit for the render rendezvous.
+	fn prefetch_decodes(&self, job: &Job) {
+		if !matches!(job.schedule.priority, FramePriority::Playback) {
+			return;
+		}
+		for request in playback_decode_requests(&job.params, job.time) {
+			let _ = self.inner.decode.prefetch(request);
+		}
 	}
 
 	fn shutdown_impl(&self) {
@@ -667,6 +833,45 @@ impl JobDispatch for PipelineBackend {
 	fn shutdown(&self) {
 		self.shutdown_impl();
 	}
+
+	/// M4: the app's pre-render window may only queue as much playback
+	/// work as the render queue can accept, so playback posts never block
+	/// the UI (Seek posts additionally over-admit; see `push`).
+	fn preview_window_capacity(&self) -> Option<usize> {
+		Some(self.queue_free().max(1))
+	}
+
+	/// M4: drop a queued playback frame the playhead has passed (pending
+	/// only — the in-flight frame cannot be interrupted). Matched on the
+	/// full key (viewer identity, frame, version) so cancelling one
+	/// monitor's window never drops the other sequence's frame at the same
+	/// number. The completion fires with `Error::State`, exactly like a
+	/// cancelled worker frame, so the window removes it from `submitted`.
+	fn cancel_preview_frame(&self, sequence: u64, frame: i64, version: u64) {
+		let inner = &self.inner;
+		let mut removed = Vec::new();
+		{
+			let mut queue = lock(&inner.queue);
+			let mut index = 0;
+			while index < queue.len() {
+				let job = &queue[index];
+				let matches = job.node_identity == sequence
+					&& job.schedule.frame == Some(frame)
+					&& job.schedule.version == version
+					&& matches!(job.schedule.priority, FramePriority::Playback);
+				if matches {
+					removed.push(queue.remove(index).expect("index in range"));
+				} else {
+					index += 1;
+				}
+			}
+			inner.depth.store(queue.len(), Ordering::Relaxed);
+		}
+		inner.room.notify_all();
+		for job in removed {
+			(job.done)(Err(Error::State));
+		}
+	}
 }
 
 fn is_render_thread(inner: &PipelineInner) -> bool {
@@ -705,6 +910,7 @@ fn render_loop(inner: Arc<PipelineInner>) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::worker::JobSchedule;
 	use oak_core::texture::Frame;
 
 	/// A unique clip per test (the process id separates test binaries, the
@@ -956,5 +1162,166 @@ mod tests {
 		assert!(!service.prefetch(request(&path, Rational::new(0, 1))));
 		assert!(!service.wait_idle());
 		let _ = std::fs::remove_file(&path);
+	}
+
+	// ---- M4: priority queues and playback read-ahead --------------------
+
+	/// A minimal job for queue-ordering tests (the producer/done are no-ops
+	/// and never run).
+	fn dummy_job(priority: FramePriority, frame: i64) -> Job {
+		Job {
+			node_identity: 1,
+			time: Rational::new(frame, 1),
+			params: Arc::new(crate::ticket::VideoTicketParams {
+				viewer: 1,
+				project: String::new(),
+				time: Rational::new(frame, 1),
+				force_size: Some((16, 16)),
+				force_format: None,
+				cache: None,
+				cache_dir: None,
+				cache_id: None,
+				cache_timebase: None,
+				footage: None,
+				montage: Vec::new(),
+				adjustments: Vec::new(),
+			}),
+			audio: None,
+			produce: Arc::new(|_, _| Ok(crate::ticket::TicketPayload::Video(Texture::dummy()))),
+			done: Box::new(|_| {}),
+			schedule: JobSchedule {
+				priority,
+				frame: Some(frame),
+				distance: frame,
+				version: 0,
+			},
+		}
+	}
+
+	/// M4: the decode queue serves a rendezvous request before queued
+	/// prefetches, while a `Sync` barrier keeps FIFO order.
+	#[test]
+	fn decode_queue_prioritizes_requests_over_prefetches() {
+		let shared = Arc::new(DecodeShared {
+			queue: Mutex::new(DecodeQueue {
+				pending: VecDeque::new(),
+				shutting_down: false,
+			}),
+			work: Condvar::new(),
+			room: Condvar::new(),
+		});
+		let (sync_tx, _sync_rx) = mpsc::sync_channel(0);
+		let (request_tx, _request_rx) = mpsc::sync_channel(0);
+		let request = |filename: &str, time: Rational| DecodeRequest {
+			filename: filename.to_string(),
+			stream_index: 0,
+			time,
+			size: (16, 16),
+			format: PixelFormat::F32,
+		};
+		{
+			let mut queue = lock(&shared.queue);
+			queue
+				.pending
+				.push_back(DecodeCommand::Sync { reply: sync_tx });
+			queue.pending.push_back(DecodeCommand::Prefetch {
+				request: request("a.mp4", Rational::new(0, 1)),
+			});
+			queue.pending.push_back(DecodeCommand::Prefetch {
+				request: request("a.mp4", Rational::new(1, 10)),
+			});
+			queue.pending.push_back(DecodeCommand::Request {
+				request: request("a.mp4", Rational::new(2, 10)),
+				reply: request_tx,
+			});
+		}
+		// The request preempts the two earlier prefetches...
+		assert!(matches!(
+			pop_command(&shared),
+			Some(DecodeCommand::Request { .. })
+		));
+		// ...but the Sync barrier stays ahead of the prefetches that were
+		// sent before it (FIFO).
+		assert!(matches!(
+			pop_command(&shared),
+			Some(DecodeCommand::Sync { .. })
+		));
+		assert!(matches!(
+			pop_command(&shared),
+			Some(DecodeCommand::Prefetch { .. })
+		));
+		assert!(matches!(
+			pop_command(&shared),
+			Some(DecodeCommand::Prefetch { .. })
+		));
+	}
+
+	/// M4: the render queue is priority-ordered (Seek, Playback,
+	/// Background) and FIFO inside a class.
+	#[test]
+	fn render_queue_orders_seek_playback_background() {
+		let mut queue = VecDeque::new();
+		enqueue_job(&mut queue, dummy_job(FramePriority::Background, 0));
+		enqueue_job(&mut queue, dummy_job(FramePriority::Playback, 1));
+		enqueue_job(&mut queue, dummy_job(FramePriority::Seek, 2));
+		enqueue_job(&mut queue, dummy_job(FramePriority::Playback, 3));
+		let classes: Vec<u8> = queue.iter().map(job_class).collect();
+		assert_eq!(classes, vec![0, 1, 1, 2]);
+		let frames: Vec<i64> = queue
+			.iter()
+			.map(|job| job.schedule.frame.unwrap())
+			.collect();
+		assert_eq!(frames, vec![2, 1, 3, 0], "FIFO within a class");
+	}
+
+	/// M4 read-ahead: the derived decode requests mirror the montage eval
+	/// (media time, target size, F32) and skip clips that do not cover the
+	/// requested time.
+	#[test]
+	fn playback_decode_requests_mirror_montage_times() {
+		let clip = |filename: &str, in_t: Rational, out_t: Rational, media_in: Rational| {
+			crate::ticket::MontageClip {
+				filename: filename.to_string(),
+				stream_index: 0,
+				in_time: in_t,
+				out_time: out_t,
+				media_in,
+				gain: 1.0,
+				effects: Vec::new(),
+			}
+		};
+		let params = crate::ticket::VideoTicketParams {
+			viewer: 1,
+			project: String::new(),
+			time: Rational::new(5, 10),
+			force_size: Some((64, 32)),
+			force_format: None,
+			cache: None,
+			cache_dir: None,
+			cache_id: None,
+			cache_timebase: None,
+			footage: None,
+			montage: vec![
+				clip("covered.mp4", Rational::new(0, 1), Rational::new(1, 1), Rational::new(2, 1)),
+				clip("outside.mp4", Rational::new(1, 1), Rational::new(2, 1), Rational::new(0, 1)),
+			],
+			adjustments: Vec::new(),
+		};
+		let requests = playback_decode_requests(&params, Rational::new(5, 10));
+		assert_eq!(requests.len(), 1, "only the covering clip is prefetched");
+		assert_eq!(requests[0].filename, "covered.mp4");
+		assert_eq!(requests[0].time, Rational::new(5, 2), "media_in + (time - in)");
+		assert_eq!(requests[0].size, (64, 32));
+		assert_eq!(requests[0].format, PixelFormat::F32);
+
+		// A single-footage ticket prefetches its stream at the ticket time.
+		let mut footage = params;
+		footage.montage.clear();
+		footage.footage = Some(("solo.mp4".to_string(), 2));
+		let requests = playback_decode_requests(&footage, Rational::new(5, 10));
+		assert_eq!(requests.len(), 1);
+		assert_eq!(requests[0].filename, "solo.mp4");
+		assert_eq!(requests[0].stream_index, 2);
+		assert_eq!(requests[0].time, Rational::new(1, 2));
 	}
 }

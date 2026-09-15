@@ -254,6 +254,57 @@
 - 背压：三条队列都有界；上屏消费慢（暂停、窗口最小化）时 render 队列满 →
   解码暂停预取；导出时上屏队列直通导出消费者，不存在"没人收"的积压。
 
+> **M4 落地回填（2026-09-15）**：
+>
+> - 渲染队列按 `JobSchedule.priority` 排序（Seek > Playback > Background，
+>   同类 FIFO）；解码队列把 rendezvous `Request` 排在 `Prefetch` 之前
+>   （渲染要帧绝不排在推测解码后面），`Sync` 屏障保持 FIFO。
+> - 播放预取：Pipeline 收到 Playback job 时立即按 montage/footage 推导
+>   `DecodeRequest`（媒体时间/尺寸/F32 与 eval 完全一致，footage 路径取
+>   `force_format.unwrap_or(F32)`），投给解码线程，于是帧 N 在渲染线程跑
+>   GPU pass 时解码线程已在解帧 N+1。`pipeline_prefetch_is_the_frame_the_render_request_uses`
+>   用"停在解码前"的确定性时序断言 LRU 命中且只解一次；`pipeline_playback_prefetches_ahead_of_the_render`
+>   只证明"每个 post 恰好投递一次预取、每帧只解一次"。
+> - 上屏窗口：`PreviewWindow` 的槽位泛化为 `PreviewSlot::{Shm, Video}`，
+>   线程管线的 `TicketPayload::Video` 直接入窗、由 `cpu_frame` 消费；
+>   `PipelineBackend::preview_window_capacity` 返回渲染队列余量，播放提交
+>   被限制在余量内不阻塞 UI；Seek 提交允许**超额插队**（队列满时也立即
+>   返回，插到 Background/Playback 之前），因为优先级排序只对已入队的 job
+>   生效——若 Seek 被挡在门外，UI 会等一个导出/缓存帧跑完。`cancel_preview_frame`
+>   丢弃已过 playhead 的排队帧，按 `(sequence, frame, version)` 全键匹配
+>   （两个监视器可同帧号同版本，只按帧匹配会误杀另一序列）。
+> - **基准对比**（本机 release，`oak-render/examples/bench_playback`，
+>   1080p/25fps MPEG-2 源、240 帧@480p(853×480) / 128 帧@1080p；两个后端
+>   统一输出 F32 帧、同尺寸，否则进程池的 BGRA8 槽位与管线的 in-process
+>   F32 帧字节量/路径不同，数字不可比）：
+>
+>   | 用例 | fps | 首帧延迟 | CPU(user+sys) |
+>   |---|---|---|---|
+>   | processes 480p（17 worker） | 48.3 | 1416 ms | 23.6 s |
+>   | pipeline 480p | 78.6 | 127 ms | 3.0 s |
+>   | processes 1080p（4 worker） | 49.2 | 396 ms | 12.0 s |
+>   | pipeline 1080p | 28.5 | 161 ms | 4.5 s |
+>
+>   结论：线程管线在代理尺寸下全面胜出，首帧延迟低一个数量级；1080p 满幅
+>   的峰值吞吐低于多 worker 进程池（单解码线程 vs 4 个并行 worker），但
+>   CPU 低约 2.7×、首帧快约 2.5×，且 28 fps 足够覆盖 24/25 fps 实时播放。
+>   按 M4 验收口径记录：CPU 不升、首帧不劣化成立；"fps 不低于"在 1080p
+>   峰值吞吐上不成立（代理播放成立）。
+>
+>   "main-heap frame copies" 只统计进程池 shm 路径（管线不经过它），两边
+>   的 0 都不构成"管线无堆拷贝"的证据——in-process 帧在 eval 缓存与
+>   service LRU 边界仍有 `Frame.data` 深拷贝（M5 收窄），文档与测试不得
+>   再宣称管线零堆拷贝。
+>
+>   根因是**这一刻解码仍是 CPU 软解**（M5 才上硬解）：进程池的 4 个 worker
+>   各自跑一个软解器并行解帧，线程管线按 §3.1 只有一条解码线程。**不要**
+>   为此把解码线程池化：GPU 硬解单元（NVDEC/VAAPI/VideoToolbox）是单设备
+>   单提交队列（§1 的出发点），§3.6 的零拷贝导入还要求"解码表面与渲染共
+>   用同一片 GPU 内存"，多解码线程只会争同一队列与显存池。M5 落地后单
+>   解码线程就是正确形态。提前提升软解吞吐的正确方向是让 FFmpeg 解码器
+>   自身多线程（frame/slice threading），而不是并列多个解码线程——本期
+>   不立项。
+
 ### 3.5 GPU 零拷贝与上屏
 
 - 内置效果全 GPU：图求值产生的中间纹理全部是 `Texture::Gpu`，整个 resolve
@@ -415,7 +466,7 @@ fallback。** 解码上传与上屏共用一层 `gpuinteop` 抽象，按后端�
 | **M1 线程管线骨架** | 解码/渲染/上屏三线程+三队列进 oak-render（`pipeline` 模块）；RenderManager 增加线程后端，进程池后端保留，`OAK_PIPELINE=processes` 可回退 | 同一套渲染测试在两个后端下都绿（测试矩阵化）；播放/seek/导出 smoke 等价 |
 | **M2 GPU 零拷贝** | 图内全程 `Texture::Gpu`（合成/转场/调整层不再逐帧回读）；wgpu 29 统一 + 采用 gpui device（§3.5 攻关已回填）；GPU 色彩管理（工作空间→输出规格→显示器 ICC 烘焙 3D LUT，GPU 执行）；导出/缓存/OFX 三处边界显式回读；内置 YUV→RGB GPU pass（M5 解码导入的依赖项，解码接线随 M5） | 图播放路径 **GPU→CPU 回读为 0**（`oak_core::backend::gpu_transfer_counters` 计数断言，M1 帧缓存范式）；`RenderedFrame::Gpu` + `to_display` 上屏在 adopted device 上零拷贝（app 测试）；YUV→RGB pass 与 `colormath::yuv444p16_to_rgb_f32` 对拍；全 workspace 测试绿 |
 | **M3 OFX 独立进程** | `oak-worker --ofx-host` 单进程宿主 + `oak-render/ofxhost` 客户端（Pipeline 后端安装，首 job 惰性 spawn）；PluginJob 经 NDJSON + 输入/输出 shm 槽；崩溃重生+在途 job 重投+三次熔断紫帧；`plugin_progress`/`plugin_cancel` 搬运（宿主即时 flush） | 植入确定性崩溃钩子：`--ofx-crash-once` 杀掉宿主 → 在途 job 重投成功；`--ofx-crash-always` 连续三次崩溃 → 客户端熔断、eval 紫帧；进度事件（含 0.5/1.0）到达 app 回调；取消 flag 语义单测（`oak-worker/tests/ofx_host.rs` + eval/ofx_host 单测） |
-| **M4 流水线预取** | 调度层按 §3.4 投依赖窗口；背压策略 | 1080p 播放 CPU 占用不升、fps 不低于进程池后端；首帧延迟不劣化（基准对比留档） |
+| **M4 流水线预取** | 渲染队列优先级（Seek>Playback>Background）；Playback job 投递即预取 Footage 解码（解码队列 Request 优先于 Prefetch）；`PreviewSlot` 泛化让线程管线入窗；队列余量作播放背压 + Seek 超额插队保证 UI 不停摆 | 确定性单测：停在解码前的时序下预取命中 LRU 且只解一次（可证伪"读前于渲染"）；Seek 在队列满时超额插队并按序优先执行；`cancel_preview_frame` 按 (sequence,frame,version) 全键匹配；播放预取 smoke（prefetches==decodes==帧数）；`bench_playback` 双后端同格式(F32)对比留档（§3.4 回填：CPU 与首帧不劣化成立；1080p 峰值吞吐低于多 worker 池，代理尺寸胜出） |
 | **M5 GPU 解码零拷贝** | §3.6 表逐行落地：staging fallback 基线 → Linux NVDEC/VAAPI 导入 → Windows D3D11VA 导入 → macOS VideoToolbox 导入；FFmpeg 无 hwaccel 的组合才评估手写 GPU 解码 | 硬解路径 `HW_TRANSFERS` 计数归零（不再下载）；逐平台导入开/关对比测试；每行独立 PR 可回退 |
 
 依赖关系：M0a 独立；M0b 依赖 M0a；M1 依赖 M0a+M0b；M2 依赖 M1；M3 依赖
