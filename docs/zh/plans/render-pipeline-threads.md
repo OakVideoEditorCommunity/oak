@@ -404,6 +404,29 @@ fallback。** 解码上传与上屏共用一层 `gpuinteop` 抽象，按后端�
   Linux(NVDEC/VAAPI) → Windows(D3D11VA) → macOS(VideoToolbox) 的顺序
   落地零拷贝导入，每行一个独立 PR、独立开关、可单独回退。
 
+> **M5 启动回填（2026-09-15）**：
+>
+> - **步骤 0（staging fallback 基线）已具备**：`oak-codec/src/hwdecode.rs`
+>   的设备候选/可用性缓存/双开关（`OAK_HWACCEL=0`、配置
+>   `HardwareDecoding`），`ffmpeg.rs:956-964` 的硬解帧
+>   `av_hwframe_transfer_data` → swscale → F32 CPU 帧，`HW_TRANSFERS`
+>   计数证明 transfer 发生；软解路径该计数恒 0；M2 的 YUV→RGB GPU pass
+>   已就绪。oak-codec 141 测试绿。**要消灭的就是那条 transfer+swscale。**
+> - **首个导入 PR（Linux VAAPI/NVDEC → wgpu）**：解码线程在
+>   `transfer_to_cpu` **之前**调用新的 `gpuinterop::try_import_hw_frame`；
+>   成功则直接产出持有硬件表面的 `Texture::Gpu`（YUV 平面 + 色彩元数据，
+>   交给 M2 的 YUV→RGB pass），失败按帧回退 staging（单帧失败不污染后续）。
+>   计数器：`HW_IMPORTS`（导入成功数）与硬解路径 `HW_TRANSFERS==0`；
+>   开关逐平台独立 + `OAK_HWACCEL=0` 全软解；开/关对比测试断言像素一致。
+>   VAAPI 走 DMA-BUF fd + `VK_EXT_external_memory_dma_buf`，NVDEC 走
+>   CUDA-Vulkan 外部内存导入；需要 `wgpu` raw Vulkan 设备（`as_hal`）+
+>   格式 modifier 协商，失败即回退。
+> - **本机开发环境**：RTX 5070 Ti（NVDEC/CUDA）+ 第二块 `/dev/dri`
+>   设备（VAAPI），FFmpeg 支持 cuda/vaapi/vulkan —— Linux 两条导入路径
+>   可真机验证；CI（lavapipe，无 hwaccel）只跑 fallback、计数器与
+>   接口单测。
+
+
 ### 3.7 resolve 重写（M0a，独立先行）
 
 对照 upstream `node/traverser.cpp:351 ResolveJobs`：
