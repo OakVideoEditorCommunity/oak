@@ -104,7 +104,11 @@ fn marker_sibling_detection() {
 	list.add_marker(a);
 	list.add_marker(b);
 	list.add_marker(other);
-	assert_eq!(list.get_marker_at_time(Rational::new(42, 1)).map(|m| m.name()), Some("a"));
+	assert_eq!(
+		list.get_marker_at_time(Rational::new(42, 1))
+			.map(|m| m.name()),
+		Some("a")
+	);
 	assert!(list.get_marker_at_time(Rational::new(7, 1)).is_some());
 	assert!(list.get_marker_at_time(Rational::new(8, 1)).is_none());
 }
@@ -254,7 +258,7 @@ fn marker_list_closest_to_time() {
 fn marker_add_command_undo_before_redo() {
 	let list_h = make_owned(TimelineMarkerList::new());
 	let mut cmd = MarkerAddCommand::new(
-		list_h.clone(),
+		list_h,
 		TimeRange::new(Rational::new(1, 1), Rational::new(2, 1)),
 		"m",
 		0,
@@ -272,7 +276,7 @@ fn marker_remove_command_double_redo() {
 		TimeRange::new(Rational::new(1, 1), Rational::new(2, 1)),
 		"m",
 	));
-	let mut cmd = MarkerRemoveCommand::new(list_h.clone(), 0);
+	let mut cmd = MarkerRemoveCommand::new(list_h, 0);
 	cmd.redo();
 	cmd.redo();
 	assert_eq!(list_of(&list_h).size(), 0);
@@ -290,7 +294,7 @@ fn marker_commands_trait_dispatch() {
 	));
 
 	let mut add = MarkerAddCommand::new(
-		list_h.clone(),
+		list_h,
 		TimeRange::new(Rational::new(9, 1), Rational::new(10, 1)),
 		"n",
 		0,
@@ -300,26 +304,26 @@ fn marker_commands_trait_dispatch() {
 	Command::undo(&mut add);
 	assert_eq!(list_of(&list_h).size(), 1);
 
-	let mut remove = MarkerRemoveCommand::new(list_h.clone(), 0);
+	let mut remove = MarkerRemoveCommand::new(list_h, 0);
 	Command::redo(&mut remove);
 	assert_eq!(list_of(&list_h).size(), 0);
 	Command::undo(&mut remove);
 	assert_eq!(list_of(&list_h).size(), 1);
 
-	let mut color = MarkerChangeColorCommand::new(list_h.clone(), 0, 7);
+	let mut color = MarkerChangeColorCommand::new(list_h, 0, 7);
 	Command::redo(&mut color);
 	assert_eq!(list_of(&list_h).at(0).unwrap().color(), 7);
 	Command::undo(&mut color);
 	assert_eq!(list_of(&list_h).at(0).unwrap().color(), 1);
 
-	let mut name = MarkerChangeNameCommand::new(list_h.clone(), 0, "z");
+	let mut name = MarkerChangeNameCommand::new(list_h, 0, "z");
 	Command::redo(&mut name);
 	assert_eq!(list_of(&list_h).at(0).unwrap().name(), "z");
 	Command::undo(&mut name);
 	assert_eq!(list_of(&list_h).at(0).unwrap().name(), "m");
 
 	let mut time = MarkerChangeTimeCommand::new(
-		list_h.clone(),
+		list_h,
 		0,
 		TimeRange::new(Rational::new(50, 1), Rational::new(51, 1)),
 	);
@@ -373,7 +377,7 @@ fn marker_list_resort_after_time_change() {
 fn marker_add_command_redo_undo() {
 	let list_h = make_owned(TimelineMarkerList::new());
 	let mut cmd = MarkerAddCommand::new(
-		list_h.clone(),
+		list_h,
 		TimeRange::new(Rational::new(1, 1), Rational::new(2, 1)),
 		"m",
 		4,
@@ -405,7 +409,7 @@ fn marker_remove_command_redo_undo() {
 		"m",
 	));
 
-	let mut cmd = MarkerRemoveCommand::new(list_h.clone(), 0);
+	let mut cmd = MarkerRemoveCommand::new(list_h, 0);
 	cmd.redo();
 	assert_eq!(list_of(&list_h).size(), 0);
 
@@ -426,7 +430,7 @@ fn marker_change_color_command_redo_undo() {
 		"m",
 	));
 
-	let mut cmd = MarkerChangeColorCommand::new(list_h.clone(), 0, 9);
+	let mut cmd = MarkerChangeColorCommand::new(list_h, 0, 9);
 	cmd.redo();
 	assert_eq!(list_of(&list_h).at(0).unwrap().color(), 9);
 	cmd.undo();
@@ -444,7 +448,7 @@ fn marker_change_name_command_redo_undo() {
 		"m",
 	));
 
-	let mut cmd = MarkerChangeNameCommand::new(list_h.clone(), 0, "renamed");
+	let mut cmd = MarkerChangeNameCommand::new(list_h, 0, "renamed");
 	cmd.redo();
 	assert_eq!(list_of(&list_h).at(0).unwrap().name(), "renamed");
 	cmd.undo();
@@ -463,7 +467,7 @@ fn marker_change_time_command_redo_undo() {
 	));
 
 	let new_t = TimeRange::new(Rational::new(50, 1), Rational::new(51, 1));
-	let mut cmd = MarkerChangeTimeCommand::new(list_h.clone(), 0, new_t);
+	let mut cmd = MarkerChangeTimeCommand::new(list_h, 0, new_t);
 	cmd.redo();
 	assert_eq!(
 		list_of(&list_h).at(0).unwrap().time().in_(),
@@ -490,7 +494,7 @@ fn marker_commands_box_to_undo_command() {
 	));
 
 	let mut cmd = MarkerAddCommand::new(
-		list_h.clone(),
+		list_h,
 		TimeRange::new(Rational::new(5, 1), Rational::new(6, 1)),
 		"n",
 		0,
@@ -501,4 +505,3 @@ fn marker_commands_box_to_undo_command() {
 	cmd.undo_now();
 	assert_eq!(list_of(&list_h).size(), 1);
 }
-

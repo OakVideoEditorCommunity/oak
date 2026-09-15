@@ -89,12 +89,12 @@ impl PreviewAudioDevice {
 			if copy_length > 0 {
 				let new_bytes_read = inner.bytes_read + copy_length;
 
-				if inner.notify_interval > 0 && inner.notify_callback.is_some() {
-					if (inner.bytes_read / inner.notify_interval)
+				if inner.notify_interval > 0
+					&& inner.notify_callback.is_some()
+					&& (inner.bytes_read / inner.notify_interval)
 						!= (new_bytes_read / inner.notify_interval)
-					{
-						notify = true;
-					}
+				{
+					notify = true;
 				}
 
 				inner.bytes_read = new_bytes_read;

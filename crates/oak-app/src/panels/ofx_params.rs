@@ -45,24 +45,24 @@
 //! in-progress slider drags); the view observes the engine and re-syncs
 //! the widget values from the engine snapshot on every render.
 
-use std::sync::Arc;
 use crate::oakui::component::text_input;
+use std::sync::Arc;
 
-use gpui::effect_stack::EffectId;
-use gpui::colors::DefaultColors;
-use gpui::{
-	div, prelude::*, px, rgb, size, point, ClickEvent, Context, Entity, EventEmitter, Focusable,
-	Render, SharedString, Window,
-};
-use gpui::{
-	Anchor, App, Bounds, ElementId, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseUpEvent,
-	Point, Pixels, Rgba, anchored, canvas, deferred, fill,
-};
-use gpui_elements::editable_text::{EditableTextState, StringStorage};
 use crate::oakui::component::controls::{CheckBox, CheckBoxEvent, CheckState};
 use crate::oakui::component::controls::{ComboBox, ComboBoxEvent, ComboBoxOption};
 use crate::oakui::component::controls::{Slider, SliderEvent, SliderModel, SliderValue, ValueKind};
 use crate::oakui::component::controls::{SpinBox, SpinBoxEvent};
+use gpui::colors::DefaultColors;
+use gpui::effect_stack::EffectId;
+use gpui::{
+	anchored, canvas, deferred, fill, Anchor, App, Bounds, ElementId, Hsla, KeyDownEvent,
+	MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, Rgba,
+};
+use gpui::{
+	div, point, prelude::*, px, rgb, size, ClickEvent, Context, Entity, EventEmitter, Focusable,
+	Render, SharedString, Window,
+};
+use gpui_elements::editable_text::{EditableTextState, StringStorage};
 
 use oak_node::value::{NodeValue, ValueType};
 
@@ -157,7 +157,11 @@ impl<E: AppEngine> OfxParamsView<E> {
 	/// Applies the engine's current values to every control (called each
 	/// render so external edits / undo / redo land on the controls).
 	fn sync_values(&mut self, window: &Window, cx: &mut Context<Self>) {
-		let params = self.engine.read(cx).effect_params(self.effect).unwrap_or_default();
+		let params = self
+			.engine
+			.read(cx)
+			.effect_params(self.effect)
+			.unwrap_or_default();
 		for control in &self.controls {
 			let Some(param) = params.iter().find(|p| p.input_id == control.input_id) else {
 				continue;
@@ -336,10 +340,13 @@ fn curve_point_to_editor(
 		let h = (next.key - p.key) / sx;
 		CurveVec2::new(h / 3.0, m_norm * h / 3.0)
 	});
-	let handle_in = index.checked_sub(1).and_then(|pi| points.get(pi)).map(|prev| {
-		let h = (p.key - prev.key) / sx;
-		CurveVec2::new(-h / 3.0, -m_norm * h / 3.0)
-	});
+	let handle_in = index
+		.checked_sub(1)
+		.and_then(|pi| points.get(pi))
+		.map(|prev| {
+			let h = (p.key - prev.key) / sx;
+			CurveVec2::new(-h / 3.0, -m_norm * h / 3.0)
+		});
 	CurvePoint {
 		x,
 		y,
@@ -396,11 +403,19 @@ fn curve_from_editor(
 				(Some(pi), None) if n > 1 => {
 					let prev = &points[pi];
 					let dx = p.x - prev.x;
-					if dx.abs() > 1e-9 { (p.y - prev.y) / dx } else { 0.0 }
+					if dx.abs() > 1e-9 {
+						(p.y - prev.y) / dx
+					} else {
+						0.0
+					}
 				}
 				(None, Some(next)) if n > 1 => {
 					let dx = next.x - p.x;
-					if dx.abs() > 1e-9 { (next.y - p.y) / dx } else { 0.0 }
+					if dx.abs() > 1e-9 {
+						(next.y - p.y) / dx
+					} else {
+						0.0
+					}
 				}
 				_ => 0.0,
 			}
@@ -421,9 +436,8 @@ fn curve_points_close(
 	b: &[gpui_widgets::curve_editor::CurvePoint],
 ) -> bool {
 	use gpui_widgets::curve_editor::CurveVec2;
-	let vec_close = |a: &CurveVec2, b: &CurveVec2| {
-		(a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6
-	};
+	let vec_close =
+		|a: &CurveVec2, b: &CurveVec2| (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6;
 	let handle_close = |a: &Option<CurveVec2>, b: &Option<CurveVec2>| match (a, b) {
 		(None, None) => true,
 		(Some(a), Some(b)) => vec_close(a, b),
@@ -431,10 +445,8 @@ fn curve_points_close(
 	};
 	a.len() == b.len()
 		&& a.iter().zip(b.iter()).all(|(a, b)| {
-			vec_close(
-				&CurveVec2::new(a.x, a.y),
-				&CurveVec2::new(b.x, b.y),
-			) && handle_close(&a.handle_in, &b.handle_in)
+			vec_close(&CurveVec2::new(a.x, a.y), &CurveVec2::new(b.x, b.y))
+				&& handle_close(&a.handle_in, &b.handle_in)
 				&& handle_close(&a.handle_out, &b.handle_out)
 		})
 }
@@ -582,7 +594,11 @@ fn slider_range_and_step(param: &EffectParam) -> (f64, f64, f64) {
 	match (range_property(param, "min"), range_property(param, "max")) {
 		// A floor but no ceiling.
 		(Some(min), None) => {
-			let v = if value.is_finite() { value.max(min) } else { min };
+			let v = if value.is_finite() {
+				value.max(min)
+			} else {
+				min
+			};
 			let span = v - min;
 			let step = if span > 0.0 {
 				nice_grid_step(span)
@@ -593,7 +609,11 @@ fn slider_range_and_step(param: &EffectParam) -> (f64, f64, f64) {
 		}
 		// A ceiling but no floor: the mirror image.
 		(None, Some(max)) => {
-			let v = if value.is_finite() { value.min(max) } else { max };
+			let v = if value.is_finite() {
+				value.min(max)
+			} else {
+				max
+			};
 			let span = max - v;
 			let step = if span > 0.0 {
 				nice_grid_step(span)
@@ -758,7 +778,11 @@ fn build_control<E: AppEngine>(
 			let (min, max) = default_range(param.value_type);
 			let mut spins = Vec::new();
 			for channel in 0..count {
-				let value = components.get(channel).copied().unwrap_or(0.0).clamp(min, max);
+				let value = components
+					.get(channel)
+					.copied()
+					.unwrap_or(0.0)
+					.clamp(min, max);
 				let model = SliderModel::new(ValueKind::Float, min, max, 0.001, value);
 				let spin = cx.new(|cx| SpinBox::new(*next_id, model, window, cx));
 				*next_id += 1;
@@ -771,7 +795,7 @@ fn build_control<E: AppEngine>(
 			// always 0..1 regardless of any attached min/max).
 			let components = value_components(&param.value);
 			let color = Rgba {
-				r: components.get(0).copied().unwrap_or(0.0) as f32,
+				r: components.first().copied().unwrap_or(0.0) as f32,
 				g: components.get(1).copied().unwrap_or(0.0) as f32,
 				b: components.get(2).copied().unwrap_or(0.0) as f32,
 				a: components.get(3).copied().unwrap_or(1.0) as f32,
@@ -785,8 +809,9 @@ fn build_control<E: AppEngine>(
 			// One curve editor per dimension; points are seeded from the
 			// JSON mirror of the curves (the input's Text value).
 			let curves = match &param.value {
-				NodeValue::Text(json) => oak_plugin::param_curve::curves_from_json(json)
-					.unwrap_or_default(),
+				NodeValue::Text(json) => {
+					oak_plugin::param_curve::curves_from_json(json).unwrap_or_default()
+				}
 				_ => Vec::new(),
 			};
 			let domain = curve_domain(param, &curves);
@@ -835,17 +860,24 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 		match &control.kind {
 			ControlKind::Slider(slider) => {
 				let slider = slider.clone();
-				cx.subscribe(&slider, move |_, _, event: &crate::oakui::component::controls::SliderEvent, cx| {
-					if let crate::oakui::component::controls::SliderEvent::ValueChanged { value, .. } = event {
-						let nv = match value {
-							SliderValue::Integer(v) => NodeValue::Int(*v),
-							_ => NodeValue::Float(value.to_f64()),
-						};
-						engine.update(cx, |engine, cx| {
-							let _ = engine.set_effect_param(effect, &input_id, nv, cx);
-						});
-					}
-				})
+				cx.subscribe(
+					&slider,
+					move |_, _, event: &crate::oakui::component::controls::SliderEvent, cx| {
+						if let crate::oakui::component::controls::SliderEvent::ValueChanged {
+							value,
+							..
+						} = event
+						{
+							let nv = match value {
+								SliderValue::Integer(v) => NodeValue::Int(*v),
+								_ => NodeValue::Float(value.to_f64()),
+							};
+							engine.update(cx, |engine, cx| {
+								let _ = engine.set_effect_param(effect, &input_id, nv, cx);
+							});
+						}
+					},
+				)
 				.detach();
 			}
 			ControlKind::CheckBox(check) => {
@@ -875,9 +907,7 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 					let nv = match &param {
 						Some(p) if p.value_type == ValueType::StrCombo => {
 							let haystack = combo_haystack(p);
-							NodeValue::StrCombo(
-								haystack.get(*value).cloned().unwrap_or_default(),
-							)
+							NodeValue::StrCombo(haystack.get(*value).cloned().unwrap_or_default())
 						}
 						_ => NodeValue::Combo(*value as i64),
 					};
@@ -908,7 +938,9 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 									.map(|p| p.value.clone())
 									.unwrap_or(NodeValue::None);
 								let patched = patch_component(&current, channel, value.to_f64());
-								engine.set_effect_param(effect, &input_id, patched, cx).is_ok()
+								engine
+									.set_effect_param(effect, &input_id, patched, cx)
+									.is_ok()
 							});
 							let _ = patched;
 						}
@@ -918,36 +950,42 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 			}
 			ControlKind::Color(picker) => {
 				let picker = picker.clone();
-				cx.subscribe(&picker, move |_, _, event: &OfxColorEvent, cx| match event {
-					// Only OK commits; slider drags update the draft inside
-					// the picker, so a drag session is one undo row.
-					OfxColorEvent::Committed(color) => {
-						let nv = NodeValue::Color([
-							color.r as f64,
-							color.g as f64,
-							color.b as f64,
-							color.a as f64,
-						]);
-						engine.update(cx, |engine, cx| {
-							if let Err(err) = engine.set_effect_param(effect, &input_id, nv, cx) {
-								// A failed set is the only path that snaps the
-								// swatch back to the old engine value (the value
-								// sync re-reads it every frame), so log it rather
-								// than swallowing it.
-								println!("[ofx params] set colour param {input_id:?} failed: {err}");
-							}
-						});
-					}
-					// Arming the picker points the program viewer's cursor at
-					// the frame; the next click there lands in the draft.
-					OfxColorEvent::PickViewerToggle { armed } => {
-						engine.update(cx, |engine, cx| {
-							engine.set_eyedropper_armed(*armed, cx);
-						});
-					}
-					// Open/close are purely local to the popup.
-					OfxColorEvent::Opened | OfxColorEvent::Cancelled => {}
-				})
+				cx.subscribe(
+					&picker,
+					move |_, _, event: &OfxColorEvent, cx| match event {
+						// Only OK commits; slider drags update the draft inside
+						// the picker, so a drag session is one undo row.
+						OfxColorEvent::Committed(color) => {
+							let nv = NodeValue::Color([
+								color.r as f64,
+								color.g as f64,
+								color.b as f64,
+								color.a as f64,
+							]);
+							engine.update(cx, |engine, cx| {
+								if let Err(err) = engine.set_effect_param(effect, &input_id, nv, cx)
+								{
+									// A failed set is the only path that snaps the
+									// swatch back to the old engine value (the value
+									// sync re-reads it every frame), so log it rather
+									// than swallowing it.
+									println!(
+										"[ofx params] set colour param {input_id:?} failed: {err}"
+									);
+								}
+							});
+						}
+						// Arming the picker points the program viewer's cursor at
+						// the frame; the next click there lands in the draft.
+						OfxColorEvent::PickViewerToggle { armed } => {
+							engine.update(cx, |engine, cx| {
+								engine.set_eyedropper_armed(*armed, cx);
+							});
+						}
+						// Open/close are purely local to the popup.
+						OfxColorEvent::Opened | OfxColorEvent::Cancelled => {}
+					},
+				)
 				.detach();
 			}
 			ControlKind::Text { .. } => {
@@ -967,28 +1005,33 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 					let domain = control.curve_domain.unwrap_or((0.0, 1.0, 0.0, 1.0));
 					let input_id = input_id.clone();
 					let engine = engine.clone();
-					cx.subscribe(&editor, move |_, _, event: &gpui_widgets::curve_editor::CurveEditorEvent, cx| {
-						use gpui_widgets::curve_editor::CurveEditorEvent as E;
-						match event {
-							E::PointMoved { .. } | E::HandleMoved { .. } | E::PointAdded { .. } => {}
-						}
-						let curves: Vec<oak_plugin::param_curve::Curve> = editors_all
-							.iter()
-							.map(|e| {
-								let points = e.read(cx).points().to_vec();
-								curve_from_editor(&points, domain)
-							})
-							.collect();
-						let json = oak_plugin::param_curve::curves_to_json(&curves);
-						engine.update(cx, |engine, cx| {
-							let _ = engine.set_effect_param(
-								effect,
-								&input_id,
-								NodeValue::Text(json),
-								cx,
-							);
-						});
-					})
+					cx.subscribe(
+						&editor,
+						move |_, _, event: &gpui_widgets::curve_editor::CurveEditorEvent, cx| {
+							use gpui_widgets::curve_editor::CurveEditorEvent as E;
+							match event {
+								E::PointMoved { .. }
+								| E::HandleMoved { .. }
+								| E::PointAdded { .. } => {}
+							}
+							let curves: Vec<oak_plugin::param_curve::Curve> = editors_all
+								.iter()
+								.map(|e| {
+									let points = e.read(cx).points().to_vec();
+									curve_from_editor(&points, domain)
+								})
+								.collect();
+							let json = oak_plugin::param_curve::curves_to_json(&curves);
+							engine.update(cx, |engine, cx| {
+								let _ = engine.set_effect_param(
+									effect,
+									&input_id,
+									NodeValue::Text(json),
+									cx,
+								);
+							});
+						},
+					)
 					.detach();
 				}
 			}
@@ -1074,9 +1117,15 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 					.text_color(colors.text)
 					.child(control.display_name.clone());
 				let widget = match &control.kind {
-					ControlKind::Slider(slider) => div().flex_1().child(slider.clone()).into_any_element(),
-					ControlKind::CheckBox(check) => div().flex_1().child(check.clone()).into_any_element(),
-					ControlKind::Combo(combo) => div().flex_1().child(combo.clone()).into_any_element(),
+					ControlKind::Slider(slider) => {
+						div().flex_1().child(slider.clone()).into_any_element()
+					}
+					ControlKind::CheckBox(check) => {
+						div().flex_1().child(check.clone()).into_any_element()
+					}
+					ControlKind::Combo(combo) => {
+						div().flex_1().child(combo.clone()).into_any_element()
+					}
 					ControlKind::Spin(spins) => {
 						let mut row = div().flex_1().flex().gap_1();
 						for (spin, _) in spins {
@@ -1138,7 +1187,10 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 								// string to the engine (avoids the re-render loop of
 								// committing on every keystroke).
 								div()
-									.id(SharedString::from(format!("ofx-commit-{}", control.input_id)))
+									.id(SharedString::from(format!(
+										"ofx-commit-{}",
+										control.input_id
+									)))
 									.cursor_pointer()
 									.rounded_sm()
 									.border_1()
@@ -1152,8 +1204,12 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 									.on_click(move |_event: &ClickEvent, _window, cx| {
 										let text = editor_commit.read(cx).as_str().to_string();
 										engine.update(cx, |engine, cx| {
-											let _ = engine
-												.set_effect_param(effect, &input_id, NodeValue::Text(text), cx);
+											let _ = engine.set_effect_param(
+												effect,
+												&input_id,
+												NodeValue::Text(text),
+												cx,
+											);
 										});
 									}),
 							)
@@ -1185,7 +1241,10 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 					ControlKind::PushButton => unreachable!("handled above"),
 				};
 				div()
-					.id(SharedString::from(format!("ofx-param-{}", control.input_id)))
+					.id(SharedString::from(format!(
+						"ofx-param-{}",
+						control.input_id
+					)))
 					.flex()
 					.items_center()
 					.gap_2()
@@ -1358,7 +1417,7 @@ impl OfxColorPicker {
 						1 => self.apply_draft_rgb(self.draft.r, v, self.draft.b, cx),
 						2 => self.apply_draft_rgb(self.draft.r, self.draft.g, v, cx),
 						3 => self.apply_draft_alpha(v, cx),
-						_ => return,
+						_ => (),
 					}
 				}
 				ColorMode::Hsv => {
@@ -1487,10 +1546,7 @@ impl OfxColorPicker {
 			}
 		};
 		let sliders = [&self.c0, &self.c1, &self.c2];
-		for (slider, (range, value)) in sliders
-			.into_iter()
-			.zip(ranges.iter().zip(vals.iter()))
-		{
+		for (slider, (range, value)) in sliders.into_iter().zip(ranges.iter().zip(vals.iter())) {
 			let (min, max, step) = *range;
 			let value = *value;
 			let slider = slider.clone();
@@ -1521,7 +1577,9 @@ impl OfxColorPicker {
 	/// every frame, so this picker stays in sync with the armed state.
 	fn toggle_viewer_pick(&mut self, cx: &mut Context<Self>) {
 		self.picking = !self.picking;
-		cx.emit(OfxColorEvent::PickViewerToggle { armed: self.picking });
+		cx.emit(OfxColorEvent::PickViewerToggle {
+			armed: self.picking,
+		});
 		cx.notify();
 	}
 
@@ -1618,14 +1676,21 @@ impl OfxColorPicker {
 			div()
 				.id(SharedString::from(format!(
 					"ofx-color-mode-{control}-{}",
-					if this_mode == ColorMode::Rgb { "rgb" } else { "hsv" }
+					if this_mode == ColorMode::Rgb {
+						"rgb"
+					} else {
+						"hsv"
+					}
 				)))
 				.debug_selector(move || {
 					format!(
 						"ofx-color-mode-{control}-{}",
-						if this_mode == ColorMode::Rgb { "rgb" } else { "hsv" }
+						if this_mode == ColorMode::Rgb {
+							"rgb"
+						} else {
+							"hsv"
+						}
 					)
-					.into()
 				})
 				.cursor_pointer()
 				.flex_1()
@@ -1652,12 +1717,17 @@ impl OfxColorPicker {
 					this.set_mode(this_mode, cx);
 				}))
 		};
-		let tab_row = div().flex().gap_1().child(tab(ColorMode::Rgb)).child(tab(ColorMode::Hsv));
+		let tab_row = div()
+			.flex()
+			.gap_1()
+			.child(tab(ColorMode::Rgb))
+			.child(tab(ColorMode::Hsv));
 
 		// Photoshop-style S/V palette + hue bar. Both record their layout
 		// bounds each frame (an invisible canvas) so a click / drag can map
 		// the cursor to a value.
-		let sv_bounds = std::sync::Arc::new(std::sync::RwLock::new(None::<gpui::Bounds<gpui::Pixels>>));
+		let sv_bounds =
+			std::sync::Arc::new(std::sync::RwLock::new(None::<gpui::Bounds<gpui::Pixels>>));
 		let sv_drag = std::sync::Arc::new(std::sync::RwLock::new(SvPaletteDrag));
 		let (hue, _, _) = rgb_to_hsv(draft.r, draft.g, draft.b);
 		let record_sv = sv_bounds.clone();
@@ -1680,41 +1750,39 @@ impl OfxColorPicker {
 			.border_color(colors.border)
 			.overflow_hidden()
 			.cursor_pointer()
-			.on_mouse_down(
-				MouseButton::Left,
-				{
-					let sv_bounds = sv_bounds.clone();
-					cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-						let Some(bounds) = sv_bounds.read().unwrap().as_ref().copied() else {
-							return;
-						};
-						let (s, v) = sv_from_point(bounds, event.position);
-						this.on_palette(s, v, cx);
-					})
-				},
-			)
+			.on_mouse_down(MouseButton::Left, {
+				let sv_bounds = sv_bounds.clone();
+				cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+					let Some(bounds) = sv_bounds.read().unwrap().as_ref().copied() else {
+						return;
+					};
+					let (s, v) = sv_from_point(bounds, event.position);
+					this.on_palette(s, v, cx);
+				})
+			})
 			.on_drag(sv_drag.clone(), |_payload, _offset, _window, cx| {
 				cx.new(|_| SvPaletteDragGhost)
 			})
-			.on_drag_move(
-				{
-					let sv_bounds = sv_bounds.clone();
-					cx.listener(
-						move |this,
-						      event: &gpui::DragMoveEvent<std::sync::Arc<std::sync::RwLock<SvPaletteDrag>>>,
-						      _window,
-						      cx| {
-							let Some(bounds) = sv_bounds.read().unwrap().as_ref().copied() else {
-								return;
-							};
-							let (s, v) = sv_from_point(bounds, event.event.position);
-							this.on_palette(s, v, cx);
-						},
-					)
-				},
-			)
+			.on_drag_move({
+				let sv_bounds = sv_bounds.clone();
+				cx.listener(
+					move |this,
+					      event: &gpui::DragMoveEvent<
+						std::sync::Arc<std::sync::RwLock<SvPaletteDrag>>,
+					>,
+					      _window,
+					      cx| {
+						let Some(bounds) = sv_bounds.read().unwrap().as_ref().copied() else {
+							return;
+						};
+						let (s, v) = sv_from_point(bounds, event.event.position);
+						this.on_palette(s, v, cx);
+					},
+				)
+			})
 			.child(sv_canvas);
-		let hue_bounds = std::sync::Arc::new(std::sync::RwLock::new(None::<gpui::Bounds<gpui::Pixels>>));
+		let hue_bounds =
+			std::sync::Arc::new(std::sync::RwLock::new(None::<gpui::Bounds<gpui::Pixels>>));
 		let hue_drag = std::sync::Arc::new(std::sync::RwLock::new(HueBarDrag));
 		let record_hue = hue_bounds.clone();
 		let hue_canvas = canvas(
@@ -1736,37 +1804,34 @@ impl OfxColorPicker {
 			.border_color(colors.border)
 			.overflow_hidden()
 			.cursor_pointer()
-			.on_mouse_down(
-				MouseButton::Left,
-				{
-					let hue_bounds = hue_bounds.clone();
-					cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-						let Some(bounds) = hue_bounds.read().unwrap().as_ref().copied() else {
-							return;
-						};
-						this.on_hue(hue_from_point(bounds, event.position), cx);
-					})
-				},
-			)
+			.on_mouse_down(MouseButton::Left, {
+				let hue_bounds = hue_bounds.clone();
+				cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+					let Some(bounds) = hue_bounds.read().unwrap().as_ref().copied() else {
+						return;
+					};
+					this.on_hue(hue_from_point(bounds, event.position), cx);
+				})
+			})
 			.on_drag(hue_drag.clone(), |_payload, _offset, _window, cx| {
 				cx.new(|_| HueBarDragGhost)
 			})
-			.on_drag_move(
-				{
-					let hue_bounds = hue_bounds.clone();
-					cx.listener(
-						move |this,
-						      event: &gpui::DragMoveEvent<std::sync::Arc<std::sync::RwLock<HueBarDrag>>>,
-						      _window,
-						      cx| {
-							let Some(bounds) = hue_bounds.read().unwrap().as_ref().copied() else {
-								return;
-							};
-							this.on_hue(hue_from_point(bounds, event.event.position), cx);
-						},
-					)
-				},
-			)
+			.on_drag_move({
+				let hue_bounds = hue_bounds.clone();
+				cx.listener(
+					move |this,
+					      event: &gpui::DragMoveEvent<
+						std::sync::Arc<std::sync::RwLock<HueBarDrag>>,
+					>,
+					      _window,
+					      cx| {
+						let Some(bounds) = hue_bounds.read().unwrap().as_ref().copied() else {
+							return;
+						};
+						this.on_hue(hue_from_point(bounds, event.event.position), cx);
+					},
+				)
+			})
 			.child(hue_canvas);
 		let palette_row = div().flex().gap_1().child(sv_panel).child(hue_bar);
 
@@ -1810,26 +1875,21 @@ impl OfxColorPicker {
 			.border_color(colors.border)
 			.overflow_hidden()
 			.child(preview_canvas);
-		let hex_row = div()
-			.flex()
-			.items_center()
-			.gap_1()
-			.child(preview)
-			.child(
-				div()
-					.flex_1()
-					.rounded_md()
-					.border_1()
-					.border_color(colors.border)
-					.bg(colors.background)
-					.px_2()
-					.py_1()
-					.child(
-						text_input(format!("ofx-color-hex-{control}"), cx)
-							.state(hex_weak)
-							.accepts_input(true),
-					),
-			);
+		let hex_row = div().flex().items_center().gap_1().child(preview).child(
+			div()
+				.flex_1()
+				.rounded_md()
+				.border_1()
+				.border_color(colors.border)
+				.bg(colors.background)
+				.px_2()
+				.py_1()
+				.child(
+					text_input(format!("ofx-color-hex-{control}"), cx)
+						.state(hex_weak)
+						.accepts_input(true),
+				),
+		);
 
 		// Hex parse error hint.
 		let error_hint = if hex_error {
@@ -1873,18 +1933,29 @@ impl OfxColorPicker {
 			.on_click(cx.listener(|this, _event: &ClickEvent, _window, cx| {
 				this.commit(cx);
 			}));
-		let buttons = div().flex().justify_between().gap_1().child(cancel).child(ok);
+		let buttons = div()
+			.flex()
+			.justify_between()
+			.gap_1()
+			.child(cancel)
+			.child(ok);
 
 		// "Pick from viewer": arms the eyedropper in the program viewer; the
 		// next click on the frame samples the pixel under the cursor.
 		let pick_viewer = div()
-			.id(SharedString::from(format!("ofx-color-pick-viewer-{control}")))
-			.debug_selector(move || format!("ofx-color-pick-viewer-{control}").into())
+			.id(SharedString::from(format!(
+				"ofx-color-pick-viewer-{control}"
+			)))
+			.debug_selector(move || format!("ofx-color-pick-viewer-{control}"))
 			.cursor_pointer()
 			.rounded_sm()
 			.border_1()
 			.border_color(colors.border)
-			.bg(if self.picking { colors.selected } else { colors.background })
+			.bg(if self.picking {
+				colors.selected
+			} else {
+				colors.background
+			})
 			.text_sm()
 			.text_color(colors.text)
 			.px_2()
@@ -1901,53 +1972,53 @@ impl OfxColorPicker {
 				.offset(point(px(0.0), px(36.0)))
 				.snap_to_window_with_margin(px(8.0))
 				.child(
-				div()
-					.w(px(300.0))
-					.p_2()
-					.rounded_lg()
-					.border_1()
-					.border_color(colors.border)
-					.bg(colors.container)
-					.flex()
-					.flex_col()
-					.gap_1()
-					.debug_selector(|| "ofx-color-popup".into())
-					.on_mouse_up_out(
-						MouseButton::Left,
-						cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-							// While the viewer eyedropper is armed, the click
-							// that follows is a *pick* on the program viewer,
-							// not an outside-click dismissal: the popup must
-							// survive it so the sampled colour lands in the
-							// draft. The pick lands mid-click (before the
-							// button comes up) and disarms the eyedropper, so
-							// its mouse-up is swallowed once explicitly.
-							if this.swallow_next_outside_up {
-								this.swallow_next_outside_up = false;
-							} else if !this.picking {
-								this.close_menu(cx);
+					div()
+						.w(px(300.0))
+						.p_2()
+						.rounded_lg()
+						.border_1()
+						.border_color(colors.border)
+						.bg(colors.container)
+						.flex()
+						.flex_col()
+						.gap_1()
+						.debug_selector(|| "ofx-color-popup".into())
+						.on_mouse_up_out(
+							MouseButton::Left,
+							cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+								// While the viewer eyedropper is armed, the click
+								// that follows is a *pick* on the program viewer,
+								// not an outside-click dismissal: the popup must
+								// survive it so the sampled colour lands in the
+								// draft. The pick lands mid-click (before the
+								// button comes up) and disarms the eyedropper, so
+								// its mouse-up is swallowed once explicitly.
+								if this.swallow_next_outside_up {
+									this.swallow_next_outside_up = false;
+								} else if !this.picking {
+									this.close_menu(cx);
+								}
+							}),
+						)
+						.on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+							if event.keystroke.key == "escape" {
+								if this.picking {
+									this.toggle_viewer_pick(cx);
+								} else {
+									this.close_menu(cx);
+								}
 							}
-						}),
-					)
-					.on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-						if event.keystroke.key == "escape" {
-							if this.picking {
-								this.toggle_viewer_pick(cx);
-							} else {
-								this.close_menu(cx);
-							}
-						}
-					}))
-					.child(tab_row)
-					.child(palette_row)
-					.child(slider_rows)
-					.child(hex_row)
-					.child(error_hint)
-					.child(buttons)
-					.child(pick_viewer),
+						}))
+						.child(tab_row)
+						.child(palette_row)
+						.child(slider_rows)
+						.child(hex_row)
+						.child(error_hint)
+						.child(buttons)
+						.child(pick_viewer),
 				),
-			)
-			.with_priority(1)
+		)
+		.with_priority(1)
 	}
 }
 
@@ -1959,7 +2030,11 @@ impl Render for OfxColorPicker {
 		let control = self.control;
 		// While the popup is open the swatch follows the draft live (the
 		// user's in-progress edit), otherwise it shows the committed value.
-		let swatch_color = if self.open { self.draft } else { self.committed };
+		let swatch_color = if self.open {
+			self.draft
+		} else {
+			self.committed
+		};
 
 		let swatch = div()
 			.id(ElementId::named_usize("ofx-color-swatch", control))
@@ -1989,13 +2064,15 @@ impl Render for OfxColorPicker {
 				}
 				cx.stop_propagation();
 			}))
-			.child(canvas(
-				|bounds, _window, _cx| bounds,
-				move |bounds, _content, window, cx| {
-					paint_checker_swatch(bounds, swatch_color, window, cx);
-				},
-			)
-			.size_full());
+			.child(
+				canvas(
+					|bounds, _window, _cx| bounds,
+					move |bounds, _content, window, cx| {
+						paint_checker_swatch(bounds, swatch_color, window, cx);
+					},
+				)
+				.size_full(),
+			);
 
 		let popup = if self.open {
 			self.popup_anchored(cx, &colors)
@@ -2045,12 +2122,7 @@ fn format_hex(color: Rgba) -> String {
 
 /// Paint a two-tone checkerboard (8 px cells) with `color` over it — the
 /// alpha channel reads through the checkerboard.
-fn paint_checker_swatch(
-	bounds: Bounds<Pixels>,
-	color: Rgba,
-	window: &mut Window,
-	_cx: &mut App,
-) {
+fn paint_checker_swatch(bounds: Bounds<Pixels>, color: Rgba, window: &mut Window, _cx: &mut App) {
 	const CELL: f32 = 8.0;
 	let width = f32::from(bounds.size.width);
 	let height = f32::from(bounds.size.height);
@@ -2276,13 +2348,13 @@ mod tests {
 	#[test]
 	fn hex_parse_rejects_malformed() {
 		for bad in [
-			"",            // empty
-			"102030",      // missing '#'
-			"#12345",      // too short
-			"#1234567",    // 7 digits
-			"#GGHHII",     // non-hex digits
-			"#123456789",  // too long
-			"# 123456",    // whitespace inside
+			"",           // empty
+			"102030",     // missing '#'
+			"#12345",     // too short
+			"#1234567",   // 7 digits
+			"#GGHHII",    // non-hex digits
+			"#123456789", // too long
+			"# 123456",   // whitespace inside
 		] {
 			assert!(parse_hex(bad).is_none(), "expected {bad:?} to be rejected");
 		}
@@ -2296,7 +2368,11 @@ mod tests {
 			picker: Entity<OfxColorPicker>,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.picker.clone())
 			}
 		}
@@ -2364,7 +2440,9 @@ mod tests {
 		// Open the popup by clicking the swatch, then re-draw so the popup's
 		// deferred layer is laid out (and the palette canvas records its
 		// bounds for the click mapping).
-		let swatch = visual.debug_bounds("ofx-color-swatch").expect("swatch painted");
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
 		let swatch_center = Point::new(
 			swatch.origin.x + swatch.size.width * 0.5,
 			swatch.origin.y + swatch.size.height * 0.5,
@@ -2415,7 +2493,11 @@ mod tests {
 			_subscription: Subscription,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.picker.clone())
 			}
 		}
@@ -2437,9 +2519,12 @@ mod tests {
 			});
 			let events = Arc::new(Mutex::new(Vec::new()));
 			let events_sub = events.clone();
-			let _subscription = cx.subscribe(&picker, move |_this, _emitter, event: &OfxColorEvent, _cx| {
-				events_sub.lock().unwrap().push(*event);
-			});
+			let _subscription = cx.subscribe(
+				&picker,
+				move |_this, _emitter, event: &OfxColorEvent, _cx| {
+					events_sub.lock().unwrap().push(*event);
+				},
+			);
 			Host {
 				picker,
 				events,
@@ -2455,7 +2540,9 @@ mod tests {
 
 		// Open the popup by clicking the swatch, then re-draw so the popup's
 		// deferred layer is laid out.
-		let swatch = visual.debug_bounds("ofx-color-swatch").expect("swatch painted");
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
 		let swatch_center = Point::new(
 			swatch.origin.x + swatch.size.width * 0.5,
 			swatch.origin.y + swatch.size.height * 0.5,
@@ -2478,7 +2565,10 @@ mod tests {
 		let host = window.root(cx).expect("host root");
 		let events = cx.read(|cx| host.read(cx).events.lock().unwrap().clone());
 		assert!(
-			matches!(events.last(), Some(OfxColorEvent::PickViewerToggle { armed: true })),
+			matches!(
+				events.last(),
+				Some(OfxColorEvent::PickViewerToggle { armed: true })
+			),
 			"clicking pick should arm the eyedropper, got {events:?}"
 		);
 
@@ -2487,7 +2577,10 @@ mod tests {
 		cx.run_until_parked();
 		let events = cx.read(|cx| host.read(cx).events.lock().unwrap().clone());
 		assert!(
-			matches!(events.last(), Some(OfxColorEvent::PickViewerToggle { armed: false })),
+			matches!(
+				events.last(),
+				Some(OfxColorEvent::PickViewerToggle { armed: false })
+			),
 			"second click should disarm the eyedropper, got {events:?}"
 		);
 	}
@@ -2505,7 +2598,11 @@ mod tests {
 			_subscription: Subscription,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.picker.clone())
 			}
 		}
@@ -2527,9 +2624,12 @@ mod tests {
 			});
 			let events = Arc::new(Mutex::new(Vec::new()));
 			let events_sub = events.clone();
-			let _subscription = cx.subscribe(&picker, move |_this, _emitter, event: &OfxColorEvent, _cx| {
-				events_sub.lock().unwrap().push(*event);
-			});
+			let _subscription = cx.subscribe(
+				&picker,
+				move |_this, _emitter, event: &OfxColorEvent, _cx| {
+					events_sub.lock().unwrap().push(*event);
+				},
+			);
 			Host {
 				picker,
 				events,
@@ -2545,7 +2645,9 @@ mod tests {
 
 		// Open the popup by clicking the swatch, then re-draw so the popup's
 		// deferred layer is laid out.
-		let swatch = visual.debug_bounds("ofx-color-swatch").expect("swatch painted");
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
 		let swatch_center = Point::new(
 			swatch.origin.x + swatch.size.width * 0.5,
 			swatch.origin.y + swatch.size.height * 0.5,
@@ -2591,7 +2693,10 @@ mod tests {
 					.any(|e| matches!(e, OfxColorEvent::Cancelled)),
 			)
 		});
-		assert!(open, "the popup must survive an outside click while picking");
+		assert!(
+			open,
+			"the popup must survive an outside click while picking"
+		);
 		assert!(picking, "the eyedropper stays armed through the pick");
 		assert!(!cancelled, "no dismissal may be emitted while picking");
 
@@ -2672,7 +2777,11 @@ mod tests {
 			_subscription: Subscription,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.picker.clone())
 			}
 		}
@@ -2694,9 +2803,12 @@ mod tests {
 			});
 			let events = Arc::new(Mutex::new(Vec::new()));
 			let events_sub = events.clone();
-			let _subscription = cx.subscribe(&picker, move |_this, _emitter, event: &OfxColorEvent, _cx| {
-				events_sub.lock().unwrap().push(*event);
-			});
+			let _subscription = cx.subscribe(
+				&picker,
+				move |_this, _emitter, event: &OfxColorEvent, _cx| {
+					events_sub.lock().unwrap().push(*event);
+				},
+			);
 			Host {
 				picker,
 				events,
@@ -2711,7 +2823,9 @@ mod tests {
 		});
 
 		// Open the popup, re-draw for the deferred layer, arm the eyedropper.
-		let swatch = visual.debug_bounds("ofx-color-swatch").expect("swatch painted");
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
 		visual.simulate_click(
 			Point::new(
 				swatch.origin.x + swatch.size.width * 0.5,
@@ -2746,7 +2860,8 @@ mod tests {
 		let host = window.root(cx).expect("host root");
 		visual.update(|_window, cx| {
 			host.update(cx, |host, cx| {
-				host.picker.update(cx, |picker, cx| picker.apply_viewer_pick(red, cx));
+				host.picker
+					.update(cx, |picker, cx| picker.apply_viewer_pick(red, cx));
 			});
 		});
 		let popup = visual
@@ -2800,18 +2915,90 @@ mod tests {
 		let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
 
 		// The six canonical corners of the RGB cube.
-		assert_eq!(hsv(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }), (0.0, 1.0, 1.0));
-		assert_eq!(hsv(Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }), (120.0, 1.0, 1.0));
-		assert_eq!(hsv(Rgba { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }), (240.0, 1.0, 1.0));
-		assert_eq!(hsv(Rgba { r: 1.0, g: 1.0, b: 0.0, a: 1.0 }), (60.0, 1.0, 1.0));
-		assert_eq!(hsv(Rgba { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }), (0.0, 0.0, 1.0));
-		assert_eq!(hsv(Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }), (0.0, 0.0, 0.0));
+		assert_eq!(
+			hsv(Rgba {
+				r: 1.0,
+				g: 0.0,
+				b: 0.0,
+				a: 1.0
+			}),
+			(0.0, 1.0, 1.0)
+		);
+		assert_eq!(
+			hsv(Rgba {
+				r: 0.0,
+				g: 1.0,
+				b: 0.0,
+				a: 1.0
+			}),
+			(120.0, 1.0, 1.0)
+		);
+		assert_eq!(
+			hsv(Rgba {
+				r: 0.0,
+				g: 0.0,
+				b: 1.0,
+				a: 1.0
+			}),
+			(240.0, 1.0, 1.0)
+		);
+		assert_eq!(
+			hsv(Rgba {
+				r: 1.0,
+				g: 1.0,
+				b: 0.0,
+				a: 1.0
+			}),
+			(60.0, 1.0, 1.0)
+		);
+		assert_eq!(
+			hsv(Rgba {
+				r: 1.0,
+				g: 1.0,
+				b: 1.0,
+				a: 1.0
+			}),
+			(0.0, 0.0, 1.0)
+		);
+		assert_eq!(
+			hsv(Rgba {
+				r: 0.0,
+				g: 0.0,
+				b: 0.0,
+				a: 1.0
+			}),
+			(0.0, 0.0, 0.0)
+		);
 
 		// The same corners back to RGB.
 		let rgb = |h: f32, s: f32, v: f32| hsv_to_rgb(h, s, v);
-		assert_eq!(rgb(0.0, 1.0, 1.0), Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 });
-		assert_eq!(rgb(120.0, 1.0, 1.0), Rgba { r: 0.0, g: 1.0, b: 0.0, a: 1.0 });
-		assert_eq!(rgb(240.0, 1.0, 1.0), Rgba { r: 0.0, g: 0.0, b: 1.0, a: 1.0 });
+		assert_eq!(
+			rgb(0.0, 1.0, 1.0),
+			Rgba {
+				r: 1.0,
+				g: 0.0,
+				b: 0.0,
+				a: 1.0
+			}
+		);
+		assert_eq!(
+			rgb(120.0, 1.0, 1.0),
+			Rgba {
+				r: 0.0,
+				g: 1.0,
+				b: 0.0,
+				a: 1.0
+			}
+		);
+		assert_eq!(
+			rgb(240.0, 1.0, 1.0),
+			Rgba {
+				r: 0.0,
+				g: 0.0,
+				b: 1.0,
+				a: 1.0
+			}
+		);
 
 		// Arbitrary RGB round-trips.
 		for (r, g, b) in [(0.5, 0.25, 0.75), (0.1, 0.9, 0.2), (0.33, 0.67, 0.44)] {
@@ -2866,14 +3053,19 @@ mod tests {
 			view: Entity<OfxParamsView<MockEngine>>,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.view.clone())
 			}
 		}
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(400.0), px(200.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::create(cx));
-			let view = cx.new(|cx| OfxParamsView::<MockEngine>::new(EffectId(900), engine, window, cx));
+			let engine = cx.new(MockEngine::create);
+			let view =
+				cx.new(|cx| OfxParamsView::<MockEngine>::new(EffectId(900), engine, window, cx));
 			Host { view }
 		});
 		cx.run_until_parked();
@@ -2953,14 +3145,19 @@ mod tests {
 			view: Entity<OfxParamsView<MockEngine>>,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.view.clone())
 			}
 		}
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(400.0), px(600.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::create(cx));
-			let view = cx.new(|cx| OfxParamsView::<MockEngine>::new(EffectId(900), engine, window, cx));
+			let engine = cx.new(MockEngine::create);
+			let view =
+				cx.new(|cx| OfxParamsView::<MockEngine>::new(EffectId(900), engine, window, cx));
 			Host { view }
 		});
 		cx.run_until_parked();
@@ -3023,13 +3220,17 @@ mod tests {
 					}
 					ControlKind::CheckBox(_) => "checkbox",
 					ControlKind::Combo(combo) => {
-						snap.combos.push((control.input_id.clone(), combo.read(cx).selected()));
+						snap.combos
+							.push((control.input_id.clone(), combo.read(cx).selected()));
 						"combo"
 					}
 					ControlKind::Spin(spins) => {
 						snap.spins.push((
 							control.input_id.clone(),
-							spins.iter().map(|(spin, _)| spin.read(cx).value().to_f64()).collect(),
+							spins
+								.iter()
+								.map(|(spin, _)| spin.read(cx).value().to_f64())
+								.collect(),
 						));
 						"spin"
 					}
@@ -3214,7 +3415,10 @@ mod tests {
 				param: param(
 					ValueType::Float,
 					NodeValue::Float(0.5),
-					vec![("min", NodeValue::Float(0.0)), ("max", NodeValue::Float(1.0))],
+					vec![
+						("min", NodeValue::Float(0.0)),
+						("max", NodeValue::Float(1.0)),
+					],
 				),
 				want_value: 0.5,
 				want_range: (0.0, 1.0),
@@ -3275,4 +3479,3 @@ mod tests {
 		}
 	}
 }
-

@@ -28,12 +28,9 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{
-	BufferSize, Device, Host, SampleFormat, Stream, StreamConfig,
-	SupportedBufferSize,
-};
 use crate::previewdevice::PreviewAudioDevice;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{BufferSize, Device, Host, SampleFormat, Stream, StreamConfig, SupportedBufferSize};
 
 /// The default frames-per-buffer requested for the preview stream
 /// (clamped to the device's supported range).
@@ -100,21 +97,19 @@ impl PortAudioOutput {
 		}
 		self.close();
 
-		if self.host.is_none(){
+		if self.host.is_none() {
 			self.host = Some(cpal::default_host())
 		}
 
 		let host = self.host.as_ref().unwrap();
 
-		let output_device = resolve_device(&host, device)
-			.ok_or_else(|| "no output device available".to_string())?;
+		let output_device =
+			resolve_device(host, device).ok_or_else(|| "no output device available".to_string())?;
 		let config = pick_config(&output_device, rate, channels)?;
 		if stream_dbg_enabled() {
 			eprintln!(
 				"[audio-stream] config: {} Hz, {} ch, buffer {:?}",
-				u32::from(config.sample_rate),
-				config.channels,
-				config.buffer_size
+				config.sample_rate, config.channels, config.buffer_size
 			);
 		}
 
@@ -217,8 +212,8 @@ fn pick_config(device: &Device, rate: i32, channels: i32) -> Result<StreamConfig
 	let want_rate = rate as u32;
 	let want_channels = channels as u16;
 
-	if let Ok(mut configs) = device.supported_output_configs() {
-		while let Some(c) = configs.next() {
+	if let Ok(configs) = device.supported_output_configs() {
+		for c in configs {
 			if c.sample_format() != SampleFormat::F32 || c.channels() != want_channels {
 				continue;
 			}

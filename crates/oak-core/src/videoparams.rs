@@ -703,9 +703,9 @@ impl VideoParams {
 		let divider = squared_divider.sqrt();
 
 		if divider <= DIVIDERS[0] as f64 {
-			return DIVIDERS[0];
+			DIVIDERS[0]
 		} else if divider >= DIVIDERS[7] as f64 {
-			return DIVIDERS[7];
+			DIVIDERS[7]
 		} else {
 			for i in 1..DIVIDERS.len() {
 				let prev = DIVIDERS[i - 1];
@@ -716,7 +716,7 @@ impl VideoParams {
 					return if prev_diff < next_diff { prev } else { next };
 				}
 			}
-			return 1; // fallback, unreachable
+			1 // fallback, unreachable
 		}
 	}
 
@@ -1075,7 +1075,7 @@ fn format_g(value: f64) -> String {
 		e += 1;
 	}
 
-	let body = if PREC > e && e >= -4 {
+	let body = if (-4..PREC).contains(&e) {
 		let decimals = (PREC - 1 - e).max(0) as usize;
 		trim_frac_trailing(format!("{:.*}", decimals, v))
 	} else {

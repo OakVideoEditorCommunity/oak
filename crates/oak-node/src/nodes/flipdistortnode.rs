@@ -199,6 +199,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(FlipDistortNode))
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.flip`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.flip",
+		name: "Flip",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,15 +325,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Flip");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.flip`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.flip",
-		name: "Flip",
-		categories: &[Category::Distort],
-		create,
-	});
 }

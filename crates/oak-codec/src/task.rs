@@ -335,8 +335,8 @@ mod tests {
 
 	#[test]
 	fn task_kind_values_match_abi() {
-		assert_eq!(TaskKind::Conform as i32, OAKCODEC_TASK_CONFORM as i32);
-		assert_eq!(TaskKind::Proxy as i32, OAKCODEC_TASK_PROXY as i32);
+		assert_eq!(TaskKind::Conform as i32, OAKCODEC_TASK_CONFORM);
+		assert_eq!(TaskKind::Proxy as i32, OAKCODEC_TASK_PROXY);
 	}
 
 	// ABI constants mirrored from include/codec/task.h.

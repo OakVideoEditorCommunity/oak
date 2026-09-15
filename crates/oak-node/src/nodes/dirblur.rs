@@ -244,6 +244,16 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(DirBlurNode))
 }
 
+/// Register this node type.
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.dirblur",
+		name: "Directional Blur",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -393,14 +403,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Directional Blur");
 	}
-}
-
-/// Register this node type.
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.dirblur",
-		name: "Directional Blur",
-		categories: &[Category::Filter],
-		create,
-	});
 }

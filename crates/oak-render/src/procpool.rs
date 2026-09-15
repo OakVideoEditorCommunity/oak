@@ -1379,11 +1379,10 @@ impl ProcessDispatcher {
 	pub fn broadcast_plugin_cancel(&self) {
 		let mut inner = lock(&self.inner);
 		for handle in inner.workers.iter_mut() {
-			if matches!(handle.state, WorkerState::Alive | WorkerState::Starting) {
-				if self.send_json(handle, &plugin_cancel_json()).is_err() {
+			if matches!(handle.state, WorkerState::Alive | WorkerState::Starting)
+				&& self.send_json(handle, &plugin_cancel_json()).is_err() {
 					handle.state = WorkerState::Dead;
 				}
-			}
 		}
 	}
 
@@ -2386,7 +2385,7 @@ impl JobDispatch for ProcessDispatcher {
 			// Every ticket still open completes with cancellation; the map
 			// is dropped with the dispatcher (clear for hygiene — leaked
 			// entries pin shm region views).
-			for (_, pt) in inner.tickets.iter_mut() {
+			for pt in inner.tickets.values_mut() {
 				if let Some(done) = pt.done.take() {
 					fired.push((done, Err(Error::State)));
 				}

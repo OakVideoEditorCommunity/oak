@@ -122,52 +122,6 @@ pub(crate) fn pick_gl_pixel_depth(
 	None
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::property::{PropertySet, Value};
-
-	fn cs(s: &str) -> CString {
-		CString::new(s).unwrap()
-	}
-
-	/// GL 像素深度协商矩阵（ofxGPURender.h kOfxOpenGLPropPixelDepth）：
-	/// 未声明/含 Float → 管线 F32 可行；声明且不含 Float → None
-	/// （GL 模式不可行，回退 CPU）。
-	#[test]
-	fn pick_gl_pixel_depth_matrix() {
-		let props = PropertySet::new();
-		assert_eq!(pick_gl_pixel_depth(&props), Some("OfxBitDepthFloat"));
-
-		let props2 = PropertySet::new();
-		props2.define(
-			crate::host::PROP_GL_PIXEL_DEPTH,
-			vec![
-				Value::String(cs("OfxBitDepthHalf")),
-				Value::String(cs("OfxBitDepthByte")),
-			],
-		);
-		assert_eq!(pick_gl_pixel_depth(&props2), None);
-
-		let props3 = PropertySet::new();
-		props3.define(
-			crate::host::PROP_GL_PIXEL_DEPTH,
-			vec![
-				Value::String(cs("OfxBitDepthByte")),
-				Value::String(cs("OfxBitDepthFloat")),
-			],
-		);
-		assert_eq!(pick_gl_pixel_depth(&props3), Some("OfxBitDepthFloat"));
-
-		let props4 = PropertySet::new();
-		props4.define(
-			crate::host::PROP_GL_PIXEL_DEPTH,
-			vec![Value::String(cs("OfxBitDepthFloat"))],
-		);
-		assert_eq!(pick_gl_pixel_depth(&props4), Some("OfxBitDepthFloat"));
-	}
-}
-
 // ---- 存活纹理表 -----------------------------------------------------------
 
 /// 存活 GL 纹理表：clipLoadTexture 产出（props 地址 → 属性集 +
@@ -224,11 +178,9 @@ pub(crate) fn purge_leftovers() {
 		.collect();
 	live.retain(|_, (_, _, is_output, _)| *is_output);
 	drop(live);
-	for gl in dropped {
-		if let Some(gl) = gl {
-			delete_gl_texture_if_gl(gl);
-		}
-	}
+	for gl in dropped.into_iter().flatten() {
+ 			delete_gl_texture_if_gl(gl);
+ 		}
 }
 
 /// 公共入口模板：panic 兜底。
@@ -539,8 +491,54 @@ pub struct GlRenderSuiteV1 {
 pub fn suite_v1() -> &'static GlRenderSuiteV1 {
 	static SUITE: std::sync::OnceLock<GlRenderSuiteV1> = std::sync::OnceLock::new();
 	SUITE.get_or_init(|| GlRenderSuiteV1 {
-		clip_load_texture: clip_load_texture,
-		clip_free_texture: clip_free_texture,
-		flush_resources: flush_resources,
+		clip_load_texture,
+		clip_free_texture,
+		flush_resources,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::property::{PropertySet, Value};
+
+	fn cs(s: &str) -> CString {
+		CString::new(s).unwrap()
+	}
+
+	/// GL 像素深度协商矩阵（ofxGPURender.h kOfxOpenGLPropPixelDepth）：
+	/// 未声明/含 Float → 管线 F32 可行；声明且不含 Float → None
+	/// （GL 模式不可行，回退 CPU）。
+	#[test]
+	fn pick_gl_pixel_depth_matrix() {
+		let props = PropertySet::new();
+		assert_eq!(pick_gl_pixel_depth(&props), Some("OfxBitDepthFloat"));
+
+		let props2 = PropertySet::new();
+		props2.define(
+			crate::host::PROP_GL_PIXEL_DEPTH,
+			vec![
+				Value::String(cs("OfxBitDepthHalf")),
+				Value::String(cs("OfxBitDepthByte")),
+			],
+		);
+		assert_eq!(pick_gl_pixel_depth(&props2), None);
+
+		let props3 = PropertySet::new();
+		props3.define(
+			crate::host::PROP_GL_PIXEL_DEPTH,
+			vec![
+				Value::String(cs("OfxBitDepthByte")),
+				Value::String(cs("OfxBitDepthFloat")),
+			],
+		);
+		assert_eq!(pick_gl_pixel_depth(&props3), Some("OfxBitDepthFloat"));
+
+		let props4 = PropertySet::new();
+		props4.define(
+			crate::host::PROP_GL_PIXEL_DEPTH,
+			vec![Value::String(cs("OfxBitDepthFloat"))],
+		);
+		assert_eq!(pick_gl_pixel_depth(&props4), Some("OfxBitDepthFloat"));
+	}
 }

@@ -179,7 +179,10 @@ fn clip_multicam_media(
 	// The source sequence and the current source's track.
 	let seq = g.connected_output(mc, SEQUENCE_INPUT, -1)?;
 	let kind = {
-		let t = mc_entry.core.standard_value(SEQUENCE_TYPE_INPUT, -1).to_double() as i32;
+		let t = mc_entry
+			.core
+			.standard_value(SEQUENCE_TYPE_INPUT, -1)
+			.to_double() as i32;
 		oak_node::track::TrackType::from_c(t).unwrap_or(oak_node::track::TrackType::Video)
 	};
 	let seq_pos = super::graphops::track_list_of(g, seq, kind)?;
@@ -221,7 +224,10 @@ fn clip_multicam_media(
 /// unchanged). Parameters are the inspector's parameter set (non-hidden,
 /// non-connection inputs at their standard values; keyframed values are
 /// not time-resolved on this path).
-fn clip_effects(g: &oak_node::graph::Graph, block_id: NodeId) -> Vec<oak_render::ticket::MontageEffect> {
+fn clip_effects(
+	g: &oak_node::graph::Graph,
+	block_id: NodeId,
+) -> Vec<oak_render::ticket::MontageEffect> {
 	use super::effectchain;
 	effectchain::chain(g, block_id)
 		.into_iter()
@@ -483,7 +489,9 @@ pub fn render_multicam_angle_frame(
 	width: i32,
 	height: i32,
 ) -> Result<RenderedFrame, String> {
-	render_video(multicam_angle_frame_params(p, seq, track, frame_ts, tb, width, height)?)
+	render_video(multicam_angle_frame_params(
+		p, seq, track, frame_ts, tb, width, height,
+	)?)
 }
 
 /// The audio montage over `range`: every audio clip overlapping the
@@ -518,8 +526,7 @@ pub fn audio_montage(p: &ProjectRef, seq: NodeId, range: TimeRange) -> Vec<Monta
 				if out <= range.in_() || in_ >= range.out() {
 					continue;
 				}
-				let Some((filename, stream_index)) =
-					clip_preview_media(&g.graph, block_id, false)
+				let Some((filename, stream_index)) = clip_preview_media(&g.graph, block_id, false)
 				else {
 					continue;
 				};
@@ -631,23 +638,24 @@ impl RenderedFrame {
 				let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
 				let pixels = f.shm.slot_bytes(f.slot);
 				let data = pixels.get(..meta.data_size.max(0) as usize)?;
-			if meta.format == PIXEL_FORMAT_F32 {
-				// M15 S3: the worker rendered F32 (the 10-bit display
-				// path) — repack the padded rows, transform and hand the
-				// samples back for the RGBA16F texture.
-				let mut samples = repack_f32_rows(meta.width, meta.height, meta.linesize, data)?;
-				// Output node: working space → the project's output
-				// colorspace. The scopes below read the output-colorspace
-				// signal (same convention as the BGRA8 slot); the display
-				// policy then decides whether the display ICC is applied on
-				// top (self-managed) or the OS maps the declared content
-				// colorspace (OS-managed).
-				apply_output_node_f32(&mut samples);
-				let scope = analyze_f32_rgba(w, h, &samples);
-				super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
-				let image = f32_rgba_to_bgra_image(w, h, &samples);
-				Some((image, scope, Some(samples)))
-			} else {
+				if meta.format == PIXEL_FORMAT_F32 {
+					// M15 S3: the worker rendered F32 (the 10-bit display
+					// path) — repack the padded rows, transform and hand the
+					// samples back for the RGBA16F texture.
+					let mut samples =
+						repack_f32_rows(meta.width, meta.height, meta.linesize, data)?;
+					// Output node: working space → the project's output
+					// colorspace. The scopes below read the output-colorspace
+					// signal (same convention as the BGRA8 slot); the display
+					// policy then decides whether the display ICC is applied on
+					// top (self-managed) or the OS maps the declared content
+					// colorspace (OS-managed).
+					apply_output_node_f32(&mut samples);
+					let scope = analyze_f32_rgba(w, h, &samples);
+					super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
+					let image = f32_rgba_to_bgra_image(w, h, &samples);
+					Some((image, scope, Some(samples)))
+				} else {
 					// BGRA8 slot: the worker already downconverted — wrap the
 					// bytes directly (no 10-bit path available for them).
 					let scope = analyze_bgra8(w, h, data);
@@ -687,11 +695,7 @@ impl RenderedFrame {
 				apply_output_node_f32(&mut samples);
 				let scope = analyze_f32_rgba(w, h, &samples);
 				super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
-				Some((
-					f32_rgba_to_bgra_image(w, h, &samples),
-					scope,
-					Some(samples),
-				))
+				Some((f32_rgba_to_bgra_image(w, h, &samples), scope, Some(samples)))
 			}
 			RenderedFrame::CpuF32 {
 				width,
@@ -706,11 +710,7 @@ impl RenderedFrame {
 				apply_output_node_f32(&mut samples);
 				let scope = analyze_f32_rgba(w, h, &samples);
 				super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
-				Some((
-					f32_rgba_to_bgra_image(w, h, &samples),
-					scope,
-					Some(samples),
-				))
+				Some((f32_rgba_to_bgra_image(w, h, &samples), scope, Some(samples)))
 			}
 		}
 	}
@@ -721,9 +721,9 @@ impl RenderedFrame {
 /// Pass-through in the legacy sRGB working space.
 fn apply_output_node_f32(samples: &mut [f32]) {
 	oak_core::colormath::working_to_display_target(
-        samples,
-        oak_core::color::pipeline_working_space(),
-        oak_core::color::pipeline_output_spec(),
+		samples,
+		oak_core::color::pipeline_working_space(),
+		oak_core::color::pipeline_output_spec(),
 	);
 }
 
@@ -742,7 +742,7 @@ fn repack_f32_rows(width: i32, height: i32, linesize: i32, data: &[u8]) -> Optio
 	let mut samples = vec![0.0f32; (width * height * 4) as usize];
 	for y in 0..height as usize {
 		let row = &data[y * linesize..y * linesize + row_bytes];
-		for (i, px) in row.chunks_exact(4).enumerate() {
+		for (i, px) in row.as_chunks::<4>().0.iter().enumerate() {
 			let v = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
 			samples[y * (width as usize) * 4 + i] = v;
 		}
@@ -876,7 +876,8 @@ fn proxy_limits_at(p: &ProjectRef, seq: NodeId, time: Rational) -> Vec<(i32, i32
 /// variant without copying frame bytes — the shm slot is read zero-copy
 /// by the caller and released after building the display image).
 fn render_video(params: VideoTicketParams) -> Result<RenderedFrame, String> {
-	let m = RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
+	let m =
+		RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
 	let id = m.tickets.next_id();
 	if std::env::var_os("OAK_DEBUG_DISPATCH").is_some() {
 		eprintln!("renderops: sync render submit arena ticket {}", id.0);
@@ -959,7 +960,9 @@ pub fn render_sequence_frame(
 	height: i32,
 	format: Option<oak_core::PixelFormat>,
 ) -> Result<RenderedFrame, String> {
-	render_video(sequence_frame_params(p, seq, frame_ts, tb, width, height, format)?)
+	render_video(sequence_frame_params(
+		p, seq, frame_ts, tb, width, height, format,
+	)?)
 }
 
 /// Build the video ticket params for one single-footage frame (M15 S2:
@@ -1025,7 +1028,9 @@ pub fn render_footage_frame(
 	height: i32,
 	format: Option<oak_core::PixelFormat>,
 ) -> Result<RenderedFrame, String> {
-	render_video(footage_frame_params(p, footage, frame_ts, tb, width, height, format)?)
+	render_video(footage_frame_params(
+		p, footage, frame_ts, tb, width, height, format,
+	)?)
 }
 
 /// Rendered interleaved f32 audio (the module audio ticket payload).
@@ -1057,7 +1062,8 @@ pub fn render_audio_range(
 		Rational::new((start_ts + len_ts) * tb.0, tb.1),
 	);
 	let montage = audio_montage(p, seq, range);
-	let m = RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
+	let m =
+		RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
 	let id = m.tickets.next_id();
 	m.tickets.submit_audio_with_id(
 		id,
@@ -1178,21 +1184,23 @@ pub fn encoding_params(
 	// Export range: the work area when enabled, otherwise the whole
 	// sequence. Frames -> seconds rationals in the sequence's frame-rate
 	// timebase (frame duration = rate_den / rate_num).
-	let (has_custom_range, range_in, range_out, length) =
-		match workarea.filter(|(s, e)| e > s) {
-			Some((in_ts, out_ts)) => (
-				true,
-				Rational::new(in_ts * i64::from(rate_den), i64::from(rate_num)),
-				Rational::new(out_ts * i64::from(rate_den), i64::from(rate_num)),
-				Rational::new((out_ts - in_ts) * i64::from(rate_den), i64::from(rate_num)),
+	let (has_custom_range, range_in, range_out, length) = match workarea.filter(|(s, e)| e > s) {
+		Some((in_ts, out_ts)) => (
+			true,
+			Rational::new(in_ts * i64::from(rate_den), i64::from(rate_num)),
+			Rational::new(out_ts * i64::from(rate_den), i64::from(rate_num)),
+			Rational::new((out_ts - in_ts) * i64::from(rate_den), i64::from(rate_num)),
+		),
+		None => (
+			false,
+			Rational::new(0, 1),
+			Rational::new(0, 1),
+			Rational::new(
+				length_frames.max(0) * i64::from(rate_den),
+				i64::from(rate_num),
 			),
-			None => (
-				false,
-				Rational::new(0, 1),
-				Rational::new(0, 1),
-				Rational::new(length_frames.max(0) * i64::from(rate_den), i64::from(rate_num)),
-			),
-		};
+		),
+	};
 	Ok(oak_task::export::EncodingParams {
 		filename: path.to_string_lossy().into_owned(),
 		format,
@@ -1245,12 +1253,22 @@ pub fn encoding_params_with_settings(
 		.iter()
 		.find(|c| **c as i32 == settings.video_codec)
 		.copied()
-		.ok_or_else(|| format!("codec {} not supported by {container:?}", settings.video_codec))?;
+		.ok_or_else(|| {
+			format!(
+				"codec {} not supported by {container:?}",
+				settings.video_codec
+			)
+		})?;
 	let audio_codec = oak_codec::exportformat::Format::get_audio_codecs(container)
 		.iter()
 		.find(|c| **c as i32 == settings.audio_codec)
 		.copied()
-		.ok_or_else(|| format!("audio codec {} not supported by {container:?}", settings.audio_codec))?;
+		.ok_or_else(|| {
+			format!(
+				"audio codec {} not supported by {container:?}",
+				settings.audio_codec
+			)
+		})?;
 	let (mut width, mut height, rate) = {
 		let g = lock(p);
 		super::graphops::sequence_video_params(&g.graph, seq)
@@ -1281,24 +1299,36 @@ pub fn encoding_params_with_settings(
 		_ => match workarea.filter(|(s, e)| e > s) {
 			Some((in_ts, out_ts)) => (
 				true,
-				Rational::new(in_ts * i64::from(rate_den.max(1)), i64::from(rate_num.max(1))),
-				Rational::new(out_ts * i64::from(rate_den.max(1)), i64::from(rate_num.max(1))),
-				Rational::new((out_ts - in_ts) * i64::from(rate_den.max(1)), i64::from(rate_num.max(1))),
+				Rational::new(
+					in_ts * i64::from(rate_den.max(1)),
+					i64::from(rate_num.max(1)),
+				),
+				Rational::new(
+					out_ts * i64::from(rate_den.max(1)),
+					i64::from(rate_num.max(1)),
+				),
+				Rational::new(
+					(out_ts - in_ts) * i64::from(rate_den.max(1)),
+					i64::from(rate_num.max(1)),
+				),
 			),
 			None => (
 				false,
 				Rational::new(0, 1),
 				Rational::new(0, 1),
-				Rational::new(length_frames.max(0) * i64::from(rate_den.max(1)), i64::from(rate_num.max(1))),
+				Rational::new(
+					length_frames.max(0) * i64::from(rate_den.max(1)),
+					i64::from(rate_num.max(1)),
+				),
 			),
 		},
 	};
 	let bit_depth = settings.bit_depth;
 	let pixel_format = match bit_depth {
 		10 => 1, // PixelFormat::U10 (only when the codec supports it; the
-		         // dialog gates 10-bit behind HDR — codecs without 10-bit
-		         // stay at the 8-bit default and the dialog disables HDR).
-		_ => 0,  // PixelFormat::U8
+		// dialog gates 10-bit behind HDR — codecs without 10-bit
+		// stay at the 8-bit default and the dialog disables HDR).
+		_ => 0, // PixelFormat::U8
 	};
 	Ok(oak_task::export::EncodingParams {
 		filename: path.to_string_lossy().into_owned(),
@@ -1394,7 +1424,8 @@ mod tests {
 	fn project_with_clip(media: &std::path::Path) -> (ProjectRef, NodeId, NodeId) {
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Montage Test");
-		let footage = graphops::import_footage(&project, media).expect("import the generated media");
+		let footage =
+			graphops::import_footage(&project, media).expect("import the generated media");
 		graphops::add_track(&project, seq, TrackType::Video).expect("add a video track");
 		graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
 			.expect("place the clip");
@@ -1416,9 +1447,12 @@ mod tests {
 			queue,
 			oak_core::backend::BackendKind::Auto,
 		);
-		let mut frame =
-			oak_render::eval::generate_frame(Rational::new(0, 1), (2, 1), oak_core::PixelFormat::F32)
-				.unwrap();
+		let mut frame = oak_render::eval::generate_frame(
+			Rational::new(0, 1),
+			(2, 1),
+			oak_core::PixelFormat::F32,
+		)
+		.unwrap();
 		for px in frame.data.chunks_exact_mut(16) {
 			for (c, v) in px.chunks_exact_mut(4).zip([0.25f32, 0.5, 0.75, 1.0]) {
 				c.copy_from_slice(&v.to_le_bytes());
@@ -1446,7 +1480,13 @@ mod tests {
 		// the display function takes the single explicit readback.
 		let token = base.create_texture(2, 1).unwrap();
 		base.upload(token, &frame).unwrap();
-		let private = RenderedFrame::Gpu(Texture::gpu(base.clone(), token, 2, 1, oak_core::PixelFormat::F32));
+		let private = RenderedFrame::Gpu(Texture::gpu(
+			base.clone(),
+			token,
+			2,
+			1,
+			oak_core::PixelFormat::F32,
+		));
 		oak_core::backend::reset_gpu_transfer_counters();
 		let displayed = private.to_display().expect("fallback display");
 		assert!(displayed.2.is_some(), "the fallback hands CPU samples");
@@ -1521,7 +1561,10 @@ mod tests {
 		let montage = video_montage(&project, seq, at(0));
 		assert_eq!(montage.len(), 1, "one clip covers frame 0");
 		assert_eq!(montage[0].filename, media.to_string_lossy());
-		assert!(video_montage(&project, seq, at(9)).len() == 1, "frame 9 is still covered");
+		assert!(
+			video_montage(&project, seq, at(9)).len() == 1,
+			"frame 9 is still covered"
+		);
 		assert!(
 			video_montage(&project, seq, at(10)).is_empty(),
 			"frame 10 is past the clip's out point"
@@ -1543,8 +1586,7 @@ mod tests {
 	fn video_montage_stacks_highest_track_on_top() {
 		let _media = media_lock();
 		oak_undo::global::clear().unwrap();
-		let red =
-			std::env::temp_dir().join(format!("oakapp_stack_red_{}.mp4", std::process::id()));
+		let red = std::env::temp_dir().join(format!("oakapp_stack_red_{}.mp4", std::process::id()));
 		let blue =
 			std::env::temp_dir().join(format!("oakapp_stack_blue_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip_solid(&red, 64, 64, 10, 10, [0.9, 0.1, 0.1, 1.0])
@@ -1555,7 +1597,8 @@ mod tests {
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Stack Montage");
 		let red_footage = graphops::import_footage(&project, &red).expect("import the red media");
-		let blue_footage = graphops::import_footage(&project, &blue).expect("import the blue media");
+		let blue_footage =
+			graphops::import_footage(&project, &blue).expect("import the blue media");
 		graphops::place_footage_clip(&project, seq, red_footage, TrackType::Video, 0, 0, 10, 0)
 			.expect("place the V1 (red) clip");
 		graphops::place_footage_clip(&project, seq, blue_footage, TrackType::Video, 1, 0, 10, 0)
@@ -1566,7 +1609,11 @@ mod tests {
 		// Bottom-to-top: V1's (red) clip first, V2's (blue) last.
 		let montage = video_montage(&project, seq, time);
 		assert_eq!(montage.len(), 2, "both clips cover frame 0");
-		assert_eq!(montage[0].filename, red.to_string_lossy(), "V1's clip is the bottom of the stack");
+		assert_eq!(
+			montage[0].filename,
+			red.to_string_lossy(),
+			"V1's clip is the bottom of the stack"
+		);
 		assert_eq!(
 			montage[1].filename,
 			blue.to_string_lossy(),
@@ -1595,7 +1642,10 @@ mod tests {
 		let off = (8 * 64 + 8) * 16;
 		let r = f32::from_le_bytes(dst[off..off + 4].try_into().unwrap());
 		let b = f32::from_le_bytes(dst[off + 8..off + 12].try_into().unwrap());
-		assert!(b > 0.5 && r < 0.4, "V2's blue covers V1's red (r={r}, b={b})");
+		assert!(
+			b > 0.5 && r < 0.4,
+			"V2's blue covers V1's red (r={r}, b={b})"
+		);
 
 		oak_undo::global::clear().unwrap();
 		let _ = std::fs::remove_file(&red);
@@ -1614,8 +1664,8 @@ mod tests {
 		// legacy sRGB pass-through so the pixel-value assertions hold
 		// regardless of the ACEScg default.
 		oak_core::color::set_pipeline_color_settings(
-            oak_core::colormath::WorkingColorSpace::SrgbLegacy,
-            oak_core::colormath::OutputColorSpec::default(),
+			oak_core::colormath::WorkingColorSpace::SrgbLegacy,
+			oak_core::colormath::OutputColorSpec::default(),
 		);
 		oak_undo::global::clear().unwrap();
 		let media =
@@ -1624,10 +1674,12 @@ mod tests {
 
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Effect Montage");
-		let footage = graphops::import_footage(&project, &media).expect("import the generated media");
+		let footage =
+			graphops::import_footage(&project, &media).expect("import the generated media");
 		graphops::add_track(&project, seq, TrackType::Video).expect("add a video track");
-		let block = graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
-			.expect("place the clip");
+		let block =
+			graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
+				.expect("place the clip");
 
 		// The effect-library double-click flow: append a 50% Opacity to the
 		// footage-backed clip (the insert rewires footage -> effect -> clip).
@@ -1674,7 +1726,9 @@ mod tests {
 		// A left-half pixel of the test pattern (known content, r ~= 0.9).
 		let pixel = |frame: &[u8]| {
 			let off = (8 * 64 + 8) * 16;
-			[0, 1, 2, 3].map(|i| f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap()))
+			[0, 1, 2, 3].map(|i| {
+				f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap())
+			})
 		};
 
 		let with_fx = video_montage(&project, seq, time);
@@ -1684,7 +1738,10 @@ mod tests {
 			1,
 			"the montage carries the clip's effect stack (not the footage source node)"
 		);
-		assert_eq!(with_fx[0].effects[0].type_id, "org.olivevideoeditor.Olive.opacity");
+		assert_eq!(
+			with_fx[0].effects[0].type_id,
+			"org.olivevideoeditor.Olive.opacity"
+		);
 		assert!(with_fx[0].effects[0].enabled);
 
 		let plain = render(
@@ -1699,7 +1756,11 @@ mod tests {
 		);
 		let effected = render(with_fx);
 		let (p, e) = (pixel(&plain), pixel(&effected));
-		assert!(p[0] > 0.6, "the plain render shows the test pattern (r={})", p[0]);
+		assert!(
+			p[0] > 0.6,
+			"the plain render shows the test pattern (r={})",
+			p[0]
+		);
 		// 50% opacity: the shader halves every channel, then the composite
 		// over transparent black halves it again via the halved alpha.
 		assert!(
@@ -1746,7 +1807,8 @@ mod tests {
 	) -> (NodeId, NodeId) {
 		let (tb, in_r) = {
 			let g = lock(p);
-			let tb = graphops::sequence_time_base(&g.graph, seq).expect("the sequence has a timebase");
+			let tb =
+				graphops::sequence_time_base(&g.graph, seq).expect("the sequence has a timebase");
 			(tb, graphops::ts_to_rational(in_ts, tb))
 		};
 		let block = {
@@ -1824,7 +1886,8 @@ mod tests {
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Adjustment Montage");
 		let red_footage = graphops::import_footage(&project, &red).expect("import the red media");
-		let blue_footage = graphops::import_footage(&project, &blue).expect("import the blue media");
+		let blue_footage =
+			graphops::import_footage(&project, &blue).expect("import the blue media");
 		graphops::place_footage_clip(&project, seq, red_footage, TrackType::Video, 0, 0, 10, 0)
 			.expect("place the V1 (red) clip");
 		graphops::place_footage_clip(&project, seq, blue_footage, TrackType::Video, 1, 0, 10, 0)
@@ -1839,36 +1902,38 @@ mod tests {
 
 		let tb = graphops::sequence_time_base(&lock(&project).graph, seq).unwrap();
 		let at = |frame: i64| graphops::ts_to_rational(frame, tb);
-		let render = |montage: Vec<MontageClip>, adjustments: Vec<AdjustmentSpan>, at_time: Rational| {
-			let params = VideoTicketParams {
-				viewer: 0,
-				project: String::new(),
-				time: at_time,
-				force_size: Some((64, 64)),
-				force_format: Some(oak_core::PixelFormat::F32),
-				cache: None,
-				cache_dir: None,
-				cache_id: None,
-				cache_timebase: None,
-				footage: None,
-				montage,
-				adjustments,
+		let render =
+			|montage: Vec<MontageClip>, adjustments: Vec<AdjustmentSpan>, at_time: Rational| {
+				let params = VideoTicketParams {
+					viewer: 0,
+					project: String::new(),
+					time: at_time,
+					force_size: Some((64, 64)),
+					force_format: Some(oak_core::PixelFormat::F32),
+					cache: None,
+					cache_dir: None,
+					cache_id: None,
+					cache_timebase: None,
+					footage: None,
+					montage,
+					adjustments,
+				};
+				let mut dst = vec![0u8; 64 * 64 * 16];
+				oak_render::eval::render_montage_frame_into(
+					params.time,
+					&params,
+					(64, 64),
+					&mut dst,
+					64 * 16,
+				)
+				.expect("montage render");
+				dst
 			};
-			let mut dst = vec![0u8; 64 * 64 * 16];
-			oak_render::eval::render_montage_frame_into(
-				params.time,
-				&params,
-				(64, 64),
-				&mut dst,
-				64 * 16,
-			)
-			.expect("montage render");
-			dst
-		};
 		let pixel = |frame: &[u8]| {
 			let off = (8 * 64 + 8) * 16;
-			[0, 1, 2, 3]
-				.map(|i| f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap()))
+			[0, 1, 2, 3].map(|i| {
+				f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap())
+			})
 		};
 
 		// Inside the layer's range the span rides the ticket, above the stack.
@@ -1880,8 +1945,15 @@ mod tests {
 			montage.len(),
 			"the layer sits above every clip (it grades the whole composite)"
 		);
-		assert_eq!(spans[0].effects.len(), 1, "the layer's stack rides the span");
-		assert_eq!(spans[0].effects[0].type_id, "org.olivevideoeditor.Olive.opacity");
+		assert_eq!(
+			spans[0].effects.len(),
+			1,
+			"the layer's stack rides the span"
+		);
+		assert_eq!(
+			spans[0].effects[0].type_id,
+			"org.olivevideoeditor.Olive.opacity"
+		);
 
 		let baseline = render(montage.clone(), Vec::new(), at(5));
 		let graded = render(montage.clone(), spans, at(5));
@@ -1948,7 +2020,8 @@ mod tests {
 			oak_core::colormath::OutputColorSpec::default(),
 		);
 		oak_undo::global::clear().unwrap();
-		let red = std::env::temp_dir().join(format!("oakapp_adjlow_red_{}.mp4", std::process::id()));
+		let red =
+			std::env::temp_dir().join(format!("oakapp_adjlow_red_{}.mp4", std::process::id()));
 		let blue =
 			std::env::temp_dir().join(format!("oakapp_adjlow_blue_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip_solid(&red, 64, 64, 10, 10, [0.9, 0.1, 0.1, 1.0])
@@ -1959,7 +2032,8 @@ mod tests {
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Mid Adjustment Montage");
 		let red_footage = graphops::import_footage(&project, &red).expect("import the red media");
-		let blue_footage = graphops::import_footage(&project, &blue).expect("import the blue media");
+		let blue_footage =
+			graphops::import_footage(&project, &blue).expect("import the blue media");
 		graphops::place_footage_clip(&project, seq, red_footage, TrackType::Video, 0, 0, 10, 0)
 			.expect("place the V1 (red) clip");
 		graphops::add_track(&project, seq, TrackType::Video).expect("add the adjustment track");
@@ -1970,9 +2044,17 @@ mod tests {
 		let (_adj, _fx) = adjustment_layer_with_opacity(&project, seq, adj_track, 0, 5, 0.5);
 		// V3's clip carries its own 50% Opacity so the composite keeps both
 		// contributions visible (an opaque top clip would hide the grading).
-		let blue_clip =
-			graphops::place_footage_clip(&project, seq, blue_footage, TrackType::Video, 2, 0, 10, 0)
-				.expect("place the V3 (blue) clip");
+		let blue_clip = graphops::place_footage_clip(
+			&project,
+			seq,
+			blue_footage,
+			TrackType::Video,
+			2,
+			0,
+			10,
+			0,
+		)
+		.expect("place the V3 (blue) clip");
 		let clip_fx = crate::oakui::effectchain::insert(
 			&project,
 			blue_clip,
@@ -1990,36 +2072,38 @@ mod tests {
 
 		let tb = graphops::sequence_time_base(&lock(&project).graph, seq).unwrap();
 		let time = graphops::ts_to_rational(0, tb);
-		let render = |montage: Vec<MontageClip>, adjustments: Vec<AdjustmentSpan>, at_time: Rational| {
-			let params = VideoTicketParams {
-				viewer: 0,
-				project: String::new(),
-				time: at_time,
-				force_size: Some((64, 64)),
-				force_format: Some(oak_core::PixelFormat::F32),
-				cache: None,
-				cache_dir: None,
-				cache_id: None,
-				cache_timebase: None,
-				footage: None,
-				montage,
-				adjustments,
+		let render =
+			|montage: Vec<MontageClip>, adjustments: Vec<AdjustmentSpan>, at_time: Rational| {
+				let params = VideoTicketParams {
+					viewer: 0,
+					project: String::new(),
+					time: at_time,
+					force_size: Some((64, 64)),
+					force_format: Some(oak_core::PixelFormat::F32),
+					cache: None,
+					cache_dir: None,
+					cache_id: None,
+					cache_timebase: None,
+					footage: None,
+					montage,
+					adjustments,
+				};
+				let mut dst = vec![0u8; 64 * 64 * 16];
+				oak_render::eval::render_montage_frame_into(
+					at_time,
+					&params,
+					(64, 64),
+					&mut dst,
+					64 * 16,
+				)
+				.expect("montage render");
+				dst
 			};
-			let mut dst = vec![0u8; 64 * 64 * 16];
-			oak_render::eval::render_montage_frame_into(
-				at_time,
-				&params,
-				(64, 64),
-				&mut dst,
-				64 * 16,
-			)
-			.expect("montage render");
-			dst
-		};
 		let pixel = |frame: &[u8]| {
 			let off = (8 * 64 + 8) * 16;
-			[0, 1, 2, 3]
-				.map(|i| f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap()))
+			[0, 1, 2, 3].map(|i| {
+				f32::from_le_bytes(frame[off + i * 4..off + i * 4 + 4].try_into().unwrap())
+			})
 		};
 
 		let (montage, spans) = video_montage_with_adjustments(&project, seq, time);
@@ -2027,10 +2111,17 @@ mod tests {
 		// V1's red then V3's blue, and the boundary sits between them.
 		assert_eq!(montage.len(), 2, "the two clips cover frame 0");
 		assert!(montage[0].effects.is_empty(), "the red clip has no stack");
-		assert_eq!(montage[1].effects.len(), 1, "the blue clip's own stack rides it");
+		assert_eq!(
+			montage[1].effects.len(),
+			1,
+			"the blue clip's own stack rides it"
+		);
 		assert_eq!(spans.len(), 1, "the layer emits one span");
 		assert_eq!(spans[0].track_index, 1, "the layer grades only V1's clip");
-		assert!(!spans[0].effects.is_empty(), "the layer carries its opacity");
+		assert!(
+			!spans[0].effects.is_empty(),
+			"the layer carries its opacity"
+		);
 
 		let baseline = pixel(&render(montage.clone(), Vec::new(), time));
 		let graded = pixel(&render(montage.clone(), spans.clone(), time));
@@ -2082,8 +2173,7 @@ mod tests {
 	#[test]
 	fn clip_multicam_media_resolves_the_current_angle() {
 		let _media = media_lock();
-		let media =
-			std::env::temp_dir().join(format!("oakapp_mcmedia_{}.mp4", std::process::id()));
+		let media = std::env::temp_dir().join(format!("oakapp_mcmedia_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate test media");
 
 		let (project, seq, footage) = project_with_clip(&media);
@@ -2114,19 +2204,20 @@ mod tests {
 					-1,
 					oak_node::value::NodeValue::Combo(0),
 				);
-				}
+			}
 			g.graph
-				.connect(source_seq, id, oak_node::nodes::multicamnode::SEQUENCE_INPUT, -1)
+				.connect(
+					source_seq,
+					id,
+					oak_node::nodes::multicamnode::SEQUENCE_INPUT,
+					-1,
+				)
 				.unwrap();
 			// The angle CLIP feeds the source array at element 0 (the
 			// traverser's `active_elements_at_time` keeps only the current
 			// source, so multi `value()` forwards exactly it).
 			g.graph
-				.input_array_insert(
-					id,
-					oak_node::nodes::multicamnode::SOURCES_INPUT,
-					0,
-				)
+				.input_array_insert(id, oak_node::nodes::multicamnode::SOURCES_INPUT, 0)
 				.unwrap();
 			g.graph
 				.connect(
@@ -2140,15 +2231,24 @@ mod tests {
 		};
 		// A host clip on the host sequence (default layout V1) fed from the
 		// multicam output; the clip's own input must first be connected.
-		let host_clip = graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
-			.expect("place the host clip");
+		let host_clip =
+			graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
+				.expect("place the host clip");
 		{
 			let mut g = graphops::lock(&project);
-			let _ = g
-				.graph
-				.disconnect(footage, host_clip, oak_node::block::clip_input::TEXTURE_INPUT, -1);
+			g.graph.disconnect(
+				footage,
+				host_clip,
+				oak_node::block::clip_input::TEXTURE_INPUT,
+				-1,
+			);
 			g.graph
-				.connect(mc, host_clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+				.connect(
+					mc,
+					host_clip,
+					oak_node::block::clip_input::TEXTURE_INPUT,
+					-1,
+				)
 				.unwrap();
 		}
 		// The montage at host time 0 resolves to the angle's media.
@@ -2263,8 +2363,9 @@ mod tests {
 				.copied()
 				.expect("red clip")
 		};
-		let blue_clip = graphops::place_footage_clip(&project, seq, bfoot, TrackType::Video, 1, 0, 10, 0)
-			.expect("blue angle slot");
+		let blue_clip =
+			graphops::place_footage_clip(&project, seq, bfoot, TrackType::Video, 1, 0, 10, 0)
+				.expect("blue angle slot");
 		let mc = {
 			let mut g = graphops::lock(&project);
 			let (core, behavior) = oak_node::nodes::multicamnode::create();
@@ -2280,13 +2381,23 @@ mod tests {
 				.input_array_insert(id, oak_node::nodes::multicamnode::SOURCES_INPUT, 0)
 				.unwrap();
 			g.graph
-				.connect(red_clip, id, oak_node::nodes::multicamnode::SOURCES_INPUT, 0)
+				.connect(
+					red_clip,
+					id,
+					oak_node::nodes::multicamnode::SOURCES_INPUT,
+					0,
+				)
 				.unwrap();
 			g.graph
 				.input_array_insert(id, oak_node::nodes::multicamnode::SOURCES_INPUT, 1)
 				.unwrap();
 			g.graph
-				.connect(blue_clip, id, oak_node::nodes::multicamnode::SOURCES_INPUT, 1)
+				.connect(
+					blue_clip,
+					id,
+					oak_node::nodes::multicamnode::SOURCES_INPUT,
+					1,
+				)
 				.unwrap();
 			id
 		};
@@ -2296,14 +2407,19 @@ mod tests {
 				.expect("host clip");
 		{
 			let mut g = graphops::lock(&project);
-			let _ = g.graph.disconnect(
+			g.graph.disconnect(
 				_rfoot,
 				host_clip,
 				oak_node::block::clip_input::TEXTURE_INPUT,
 				-1,
 			);
 			g.graph
-				.connect(mc, host_clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+				.connect(
+					mc,
+					host_clip,
+					oak_node::block::clip_input::TEXTURE_INPUT,
+					-1,
+				)
 				.unwrap();
 		}
 
@@ -2332,7 +2448,10 @@ mod tests {
 		};
 		// Source 0 = red angle.
 		let (r0, b0) = render_rgb(0);
-		assert!(r0 > 0.4 && b0 < 0.4, "source 0 is the red angle (r={r0} b={b0})");
+		assert!(
+			r0 > 0.4 && b0 < 0.4,
+			"source 0 is the red angle (r={r0} b={b0})"
+		);
 
 		// Switch to source 1: current_in drives the element the multi
 		// `value()` forwards — the frame must turn blue.
@@ -2490,7 +2609,8 @@ mod tests {
 	#[test]
 	fn audio_montage_overlaps_the_range() {
 		let _media = media_lock();
-		let media = std::env::temp_dir().join(format!("oakapp_montage_a_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oakapp_montage_a_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate test media");
 
 		let (project, seq, footage) = project_with_clip(&media);
@@ -2502,9 +2622,15 @@ mod tests {
 
 		let overlapping = audio_montage(&project, seq, TimeRange::new(at(0), at(5)));
 		assert_eq!(overlapping.len(), 1, "the range overlaps the audio clip");
-		assert_eq!(overlapping[0].stream_index, 1, "the audio stream is selected");
+		assert_eq!(
+			overlapping[0].stream_index, 1,
+			"the audio stream is selected"
+		);
 		let disjoint = audio_montage(&project, seq, TimeRange::new(at(10), at(20)));
-		assert!(disjoint.is_empty(), "a range past the clip overlaps nothing");
+		assert!(
+			disjoint.is_empty(),
+			"a range past the clip overlaps nothing"
+		);
 		oak_undo::global::clear().unwrap();
 		let _ = std::fs::remove_file(&media);
 	}
@@ -2515,7 +2641,8 @@ mod tests {
 	#[test]
 	fn montages_skip_muted_tracks() {
 		let _media = media_lock();
-		let media = std::env::temp_dir().join(format!("oakapp_montage_m_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oakapp_montage_m_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate test media");
 
 		let (project, seq, footage) = project_with_clip(&media);
@@ -2548,8 +2675,16 @@ mod tests {
 
 		oak_undo::global::undo().unwrap();
 		oak_undo::global::undo().unwrap();
-		assert_eq!(video_montage(&project, seq, at(0)).len(), 1, "undo restores the video clip");
-		assert_eq!(audio_montage(&project, seq, range).len(), 1, "undo restores the audio clip");
+		assert_eq!(
+			video_montage(&project, seq, at(0)).len(),
+			1,
+			"undo restores the video clip"
+		);
+		assert_eq!(
+			audio_montage(&project, seq, range).len(),
+			1,
+			"undo restores the audio clip"
+		);
 		oak_undo::global::clear().unwrap();
 		let _ = std::fs::remove_file(&media);
 	}
@@ -2569,7 +2704,11 @@ mod tests {
 		// underflows the renderable minimum.
 		assert_eq!(full_res_render_size(0, 0, 1), (2, 2));
 		assert_eq!(full_res_render_size(1, 1, 8), (2, 2));
-		assert_eq!(full_res_render_size(1920, 1080, 0), (1920, 1080), "a zero divider means Full");
+		assert_eq!(
+			full_res_render_size(1920, 1080, 0),
+			(1920, 1080),
+			"a zero divider means Full"
+		);
 	}
 
 	/// Clamping only shrinks: a render that already fits a limit is left
@@ -2583,7 +2722,11 @@ mod tests {
 			(960, 540),
 			"a smaller request is not upscaled to the proxy"
 		);
-		assert_eq!(clamp_render_size(1920, 1080, &[]), (1920, 1080), "no limits = no clamping");
+		assert_eq!(
+			clamp_render_size(1920, 1080, &[]),
+			(1920, 1080),
+			"no limits = no clamping"
+		);
 		assert_eq!(
 			clamp_render_size(1920, 1080, &[(640, 640)]),
 			(640, 360),
@@ -2609,7 +2752,8 @@ mod tests {
 			std::env::temp_dir().join(format!("oakapp_proxy_src_{}.mp4", std::process::id()));
 		let proxy =
 			std::env::temp_dir().join(format!("oakapp_proxy_32_{}.mp4", std::process::id()));
-		oak_codec::testmedia::write_test_clip(&orig, 64, 64, 10, 10).expect("generate the source media");
+		oak_codec::testmedia::write_test_clip(&orig, 64, 64, 10, 10)
+			.expect("generate the source media");
 		oak_codec::testmedia::write_test_clip_solid(&proxy, 32, 32, 10, 10, [0.1, 0.1, 0.9, 1.0])
 			.expect("generate the proxy media");
 
@@ -2626,7 +2770,11 @@ mod tests {
 			let f = g
 				.graph
 				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut()?.downcast_mut::<oak_node::footage::FootageBehavior>())
+				.and_then(|e| {
+					e.behavior
+						.as_any_mut()?
+						.downcast_mut::<oak_node::footage::FootageBehavior>()
+				})
 				.expect("the footage behavior");
 			f.proxy = proxy.to_string_lossy().into_owned();
 			f.proxy_enabled = true;
@@ -2644,22 +2792,39 @@ mod tests {
 			let f = graphops::footage_behavior(&g.graph, footage).expect("the footage behavior");
 			preview_footage_media(f, true).0
 		};
-		assert_eq!(selected, proxy.to_string_lossy(), "the proxy stands in for the source");
+		assert_eq!(
+			selected,
+			proxy.to_string_lossy(),
+			"the proxy stands in for the source"
+		);
 
 		// …and the sequence frame ticket is clamped to its 32x32 size.
 		let tb = graphops::sequence_time_base(&lock(&project).graph, seq).unwrap();
-		let params =
-			sequence_frame_params(&project, seq, 0, tb, 64, 64, None).expect("sequence frame params");
-		assert_eq!(params.force_size, Some((32, 32)), "the proxy bounds the render size");
+		let params = sequence_frame_params(&project, seq, 0, tb, 64, 64, None)
+			.expect("sequence frame params");
+		assert_eq!(
+			params.force_size,
+			Some((32, 32)),
+			"the proxy bounds the render size"
+		);
 
 		// The decoded pixels are the proxy's (solid blue), not the source's.
 		let mut dst = vec![0u8; 32 * 32 * 16];
-		oak_render::eval::render_montage_frame_into(params.time, &params, (32, 32), &mut dst, 32 * 16)
-			.expect("montage render at the proxy size");
+		oak_render::eval::render_montage_frame_into(
+			params.time,
+			&params,
+			(32, 32),
+			&mut dst,
+			32 * 16,
+		)
+		.expect("montage render at the proxy size");
 		let off = (8 * 32 + 8) * 16;
 		let r = f32::from_le_bytes(dst[off..off + 4].try_into().unwrap());
 		let b = f32::from_le_bytes(dst[off + 8..off + 12].try_into().unwrap());
-		assert!(b > 0.5 && r < 0.4, "the proxy's blue covers the frame (r={r}, b={b})");
+		assert!(
+			b > 0.5 && r < 0.4,
+			"the proxy's blue covers the frame (r={r}, b={b})"
+		);
 
 		store.set(None, "UseProxyMedia", &old);
 		oak_undo::global::clear().unwrap();

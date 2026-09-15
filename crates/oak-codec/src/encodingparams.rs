@@ -558,7 +558,7 @@ impl<'a> Cursor<'a> {
 	}
 
 	fn skip_ws(&mut self) {
-		while self.peek().map_or(false, char::is_whitespace) {
+		while self.peek().is_some_and(char::is_whitespace) {
 			self.i += 1;
 		}
 	}

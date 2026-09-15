@@ -318,7 +318,8 @@ impl ColorProcessor {
 	}
 
 	/// Convert a whole F32 frame in place (row-major RGBA).
-	pub fn convert_frame(&self, frame: &mut Frame) -> Result<()> {		let Some(cpu) = &self.cpu else {
+	pub fn convert_frame(&self, frame: &mut Frame) -> Result<()> {
+		let Some(cpu) = &self.cpu else {
 			return Ok(()); // pass-through
 		};
 		if frame.format != PixelFormat::F32 {
@@ -366,8 +367,7 @@ impl ColorProcessor {
 		if data.len() < count {
 			return Err(Error::Invalid);
 		}
-		let mut f32s: Vec<f32> =
-			data[..count].iter().map(|&v| v as f32 / 255.0).collect();
+		let mut f32s: Vec<f32> = data[..count].iter().map(|&v| v as f32 / 255.0).collect();
 		cpu.try_apply_rgba_pixels(&mut f32s, pixels, 4)
 			.map_err(|e| Error::Failed(format!("OCIO f32 apply (bgra8 detour): {e}")))?;
 		for (dst, v) in data[..count].iter_mut().zip(f32s) {
@@ -409,7 +409,7 @@ impl GradingStyle {
 /// Reinterpret a byte buffer as f32 when its length is a multiple of 4
 /// (the pipeline guarantees F32 RGBA frames, so alignment is exact).
 fn bytemuck_f32_slice(data: &mut [u8]) -> Option<&mut [f32]> {
-	if data.len() % 4 != 0 {
+	if !data.len().is_multiple_of(4) {
 		return None;
 	}
 	// SAFETY: length is a multiple of 4 and `data` is byte-aligned; the
@@ -427,11 +427,17 @@ fn bytemuck_f32_slice(data: &mut [u8]) -> Option<&mut [f32]> {
 /// project-properties commit). Render and export paths read it — a single
 /// project is open at a time, so a process global is the same shape as the
 /// OCIO default config above.
-static PIPELINE_COLOR: LazyLock<Mutex<(crate::colormath::WorkingColorSpace, crate::colormath::OutputColorSpec)>> =
-	LazyLock::new(|| Mutex::new((
+static PIPELINE_COLOR: LazyLock<
+	Mutex<(
+		crate::colormath::WorkingColorSpace,
+		crate::colormath::OutputColorSpec,
+	)>,
+> = LazyLock::new(|| {
+	Mutex::new((
 		crate::colormath::WorkingColorSpace::default(),
 		crate::colormath::OutputColorSpec::default(),
-	)));
+	))
+});
 
 /// Set the pipeline color settings (working space + output spec).
 pub fn set_pipeline_color_settings(
@@ -594,9 +600,7 @@ pub fn config_path() -> Option<String> {
 			return Some(path);
 		}
 	}
-	if default_config().is_none() {
-		return None;
-	}
+	default_config()?;
 	Some(format!(
 		"{}/ocioconf/config.ocio",
 		crate::commonutil::configuration_location()
@@ -836,8 +840,8 @@ mod tests {
 		let _lock = config_lock();
 		if set_up_default_config().is_err() {
 			return;
-		}		// Create via the built-in config; a valid processor must exist for
-		// the ACES scene→display-encoded pairing and must preserve alpha.
+		} // Create via the built-in config; a valid processor must exist for
+	// the ACES scene→display-encoded pairing and must preserve alpha.
 		let p = ColorProcessor::create("ACEScg", "sRGB Encoded Rec.709 (sRGB)", Direction::Normal);
 		let p = p.expect("processor handle always returned");
 		assert!(
@@ -879,7 +883,8 @@ mod tests {
 			return;
 		}
 		let display = config.display_all(0).unwrap();
-		let n = config.num_views_by_reference_space(ocio_rs::SearchReferenceSpaceType::Scene, &display);
+		let n =
+			config.num_views_by_reference_space(ocio_rs::SearchReferenceSpaceType::Scene, &display);
 		assert!(n >= 0);
 		if n > 0 {
 			let view = config
@@ -913,7 +918,7 @@ mod tests {
 		let f32s: &mut [f32] = unsafe {
 			std::slice::from_raw_parts_mut(f.data.as_mut_ptr() as *mut f32, f.pixel_count() * 4)
 		};
-		for px in f32s.chunks_exact_mut(4) {
+		for px in f32s.as_chunks_mut::<4>().0 {
 			px[0] = 0.18;
 			px[1] = 0.18;
 			px[2] = 0.18;
@@ -960,8 +965,10 @@ mod tests {
 			"0.18 linear grey should land near 0.5 sRGB (got {})",
 			out[0]
 		);
-		assert!((out[0] - out[1]).abs() < 1e-3 && (out[1] - out[2]).abs() < 1e-3,
-			"grey stays grey: {out:?}");
+		assert!(
+			(out[0] - out[1]).abs() < 1e-3 && (out[1] - out[2]).abs() < 1e-3,
+			"grey stays grey: {out:?}"
+		);
 		assert!((out[3] - 1.0).abs() < 1e-5, "alpha preserved");
 	}
 
@@ -1073,7 +1080,7 @@ mod tests {
 		let f32_result = p32.convert_f32_rgba(&mut f32s, 4);
 		eprintln!("f32 convert: {f32_result:?} -> {f32s:?}");
 		bgra_result.expect("convert");
-		for (i, px) in data.chunks_exact(4).enumerate() {
+		for (i, px) in data.as_chunks::<4>().0.iter().enumerate() {
 			assert_eq!(px[3], 255, "pixel {i}: alpha preserved");
 			let rgb: u32 = px[0] as u32 + px[1] as u32 + px[2] as u32;
 			assert!(rgb > 0, "pixel {i} must not be crushed to black: {px:?}");
@@ -1085,7 +1092,7 @@ mod tests {
 			"grey stays grey through the display ICC: {b} {g} {r}"
 		);
 		f32_result.expect("convert f32");
-		for (i, px) in f32s.chunks_exact(4).enumerate() {
+		for (i, px) in f32s.as_chunks::<4>().0.iter().enumerate() {
 			assert!((px[3] - 1.0).abs() < 1e-3, "pixel {i}: alpha preserved");
 			let rgb = px[0] + px[1] + px[2];
 			assert!(rgb > 0.0, "pixel {i} must not be crushed to black: {px:?}");
@@ -1171,7 +1178,10 @@ mod tests {
 				stub.contains("ove_grading_primary"),
 				"function name present"
 			);
-			assert!(!stub.contains("sampler"), "no LUT upload expected for grading");
+			assert!(
+				!stub.contains("sampler"),
+				"no LUT upload expected for grading"
+			);
 			// Cache hit: a repeated call returns the same text.
 			let again = grading_primary_function_shader(style).unwrap();
 			assert_eq!(stub, again);
@@ -1200,8 +1210,14 @@ mod tests {
 			"cie_xyz_d65_interchange",
 		)
 		.expect("default config generates an analytic shader");
-		assert!(stub.contains("SceneLinearToCIEXYZ_d65"), "function name present");
-		assert!(!stub.contains("sampler"), "no LUT upload expected in the default config");
+		assert!(
+			stub.contains("SceneLinearToCIEXYZ_d65"),
+			"function name present"
+		);
+		assert!(
+			!stub.contains("sampler"),
+			"no LUT upload expected in the default config"
+		);
 		// Cache hit: a repeated call returns the same text.
 		let again = ocio_function_shader(
 			"SceneLinearToCIEXYZ_d65",
@@ -1217,9 +1233,9 @@ mod tests {
 		let _lock = config_lock();
 		// studio-config's Rec.709 display is a CLF LUT chain (unlike the
 		// analytic sRGB one); without a LUT upload path it must be refused.
-		let Ok(cfg) = ocio_rs::Config::create_from_builtin_config(
-			"studio-config-v2.1.0_aces-v1.3_ocio-v2.3",
-		) else {
+		let Ok(cfg) =
+			ocio_rs::Config::create_from_builtin_config("studio-config-v2.1.0_aces-v1.3_ocio-v2.3")
+		else {
 			return;
 		};
 		let cfg = SafeConfig(cfg);
@@ -1234,4 +1250,3 @@ mod tests {
 		);
 	}
 }
-

@@ -189,6 +189,16 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(MirrorNode))
 }
 
+/// Register this node type.
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.mirror",
+		name: "Mirror",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,14 +336,4 @@ mod tests {
         let dup = behavior.duplicate(&core).unwrap();
         assert_eq!(dup.name(), "Mirror");
     }
-}
-
-/// Register this node type.
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.mirror",
-		name: "Mirror",
-		categories: &[Category::Distort],
-		create,
-	});
 }

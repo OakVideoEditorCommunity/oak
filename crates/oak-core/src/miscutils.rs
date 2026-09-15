@@ -482,7 +482,7 @@ mod tests {
 		assert!(cur.get_video_params().unwrap().is_null());
 
 		// Store with a destructor.
-		let p1 = 0x1 as *mut c_void;
+		let p1 = std::ptr::dangling_mut::<c_void>();
 		assert!(cur.set_video_params(p1, Some(count_destroy)).is_ok());
 		assert_eq!(cur.get_video_params().unwrap(), p1);
 

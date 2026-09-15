@@ -537,7 +537,7 @@ impl NodeBehavior for FootageBehavior {
 						if let Some(v) = reader.attribute("ppreset") {
 							if !v.is_empty() {
 								let mut a = [0u8; 32];
-								let n = v.as_bytes().len().min(31);
+								let n = v.len().min(31);
 								a[..n].copy_from_slice(&v.as_bytes()[..n]);
 								custom.preset = a;
 							}
@@ -545,7 +545,7 @@ impl NodeBehavior for FootageBehavior {
 						if let Some(v) = reader.attribute("pext") {
 							if !v.is_empty() {
 								let mut a = [0u8; 32];
-								let n = v.as_bytes().len().min(31);
+								let n = v.len().min(31);
 								a[..n].copy_from_slice(&v.as_bytes()[..n]);
 								custom.extension = a;
 							}

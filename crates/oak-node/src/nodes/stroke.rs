@@ -295,6 +295,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(StrokeFilterNode))
 }
 
+/// Register this node type (C++ `k_stroke_filter` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.stroke",
+		name: "Stroke",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,15 +423,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Stroke");
 	}
-}
-
-/// Register this node type (C++ `k_stroke_filter` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.stroke",
-		name: "Stroke",
-		categories: &[Category::Filter],
-		create,
-	});
 }

@@ -12,7 +12,9 @@ use oak_render::ticket::{AudioTicketParams, MontageClip, TicketPayload};
 fn main() {
 	let args: Vec<String> = std::env::args().collect();
 	if args.len() < 6 {
-		eprintln!("usage: render_audio_wav <media> <stream_index> <start_sec> <end_sec> <out.wav> [fps]");
+		eprintln!(
+			"usage: render_audio_wav <media> <stream_index> <start_sec> <end_sec> <out.wav> [fps]"
+		);
 		std::process::exit(64);
 	}
 	let media = &args[1];
@@ -20,7 +22,11 @@ fn main() {
 	let start_sec: f64 = args[3].parse().unwrap();
 	let end_sec: f64 = args[4].parse().unwrap();
 	let out_path = &args[5];
-	let fps: i64 = if args.len() > 6 { args[6].parse().unwrap() } else { 25 };
+	let fps: i64 = if args.len() > 6 {
+		args[6].parse().unwrap()
+	} else {
+		25
+	};
 
 	let sample_rate = 48000i32;
 	let channel_layout = 0x3u64; // stereo
@@ -58,7 +64,7 @@ fn main() {
 			other => {
 				eprintln!("frame {f}: render failed: {:?}", other.is_err());
 				let frames = ((sample_rate as f64) / fps as f64).round() as usize;
-				pcm.extend(std::iter::repeat(0i16).take(frames * channels));
+				pcm.extend(std::iter::repeat_n(0i16, frames * channels));
 			}
 		}
 	}

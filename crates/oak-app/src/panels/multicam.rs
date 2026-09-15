@@ -538,7 +538,7 @@ mod tests {
 	async fn panel_renders_the_mock_grid(cx: &mut TestAppContext) {
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(640.0), px(360.0)), |window, cx| {
-			let engine = cx.new(|cx| crate::oakui::MockEngine::demo(cx));
+			let engine = cx.new(crate::oakui::MockEngine::demo);
 			let clock = engine.read(cx).program_clock().clone();
 			MulticamPanel::new(engine, clock, window, cx)
 		});

@@ -163,10 +163,7 @@ fn golden_project_with_footage_loads() {
 
 	// The root folder (from the settings "root" key) holds the bin.
 	let root = p.graph.get(p.root).expect("root folder resolves");
-	assert_eq!(
-		root.behavior.type_id(),
-		"org.olivevideoeditor.Olive.folder"
-	);
+	assert_eq!(root.behavior.type_id(), "org.olivevideoeditor.Olive.folder");
 	let folder = root
 		.behavior
 		.as_any()
@@ -507,10 +504,10 @@ fn build_full_project() -> std::sync::Arc<std::sync::Mutex<oak_node::project::Pr
 }
 
 /// Borrowed track list of a node.
-fn list_of<'a>(
-	p: &'a oak_node::project::Project,
+fn list_of(
+	p: &oak_node::project::Project,
 	id: oak_node::id::NodeId,
-) -> &'a oak_node::track::TrackListBehavior {
+) -> &oak_node::track::TrackListBehavior {
 	p.graph
 		.get(id)
 		.unwrap()
@@ -521,7 +518,10 @@ fn list_of<'a>(
 }
 
 /// Field-by-field comparison of the round-tripped full project.
-fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_node::project::Project) {
+fn assert_full_roundtrip_fields(
+	orig: &oak_node::project::Project,
+	loaded: &oak_node::project::Project,
+) {
 	use oak_node::block::ClipBlockBehavior;
 	use oak_node::folder::FolderBehavior;
 	use oak_node::footage::FootageBehavior;
@@ -533,7 +533,11 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 	assert_eq!(loaded.settings, orig.settings, "settings");
 
 	// The graph keeps its node count, types and edge count.
-	assert_eq!(loaded.graph.node_count(), orig.graph.node_count(), "node count");
+	assert_eq!(
+		loaded.graph.node_count(),
+		orig.graph.node_count(),
+		"node count"
+	);
 	let o_types: Vec<&str> = orig
 		.graph
 		.node_ids()
@@ -607,7 +611,10 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 		l_f.proxy_video_stream_index, o_f.proxy_video_stream_index,
 		"proxy stream"
 	);
-	assert_eq!(l_f.proxy_preset_version, o_f.proxy_preset_version, "proxy preset");
+	assert_eq!(
+		l_f.proxy_preset_version, o_f.proxy_preset_version,
+		"proxy preset"
+	);
 	assert_eq!(l_f.streams.len(), o_f.streams.len(), "stream count");
 	for (ls, os) in l_f.streams.iter().zip(&o_f.streams) {
 		assert_eq!(ls.index, os.index, "stream index");
@@ -644,7 +651,11 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 		orig.graph.get(o_seq).unwrap().core.override_color,
 		"sequence color"
 	);
-	assert_eq!(l_s.track_lists.len(), o_s.track_lists.len(), "track list count");
+	assert_eq!(
+		l_s.track_lists.len(),
+		o_s.track_lists.len(),
+		"track list count"
+	);
 	let (o_vlist, l_vlist) = (o_s.track_lists[0], l_s.track_lists[0]);
 	let (o_alist, l_alist) = (o_s.track_lists[1], l_s.track_lists[1]);
 
@@ -653,14 +664,22 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 	assert_eq!(l_vl.kind, o_vl.kind, "video list kind");
 	assert_eq!(l_vl.array_base, o_vl.array_base, "video list base");
 	assert_eq!(l_vl.sequence, Some(l_seq), "video list sequence backref");
-	assert_eq!(l_vl.tracks.len(), o_vl.tracks.len(), "video list track count");
+	assert_eq!(
+		l_vl.tracks.len(),
+		o_vl.tracks.len(),
+		"video list track count"
+	);
 	let (o_vtrack, l_vtrack) = (o_vl.tracks[0], l_vl.tracks[0]);
 	let o_al = list_of(orig, o_alist);
 	let l_al = list_of(loaded, l_alist);
 	assert_eq!(l_al.kind, o_al.kind, "audio list kind");
 	assert_eq!(l_al.array_base, o_al.array_base, "audio list base");
 	assert_eq!(l_al.sequence, Some(l_seq), "audio list sequence backref");
-	assert_eq!(l_al.tracks.len(), o_al.tracks.len(), "audio list track count");
+	assert_eq!(
+		l_al.tracks.len(),
+		o_al.tracks.len(),
+		"audio list track count"
+	);
 	let (o_atrack, l_atrack) = (o_al.tracks[0], l_al.tracks[0]);
 
 	// Video track: kind/blocks/muted/locked/height/index/backref.
@@ -686,7 +705,11 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 	assert_eq!(l_t.height, o_t.height, "video track height");
 	assert_eq!(l_t.index, o_t.index, "video track index");
 	assert_eq!(l_t.track_list, Some(l_vlist), "video track list backref");
-	assert_eq!(l_t.blocks.len(), o_t.blocks.len(), "video track block count");
+	assert_eq!(
+		l_t.blocks.len(),
+		o_t.blocks.len(),
+		"video track block count"
+	);
 	let o_clip1 = o_t.blocks[0];
 	let o_gap1 = o_t.blocks[1];
 	let o_clip2 = o_t.blocks[2];
@@ -816,7 +839,11 @@ fn assert_full_roundtrip_fields(orig: &oak_node::project::Project, loaded: &oak_
 	assert_eq!(l_at.kind, TrackType::Audio, "audio track kind");
 	assert_eq!(l_at.locked, o_at.locked, "audio track locked");
 	assert_eq!(l_at.track_list, Some(l_alist), "audio track list backref");
-	assert_eq!(l_at.blocks.len(), o_at.blocks.len(), "audio track block count");
+	assert_eq!(
+		l_at.blocks.len(),
+		o_at.blocks.len(),
+		"audio track block count"
+	);
 	let o_c3 = orig
 		.graph
 		.get(o_at.blocks[0])
@@ -956,7 +983,11 @@ fn multicam_node_round_trip_preserves_current_in() {
 	// serializes combo indices as Int — `string_to_value` maps
 	// `ValueType::Combo` to `NodeValue::Int`).
 	assert_eq!(
-		l.graph.get(loaded_mc).unwrap().core.standard_value(CURRENT_INPUT, -1),
+		l.graph
+			.get(loaded_mc)
+			.unwrap()
+			.core
+			.standard_value(CURRENT_INPUT, -1),
 		NodeValue::Int(2),
 		"current_in survives the round-trip"
 	);
@@ -1004,8 +1035,11 @@ fn dynamic_plugin_node_round_trips_across_load() {
 	// from its OFX params).
 	let probe_core = || {
 		let mut core = NodeCore::new();
-		core.inputs
-			.push(Input::new(INPUT_ID, ValueType::Float, NodeValue::Float(0.0)));
+		core.inputs.push(Input::new(
+			INPUT_ID,
+			ValueType::Float,
+			NodeValue::Float(0.0),
+		));
 		core
 	};
 	{
@@ -1049,7 +1083,11 @@ fn dynamic_plugin_node_round_trips_across_load() {
 		.find(|id| l.graph.get(*id).map(|e| e.behavior.type_id()) == Some(TYPE_ID))
 		.expect("loaded project has the dynamic node");
 	assert_eq!(
-		l.graph.get(probe).unwrap().core.standard_value(INPUT_ID, -1),
+		l.graph
+			.get(probe)
+			.unwrap()
+			.core
+			.standard_value(INPUT_ID, -1),
 		NodeValue::Float(2.5),
 		"the standard value survives the rebuild"
 	);
@@ -1077,7 +1115,10 @@ fn multicam_clip_round_trip_preserves_wiring() {
 		let seq_id = p.graph.add_node(core, behavior);
 		let (core, behavior) = TrackListBehavior::create();
 		let list_id = p.graph.add_node(core, behavior);
-		let (core, behavior) = (NodeCore::new(), Box::new(TrackBehavior::new(TrackType::Video)));
+		let (core, behavior) = (
+			NodeCore::new(),
+			Box::new(TrackBehavior::new(TrackType::Video)),
+		);
 		let track_id = p.graph.add_node(core, behavior);
 		{
 			let seq = p.graph.get_mut(seq_id).unwrap();
@@ -1132,18 +1173,13 @@ fn multicam_clip_round_trip_preserves_wiring() {
 		// The multicam node routed between the sequence and the clip.
 		let (core, behavior) = create();
 		let mc_id = p.graph.add_node(core, behavior);
-		p.graph
-			.connect(mc_id, clip_id, "tex_in", -1)
-			.unwrap();
+		p.graph.connect(mc_id, clip_id, "tex_in", -1).unwrap();
 		p.graph.connect(seq_id, mc_id, SEQUENCE_INPUT, -1).unwrap();
 		let mc = p.graph.get_mut(mc_id).unwrap();
 		mc.core
 			.set_standard_value(CURRENT_INPUT, -1, NodeValue::Combo(2));
-		mc.core.set_standard_value(
-			SEQUENCE_TYPE_INPUT,
-			-1,
-			NodeValue::Combo(0),
-		);
+		mc.core
+			.set_standard_value(SEQUENCE_TYPE_INPUT, -1, NodeValue::Combo(0));
 		(seq_id, clip_id, mc_id)
 	};
 	let _ = (seq_id, clip_id, mc_id);
@@ -1165,12 +1201,20 @@ fn multicam_clip_round_trip_preserves_wiring() {
 		})
 		.expect("loaded project has a MultiCamNode");
 	assert_eq!(
-		l.graph.get(loaded_mc).unwrap().core.standard_value(CURRENT_INPUT, -1),
+		l.graph
+			.get(loaded_mc)
+			.unwrap()
+			.core
+			.standard_value(CURRENT_INPUT, -1),
 		NodeValue::Int(2),
 		"current_in survives"
 	);
 	assert_eq!(
-		l.graph.get(loaded_mc).unwrap().core.standard_value(SEQUENCE_TYPE_INPUT, -1),
+		l.graph
+			.get(loaded_mc)
+			.unwrap()
+			.core
+			.standard_value(SEQUENCE_TYPE_INPUT, -1),
 		NodeValue::Int(0),
 		"sequence_type_in survives"
 	);
@@ -1332,5 +1376,8 @@ fn legacy_project_without_endpoints_migrates_on_load() {
 	let r = reloaded.lock().unwrap();
 	assert_eq!(r.graph.endpoints(), Some((li, lo)));
 	assert_eq!(r.graph.node_count(), legacy_count + 2);
-	assert_eq!(r.graph.connected_output(lo, GRAPH_OUTPUT_INPUT, -1), Some(li));
+	assert_eq!(
+		r.graph.connected_output(lo, GRAPH_OUTPUT_INPUT, -1),
+		Some(li)
+	);
 }

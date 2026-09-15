@@ -90,7 +90,7 @@ fn build_display_lut() -> oak_core::lut::Lut3d {
 	);
 	super::displaycolor::apply_f32_rgba(&mut samples, n as i64);
 	let mut data = Vec::with_capacity(n * 3);
-	for px in samples.chunks_exact(4) {
+	for px in samples.as_chunks::<4>().0 {
 		data.extend_from_slice(&px[..3]);
 	}
 	oak_core::lut::Lut3d { edge, lo, hi, data }
@@ -128,7 +128,8 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
 	}
-	let adopted = oak_core::backend::GpuContext::adopt(device, queue, oak_core::backend::BackendKind::Auto);
+	let adopted =
+		oak_core::backend::GpuContext::adopt(device, queue, oak_core::backend::BackendKind::Auto);
 	if !oak_core::backend::GpuContext::install_shared(Some(adopted)) {
 		// The engine context was already used for GPU work before the
 		// window opened: it cannot be replaced, so present falls back to
@@ -193,8 +194,7 @@ pub fn upload_rgba16f(
 		let ctx = GPU_CONTEXT.lock().ok()?;
 		ctx.as_ref().map(|(d, q)| (d.clone(), q.clone()))?
 	};
-	let (bytes, bytes_per_row) =
-		super::frames::f32_rgba_to_16f_bytes(width, height, samples)?;
+	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_16f_bytes(width, height, samples)?;
 	let texture = device.create_texture(&wgpu::TextureDescriptor {
 		label: Some("oak_display_rgba16f"),
 		size: wgpu::Extent3d {

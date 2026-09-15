@@ -160,11 +160,10 @@ fn caught(f: impl FnOnce() -> Result<(), c_int>) -> c_int {
 		|_| status::FAILED,
 		|r| r.map_or_else(|c| c, |()| status::OK),
 	);
-	if std::env::var_os("OAK_OFX_TRACE").is_some() {
-		if code != status::OK {
+	if std::env::var_os("OAK_OFX_TRACE").is_some()
+		&& code != status::OK {
 			eprintln!("[ofx] param suite error {code} at {caller}");
 		}
-	}
 	code
 }
 
@@ -712,24 +711,24 @@ extern "C" {
 pub fn suite_v1() -> &'static ParameterSuiteV1 {
 	static SUITE: std::sync::OnceLock<ParameterSuiteV1> = std::sync::OnceLock::new();
 	SUITE.get_or_init(|| ParameterSuiteV1 {
-		param_define: param_define,
-		param_get_handle: param_get_handle,
-		param_set_get_property_set: param_set_get_property_set,
-		param_get_property_set: param_get_property_set,
+		param_define,
+		param_get_handle,
+		param_set_get_property_set,
+		param_get_property_set,
 		param_get_value: ofx_param_get_value_shim,
 		param_get_value_at_time: ofx_param_get_value_at_time_shim,
 		param_get_derivative: ofx_param_get_derivative_shim,
 		param_get_integral: ofx_param_get_integral_shim,
 		param_set_value: ofx_param_set_value_shim,
 		param_set_value_at_time: ofx_param_set_value_at_time_shim,
-		param_get_num_keys: param_get_num_keys,
-		param_get_key_time: param_get_key_time,
-		param_get_key_index: param_get_key_index,
-		param_delete_key: param_delete_key,
-		param_delete_all_keys: param_delete_all_keys,
-		param_copy: param_copy,
-		param_edit_begin: param_edit_begin,
-		param_edit_end: param_edit_end,
+		param_get_num_keys,
+		param_get_key_time,
+		param_get_key_index,
+		param_delete_key,
+		param_delete_all_keys,
+		param_copy,
+		param_edit_begin,
+		param_edit_end,
 	})
 }
 

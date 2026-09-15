@@ -229,9 +229,7 @@ fn parse_xprop_icc_hex(output: &str) -> Option<Vec<u8>> {
 			n_digits += 1;
 		}
 		if n_digits > 0 {
-			if let Ok(byte) =
-				u8::from_str_radix(&rest[digits_start..digits_start + n_digits], 16)
-			{
+			if let Ok(byte) = u8::from_str_radix(&rest[digits_start..digits_start + n_digits], 16) {
 				bytes.push(byte);
 			}
 		}
@@ -563,9 +561,8 @@ mod windows {
 		let sub_key = wide_nul(r"Software\Microsoft\Windows\CurrentVersion\VideoSettings");
 		let value_name = wide_nul("EnableAutoColorManagement");
 		let mut key: *mut c_void = std::ptr::null_mut();
-		let status = unsafe {
-			RegOpenKeyExW(HKEY_CURRENT_USER, sub_key.as_ptr(), 0, KEY_READ, &mut key)
-		};
+		let status =
+			unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, sub_key.as_ptr(), 0, KEY_READ, &mut key) };
 		if status != ERROR_SUCCESS {
 			return None;
 		}
@@ -628,7 +625,12 @@ mod windows {
 	pub(super) fn display_icc_for(device: &str) -> Option<String> {
 		let name = wide_nul(device);
 		let hdc = unsafe {
-			CreateDCW(name.as_ptr(), name.as_ptr(), std::ptr::null(), std::ptr::null())
+			CreateDCW(
+				name.as_ptr(),
+				name.as_ptr(),
+				std::ptr::null(),
+				std::ptr::null(),
+			)
 		};
 		if hdc.is_null() {
 			return None;
@@ -660,7 +662,10 @@ mod windows {
 			sz_device: [0; 32],
 		};
 		let ok = unsafe {
-			GetMonitorInfoW(hmonitor as *const c_void, &mut info as *mut _ as *mut c_void)
+			GetMonitorInfoW(
+				hmonitor as *const c_void,
+				&mut info as *mut _ as *mut c_void,
+			)
 		};
 		if ok == 0 {
 			return None;
@@ -864,7 +869,7 @@ mod linux {
 			.lines()
 			.map(str::trim_start)
 			.find(|l| l.starts_with("Filename:"))?;
-		let name = line.splitn(2, ':').nth(1)?.trim();
+		let name = line.split_once(':')?.1.trim();
 		if name.is_empty() {
 			None
 		} else {
@@ -1066,7 +1071,10 @@ Monitors: 1
 	#[test]
 	fn parse_xrandr_monitors_malformed() {
 		assert_eq!(parse_xrandr_monitors(""), Vec::<RandRMonitor>::new());
-		assert_eq!(parse_xrandr_monitors("Monitors: 0\n"), Vec::<RandRMonitor>::new());
+		assert_eq!(
+			parse_xrandr_monitors("Monitors: 0\n"),
+			Vec::<RandRMonitor>::new()
+		);
 		// No `:` separator, a missing geometry, and a geometry with no
 		// outputs are all skipped without panicking.
 		let out = "\

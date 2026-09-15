@@ -27,6 +27,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::oakui::component::menu::{Menu, MenuItem};
 use gpui::colors::DefaultColors;
 use gpui::dock::{DockPanel, PanelEvent};
 use gpui::node_graph::{
@@ -34,13 +35,12 @@ use gpui::node_graph::{
 	NodeVisualState, MAX_ZOOM, MIN_ZOOM,
 };
 use gpui::{
-	div, point, prelude::*, px, AnyElement, App, Bounds, ClickEvent, Context, Entity,
-	EventEmitter, MouseButton, Pixels, Point, Render, SharedString, Window,
+	div, point, prelude::*, px, AnyElement, App, Bounds, ClickEvent, Context, Entity, EventEmitter,
+	MouseButton, Pixels, Point, Render, SharedString, Window,
 };
-use crate::oakui::component::menu::{Menu, MenuItem};
 
-use crate::oakui::component::menu::{ContextMenuHandle, ContextMenuTriggered};
 use crate::oakui::component::menu;
+use crate::oakui::component::menu::{ContextMenuHandle, ContextMenuTriggered};
 use crate::oakui::{AppEngine, NodeLibraryEntry};
 use crate::panels::commands::PanelCommandHandler;
 use crate::panels::ids::NODE_EDITOR;
@@ -203,8 +203,9 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 		let Some(node) = node else {
 			return;
 		};
-		self.graph
-			.update(cx, |graph, cx| graph.set_selection(BTreeSet::from([NodeId(node)]), cx));
+		self.graph.update(cx, |graph, cx| {
+			graph.set_selection(BTreeSet::from([NodeId(node)]), cx)
+		});
 	}
 
 	/// Handles the node editor's local (non-registry) context-menu items.
@@ -221,9 +222,10 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 				.map(|entry| entry.1.clone());
 			if let Some(type_id) = type_id {
 				let position = self.add_node_position.unwrap_or_default();
-				if let Err(err) = self.engine.update(cx, |engine, cx| {
-					engine.add_node_at(&type_id, position, cx)
-				}) {
+				if let Err(err) = self
+					.engine
+					.update(cx, |engine, cx| engine.add_node_at(&type_id, position, cx))
+				{
 					println!("[node editor] add node failed: {err}");
 				}
 			}
@@ -394,8 +396,7 @@ impl<E: AppEngine> Render for NodeEditorPanel<E> {
 								.graph_position_at(window.mouse_position());
 							let type_id = payload.type_id.to_string();
 							this.engine.update(cx, |engine, cx| {
-								if let Err(err) = engine.add_node_at(&type_id, graph_position, cx)
-								{
+								if let Err(err) = engine.add_node_at(&type_id, graph_position, cx) {
 									println!("[node editor] add node failed: {err}");
 								}
 							});
@@ -508,12 +509,18 @@ pub(crate) fn node_menu(protected: bool) -> Menu {
 	items.push(MenuItem::new(LOCAL_GROUP, tr("node.context.group")));
 	items.push(MenuItem::new(LOCAL_UNGROUP, tr("node.context.ungroup")));
 	items.push(menu::color_label_item(None).separated());
-	items.push(MenuItem::new(LOCAL_OPEN_IN_VIEWER, tr("node.context.open_in_viewer")));
+	items.push(MenuItem::new(
+		LOCAL_OPEN_IN_VIEWER,
+		tr("node.context.open_in_viewer"),
+	));
 	items.push(MenuItem::new(
 		LOCAL_SHOW_IN_PARAM_EDITOR,
 		tr("node.context.show_in_param_editor"),
 	));
-	items.push(MenuItem::new(LOCAL_NODE_PROPERTIES, tr("menu.context.properties")));
+	items.push(MenuItem::new(
+		LOCAL_NODE_PROPERTIES,
+		tr("menu.context.properties"),
+	));
 	Menu::new(items)
 }
 
@@ -538,27 +545,21 @@ pub(crate) fn background_menu(
 	let mut add_items: Vec<MenuItem> = Vec::new();
 	let mut next_id = LOCAL_ADD_NODE_BASE;
 	for (category_key, mut entries) in groups {
-		entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+		entries.sort_by_key(|a| a.name.to_lowercase());
 		let mut submenu = Vec::with_capacity(entries.len());
 		for entry in entries {
 			submenu.push(MenuItem::new(next_id, entry.name.clone()));
 			add_menu_ids.push((next_id, entry.type_id));
 			next_id += 1;
 		}
-		add_items.push(
-			MenuItem::new(0, tr(category_key)).with_submenu(Menu::new(submenu)),
-		);
+		add_items.push(MenuItem::new(0, tr(category_key)).with_submenu(Menu::new(submenu)));
 	}
 
 	let direction_menu = Menu::new(vec![
-		MenuItem::new(LOCAL_DIR_TOP_BOTTOM, tr("node.context.dir_top_bottom"))
-			.with_checked(true),
-		MenuItem::new(LOCAL_DIR_BOTTOM_TOP, tr("node.context.dir_bottom_top"))
-			.with_checked(false),
-		MenuItem::new(LOCAL_DIR_LEFT_RIGHT, tr("node.context.dir_left_right"))
-			.with_checked(false),
-		MenuItem::new(LOCAL_DIR_RIGHT_LEFT, tr("node.context.dir_right_left"))
-			.with_checked(false),
+		MenuItem::new(LOCAL_DIR_TOP_BOTTOM, tr("node.context.dir_top_bottom")).with_checked(true),
+		MenuItem::new(LOCAL_DIR_BOTTOM_TOP, tr("node.context.dir_bottom_top")).with_checked(false),
+		MenuItem::new(LOCAL_DIR_LEFT_RIGHT, tr("node.context.dir_left_right")).with_checked(false),
+		MenuItem::new(LOCAL_DIR_RIGHT_LEFT, tr("node.context.dir_right_left")).with_checked(false),
 	]);
 
 	Menu::new(vec![
@@ -592,7 +593,7 @@ mod tests {
 	) {
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(640.0), px(480.0)), |window, cx| {
-			let engine = cx.new(|cx| crate::oakui::MockEngine::demo(cx));
+			let engine = cx.new(crate::oakui::MockEngine::demo);
 			NodeEditorPanel::new(engine, window, cx)
 		});
 		cx.run_until_parked();
@@ -638,7 +639,9 @@ mod tests {
 	fn node_menu_carries_grouping_and_reveals() {
 		// The color-label lookup below matches on a localized label: pin
 		// en-US under the shared language lock.
-		let _guard = crate::i18n::lang_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		crate::i18n::set_language_code("en-US");
 		let menu = node_menu(false);
 		let ids: Vec<usize> = menu.items.iter().map(|item| item.id).collect();
@@ -761,7 +764,12 @@ mod tests {
 		cx.update(|_window, app| {
 			let engine = panel.read(app).engine.clone();
 			engine.update(app, |engine, cx| {
-				engine.apply_effect_event(&EffectStackEvent::CardSelected { effect: EffectId(1) }, cx);
+				engine.apply_effect_event(
+					&EffectStackEvent::CardSelected {
+						effect: EffectId(1),
+					},
+					cx,
+				);
 			});
 		});
 		cx.run_until_parked();

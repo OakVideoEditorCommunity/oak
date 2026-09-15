@@ -73,7 +73,7 @@ fn make_owned_round_trips_value() {
 #[test]
 fn make_owned_shares_one_object() {
 	let h1 = make_owned(0i32);
-	let h2 = h1.clone();
+	let h2 = h1;
 	// SAFETY: both handles box the same `Arc<Mutex<i32>>` allocation.
 	let a = unsafe { get::<Arc<Mutex<i32>>>(&h1) }.unwrap().clone();
 	let b = unsafe { get::<Arc<Mutex<i32>>>(&h2) }.unwrap().clone();

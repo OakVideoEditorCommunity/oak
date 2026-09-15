@@ -241,6 +241,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(WaveDistortNode))
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.wave`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.wave",
+		name: "Wave",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,15 +351,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Wave");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.wave`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.wave",
-		name: "Wave",
-		categories: &[Category::Distort],
-		create,
-	});
 }

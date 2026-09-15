@@ -299,6 +299,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(RippleDistortNode { gizmo }))
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.ripple`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.ripple",
+		name: "Ripple",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,15 +414,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Ripple");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.ripple`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.ripple",
-		name: "Ripple",
-		categories: &[Category::Distort],
-		create,
-	});
 }

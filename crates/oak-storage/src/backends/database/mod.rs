@@ -124,9 +124,7 @@ impl DbTarget {
 	/// The `?project=` selector.
 	fn project(&self) -> Option<&str> {
 		match self {
-			DbTarget::Sqlite { project, .. } | DbTarget::Pg { project, .. } => {
-				project.as_deref()
-			}
+			DbTarget::Sqlite { project, .. } | DbTarget::Pg { project, .. } => project.as_deref(),
 		}
 	}
 }
@@ -610,7 +608,12 @@ impl DatabaseBackend {
 	/// backend's save semantics (same serializer output, file container;
 	/// assembled in memory, nothing is written to the library). The
 	/// target URI must be a `file://` URI.
-	pub fn export_to_file(&self, uri: &StorageUri, uuid: &str, file_uri: &StorageUri) -> Result<()> {
+	pub fn export_to_file(
+		&self,
+		uri: &StorageUri,
+		uuid: &str,
+		file_uri: &StorageUri,
+	) -> Result<()> {
 		if file_uri.scheme != "file" {
 			return Err(Error::Invalid);
 		}
@@ -856,9 +859,9 @@ async fn connect_sqlite(path: &str) -> Result<DatabaseConnection> {
 /// A single `connect()` surfaces the refusal immediately, so a dead /
 /// unreachable host fails fast with a clean E_IO.
 async fn connect_pg(conn: &str) -> Result<DatabaseConnection> {
-	use std::str::FromStr;
 	use sea_orm::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 	use sea_orm::sqlx::ConnectOptions;
+	use std::str::FromStr;
 	let url = format!("postgres://{conn}");
 	let options = PgConnectOptions::from_str(&url)
 		.map_err(|e| Error::Io(format!("invalid postgres connection string: {e}")))?;
@@ -978,8 +981,15 @@ fn serialize_node_xml(p: &Project, id: NodeId) -> Result<String> {
 	let mut w = XmlWriterBridge::new()
 		.ok_or_else(|| Error::Failed("oak_core XML writer unavailable".to_string()))?;
 	w.start_element("node");
-	oak_node::serializer::save_node(&mut w, &entry.core, &*entry.behavior, id, &type_id, &connections)
-		.map_err(|e| Error::Format(e.to_string()))?;
+	oak_node::serializer::save_node(
+		&mut w,
+		&entry.core,
+		&*entry.behavior,
+		id,
+		&type_id,
+		&connections,
+	)
+	.map_err(|e| Error::Format(e.to_string()))?;
 	w.end_element();
 	Ok(w.output())
 }
@@ -1088,7 +1098,10 @@ async fn replay_state<C: ConnectionTrait>(
 		.map_err(db_err)?;
 	for r in rows {
 		if r.node_identity == SETTINGS_NODE {
-			settings = r.new_xml.clone().unwrap_or_else(|| EMPTY_SETTINGS.to_string());
+			settings = r
+				.new_xml
+				.clone()
+				.unwrap_or_else(|| EMPTY_SETTINGS.to_string());
 		} else if let Some(new) = r.new_xml {
 			nodes.insert((r.node_identity - 1) as u64, new);
 		} else {
@@ -1373,8 +1386,11 @@ async fn maybe_snapshot<C: ConnectionTrait>(
 		.one(conn)
 		.await
 		.map_err(db_err)?;
-	let interval = oak_core::configstore::ConfigStore::instance()
-		.get_int(Some("Storage"), "SnapshotIntervalSec", 600);
+	let interval = oak_core::configstore::ConfigStore::instance().get_int(
+		Some("Storage"),
+		"SnapshotIntervalSec",
+		600,
+	);
 	let due = match &last {
 		None => true,
 		Some(s) => {
@@ -1426,7 +1442,7 @@ async fn prune_snapshots<C: ConnectionTrait>(conn: &C, project_id: i64) -> Resul
 	let keep: Vec<i64> = snapshot::Entity::find()
 		.filter(snapshot::Column::ProjectId.eq(project_id))
 		.order_by_desc(snapshot::Column::CommandSeq)
-		.limit(SNAPSHOT_KEEP as u64)
+		.limit(SNAPSHOT_KEEP)
 		.all(conn)
 		.await
 		.map_err(db_err)?
@@ -1450,9 +1466,16 @@ async fn prune_snapshots<C: ConnectionTrait>(conn: &C, project_id: i64) -> Resul
 /// the newest snapshot already covers them, so the head state stays
 /// reconstructible from the snapshot plus the remaining rows (plan §1:
 /// history beyond the window is forfeit).
-async fn retention_prune<C: ConnectionTrait>(conn: &C, project_id: i64, now: DateTime) -> Result<()> {
-	let days = oak_core::configstore::ConfigStore::instance()
-		.get_int(Some("Storage"), "JournalRetentionDays", 0);
+async fn retention_prune<C: ConnectionTrait>(
+	conn: &C,
+	project_id: i64,
+	now: DateTime,
+) -> Result<()> {
+	let days = oak_core::configstore::ConfigStore::instance().get_int(
+		Some("Storage"),
+		"JournalRetentionDays",
+		0,
+	);
 	if days <= 0 {
 		return Ok(());
 	}
@@ -1609,12 +1632,11 @@ mod tests {
 				.unwrap()
 				.create)();
 			let a = guard.graph.add_node(core, behavior);
-			guard
-				.graph
-				.get_mut(a)
-				.unwrap()
-				.core
-				.set_standard_value("param_a_in", -1, oak_node::value::NodeValue::Float(2.5));
+			guard.graph.get_mut(a).unwrap().core.set_standard_value(
+				"param_a_in",
+				-1,
+				oak_node::value::NodeValue::Float(2.5),
+			);
 		}
 		let guard = p.lock().unwrap();
 		let (nodes, settings, _) = serialize_project_state(&guard).unwrap();

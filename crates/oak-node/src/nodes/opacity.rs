@@ -244,6 +244,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	)
 }
 
+/// Register this node type (C++ `k_opacity_effect` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.opacity",
+		name: "Opacity",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,15 +406,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Opacity");
 	}
-}
-
-/// Register this node type (C++ `k_opacity_effect` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.opacity",
-		name: "Opacity",
-		categories: &[Category::Filter],
-		create,
-	});
 }

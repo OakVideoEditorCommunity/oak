@@ -21,10 +21,10 @@
 mod common;
 
 use common::lock_manager;
-use oak_codec::encodingparams::EncodingParams;
 use oak_audio::error::{Error, OAKAUDIO_E_INVALID};
 use oak_audio::manager::instance;
 use oak_audio::params::{AudioParams, SampleFormat};
+use oak_codec::encodingparams::EncodingParams;
 
 /// Audio params for the tests: stereo f32 at 48 kHz.
 fn stereo() -> AudioParams {
@@ -97,11 +97,13 @@ fn push_output_starts_clock() {
 	// With no explicit device the push still succeeds (M12 P1).
 	m.set_output_device(-1).unwrap();
 	let samples = vec![0u8; 480 * 2 * 4];
-	m.push_to_output(stereo(), &samples, &mut vec![0u8; 64]).unwrap();
+	m.push_to_output(stereo(), &samples, &mut [0u8; 64])
+		.unwrap();
 
 	// After selecting a device the push succeeds and the clock starts at 0.
 	m.set_output_device(0).unwrap();
-	m.push_to_output(stereo(), &samples, &mut vec![0u8; 64]).unwrap();
+	m.push_to_output(stereo(), &samples, &mut [0u8; 64])
+		.unwrap();
 	m.seconds(&mut secs).unwrap();
 	assert!(secs >= 0.0, "clock started (got {secs})");
 }
@@ -142,7 +144,8 @@ fn output_control_flags() {
 	m.set_output_notify_interval(1024).unwrap();
 	let err = m.set_output_notify_interval(-1).unwrap_err();
 	assert_eq!(
-		err.downcast_ref::<oak_audio::error::Error>().map(|e| e.code()),
+		err.downcast_ref::<oak_audio::error::Error>()
+			.map(|e| e.code()),
 		Some(OAKAUDIO_E_INVALID)
 	);
 	m.clear_buffered_output().unwrap();
@@ -151,7 +154,8 @@ fn output_control_flags() {
 	// Push starts the stream, then stop_output halts it (clock -> -1).
 	m.set_output_device(0).unwrap();
 	let samples = vec![0u8; 480 * 2 * 4];
-	m.push_to_output(stereo(), &samples, &mut vec![0u8; 64]).unwrap();
+	m.push_to_output(stereo(), &samples, &mut [0u8; 64])
+		.unwrap();
 	m.stop_output().unwrap();
 	let mut secs = 1.0f64;
 	m.seconds(&mut secs).unwrap();
@@ -171,7 +175,9 @@ fn recording_start_stop() {
 
 	// No input device -> explainable failure, no crash.
 	m.set_input_device(-1).unwrap();
-	assert!(m.start_recording(&wav_params("unused.wav"), &mut vec![0u8; 64]).is_err());
+	assert!(m
+		.start_recording(&wav_params("unused.wav"), &mut [0u8; 64])
+		.is_err());
 
 	m.set_input_device(0).unwrap();
 	let path = std::env::temp_dir().join(format!("oakaudio_rec_{}.wav", std::process::id()));
@@ -193,8 +199,14 @@ fn recording_start_stop() {
 #[test]
 fn config_defaults() {
 	assert_eq!(oak_audio::config::output_buffer_size(), 0);
-	assert!(oak_audio::config::device_name(true).is_err(), "no configured output device");
-	assert!(oak_audio::config::device_name(false).is_err(), "no configured input device");
+	assert!(
+		oak_audio::config::device_name(true).is_err(),
+		"no configured output device"
+	);
+	assert!(
+		oak_audio::config::device_name(false).is_err(),
+		"no configured input device"
+	);
 }
 
 /// PreviewAudioDevice pull-side plumbing (read/notify callback/clock).
@@ -262,7 +274,7 @@ fn output_levels_reports_buffered_peaks() {
 		packed.extend_from_slice(&(0.05f32 * t).to_le_bytes());
 		packed.extend_from_slice(&(0.2f32 * t).to_le_bytes());
 	}
-	m.push_to_output(stereo(), &packed, &mut vec![0u8; 64]).unwrap();
+	m.push_to_output(stereo(), &packed, &mut [0u8; 64]).unwrap();
 
 	let mut peaks = [0.0f32; 4];
 	let n = m.output_levels(&mut peaks).unwrap();
@@ -288,7 +300,10 @@ fn output_levels_reports_buffered_peaks() {
 
 	// The error mapping is intact.
 	assert_eq!(Error::Invalid.code(), OAKAUDIO_E_INVALID);
-	assert_eq!(Error::Failed("x".to_string()).code(), oak_audio::error::OAKAUDIO_E_FAILED);
+	assert_eq!(
+		Error::Failed("x".to_string()).code(),
+		oak_audio::error::OAKAUDIO_E_FAILED
+	);
 
 	// Leave the singleton as we found it: the push flipped
 	// `output_started`, which other tests' seconds() assertions depend on.

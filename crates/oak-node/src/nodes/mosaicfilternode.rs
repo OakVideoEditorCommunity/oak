@@ -214,6 +214,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(MosaicFilterNode))
 }
 
+/// Register this node type (C++ `k_mosaic_filter` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.mosaicfilter",
+		name: "Mosaic",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,15 +322,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Mosaic");
 	}
-}
-
-/// Register this node type (C++ `k_mosaic_filter` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.mosaicfilter",
-		name: "Mosaic",
-		categories: &[Category::Filter],
-		create,
-	});
 }

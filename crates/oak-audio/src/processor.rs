@@ -135,7 +135,9 @@ fn fix_channel_layout(params: AudioParams) -> AudioParams {
 fn build_graph(from: &AudioParams, to: &AudioParams, speed: f64) -> Result<ffmpeg::filter::Graph> {
 	let in_format = to_ffmpeg_sample_format(from.format);
 	if in_format == Sample::None {
-		return Err(Box::new(Error::Failed("invalid input sample format".to_string())));
+		return Err(Box::new(Error::Failed(
+			"invalid input sample format".to_string(),
+		)));
 	}
 
 	let abuffer = ffmpeg::filter::find("abuffer")
@@ -257,10 +259,19 @@ impl Processor {
 	/// Push planar float input and pull converted output. Returns the number
 	/// of output frames written.
 	///
+	/// # Safety
+	///
+	/// `in_planar` must be null or point to at least `from.channel_count()`
+	/// readable `*const f32` plane pointers, each valid for
+	/// `in_frame_count` samples; `out_planar` must be null or point to at
+	/// least `to.channel_count()` writable `*mut f32` plane pointers, each
+	/// valid for `out_capacity_frames` samples (NULL plane entries are
+	/// skipped).
+	///
 	/// `// CPP-PARITY: src/audio/c_api/processor.cpp:91` (validation, state
 	/// check, null `out_planar` short-circuit) and
 	/// `src/audio/src/audioprocessor.cpp:141` (push/pull loop, byte counting).
-	pub fn convert(
+	pub unsafe fn convert(
 		&self,
 		in_planar: *const *const f32,
 		in_frame_count: i32,
@@ -273,7 +284,9 @@ impl Processor {
 		if inner.graph.is_none() {
 			return Err(Box::from(Error::State));
 		}
-		if in_frame_count < 0 || out_capacity_frames < 0 || (in_frame_count > 0 && in_planar.is_null())
+		if in_frame_count < 0
+			|| out_capacity_frames < 0
+			|| (in_frame_count > 0 && in_planar.is_null())
 		{
 			return Err(Box::from(Error::Invalid));
 		}
@@ -294,7 +307,8 @@ impl Processor {
 			let nb = in_frame_count as usize;
 			let in_channels = from.channel_count().max(0) as usize;
 			let layout = channel_layout_from_mask(from.channel_layout);
-			let mut frame = ffmpeg::frame::Audio::new(to_ffmpeg_sample_format(from.format), nb, layout);
+			let mut frame =
+				ffmpeg::frame::Audio::new(to_ffmpeg_sample_format(from.format), nb, layout);
 			frame.set_rate(from.sample_rate as u32);
 			let planar = from.format.is_planar();
 			// `plane_mut::<T>` requires the exact sample type of the frame
@@ -317,7 +331,9 @@ impl Processor {
 						// samples.
 						let src = unsafe { *in_planar } as *const $t;
 						let dst = frame.plane_mut::<$t>(0);
-						unsafe { ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), nb * in_channels) };
+						unsafe {
+							ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), nb * in_channels)
+						};
 					}
 				}};
 			}

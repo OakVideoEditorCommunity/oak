@@ -63,9 +63,9 @@ use crate::framecache::FrameCache;
 use crate::ipc::{
 	error_message, write_message, AudioTicketSpec, BatchTicketSpec, FrameSlotMeta, FrameSlotPool,
 	HandshakeMsg, LoadGraphMsg, PluginProgressMsg, RenderAudioBatchMsg, RenderBatchMsg,
-	RenderFrameMsg, SharedMemoryRegion, ShmMode, SLOT_FORMAT_AUDIO_F32, SLOT_FORMAT_BGRA8, TYPE_CANCEL, TYPE_HANDSHAKE, TYPE_LOAD_GRAPH,
-	TYPE_PLUGIN_CANCEL, TYPE_RENDER_AUDIO_BATCH, TYPE_RENDER_BATCH, TYPE_RENDER_FRAME,
-	TYPE_SHUTDOWN,
+	RenderFrameMsg, SharedMemoryRegion, ShmMode, SLOT_FORMAT_AUDIO_F32, SLOT_FORMAT_BGRA8,
+	TYPE_CANCEL, TYPE_HANDSHAKE, TYPE_LOAD_GRAPH, TYPE_PLUGIN_CANCEL, TYPE_RENDER_AUDIO_BATCH,
+	TYPE_RENDER_BATCH, TYPE_RENDER_FRAME, TYPE_SHUTDOWN,
 };
 use crate::{log_error, PROTOCOL_VERSION};
 
@@ -376,7 +376,9 @@ impl WorkerSession {
 		// non-fatal: the worker stays up for plugin-free graphs.
 		log_error("runtime: scanning and registering OFX plugins");
 		if let Err(e) = oak_plugin::host::Host::global().cache.scan() {
-			log_error(&format!("runtime: OFX plugin scan failed ({e}); continuing"));
+			log_error(&format!(
+				"runtime: OFX plugin scan failed ({e}); continuing"
+			));
 		}
 		let discovered = oak_plugin::host::Host::global().cache.count();
 		let registered = oak_plugin::node_factory::register_plugin_nodes();
@@ -574,10 +576,7 @@ impl WorkerSession {
 				let content = match std::fs::read_to_string(&load.path) {
 					Ok(c) => c,
 					Err(e) => {
-						return Some(error_message(
-							&format!("graph file unreadable: {e}"),
-							None,
-						))
+						return Some(error_message(&format!("graph file unreadable: {e}"), None))
 					}
 				};
 				match oak_node::serializer::load_with_id_map(&content) {
@@ -747,11 +746,7 @@ impl WorkerSession {
 	/// `frame_ready` or `frame_failed` per ticket. Crashes the process
 	/// deliberately when the crash-mode environment asks for it (the
 	/// crash-isolation test hook).
-	fn handle_render_batch_stream(
-		&mut self,
-		line: &str,
-		out: &mut impl Write,
-	) -> io::Result<()> {
+	fn handle_render_batch_stream(&mut self, line: &str, out: &mut impl Write) -> io::Result<()> {
 		let batch: RenderBatchMsg = match serde_json::from_str(line) {
 			Ok(b) => b,
 			Err(_) => {
@@ -785,10 +780,7 @@ impl WorkerSession {
 					"slot": slot,
 				}),
 				Err(e) => {
-					log_error(&format!(
-						"render_batch: ticket {} failed: {e}",
-						spec.ticket
-					));
+					log_error(&format!("render_batch: ticket {} failed: {e}", spec.ticket));
 					json!({
 						"type": crate::ipc::TYPE_FRAME_FAILED,
 						"ticket": spec.ticket,
@@ -912,7 +904,10 @@ impl WorkerSession {
 		let batch: RenderAudioBatchMsg = match serde_json::from_str(line) {
 			Ok(b) => b,
 			Err(_) => {
-				return write_message(out, &error_message("invalid render_audio_batch message", None))
+				return write_message(
+					out,
+					&error_message("invalid render_audio_batch message", None),
+				)
 			}
 		};
 
@@ -984,10 +979,7 @@ impl WorkerSession {
 		// SAFETY: `slot` was acquired above; the block is live shared memory
 		// of the attached pool.
 		let dst = unsafe {
-			std::slice::from_raw_parts_mut(
-				pool.slot_data(spec.slot as u32),
-				pool.slot_data_bytes(),
-			)
+			std::slice::from_raw_parts_mut(pool.slot_data(spec.slot as u32), pool.slot_data_bytes())
 		};
 		eval::render_audio_samples_into(&params, &mut dst[..need]).map_err(|e| e.to_string())?;
 
@@ -1037,15 +1029,15 @@ impl WorkerSession {
 				out_time: Rational::new(c.out_num, c.out_den),
 				media_in: Rational::new(c.media_in_num, c.media_in_den),
 				gain: c.gain,
-				effects: c.effects.iter().map(crate::ipc::montage_effect_from).collect(),
+				effects: c
+					.effects
+					.iter()
+					.map(crate::ipc::montage_effect_from)
+					.collect(),
 			})
 			.collect();
 		Ok(AudioTicketParams {
-			viewer: self
-				.graph
-				.as_ref()
-				.map(|g| g.project_copy)
-				.unwrap_or(0),
+			viewer: self.graph.as_ref().map(|g| g.project_copy).unwrap_or(0),
 			range: oak_core::TimeRange::new(start, start + duration),
 			sample_rate: spec.sample_rate,
 			channel_layout: spec.channel_layout,
@@ -1061,8 +1053,12 @@ impl WorkerSession {
 	/// covers tickets in flight before that IPC lands, and mirrors
 	/// [`handle_load_graph`]'s adopt step.
 	fn sync_pipeline_color_from_graph(&mut self) -> bool {
-		let Some(graph) = &self.graph else { return false; };
-		let Some(project) = &graph.project else { return false; };
+		let Some(graph) = &self.graph else {
+			return false;
+		};
+		let Some(project) = &graph.project else {
+			return false;
+		};
 		let (working, output) = {
 			let guard = project.lock().unwrap_or_else(|e| e.into_inner());
 			(guard.working_color_space(), guard.output_color_spec())
@@ -1077,7 +1073,11 @@ impl WorkerSession {
 	}
 
 	/// Render `spec` into the slot's data block and fill the slot meta.
-	fn render_spec_pixels(&mut self, spec: &BatchTicketSpec, pool: &FrameSlotPool) -> Result<(), String> {
+	fn render_spec_pixels(
+		&mut self,
+		spec: &BatchTicketSpec,
+		pool: &FrameSlotPool,
+	) -> Result<(), String> {
 		// Derive the pipeline colors from the loaded project on every render:
 		// eval's decode linearization and the output node below read the
 		// process global, which the resync (load_graph) keeps current — but a
@@ -1136,7 +1136,14 @@ impl WorkerSession {
 			match &cached {
 				Some(c) => dst[..f32_need].copy_from_slice(&c[..f32_need]),
 				None => {
-					render_f32_into(spec, &params, &self.graph, time, (w, h), &mut dst[..dst_need])?;
+					render_f32_into(
+						spec,
+						&params,
+						&self.graph,
+						time,
+						(w, h),
+						&mut dst[..dst_need],
+					)?;
 					self.frame_cache.insert(key, dst[..f32_need].to_vec());
 				}
 			}
@@ -1207,7 +1214,11 @@ impl WorkerSession {
 				out_time: Rational::new(c.out_num, c.out_den),
 				media_in: Rational::new(c.media_in_num, c.media_in_den),
 				gain: c.gain,
-				effects: c.effects.iter().map(crate::ipc::montage_effect_from).collect(),
+				effects: c
+					.effects
+					.iter()
+					.map(crate::ipc::montage_effect_from)
+					.collect(),
 			})
 			.collect();
 		let adjustments: Vec<AdjustmentSpan> = spec
@@ -1219,10 +1230,7 @@ impl WorkerSession {
 			viewer: if spec.viewer_node != 0 {
 				spec.viewer_node
 			} else {
-				self.graph
-					.as_ref()
-					.map(|g| g.project_copy)
-					.unwrap_or(0)
+				self.graph.as_ref().map(|g| g.project_copy).unwrap_or(0)
 			},
 			project: spec.project_key.clone(),
 			time,
@@ -1279,7 +1287,13 @@ fn render_f32_into(
 					.or_else(|| oak_node::id::NodeId::from_identity(spec.viewer_node));
 				match viewer_id {
 					Some(viewer_id) => {
-						let rendered = eval::render_graph_frame(project, viewer_id, time, (w, h), PixelFormat::F32);
+						let rendered = eval::render_graph_frame(
+							project,
+							viewer_id,
+							time,
+							(w, h),
+							PixelFormat::F32,
+						);
 						// M2: the graph renders all-GPU in-process; the worker's
 						// wire format is a CPU shm slot, so this is the explicit
 						// readback boundary of the process backend.
@@ -1300,7 +1314,7 @@ fn render_f32_into(
 							}
 						};
 						if let Some(frame) = frame {
-							let src_stride = frame.linesize_bytes() as usize;
+							let src_stride = frame.linesize_bytes();
 							let row_bytes = (w as usize) * 16;
 							if frame.data.len() < src_stride * (h as usize)
 								|| dst.len() < row_bytes * (h as usize)
@@ -1366,7 +1380,9 @@ fn render_f32_into(
 fn warn_graph_fallback(viewer: u64, why: &str) {
 	static WARNED: AtomicBool = AtomicBool::new(false);
 	if !WARNED.swap(true, Ordering::Relaxed) {
-		log_error(&format!("graph-mode ticket viewer {viewer}: {why}; falling back to montage"));
+		log_error(&format!(
+			"graph-mode ticket viewer {viewer}: {why}; falling back to montage"
+		));
 	}
 }
 
@@ -1895,9 +1911,9 @@ mod tests {
 		);
 		assert!(resp.is_none(), "unexpected error: {resp:?}");
 		assert_eq!(
-            oak_core::color::pipeline_working_space(),
-            WorkingColorSpace::AcesCg,
-            "load_graph must adopt the snapshot's working space"
+			oak_core::color::pipeline_working_space(),
+			WorkingColorSpace::AcesCg,
+			"load_graph must adopt the snapshot's working space"
 		);
 		let _ = std::fs::remove_file(&path);
 		// Restore the default global so parallel tests are not disturbed.
@@ -1930,17 +1946,17 @@ mod tests {
 		// reaches this worker later. A render ticket in that window must not
 		// run under the stale colors.
 		oak_core::color::set_pipeline_color_settings(
-            WorkingColorSpace::SrgbLegacy,
-            oak_core::color::pipeline_output_spec(),
+			WorkingColorSpace::SrgbLegacy,
+			oak_core::color::pipeline_output_spec(),
 		);
 		assert!(
 			s.sync_pipeline_color_from_graph(),
 			"stale global must be refreshed from the loaded project"
 		);
 		assert_eq!(
-            oak_core::color::pipeline_working_space(),
-            WorkingColorSpace::AcesCg,
-            "sync must restore the snapshot's working space"
+			oak_core::color::pipeline_working_space(),
+			WorkingColorSpace::AcesCg,
+			"sync must restore the snapshot's working space"
 		);
 		assert!(
 			!s.sync_pipeline_color_from_graph(),
@@ -1962,8 +1978,8 @@ mod tests {
 		// the code (sRGB EOTF) into ACEScg and then encodes for output, so
 		// the mid-gray comes back near 0.5.
 		use oak_core::colormath::{
-			acescg_to_output_bytes, decode_to_acescg_bytes, srgb_oetf, OutputColorSpec, OutputGamut,
-			OutputTransfer, SourcePrimaries, SourceTransfer, WorkingColorSpace,
+			acescg_to_output_bytes, decode_to_acescg_bytes, srgb_oetf, OutputColorSpec,
+			OutputGamut, OutputTransfer, SourcePrimaries, SourceTransfer, WorkingColorSpace,
 		};
 		let spec = OutputColorSpec {
 			gamut: OutputGamut::Srgb,
@@ -1985,7 +2001,12 @@ mod tests {
 
 		// Correct path: decode (sRGB EOTF) → ACEScg → output encode.
 		let mut bytes = [0.5f32, 0.5, 0.5, 1.0].map(f32::to_le_bytes).concat();
-		decode_to_acescg_bytes(&mut bytes, 1, SourcePrimaries::Bt709, SourceTransfer::SdrGamma);
+		decode_to_acescg_bytes(
+			&mut bytes,
+			1,
+			SourcePrimaries::Bt709,
+			SourceTransfer::SdrGamma,
+		);
 		acescg_to_output_bytes(&mut bytes, 1, spec);
 		let out = f32::from_le_bytes(bytes[0..4].try_into().unwrap());
 		assert!(
@@ -2040,7 +2061,9 @@ mod tests {
 		assert_eq!(meta.format, PixelFormat::F32 as i32);
 		assert_eq!(meta.data_size, 4 * 4 * 16);
 		// Generated frame: transparent black.
-		let data = unsafe { std::slice::from_raw_parts(parent_pool.slot_data_const(consumed), 4 * 4 * 16) };
+		let data = unsafe {
+			std::slice::from_raw_parts(parent_pool.slot_data_const(consumed), 4 * 4 * 16)
+		};
 		assert!(data.iter().all(|&b| b == 0));
 		unsafe { parent_pool.release(consumed) };
 	}
@@ -2167,12 +2190,15 @@ mod tests {
 		assert_eq!(meta.channel_count, 2);
 		assert_eq!(meta.linesize, 2 * 4);
 		assert_eq!(meta.data_size, slot_bytes as i32);
-		let data =
-			unsafe { std::slice::from_raw_parts(parent_pool.slot_data_const(consumed), slot_bytes) };
+		let data = unsafe {
+			std::slice::from_raw_parts(parent_pool.slot_data_const(consumed), slot_bytes)
+		};
 		assert!(data.iter().all(|&b| b == 0), "empty montage is silence");
 		// The samples parse back as 2000 stereo frames.
 		let parsed: Vec<f32> = data
-			.chunks_exact(4)
+			.as_chunks::<4>()
+			.0
+			.iter()
 			.map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
 			.collect();
 		assert_eq!(parsed.len(), 2000 * 2);

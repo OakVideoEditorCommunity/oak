@@ -40,9 +40,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::PixelFormat;
 
+use crate::error::{Error, Result};
 use crate::frame::VideoParamsPod;
 use crate::texture::{Frame, Texture};
-use crate::error::{Error, Result};
 
 /// Backend selection preference (mapped onto wgpu backends).
 ///
@@ -183,9 +183,8 @@ impl DisplayBitDepth {
 	/// Read the user's persisted choice through the oak_core config C ABI
 	/// ("DisplayBitDepth").
 	pub fn from_user_config() -> DisplayBitDepth {
-		let configured =
-			crate::commonutil::config_get_string(None, CONFIG_KEY_DISPLAY_BIT_DEPTH)
-				.unwrap_or_default();
+		let configured = crate::commonutil::config_get_string(None, CONFIG_KEY_DISPLAY_BIT_DEPTH)
+			.unwrap_or_default();
 		DisplayBitDepth::from_config_string(&configured)
 	}
 
@@ -243,10 +242,10 @@ pub trait GpuContextLike: Send + Sync {
 	fn download(&self, token: u64) -> Result<Frame>;
 	/// Blit texture → texture (plain copy; color-managed deferred).
 	fn blit(
-        &self,
-        src: u64,
-        dst: u64,
-        processor: Option<&crate::color::ColorProcessor>,
+		&self,
+		src: u64,
+		dst: u64,
+		processor: Option<&crate::color::ColorProcessor>,
 	) -> Result<()>;
 
 	/// Concrete-context downcast hook (M2). The present path uses it to
@@ -432,7 +431,9 @@ impl GpuContext {
 			// (widely available on desktop GPUs); without it effect
 			// shaders sample nearest — a quality degradation, not a
 			// failure (logged once by the shaderfx runner).
-			let filterable = adapter.features().contains(wgpu::Features::FLOAT32_FILTERABLE);
+			let filterable = adapter
+				.features()
+				.contains(wgpu::Features::FLOAT32_FILTERABLE);
 			let mut required_features = wgpu::Features::empty();
 			if filterable {
 				required_features |= wgpu::Features::FLOAT32_FILTERABLE;
@@ -789,12 +790,7 @@ impl GpuContext {
 	/// nodes (`ColorTransformJob`, M2). The LUT texture is uploaded once
 	/// per key (the caller passes a stable processor cache id); applying
 	/// it is GPU→GPU.
-	pub fn apply_color_lut(
-		&self,
-		src: u64,
-		key: &str,
-		lut: &crate::lut::Lut3d,
-	) -> Result<u64> {
+	pub fn apply_color_lut(&self, src: u64, key: &str, lut: &crate::lut::Lut3d) -> Result<u64> {
 		let token = {
 			let mut cache = lock(&self.color_luts);
 			if let Some((_, token)) = cache.iter().find(|(k, _)| k == key) {
@@ -873,7 +869,8 @@ impl GpuContext {
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
-		self.queue.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		self.queue
+			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
 		let src_view = src_tex
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1023,12 +1020,11 @@ impl GpuContext {
 				cache: None,
 			});
 		if let Some(err) = pollster_block_on(scope.pop()) {
-			return Err(Error::Failed(format!("present pipeline validation failed: {err}")));
+			return Err(Error::Failed(format!(
+				"present pipeline validation failed: {err}"
+			)));
 		}
-		let program = PresentPipeline {
-			pipeline,
-			layout,
-		};
+		let program = PresentPipeline { pipeline, layout };
 		cache.push((format, program.clone()));
 		Ok(program)
 	}
@@ -1090,7 +1086,8 @@ impl GpuContext {
 			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
 			mapped_at_creation: false,
 		});
-		self.queue.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		self.queue
+			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
 		let y_view = y_tex
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1239,12 +1236,11 @@ impl GpuContext {
 				cache: None,
 			});
 		if let Some(err) = pollster_block_on(scope.pop()) {
-			return Err(Error::Failed(format!("YUV pipeline validation failed: {err}")));
+			return Err(Error::Failed(format!(
+				"YUV pipeline validation failed: {err}"
+			)));
 		}
-		let program = PresentPipeline {
-			pipeline,
-			layout,
-		};
+		let program = PresentPipeline { pipeline, layout };
 		*cache = Some(program.clone());
 		Ok(program)
 	}
@@ -1438,10 +1434,10 @@ impl GpuContext {
 	/// of this pass (see README §4), so a `Some` processor returns
 	/// `Error::Failed` and the plain-copy WGSL pipeline is used for `None`.
 	pub fn blit(
-        &self,
-        src: u64,
-        dst: u64,
-        processor: Option<&crate::color::ColorProcessor>,
+		&self,
+		src: u64,
+		dst: u64,
+		processor: Option<&crate::color::ColorProcessor>,
 	) -> Result<()> {
 		if processor.is_some() {
 			return Err(Error::Failed(
@@ -1767,7 +1763,9 @@ impl GpuContext {
 				cache: None,
 			});
 		if let Some(err) = pollster_block_on(scope.pop()) {
-			return Err(Error::Failed(format!("effect pipeline validation failed: {err}")));
+			return Err(Error::Failed(format!(
+				"effect pipeline validation failed: {err}"
+			)));
 		}
 
 		let program = Arc::new(ShaderProgram {
@@ -2121,7 +2119,6 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
 }
 "#;
 
-
 impl GpuContextLike for GpuContext {
 	fn kind(&self) -> BackendKind {
 		self.kind()
@@ -2140,10 +2137,10 @@ impl GpuContextLike for GpuContext {
 	}
 
 	fn blit(
-        &self,
-        src: u64,
-        dst: u64,
-        processor: Option<&crate::color::ColorProcessor>,
+		&self,
+		src: u64,
+		dst: u64,
+		processor: Option<&crate::color::ColorProcessor>,
 	) -> Result<()> {
 		self.blit(src, dst, processor)
 	}
@@ -2197,11 +2194,11 @@ fn pollster_block_on<F: std::future::Future>(future: F) -> F::Output {
 // Minimal futures executor (wgpu brings futures-core transitively; a tiny
 // block_on is enough for the immediately-ready adapter/device futures).
 mod futures_executor {
-    use std::future::Future;
-    use std::pin::pin;
-    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+	use std::future::Future;
+	use std::pin::pin;
+	use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-    fn noop_raw_waker() -> RawWaker {
+	fn noop_raw_waker() -> RawWaker {
 		fn no_op(_: *const ()) {}
 		fn clone(_: *const ()) -> RawWaker {
 			noop_raw_waker()
@@ -2353,7 +2350,13 @@ impl DisplayRenderer {
 	}
 
 	/// Upload pixels into a texture (GPU: backend upload; CPU: buffer copy).
-	pub fn upload_texture(
+	///
+	/// # Safety
+	///
+	/// `pixels` must point to at least `linesize * height` readable bytes
+	/// of the texture's pixel format, and `linesize` must equal the
+	/// frame's line size.
+	pub unsafe fn upload_texture(
 		&self,
 		texture: &mut Texture,
 		pixels: *const u8,
@@ -2362,7 +2365,7 @@ impl DisplayRenderer {
 		let size = texture.size();
 		match texture {
 			Texture::Gpu { token, ctx, .. } => {
-				let frame = frame_from_pixels_for_upload(size, pixels, linesize)?;
+				let frame = unsafe { frame_from_pixels_for_upload(size, pixels, linesize) }?;
 				ctx.upload(*token, &frame)
 			}
 			Texture::Cpu(frame) => {
@@ -2380,7 +2383,17 @@ impl DisplayRenderer {
 	}
 
 	/// Download a texture's pixels into `dst` (with `linesize` stride).
-	pub fn download_texture(&self, texture: &Texture, dst: *mut u8, linesize: usize) -> Result<()> {
+	///
+	/// # Safety
+	///
+	/// `dst` must point to at least `linesize * height` writable bytes,
+	/// and `linesize` must equal the frame's line size.
+	pub unsafe fn download_texture(
+		&self,
+		texture: &Texture,
+		dst: *mut u8,
+		linesize: usize,
+	) -> Result<()> {
 		let frame = texture.to_frame()?;
 		let stride = frame.linesize_bytes();
 		if linesize != stride {
@@ -2397,10 +2410,10 @@ impl DisplayRenderer {
 	/// GPU path: plain-copy WGSL blit; a color processor on the GPU path is
 	/// deferred (`Error::Failed`, see [`GpuContext::blit`]).
 	pub fn blit_color_managed(
-        &self,
-        src: Option<&Texture>,
-        dst: &mut Texture,
-        processor: Option<&crate::color::ColorProcessor>,
+		&self,
+		src: Option<&Texture>,
+		dst: &mut Texture,
+		processor: Option<&crate::color::ColorProcessor>,
 	) -> Result<()> {
 		match (src, dst) {
 			(
@@ -2430,7 +2443,12 @@ impl DisplayRenderer {
 
 	/// Cross-backend texture download by id (GPU registry only; CPU
 	/// textures have no id registry — documented).
-	pub fn download_from_texture(
+	///
+	/// # Safety
+	///
+	/// `dst` must point to at least `linesize * height` writable bytes,
+	/// and `linesize` must equal the F32 line size.
+	pub unsafe fn download_from_texture(
 		&self,
 		texture_id: i32,
 		params: &VideoParamsPod,
@@ -2464,7 +2482,12 @@ pub fn texture_id_of(t: &Texture) -> i32 {
 }
 
 /// Build an F32 frame from raw pixels (for GPU upload).
-pub fn frame_from_pixels_for_upload(
+///
+/// # Safety
+///
+/// `pixels` must point to `linesize * height` readable bytes of F32 RGBA
+/// data (a null pointer is rejected with `Error::Invalid`).
+pub unsafe fn frame_from_pixels_for_upload(
 	size: (i32, i32),
 	pixels: *const u8,
 	linesize: usize,
@@ -2489,14 +2512,14 @@ pub fn frame_from_pixels_for_upload(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+	use super::*;
 
-    /// Serializes the tests that assert on the process-global GPU
-    /// transfer counters (and install a display LUT): parallel tests would
-    /// otherwise see each other's transfers.
-    static GPU_COUNTER_LOCK: Mutex<()> = Mutex::new(());
+	/// Serializes the tests that assert on the process-global GPU
+	/// transfer counters (and install a display LUT): parallel tests would
+	/// otherwise see each other's transfers.
+	static GPU_COUNTER_LOCK: Mutex<()> = Mutex::new(());
 
-    #[test]
+	#[test]
 	fn backend_string_roundtrip() {
 		for (s, kind) in [
 			("auto", BackendKind::Auto),
@@ -2534,13 +2557,19 @@ mod tests {
 
 	#[test]
 	fn display_bit_depth_string_roundtrip() {
-		assert_eq!(DisplayBitDepth::from_config_string("8"), DisplayBitDepth::Bit8);
+		assert_eq!(
+			DisplayBitDepth::from_config_string("8"),
+			DisplayBitDepth::Bit8
+		);
 		assert_eq!(
 			DisplayBitDepth::from_config_string("10"),
 			DisplayBitDepth::Bit10
 		);
 		// Unknown / missing → the 10-bit default.
-		assert_eq!(DisplayBitDepth::from_config_string(""), DisplayBitDepth::Bit10);
+		assert_eq!(
+			DisplayBitDepth::from_config_string(""),
+			DisplayBitDepth::Bit10
+		);
 		assert_eq!(
 			DisplayBitDepth::from_config_string("bogus"),
 			DisplayBitDepth::Bit10
@@ -2560,12 +2589,18 @@ mod tests {
 		// 10-bit → the 10-bit (RGB10A2) swapchain format, HDR float fallback.
 		assert_eq!(
 			DisplayBitDepth::Bit10.present_formats(),
-			&[wgpu::TextureFormat::Rgb10a2Unorm, wgpu::TextureFormat::Rgba16Float]
+			&[
+				wgpu::TextureFormat::Rgb10a2Unorm,
+				wgpu::TextureFormat::Rgba16Float
+			]
 		);
 		// 8-bit → the engine's current default preference list.
 		assert_eq!(
 			DisplayBitDepth::Bit8.present_formats(),
-			&[wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm]
+			&[
+				wgpu::TextureFormat::Bgra8Unorm,
+				wgpu::TextureFormat::Rgba8Unorm
+			]
 		);
 	}
 
@@ -2590,8 +2625,7 @@ mod tests {
 		assert!(!GpuContext::shared().unwrap().is_adopted());
 
 		let (device, queue) = base.device_queue();
-		let adopted =
-			GpuContext::adopt(device, queue, BackendKind::Auto);
+		let adopted = GpuContext::adopt(device, queue, BackendKind::Auto);
 		assert!(
 			GpuContext::install_shared(Some(adopted.clone())),
 			"an unused engine context is replaceable by the UI device"
@@ -2605,8 +2639,7 @@ mod tests {
 		// pulled out from under in-flight work.
 		let _texture = adopted.create_texture(2, 2).unwrap();
 		let (device, queue) = adopted.device_queue();
-		let second =
-			GpuContext::adopt(device, queue, BackendKind::Auto);
+		let second = GpuContext::adopt(device, queue, BackendKind::Auto);
 		assert!(
 			!GpuContext::install_shared(Some(second)),
 			"a used context is not replaceable"
@@ -2728,8 +2761,7 @@ mod tests {
 		for i in 0..(w * h) as usize {
 			let px = sample(i);
 			for (c, v) in px.iter().enumerate() {
-				frame.data[i * 16 + c * 4..i * 16 + c * 4 + 4]
-					.copy_from_slice(&v.to_le_bytes());
+				frame.data[i * 16 + c * 4..i * 16 + c * 4 + 4].copy_from_slice(&v.to_le_bytes());
 			}
 		}
 		ctx.upload(src, &frame).unwrap();
@@ -2859,10 +2891,10 @@ mod tests {
 
 		let mut expected = vec![0.0f32; w * h * 4];
 		let mut compare = |ctx: &GpuContext,
-		                    tag: &str,
-		                    matrix: crate::colormath::YuvMatrix,
-		                    transform: YuvTransform,
-		                    full_range: bool| {
+		                   tag: &str,
+		                   matrix: crate::colormath::YuvMatrix,
+		                   transform: YuvTransform,
+		                   full_range: bool| {
 			crate::colormath::yuv444p16_to_rgb_f32(
 				&y_code_plane,
 				w * 2,
@@ -2893,12 +2925,48 @@ mod tests {
 			}
 		};
 		use crate::colormath::YuvMatrix;
-		compare(&ctx, "bt601 limited", YuvMatrix::Bt601, YuvTransform::bt601_limited(), false);
-		compare(&ctx, "bt601 full", YuvMatrix::Bt601, YuvTransform::bt601_full(), true);
-		compare(&ctx, "bt709 limited", YuvMatrix::Bt709, YuvTransform::bt709_limited(), false);
-		compare(&ctx, "bt709 full", YuvMatrix::Bt709, YuvTransform::bt709_full(), true);
-		compare(&ctx, "bt2020 limited", YuvMatrix::Bt2020, YuvTransform::bt2020_limited(), false);
-		compare(&ctx, "bt2020 full", YuvMatrix::Bt2020, YuvTransform::bt2020_full(), true);
+		compare(
+			&ctx,
+			"bt601 limited",
+			YuvMatrix::Bt601,
+			YuvTransform::bt601_limited(),
+			false,
+		);
+		compare(
+			&ctx,
+			"bt601 full",
+			YuvMatrix::Bt601,
+			YuvTransform::bt601_full(),
+			true,
+		);
+		compare(
+			&ctx,
+			"bt709 limited",
+			YuvMatrix::Bt709,
+			YuvTransform::bt709_limited(),
+			false,
+		);
+		compare(
+			&ctx,
+			"bt709 full",
+			YuvMatrix::Bt709,
+			YuvTransform::bt709_full(),
+			true,
+		);
+		compare(
+			&ctx,
+			"bt2020 limited",
+			YuvMatrix::Bt2020,
+			YuvTransform::bt2020_limited(),
+			false,
+		);
+		compare(
+			&ctx,
+			"bt2020 full",
+			YuvMatrix::Bt2020,
+			YuvTransform::bt2020_full(),
+			true,
+		);
 
 		ctx.destroy_texture(y);
 		ctx.destroy_texture(u);
@@ -2914,9 +2982,7 @@ mod tests {
 		let Some(ctx) = any_gpu() else {
 			return;
 		};
-		let lut = crate::lut::Lut3d::build(9, [0.0; 3], [1.0; 3], |c| {
-			[c[1], c[2], c[0]]
-		});
+		let lut = crate::lut::Lut3d::build(9, [0.0; 3], [1.0; 3], |c| [c[1], c[2], c[0]]);
 		let (w, h) = (4, 2);
 		let src = ctx.create_texture(w, h).unwrap();
 		let mut frame = Frame::new();
@@ -2933,8 +2999,7 @@ mod tests {
 				1.0,
 			];
 			for (c, v) in px.iter().enumerate() {
-				frame.data[i * 16 + c * 4..i * 16 + c * 4 + 4]
-					.copy_from_slice(&v.to_le_bytes());
+				frame.data[i * 16 + c * 4..i * 16 + c * 4 + 4].copy_from_slice(&v.to_le_bytes());
 			}
 		}
 		ctx.upload(src, &frame).unwrap();
@@ -2960,7 +3025,9 @@ mod tests {
 				let want = lut.eval(src_px);
 				for c in 0..3 {
 					let g = f32::from_le_bytes(
-						got.data[i * 16 + c * 4..i * 16 + c * 4 + 4].try_into().unwrap(),
+						got.data[i * 16 + c * 4..i * 16 + c * 4 + 4]
+							.try_into()
+							.unwrap(),
 					);
 					assert!(
 						(g - want[c]).abs() < 1e-4,
@@ -3008,7 +3075,7 @@ mod tests {
 	#[test]
 	fn display_renderer_rejects_foreign_gl_context() {
 		let mut r = DisplayRenderer::new(BackendKind::Gl);
-		let fake = 0x1 as *mut std::ffi::c_void;
+		let fake = std::ptr::dangling_mut::<std::ffi::c_void>();
 		assert_eq!(r.init(fake).unwrap_err().code(), Error::Invalid.code());
 	}
 
@@ -3039,20 +3106,20 @@ mod tests {
 		frame.allocate();
 		frame.data[0] = 0x77;
 		let mut upload_target = r3.create_texture(&pod, None).unwrap();
-		r3.upload_texture(
-			&mut upload_target,
-			frame.data.as_ptr(),
-			frame.linesize_bytes(),
-		)
+		unsafe {
+			r3.upload_texture(
+				&mut upload_target,
+				frame.data.as_ptr(),
+				frame.linesize_bytes(),
+			)
+		}
 		.unwrap();
 		let mut buf = vec![0u8; frame.linesize_bytes() * 4];
-		r3.download_texture(&upload_target, buf.as_mut_ptr(), frame.linesize_bytes())
+		unsafe { r3.download_texture(&upload_target, buf.as_mut_ptr(), frame.linesize_bytes()) }
 			.unwrap();
 		assert_eq!(buf[0], 0x77);
 		// Stride mismatch rejected.
-		assert!(r3
-			.upload_texture(&mut upload_target, frame.data.as_ptr(), 1)
-			.is_err());
+		assert!(unsafe { r3.upload_texture(&mut upload_target, frame.data.as_ptr(), 1) }.is_err());
 	}
 
 	#[test]
@@ -3077,9 +3144,9 @@ mod tests {
 		assert_eq!(df.data[4], 0x22);
 		// Pass-through processor is a no-op.
 		r.blit_color_managed(
-            Some(&src),
-            &mut dst,
-            Some(&crate::color::ColorProcessor::pass_through()),
+			Some(&src),
+			&mut dst,
+			Some(&crate::color::ColorProcessor::pass_through()),
 		)
 		.unwrap();
 		// Size mismatch rejected.

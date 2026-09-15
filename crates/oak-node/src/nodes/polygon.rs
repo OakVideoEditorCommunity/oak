@@ -112,7 +112,7 @@ pub fn point_array(core: &NodeCore, inputs: &crate::value::NodeValueRow, time: o
 		.inputs
 		.iter()
 		.find(|i| i.id == POINTS_INPUT)
-		.map(|i| (i.array_size as usize).min(64))
+		.map(|i| i.array_size.min(64))
 		.unwrap_or(5);
 	let mut points: Vec<[f64; 4]> = Vec::new();
 	for i in 0..size {
@@ -380,6 +380,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(PolygonGenerator))
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.polygon`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.polygon",
+		name: "Polygon",
+		categories: &[Category::Generator],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,15 +517,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Polygon");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.polygon`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.polygon",
-		name: "Polygon",
-		categories: &[Category::Generator],
-		create,
-	});
 }

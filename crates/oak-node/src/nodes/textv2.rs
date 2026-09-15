@@ -92,7 +92,7 @@ impl TextGeneratorV2 {
 		let text = row
 			.get(TEXT_INPUT)
 			.map(to_text)
-			.unwrap_or_else(|| String::new());
+			.unwrap_or_default();
 		let html = matches!(row.get(HTML_INPUT), Some(NodeValue::Boolean(true)));
 		let mut mode = TextLayoutMode::PlainText;
 		let text = if html {
@@ -111,7 +111,7 @@ impl TextGeneratorV2 {
 		TextLayoutRequest {
 			text,
 			mode,
-			font_family: row.get(FONT_INPUT).map(to_text).unwrap_or_else(String::new),
+			font_family: row.get(FONT_INPUT).map(to_text).unwrap_or_default(),
 			font_size_pt: row
 				.get(FONT_SIZE_INPUT)
 				.map(NodeValue::to_double)

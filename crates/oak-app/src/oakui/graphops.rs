@@ -699,12 +699,11 @@ pub fn ts_to_rational(ts: i64, tb: (i64, i64)) -> Rational {
 
 /// The sequence's track list of `kind`, when it exists.
 pub fn track_list_of(g: &Graph, seq: NodeId, kind: TrackType) -> Option<NodeId> {
-	for &list_id in &sequence_behavior(g, seq)?.track_lists {
-		if track_list_behavior(g, list_id).map(|l| l.kind) == Some(kind) {
-			return Some(list_id);
-		}
-	}
-	None
+	sequence_behavior(g, seq)?
+		.track_lists
+		.iter()
+		.find(|&&list_id| track_list_behavior(g, list_id).map(|l| l.kind) == Some(kind))
+		.copied()
 }
 
 /// Find (or create) the sequence's track list of `kind` (the facade's
@@ -1700,7 +1699,12 @@ pub fn create_adjustment_layer(
 		let index = track_list_behavior(&g.graph, list)
 			.and_then(|l| l.tracks.iter().position(|&t| t == track))
 			.ok_or_else(|| "the track is not in its list".to_string())?;
-		(list, index, ts_to_rational(in_ts, tb), ts_to_rational(out_ts, tb))
+		(
+			list,
+			index,
+			ts_to_rational(in_ts, tb),
+			ts_to_rational(out_ts, tb),
+		)
 	};
 
 	// The block itself: no label, no color override, no media wiring —
@@ -2370,7 +2374,12 @@ pub fn place_generator_clip(
 		in_r,
 	)
 	.to_command();
-	let edge = connect_command(p, generator, clip, oak_node::block::clip_input::TEXTURE_INPUT)?;
+	let edge = connect_command(
+		p,
+		generator,
+		clip,
+		oak_node::block::clip_input::TEXTURE_INPUT,
+	)?;
 	push_multi(vec![place, edge], "Add Clip")?;
 	Ok(clip)
 }
@@ -4557,7 +4566,15 @@ mod undo_cycle_ops_tests {
 	/// tests use.
 	fn two_touching_clips(
 		media: &std::path::Path,
-	) -> (ProjectRef, NodeId, NodeId, NodeId, NodeId, (i64, i64), Rational) {
+	) -> (
+		ProjectRef,
+		NodeId,
+		NodeId,
+		NodeId,
+		NodeId,
+		(i64, i64),
+		Rational,
+	) {
 		let project = create_project();
 		let seq = create_sequence(&project, "Default Transition");
 		let footage = import_footage(&project, media).expect("import");
@@ -4586,8 +4603,8 @@ mod undo_cycle_ops_tests {
 	fn default_transition_covers_both_ends_of_a_lone_clip() {
 		let _g = test_lock();
 		oak_undo::global::clear().unwrap();
-		let media = std::env::temp_dir()
-			.join(format!("oak_lone_transition_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oak_lone_transition_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
 		let project = create_project();
 		let seq = create_sequence(&project, "Lone Transition");
@@ -4604,10 +4621,14 @@ mod undo_cycle_ops_tests {
 		let half = ts_to_rational(3, tb);
 
 		let before = oak_undo::global::count().unwrap();
-		let created = add_default_transition(&project, seq, &[clip], half)
-			.expect("add default transition");
+		let created =
+			add_default_transition(&project, seq, &[clip], half).expect("add default transition");
 		assert_eq!(created, 2, "a lone clip takes both ends");
-		assert_eq!(oak_undo::global::count().unwrap(), before + 1, "one undo row");
+		assert_eq!(
+			oak_undo::global::count().unwrap(),
+			before + 1,
+			"one undo row"
+		);
 
 		let edge = half + half;
 		{
@@ -4615,7 +4636,10 @@ mod undo_cycle_ops_tests {
 			let blocks = track_behavior(&g.graph, track)
 				.map(|t| t.blocks.clone())
 				.unwrap_or_default();
-			let index = blocks.iter().position(|&b| b == clip).expect("clip on track");
+			let index = blocks
+				.iter()
+				.position(|&b| b == clip)
+				.expect("clip on track");
 			// (A leading gap when the clip starts past zero,) the head
 			// transition, the clip, the tail transition.
 			let (head, tail) = (blocks[index - 1], blocks[index + 1]);
@@ -4636,12 +4660,14 @@ mod undo_cycle_ops_tests {
 				"the head transition spans the clip's head"
 			);
 			assert_eq!(
-				g.graph.connected_output(head, oak_node::block::transition_input::IN_BLOCK, -1),
+				g.graph
+					.connected_output(head, oak_node::block::transition_input::IN_BLOCK, -1),
 				Some(clip),
 				"the head transition wires only the clip in"
 			);
 			assert_eq!(
-				g.graph.connected_output(head, oak_node::block::transition_input::OUT_BLOCK, -1),
+				g.graph
+					.connected_output(head, oak_node::block::transition_input::OUT_BLOCK, -1),
 				None,
 				"the head transition has no outgoing side"
 			);
@@ -4662,12 +4688,14 @@ mod undo_cycle_ops_tests {
 				"the tail transition spans the clip's tail"
 			);
 			assert_eq!(
-				g.graph.connected_output(tail, oak_node::block::transition_input::OUT_BLOCK, -1),
+				g.graph
+					.connected_output(tail, oak_node::block::transition_input::OUT_BLOCK, -1),
 				Some(clip),
 				"the tail transition wires only the clip out"
 			);
 			assert_eq!(
-				g.graph.connected_output(tail, oak_node::block::transition_input::IN_BLOCK, -1),
+				g.graph
+					.connected_output(tail, oak_node::block::transition_input::IN_BLOCK, -1),
 				None,
 				"the tail transition has no incoming side"
 			);
@@ -4694,8 +4722,8 @@ mod undo_cycle_ops_tests {
 	fn default_transition_covers_the_selected_seams() {
 		let _g = test_lock();
 		oak_undo::global::clear().unwrap();
-		let media = std::env::temp_dir()
-			.join(format!("oak_default_transition_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oak_default_transition_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
 		let (project, seq, track, a, b, tb, half) = two_touching_clips(&media);
 
@@ -4716,7 +4744,11 @@ mod undo_cycle_ops_tests {
 			let blocks = track_behavior(&g.graph, track)
 				.map(|t| t.blocks.clone())
 				.unwrap_or_default();
-			assert_eq!(blocks.len(), 3, "the transition joins the track: {blocks:?}");
+			assert_eq!(
+				blocks.len(),
+				3,
+				"the transition joins the track: {blocks:?}"
+			);
 			let t = blocks[1];
 			let seam = ts_to_rational(10, tb);
 			let core = block_core_of(&g.graph, t).expect("transition core");
@@ -4737,12 +4769,14 @@ mod undo_cycle_ops_tests {
 				"a default transition is symmetric"
 			);
 			assert_eq!(
-				g.graph.connected_output(t, oak_node::block::transition_input::OUT_BLOCK, -1),
+				g.graph
+					.connected_output(t, oak_node::block::transition_input::OUT_BLOCK, -1),
 				Some(a),
 				"the previous clip feeds out_block_in"
 			);
 			assert_eq!(
-				g.graph.connected_output(t, oak_node::block::transition_input::IN_BLOCK, -1),
+				g.graph
+					.connected_output(t, oak_node::block::transition_input::IN_BLOCK, -1),
 				Some(b),
 				"the next clip feeds in_block_in"
 			);
@@ -4787,7 +4821,10 @@ mod undo_cycle_ops_tests {
 		assert_eq!(oak_undo::global::count().unwrap(), rows);
 		{
 			let g = lock(&project);
-			assert!(g.graph.is_valid(transition), "the refused batch changed nothing");
+			assert!(
+				g.graph.is_valid(transition),
+				"the refused batch changed nothing"
+			);
 		}
 
 		oak_undo::global::clear().unwrap();
@@ -4844,8 +4881,8 @@ mod undo_cycle_ops_tests {
 		cycle_assert(&project, seq, &post, "transition length");
 
 		// A request longer than the dragged clip is clamped to its length.
-		let applied =
-			set_transition_length(&project, b, true, frame, ts_to_rational(9_999, tb)).expect("clamp");
+		let applied = set_transition_length(&project, b, true, frame, ts_to_rational(9_999, tb))
+			.expect("clamp");
 		assert_eq!(
 			applied,
 			ts_to_rational(10, tb),

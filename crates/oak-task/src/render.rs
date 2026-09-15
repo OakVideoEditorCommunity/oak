@@ -57,19 +57,15 @@ use oak_core::videoparams::VideoParams;
 use oak_node::footage::FootageBehavior;
 use oak_node::sequence::SequenceBehavior;
 use oak_node::track::{TrackBehavior, TrackListBehavior, TrackType};
-use oak_render::procpool::{
-    bgra8_to_f32_rgba, DispatcherConfig, ProcessDispatcher, ShmFrameRef,
-};
+use oak_render::procpool::{bgra8_to_f32_rgba, DispatcherConfig, ProcessDispatcher, ShmFrameRef};
 use oak_render::ticket::{
-    ticket_kind, AudioTicketParams, MontageClip, MontageEffect, TicketArena, TicketId, TicketPayload,
-    TicketResult, VideoTicketParams,
+	ticket_kind, AudioTicketParams, MontageClip, MontageEffect, TicketArena, TicketId,
+	TicketPayload, TicketResult, VideoTicketParams,
 };
 use oak_render::worker::JobDispatch;
 
 use crate::error::{Error, Result};
-use crate::nodeops::{
-    find_input_footage, pixel_format_from_code, NodeRef, ProjectRef,
-};
+use crate::nodeops::{find_input_footage, pixel_format_from_code, NodeRef, ProjectRef};
 use crate::task::Task;
 use oak_core::{Rational, TimeRange};
 
@@ -112,12 +108,16 @@ pub struct ForceParams {
 pub trait RenderTaskBehavior {
 	/// Called for each rendered video frame.
 	fn frame_downloaded(
-        &mut self,
-        task: &mut Task,
-        frame: &oak_core::texture::Texture,
+		&mut self,
+		task: &mut Task,
+		frame: &oak_core::texture::Texture,
 	) -> Result<()>;
 	/// Called for each rendered audio buffer.
-	fn audio_downloaded(&mut self, task: &mut Task, samples: &oak_render::ticket::AudioSamples) -> Result<()>;
+	fn audio_downloaded(
+		&mut self,
+		task: &mut Task,
+		samples: &oak_render::ticket::AudioSamples,
+	) -> Result<()>;
 	/// Called to encode a subtitle.
 	fn encode_subtitle(&mut self, task: &mut Task, text: &str) -> Result<()>;
 }
@@ -230,7 +230,10 @@ impl RenderTask {
 	/// The forced output size from [`ForceParams`], or `None`.
 	fn force_size(&self) -> Option<(i32, i32)> {
 		if self.force_params.force_width > 0 && self.force_params.force_height > 0 {
-			Some((self.force_params.force_width, self.force_params.force_height))
+			Some((
+				self.force_params.force_width,
+				self.force_params.force_height,
+			))
 		} else {
 			None
 		}
@@ -253,7 +256,10 @@ impl RenderTask {
 	/// traverser's bypass pushes the effect input through unchanged).
 	/// Parameters are the non-hidden, non-connection data inputs at
 	/// their standard (non-keyframed) values.
-	fn clip_effects(graph: &oak_node::graph::Graph, host: oak_node::id::NodeId) -> Vec<MontageEffect> {
+	fn clip_effects(
+		graph: &oak_node::graph::Graph,
+		host: oak_node::id::NodeId,
+	) -> Vec<MontageEffect> {
 		// Walk the chain: from the host's effect input upstream until an
 		// unconnected input or a node without an effect input; a `seen`
 		// guard protects against malformed cycles.
@@ -333,10 +339,12 @@ impl RenderTask {
 	/// (bottom-most track first so the topmost track — the highest-numbered
 	/// one, the list's last — composites last;
 	/// `// CPP-PARITY: M12 P0 montage contract`).
-	fn video_montage(project: &ProjectRef, sequence: oak_node::id::NodeId, time: Rational) -> Vec<MontageClip> {
-		let guard = project
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+	fn video_montage(
+		project: &ProjectRef,
+		sequence: oak_node::id::NodeId,
+		time: Rational,
+	) -> Vec<MontageClip> {
+		let guard = project.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(entry) = guard.graph.get(sequence) else {
 			return Vec::new();
 		};
@@ -374,8 +382,7 @@ impl RenderTask {
 					continue;
 				};
 				for block_id in &track.blocks {
-					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id)
-					else {
+					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id) else {
 						continue;
 					};
 					if time < core.in_() || time >= core.out() {
@@ -411,10 +418,12 @@ impl RenderTask {
 
 	/// Flatten the audio tracks of `sequence` into an audio montage
 	/// (track order is irrelevant — the mixer accumulates gains).
-	fn audio_montage(project: &ProjectRef, sequence: oak_node::id::NodeId, time: Rational) -> Vec<MontageClip> {
-		let guard = project
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+	fn audio_montage(
+		project: &ProjectRef,
+		sequence: oak_node::id::NodeId,
+		time: Rational,
+	) -> Vec<MontageClip> {
+		let guard = project.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(entry) = guard.graph.get(sequence) else {
 			return Vec::new();
 		};
@@ -452,8 +461,7 @@ impl RenderTask {
 					continue;
 				};
 				for block_id in &track.blocks {
-					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id)
-					else {
+					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id) else {
 						continue;
 					};
 					if time < core.in_() || time >= core.out() {
@@ -569,7 +577,8 @@ impl RenderTask {
 	/// single range; the C++ submits one ticket per audio range).
 	fn build_audio_ticket(&self, range: TimeRange) -> Result<AudioTicketParams> {
 		let (project, viewer_id) = &self.viewer;
-		let (sample_rate, channel_layout) = crate::nodeops::sequence_audio_params(project, *viewer_id);
+		let (sample_rate, channel_layout) =
+			crate::nodeops::sequence_audio_params(project, *viewer_id);
 		let montage = Self::audio_montage(project, *viewer_id, range.in_());
 		Ok(AudioTicketParams {
 			viewer: viewer_id.identity(),
@@ -595,9 +604,13 @@ impl RenderTask {
 		let params = self.build_video_ticket(time)?;
 		let id = arena.next_id();
 		let dispatch_ptr = DispatchPtr(dispatch);
-		arena.submit_video_background_with_id(id, params, Box::new(move |result| {
-			push_finished(id, result, dispatch_ptr);
-		}));
+		arena.submit_video_background_with_id(
+			id,
+			params,
+			Box::new(move |result| {
+				push_finished(id, result, dispatch_ptr);
+			}),
+		);
 		Ok(id)
 	}
 
@@ -612,9 +625,13 @@ impl RenderTask {
 		let params = self.build_audio_ticket(range)?;
 		let id = arena.next_id();
 		let dispatch_ptr = DispatchPtr(dispatch);
-		arena.submit_audio_with_id(id, params, Box::new(move |result| {
-			push_finished(id, result, dispatch_ptr);
-		}));
+		arena.submit_audio_with_id(
+			id,
+			params,
+			Box::new(move |result| {
+				push_finished(id, result, dispatch_ptr);
+			}),
+		);
 		Ok(id)
 	}
 
@@ -638,10 +655,7 @@ impl RenderTask {
 		match self.submit_video_ticket(arena, time, dispatch) {
 			Ok(id) => {
 				in_flight.push(id);
-				ticket_keys.insert(
-					id,
-					(TICKET_VIDEO, time.numerator(), time.denominator()),
-				);
+				ticket_keys.insert(id, (TICKET_VIDEO, time.numerator(), time.denominator()));
 				Ok(())
 			}
 			Err(e) => {
@@ -772,8 +786,7 @@ impl RenderTask {
 					.start()
 					.map_err(|e| Error::Failed(format!("render worker pool start: {e}")))?;
 				let producer: oak_render::ticket::Producer = Arc::new(|time, params| {
-					oak_render::eval::render_produced_frame(time, params)
-						.map(TicketPayload::Video)
+					oak_render::eval::render_produced_frame(time, params).map(TicketPayload::Video)
 				});
 				// M15 S3: the private dispatcher routes audio through the
 				// worker pool too; the inline dispatcher is the fallback
@@ -910,9 +923,8 @@ impl RenderTask {
 							break;
 						}
 						Err(e) => {
-							result = Err(Error::Failed(format!(
-								"Audio render ticket failed: {e:?}"
-							)));
+							result =
+								Err(Error::Failed(format!("Audio render ticket failed: {e:?}")));
 							break;
 						}
 					}
@@ -956,9 +968,8 @@ impl RenderTask {
 							break;
 						}
 						Err(e) => {
-							result = Err(Error::Failed(format!(
-								"Frame render ticket failed: {e:?}"
-							)));
+							result =
+								Err(Error::Failed(format!("Frame render ticket failed: {e:?}")));
 							break;
 						}
 					}
@@ -1020,8 +1031,7 @@ impl RenderTask {
 				.finished
 				.lock()
 				.unwrap_or_else(|e| e.into_inner())
-				.is_empty()
-				&& dispatch_ref.running.load(Ordering::SeqCst) == 0
+				.is_empty() && dispatch_ref.running.load(Ordering::SeqCst) == 0
 			{
 				// Every ticket finished and its queue copy was consumed.
 				break;
@@ -1202,7 +1212,9 @@ fn shm_frame_to_texture(frame: &ShmFrameRef) -> oak_core::texture::Texture {
 	f.channels = 4;
 	f.timestamp = oak_core::Rational::new(meta.time_num, meta.time_den);
 	f.data = samples
-		.chunks_exact(4)
+		.as_chunks::<4>()
+		.0
+		.iter()
 		.flat_map(|px| {
 			let mut bytes = [0u8; 16];
 			for (i, v) in px.iter().enumerate() {

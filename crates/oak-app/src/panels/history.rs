@@ -268,7 +268,7 @@ mod tests {
 	) {
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(320.0), px(400.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::demo(cx));
+			let engine = cx.new(MockEngine::demo);
 			HistoryPanel::new(engine, window, cx)
 		});
 		cx.run_until_parked();

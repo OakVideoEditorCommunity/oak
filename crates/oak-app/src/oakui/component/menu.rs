@@ -82,7 +82,8 @@ impl ContextMenuHandle {
 
 	/// Open the menu at `position` (window coordinates).
 	pub fn show(&self, position: Point<Pixels>, menu: Menu, cx: &mut App) {
-		self.menu.update(cx, |menu_view, cx| menu_view.show(position, menu, cx));
+		self.menu
+			.update(cx, |menu_view, cx| menu_view.show(position, menu, cx));
 	}
 
 	/// The popup entity, to be rendered as a child of the panel so the
@@ -126,7 +127,8 @@ pub const LANG_ITEM_COUNT: usize = 32;
 /// Maps a menu item id in the language range back to its index into
 /// [`crate::i18n::available_languages`].
 pub fn language_item_index(item: usize) -> Option<usize> {
-	(item >= LANG_ITEM_BASE && item < LANG_ITEM_BASE + LANG_ITEM_COUNT)
+	(LANG_ITEM_BASE..LANG_ITEM_BASE + LANG_ITEM_COUNT)
+		.contains(&item)
 		.then(|| item - LANG_ITEM_BASE)
 }
 
@@ -262,7 +264,8 @@ pub fn color_label_item(selected: Option<usize>) -> MenuItem {
 /// The color index (`0..COLOR_LABEL_COUNT`) behind a triggered menu item id,
 /// when `item` is one of the color-label items.
 pub fn color_label_index(item: usize) -> Option<usize> {
-	(item >= COLOR_LABEL_BASE && item < COLOR_LABEL_BASE + COLOR_LABEL_COUNT)
+	(COLOR_LABEL_BASE..COLOR_LABEL_BASE + COLOR_LABEL_COUNT)
+		.contains(&item)
 		.then(|| item - COLOR_LABEL_BASE)
 }
 
@@ -334,12 +337,17 @@ impl Default for ViewerMenuState {
 pub fn viewer_menu(state: &ViewerMenuState) -> Menu {
 	use crate::i18n::tr;
 	// Zoom: Fit + one entry per zoom level, checked against the live state.
-	let mut zoom_items = vec![MenuItem::new(LOCAL_VIEWER_ZOOM_FIT, tr("viewer.context.zoom_fit"))
-		.with_checked(state.zoom == ViewerZoom::Fit)];
+	let mut zoom_items = vec![
+		MenuItem::new(LOCAL_VIEWER_ZOOM_FIT, tr("viewer.context.zoom_fit"))
+			.with_checked(state.zoom == ViewerZoom::Fit),
+	];
 	for (index, level) in VIEWER_ZOOM_LEVELS.iter().enumerate() {
 		zoom_items.push(
-			MenuItem::new(viewer_zoom_level_id(index), format!("{:.0}%", level * 100.0))
-				.with_checked(state.zoom == ViewerZoom::Level(index)),
+			MenuItem::new(
+				viewer_zoom_level_id(index),
+				format!("{:.0}%", level * 100.0),
+			)
+			.with_checked(state.zoom == ViewerZoom::Level(index)),
 		);
 	}
 	// Playback Resolution radio group (the C++ `PlaybackDivider` config):
@@ -376,9 +384,10 @@ pub fn viewer_menu(state: &ViewerMenuState) -> Menu {
 	Menu::new(vec![
 		MenuItem::new(0, tr("viewer.context.zoom")).with_submenu(Menu::new(zoom_items)),
 		MenuItem::new(LOCAL_VIEWER_FULL_SCREEN, tr("viewer.context.full_screen")),
-		MenuItem::new(0, tr("viewer.context.playback_resolution"))
-			.with_submenu(resolution_menu),
-		MenuItem::new(0, tr("viewer.context.safe_margins")).with_submenu(safe_menu).separated(),
+		MenuItem::new(0, tr("viewer.context.playback_resolution")).with_submenu(resolution_menu),
+		MenuItem::new(0, tr("viewer.context.safe_margins"))
+			.with_submenu(safe_menu)
+			.separated(),
 		MenuItem::new(LOCAL_VIEWER_STOP_ON_LAST, tr("viewer.context.stop_on_last"))
 			.with_checked(state.stop_on_last)
 			.separated(),
@@ -426,7 +435,9 @@ pub fn viewer_menu_action(item: usize) -> Option<ViewerMenuAction> {
 	} else if item >= LOCAL_VIEWER_ZOOM_LEVELS_BASE
 		&& item < LOCAL_VIEWER_ZOOM_LEVELS_BASE + VIEWER_ZOOM_LEVELS.len()
 	{
-		Some(ViewerMenuAction::ZoomLevel(item - LOCAL_VIEWER_ZOOM_LEVELS_BASE))
+		Some(ViewerMenuAction::ZoomLevel(
+			item - LOCAL_VIEWER_ZOOM_LEVELS_BASE,
+		))
 	} else {
 		match item {
 			LOCAL_VIEWER_FULL_SCREEN => Some(ViewerMenuAction::FullScreen),
@@ -585,7 +596,9 @@ mod tests {
 	fn viewer_menu_offers_every_zoom_level() {
 		// The label lookups below race with tests that flip the process
 		// language: pin en-US under the shared lock.
-		let _guard = crate::i18n::lang_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		crate::i18n::set_language_code("en-US");
 		let menu = viewer_menu(&ViewerMenuState::default());
 		let zoom = menu
@@ -599,7 +612,10 @@ mod tests {
 		assert_eq!(zoom_items[0].checked, Some(true), "Fit checked by default");
 		for (index, level) in VIEWER_ZOOM_LEVELS.iter().enumerate() {
 			assert_eq!(zoom_items[index + 1].id, viewer_zoom_level_id(index));
-			assert_eq!(zoom_items[index + 1].label, format!("{:.0}%", level * 100.0));
+			assert_eq!(
+				zoom_items[index + 1].label,
+				format!("{:.0}%", level * 100.0)
+			);
 			assert_eq!(
 				zoom_items[index + 1].checked,
 				Some(false),
@@ -614,7 +630,9 @@ mod tests {
 	fn viewer_menu_radio_groups_default_to_the_first_entry() {
 		// The label lookups below race with tests that flip the process
 		// language: pin en-US under the shared lock.
-		let _guard = crate::i18n::lang_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		crate::i18n::set_language_code("en-US");
 		let menu = viewer_menu(&ViewerMenuState::default());
 		for label_key in [
@@ -630,7 +648,9 @@ mod tests {
 			let sub = item.submenu.as_ref().unwrap();
 			assert_eq!(sub.items[0].checked, Some(true), "{label_key} default");
 			assert!(
-				sub.items[1..].iter().all(|item| item.checked == Some(false)),
+				sub.items[1..]
+					.iter()
+					.all(|item| item.checked == Some(false)),
 				"{label_key} non-defaults unchecked"
 			);
 		}
@@ -640,7 +660,9 @@ mod tests {
 	#[test]
 	fn viewer_menu_resolution_radio_follows_the_divider() {
 		// Label lookup: pin en-US under the shared language lock.
-		let _guard = crate::i18n::lang_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		crate::i18n::set_language_code("en-US");
 		let menu = viewer_menu(&ViewerMenuState {
 			playback_divider: 4,
@@ -662,7 +684,9 @@ mod tests {
 	#[test]
 	fn viewer_menu_reflects_live_state() {
 		// Label lookup: pin en-US under the shared language lock.
-		let _guard = crate::i18n::lang_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		crate::i18n::set_language_code("en-US");
 		let menu = viewer_menu(&ViewerMenuState {
 			playback_divider: 2,
@@ -721,7 +745,10 @@ mod tests {
 			None,
 			"zoom id past the last level"
 		);
-		assert_eq!(viewer_menu_action(LOCAL_VIEWER_FULL_SCREEN), Some(V::FullScreen));
+		assert_eq!(
+			viewer_menu_action(LOCAL_VIEWER_FULL_SCREEN),
+			Some(V::FullScreen)
+		);
 		for (id, divider) in [
 			(LOCAL_VIEWER_RES_FULL, 1),
 			(LOCAL_VIEWER_RES_HALF, 2),
@@ -732,8 +759,14 @@ mod tests {
 		}
 		assert_eq!(viewer_menu_action(LOCAL_VIEWER_SAFE_OFF), Some(V::SafeOff));
 		assert_eq!(viewer_menu_action(LOCAL_VIEWER_SAFE_ON), Some(V::SafeOn));
-		assert_eq!(viewer_menu_action(LOCAL_VIEWER_SAFE_CUSTOM), Some(V::SafeCustom));
-		assert_eq!(viewer_menu_action(LOCAL_VIEWER_STOP_ON_LAST), Some(V::StopOnLast));
+		assert_eq!(
+			viewer_menu_action(LOCAL_VIEWER_SAFE_CUSTOM),
+			Some(V::SafeCustom)
+		);
+		assert_eq!(
+			viewer_menu_action(LOCAL_VIEWER_STOP_ON_LAST),
+			Some(V::StopOnLast)
+		);
 		assert_eq!(
 			viewer_menu_action(LOCAL_VIEWER_WF_AUTOMATIC),
 			Some(V::Waveform(WaveformMode::Automatic))
@@ -747,8 +780,15 @@ mod tests {
 			Some(V::Waveform(WaveformMode::Both))
 		);
 		assert_eq!(viewer_menu_action(LOCAL_VIEWER_SHOW_FPS), Some(V::ShowFps));
-		assert_eq!(viewer_menu_action(LOCAL_VIEWER_SAVE_FRAME), Some(V::SaveFrame));
-		assert_eq!(viewer_menu_action(0), None, "registry-range id is not local");
+		assert_eq!(
+			viewer_menu_action(LOCAL_VIEWER_SAVE_FRAME),
+			Some(V::SaveFrame)
+		);
+		assert_eq!(
+			viewer_menu_action(0),
+			None,
+			"registry-range id is not local"
+		);
 		assert_eq!(viewer_menu_action(LOCAL_ID_BASE), None, "color-label id");
 	}
 }

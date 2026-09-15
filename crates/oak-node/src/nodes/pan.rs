@@ -196,6 +196,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(PanNode))
 }
 
+/// Register this node type (C++ `k_audio_panning` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.pan",
+		name: "Pan",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -337,15 +348,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Pan");
 	}
-}
-
-/// Register this node type (C++ `k_audio_panning` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.pan",
-		name: "Pan",
-		categories: &[Category::Filter],
-		create,
-	});
 }

@@ -42,8 +42,8 @@ use std::sync::Arc;
 
 use oak_codec::encoder::{create_from_params, Encoder};
 use oak_codec::encodingparams::EncodingParams as CodecEncodingParams;
-use oak_core::videoparams::VideoParams as CommonVideoParams;
 use oak_core::texture::Texture;
+use oak_core::videoparams::VideoParams as CommonVideoParams;
 
 use crate::error::{Error, Result};
 use crate::nodeops::{self, NodeRef};
@@ -127,7 +127,6 @@ pub struct EncodingParams {
 	pub color_trc: i32,
 	/// AVColorSpace (SDR 709 = 1, HDR BT.2020 = 9).
 	pub color_space: i32,
-
 }
 
 impl ExportTask {
@@ -147,7 +146,13 @@ impl ExportTask {
 		// `it_export` run).
 		let video_params = nodeops::sequence_video_params(&viewer.0, viewer.1, 0)
 			.or_else(|| nodeops::footage_video_params(&viewer.0, viewer.1, 0));
-		let render = RenderTask::new(base, video_params, viewer.clone(), ForceParams::default(), None);
+		let render = RenderTask::new(
+			base,
+			video_params,
+			viewer.clone(),
+			ForceParams::default(),
+			None,
+		);
 		ExportTask {
 			render,
 			viewer_node: viewer,
@@ -231,15 +236,13 @@ impl ExportTask {
 	/// The project's pipeline color settings (working colorspace + the
 	/// delivery output spec) read off the exported node's project — the
 	/// export renders to the project's delivery target, not to the display.
-	fn delivery_color(&self) -> (
-        oak_core::colormath::WorkingColorSpace,
-        oak_core::colormath::OutputColorSpec,
+	fn delivery_color(
+		&self,
+	) -> (
+		oak_core::colormath::WorkingColorSpace,
+		oak_core::colormath::OutputColorSpec,
 	) {
-		let guard = self
-			.viewer_node
-			.0
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let guard = self.viewer_node.0.lock().unwrap_or_else(|e| e.into_inner());
 		(guard.working_color_space(), guard.output_color_spec())
 	}
 
@@ -288,25 +291,26 @@ impl ExportTask {
 		let frame = match texture {
 			Texture::Cpu(frame) => frame.clone(),
 			Texture::Gpu { .. } => texture.to_frame().map_err(|e| {
-				Error::Failed(format!("Render frame readback for the encoder failed: {e:?}"))
+				Error::Failed(format!(
+					"Render frame readback for the encoder failed: {e:?}"
+				))
 			})?,
 		};
 		let frame = &frame;
 		let params = CommonVideoParams::new_basic(
-            frame.width,
-            frame.height,
-            oak_core::ocioutils::PixelFormat::from_code(frame.format as i32),
-            4,
-            1,
-            1,
-            0,
-            1,
+			frame.width,
+			frame.height,
+			oak_core::ocioutils::PixelFormat::from_code(frame.format as i32),
+			4,
+			1,
+			1,
+			0,
+			1,
 		);
 		let mut out = oak_codec::frame::Frame::with_params(params);
 		out.set_timestamp(frame.timestamp);
-		out.allocate().map_err(|e| {
-			Error::Failed(format!("Failed to allocate encoder frame: {e:?}"))
-		})?;
+		out.allocate()
+			.map_err(|e| Error::Failed(format!("Failed to allocate encoder frame: {e:?}")))?;
 		let dst_stride = out.linesize_bytes() as usize;
 		let Some(dst) = out.data_mut() else {
 			return Err(Error::Failed(
@@ -386,7 +390,7 @@ impl TaskBehavior for ExportTask {
 		result?;
 
 		// Flush the encoder and surface any trailing error.
-		if let Err(_) = encoder.flush() {
+		if encoder.flush().is_err() {
 			// Fall through to the error read below (the flush error is
 			// surfaced through `get_error()` like the C ABI did).
 		}
@@ -411,7 +415,7 @@ impl RenderTaskBehavior for ExportTask {
 		// project's delivery colorspace before encoding. (No-op in the
 		// legacy sRGB working space.)
 		self.apply_output_node(&mut codec_frame);
-		if let Err(_) = encoder.write_video(&codec_frame) {
+		if encoder.write_video(&codec_frame).is_err() {
 			let err = encoder.get_error();
 			task.set_error(&err);
 			return Err(Error::Failed("Failed to write frame".to_string()));
@@ -433,7 +437,10 @@ impl RenderTaskBehavior for ExportTask {
 		} else {
 			0
 		};
-		if let Err(_) = encoder.write_audio(&samples.samples, frame_count as i32) {
+		if encoder
+			.write_audio(&samples.samples, frame_count as i32)
+			.is_err()
+		{
 			let err = encoder.get_error();
 			task.set_error(&err);
 			return Err(Error::Failed("Failed to write audio".to_string()));
@@ -450,7 +457,7 @@ impl RenderTaskBehavior for ExportTask {
 		};
 		// The simplified path does not carry the subtitle block's in/out
 		// times; write with 0.0/0.0 (the encoder default interval).
-		if let Err(_) = encoder.write_subtitle(text, 0.0, 0.0) {
+		if encoder.write_subtitle(text, 0.0, 0.0).is_err() {
 			let err = encoder.get_error();
 			task.set_error(&err);
 			return Err(Error::Failed("Failed to write subtitle".to_string()));

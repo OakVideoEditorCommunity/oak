@@ -55,7 +55,10 @@ struct FreeProbe {
 
 impl Drop for FreeProbe {
 	fn drop(&mut self) {
-		self.trace.lock().unwrap().push(format!("free:{}", self.name));
+		self.trace
+			.lock()
+			.unwrap()
+			.push(format!("free:{}", self.name));
 	}
 }
 
@@ -106,11 +109,14 @@ fn command_drop_frees_exactly_once() {
 		name: "a",
 		trace: trace.clone(),
 	};
-	let cmd = UndoCommand::from_closures(move || {}, move || {
-		// `probe` must be captured by value so that dropping the command
-		// frees it; dropping a reference (the previous body) did nothing.
-		let _ = &probe;
-	});
+	let cmd = UndoCommand::from_closures(
+		move || {},
+		move || {
+			// `probe` must be captured by value so that dropping the command
+			// frees it; dropping a reference (the previous body) did nothing.
+			let _ = &probe;
+		},
+	);
 
 	drop(cmd);
 	assert_eq!(events(&trace), vec!["free:a"]);
@@ -141,8 +147,8 @@ fn multi_redo_undo_ordering() {
 
 	assert_eq!(multi.multi_child_count(), 3);
 	// Children are reachable and named.
-	assert_eq!(multi.multi_child(0).unwrap().is_done(), false);
-	assert_eq!(multi.multi_child(2).unwrap().is_done(), false);
+	assert!(!multi.multi_child(0).unwrap().is_done());
+	assert!(!multi.multi_child(2).unwrap().is_done());
 	assert!(matches!(multi.multi_child(3), Err(Error::NotFound)));
 
 	// Redo in insertion order; undo in reverse.
@@ -182,7 +188,7 @@ fn stack_new_has_empty_bottom() {
 	assert!(!s.can_undo());
 	assert!(!s.can_redo());
 	assert_eq!(s.command_name(0).unwrap(), "New/Open Project");
-	assert_eq!(s.command_is_done(0).unwrap(), true);
+	assert!(s.command_is_done(0).unwrap());
 }
 
 #[test]
@@ -203,7 +209,7 @@ fn stack_push_undo_redo_branch() {
 	assert!(s.can_redo());
 	assert_eq!(s.done_count(), 2);
 	assert_eq!(s.command_name(2).unwrap(), "B"); // undone row is still labeled
-	assert_eq!(s.command_is_done(2).unwrap(), false);
+	assert!(!s.command_is_done(2).unwrap());
 
 	// Redo restores.
 	s.redo().unwrap();

@@ -130,12 +130,7 @@ impl KeyframeTrack {
 			}
 		}
 
-		let (b, a) = match before {
-			Some(pair) => pair,
-			// Unreachable given the front/back guards; C++ logs and falls
-			// through to the standard value.
-			None => return None,
-		};
+		let (b, a) = before?;
 		let before_key = &keys[b];
 		let after_key = &keys[a];
 

@@ -47,7 +47,7 @@ fn gradient_frame_x(size: (i32, i32)) -> Texture {
 	Texture::wrap_frame(f)
 }
 fn pixel_at(frame: &oak_core::texture::Frame, x: usize, y: usize) -> [f32; 4] {
-	let stride = frame.linesize_bytes() as usize;
+	let stride = frame.linesize_bytes();
 	let at = y * stride + x * 16;
 	let mut out = [0f32; 4];
 	for c in 0..4 { out[c] = f32::from_le_bytes(frame.data[at + c*4..at + c*4 + 4].try_into().unwrap()); }

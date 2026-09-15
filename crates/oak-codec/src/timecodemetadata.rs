@@ -66,7 +66,7 @@ fn frame_rate(timebase: &Rational) -> f64 {
 /// `drop_frame` is true when the (already trimmed) string contains a `;`.
 /// Returns `None` on any parse failure.
 fn timecode_to_time(timecode: &str, timebase: &Rational, drop_frame: bool) -> Option<Rational> {
-	let mut tokens: Vec<&str> = timecode.split(|c| c == ':' || c == ';').collect();
+	let mut tokens: Vec<&str> = timecode.split([':', ';']).collect();
 	let element_count = 4;
 
 	// Keep only the leading `HH:MM:SS:FF` tokens.

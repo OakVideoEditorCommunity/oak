@@ -66,12 +66,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gpui::effect_stack::{
-    EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
+	EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
 };
 use gpui::node_graph::{NodeGraphDataSource, NodeGraphEvent};
 use gpui::timeline::{
-    ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
-    TrackData, TrackHeaderEvent, TrackKind, TrimEdge,
+	ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
+	TrackData, TrackHeaderEvent, TrackKind, TrimEdge,
 };
 use gpui::{prelude::*, px, App, Context, Entity, Hsla, Pixels, RenderImage, SharedString};
 use gpui_widgets::audio_meter::AudioMeterDataSource;
@@ -86,8 +86,8 @@ use oak_timeline::handle::CHandle;
 use oak_timeline::util::NodeRef;
 
 use super::engine::{
-    AppEngine, EngineGateway, ExportSession, LibraryProject, Monitor, MulticamState, Project,
-    ScopeData, Sequence, SequenceParameters, VideoFormat, WizardFootage, WizardSyncOffset,
+	AppEngine, EngineGateway, ExportSession, LibraryProject, Monitor, MulticamState, Project,
+	ScopeData, Sequence, SequenceParameters, VideoFormat, WizardFootage, WizardSyncOffset,
 };
 use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image, synthetic_frame_samples};
 use super::graphops::{self, ProjectRef};
@@ -422,7 +422,10 @@ impl AudioPrefetch {
 			let ts = *ts;
 			let (_, data) = self.buffered.pop_front().unwrap();
 			if ts >= playhead {
-				audio_dbg(&format!("push chunk {ts} (lead {} vs playhead {playhead})", ts - playhead));
+				audio_dbg(&format!(
+					"push chunk {ts} (lead {} vs playhead {playhead})",
+					ts - playhead
+				));
 				out.push(data);
 			} else {
 				audio_dbg(&format!(
@@ -449,7 +452,10 @@ pub(crate) fn audio_dbg(msg: &str) {
 		return;
 	}
 	static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-	let ms = T0.get_or_init(std::time::Instant::now).elapsed().as_millis();
+	let ms = T0
+		.get_or_init(std::time::Instant::now)
+		.elapsed()
+		.as_millis();
 	eprintln!("[audio {ms:>8}ms] {msg}");
 }
 
@@ -674,7 +680,7 @@ fn read_f32_frame(frame: &super::renderops::RenderedFrame) -> Option<(u32, u32, 
 	let mut samples = vec![0.0f32; (*width * *height * 4) as usize];
 	for y in 0..*height as usize {
 		let row = &data[y * linesize..y * linesize + row_bytes];
-		for (i, px) in row.chunks_exact(4).enumerate() {
+		for (i, px) in row.as_chunks::<4>().0.iter().enumerate() {
 			let v = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
 			samples[y * (*width as usize) * 4 + i] = v;
 		}
@@ -712,7 +718,8 @@ fn rendered_to_owned_image(rendered: &super::renderops::RenderedFrame) -> Option
 				// register the RGBA16F texture for the viewer; the BGRA8
 				// image below is only the CPU fallback (scope / eyedropper /
 				// cached fills without a GPU).
-				let mut samples = repack_f32_row_bytes(meta.width, meta.height, meta.linesize, data)?;
+				let mut samples =
+					repack_f32_row_bytes(meta.width, meta.height, meta.linesize, data)?;
 				apply_output_node_f32(&mut samples);
 				super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
 				let image = f32_rgba_to_bgra_image(w, h, &samples);
@@ -760,7 +767,9 @@ fn samples_from_cpu_frame(frame: &oak_core::texture::Frame) -> Option<(u32, u32,
 	let mut samples = vec![0.0f32; w * h * 4];
 	for y in 0..h {
 		for (i, px) in frame.data[y * stride..y * stride + w * 16]
-			.chunks_exact(16)
+			.as_chunks::<16>()
+			.0
+			.iter()
 			.enumerate()
 		{
 			for c in 0..4 {
@@ -776,9 +785,9 @@ fn samples_from_cpu_frame(frame: &oak_core::texture::Frame) -> Option<(u32, u32,
 /// project's output colorspace); pass-through in the legacy working space.
 fn apply_output_node_f32(samples: &mut [f32]) {
 	oak_core::colormath::working_to_display_target(
-        samples,
-        oak_core::color::pipeline_working_space(),
-        oak_core::color::pipeline_output_spec(),
+		samples,
+		oak_core::color::pipeline_working_space(),
+		oak_core::color::pipeline_output_spec(),
 	);
 }
 
@@ -796,7 +805,7 @@ fn repack_f32_row_bytes(width: i32, height: i32, linesize: i32, data: &[u8]) -> 
 	let mut samples = vec![0.0f32; (width * height * 4) as usize];
 	for y in 0..height as usize {
 		let row = &data[y * linesize..y * linesize + row_bytes];
-		for (i, px) in row.chunks_exact(4).enumerate() {
+		for (i, px) in row.as_chunks::<4>().0.iter().enumerate() {
 			let v = f32::from_ne_bytes([px[0], px[1], px[2], px[3]]);
 			samples[y * (width as usize) * 4 + i] = v;
 		}
@@ -1355,12 +1364,12 @@ impl RealEngine {
 		// footage as the re-point target.
 		let target_footage = {
 			let g = graphops::lock(&project);
-			let mc = g
-				.graph
-				.connected_output(clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)?;
-			let seq = g
-				.graph
-				.connected_output(mc, oak_node::nodes::multicamnode::SEQUENCE_INPUT, -1)?;
+			let mc =
+				g.graph
+					.connected_output(clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)?;
+			let seq =
+				g.graph
+					.connected_output(mc, oak_node::nodes::multicamnode::SEQUENCE_INPUT, -1)?;
 			let list = graphops::track_list_of(&g.graph, seq, TrackType::Audio)?;
 			let list_behavior = graphops::track_list_behavior(&g.graph, list)?;
 			let audio_track = list_behavior.tracks.get(source as usize)?;
@@ -1382,18 +1391,15 @@ impl RealEngine {
 				let mut g = graphops::lock(&p_undo);
 				for (from, input, element) in g.graph.input_connections(aclip) {
 					if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-						let _ = g.graph.disconnect(from, aclip, &input, element);
+						g.graph.disconnect(from, aclip, &input, element);
 					}
 				}
 			},
 			move || {
 				let mut g = graphops::lock(&p_redo);
-				let _ = g.graph.connect(
-					old,
-					aclip,
-					oak_node::block::clip_input::TEXTURE_INPUT,
-					-1,
-				);
+				let _ = g
+					.graph
+					.connect(old, aclip, oak_node::block::clip_input::TEXTURE_INPUT, -1);
 			},
 		);
 		let p_connect = project.clone();
@@ -1402,7 +1408,7 @@ impl RealEngine {
 				let mut g = graphops::lock(&p_connect);
 				for (from, input, element) in g.graph.input_connections(aclip) {
 					if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-						let _ = g.graph.disconnect(from, aclip, &input, element);
+						g.graph.disconnect(from, aclip, &input, element);
 					}
 				}
 				let _ = g.graph.connect(
@@ -1418,15 +1424,12 @@ impl RealEngine {
 					let mut g = graphops::lock(&p);
 					for (from, input, element) in g.graph.input_connections(aclip) {
 						if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-							let _ = g.graph.disconnect(from, aclip, &input, element);
+							g.graph.disconnect(from, aclip, &input, element);
 						}
 					}
-					let _ = g.graph.connect(
-						old,
-						aclip,
-						oak_node::block::clip_input::TEXTURE_INPUT,
-						-1,
-					);
+					let _ =
+						g.graph
+							.connect(old, aclip, oak_node::block::clip_input::TEXTURE_INPUT, -1);
 				}
 			},
 		);
@@ -1794,7 +1797,12 @@ impl RealEngine {
 				*slot = RendererSlot::Ready;
 				let (image, scope, samples) = rendered.to_display()?;
 				if let Some(samples) = samples {
-					super::gpu::register_display_frame(image.id.0, width as u32, height as u32, &samples);
+					super::gpu::register_display_frame(
+						image.id.0,
+						width as u32,
+						height as u32,
+						&samples,
+					);
 				}
 				release_rendered_frame(&rendered);
 				Some((image, scope))
@@ -1849,7 +1857,12 @@ impl RealEngine {
 				*slot = RendererSlot::Ready;
 				let (image, scope, samples) = rendered.to_display()?;
 				if let Some(samples) = samples {
-					super::gpu::register_display_frame(image.id.0, width as u32, height as u32, &samples);
+					super::gpu::register_display_frame(
+						image.id.0,
+						width as u32,
+						height as u32,
+						&samples,
+					);
 				}
 				release_rendered_frame(&rendered);
 				Some((image, scope))
@@ -2294,10 +2307,22 @@ impl RealEngine {
 		for frame in new_frames {
 			let params = match monitor {
 				Monitor::Program => super::renderops::sequence_frame_params(
-					&project, node, frame, tb, width, height, Some(oak_core::PixelFormat::F32),
+					&project,
+					node,
+					frame,
+					tb,
+					width,
+					height,
+					Some(oak_core::PixelFormat::F32),
 				),
 				Monitor::Source => super::renderops::footage_frame_params(
-					&project, node, frame, tb, width, height, Some(oak_core::PixelFormat::F32),
+					&project,
+					node,
+					frame,
+					tb,
+					width,
+					height,
+					Some(oak_core::PixelFormat::F32),
 				),
 			};
 			let Ok(params) = params else { continue };
@@ -2422,7 +2447,12 @@ impl RealEngine {
 				let (image, scope, samples) =
 					super::renderops::RenderedFrame::Gpu(texture).to_display()?;
 				if let Some(samples) = samples {
-					super::gpu::register_display_frame(image.id.0, w.max(0) as u32, h.max(0) as u32, &samples);
+					super::gpu::register_display_frame(
+						image.id.0,
+						w.max(0) as u32,
+						h.max(0) as u32,
+						&samples,
+					);
 				}
 				Some((Arc::new(image), scope))
 			}
@@ -2502,8 +2532,8 @@ impl RealEngine {
 	/// mapped onto the widget's badge enum; folders and footage without
 	/// proxy state get none.
 	fn proxy_badge_of(&self, id: u64) -> Option<gpui_widgets::project_explorer::ProxyBadge> {
-        use gpui_widgets::project_explorer::ProxyBadge;
-        let project = self.project.as_ref()?;
+		use gpui_widgets::project_explorer::ProxyBadge;
+		let project = self.project.as_ref()?;
 		let node = graphops::id_of(id)?;
 		let guard = graphops::lock(project);
 		let f = graphops::footage_behavior(&guard.graph, node)?;
@@ -2839,8 +2869,8 @@ impl RealEngine {
 		f: &oak_node::footage::FootageBehavior,
 		node: NodeId,
 	) -> super::engine::ProxyMediaState {
-        use super::engine::ProxyMediaState;
-        if self.proxy_runs.iter().any(|run| run.footage == node) {
+		use super::engine::ProxyMediaState;
+		if self.proxy_runs.iter().any(|run| run.footage == node) {
 			return ProxyMediaState::Generating;
 		}
 		if f.proxy.is_empty() {
@@ -2866,9 +2896,9 @@ impl RealEngine {
 	/// every clip is re-placed so its source head lines up with the
 	/// reference's at the anchor (one multi-undo).
 	fn sync_clips_by_source_time_internal(&mut self, clips: &[ClipId]) {
-        use oak_audio::synchronizer::{place_by_source_time, SourceClip};
+		use oak_audio::synchronizer::{place_by_source_time, SourceClip};
 
-        let Some(project) = self.project.clone() else {
+		let Some(project) = self.project.clone() else {
 			return;
 		};
 
@@ -2990,12 +3020,12 @@ impl RealEngine {
 	/// offset triggers a rate search whose winner also rescales the clip
 	/// speed (one multi-undo).
 	fn sync_clips_by_waveform_internal(&mut self, clips: &[ClipId], allow_speed: bool) {
-        use oak_audio::synchronizer::place_by_waveform_offset;
-        use oak_audio::waveformsync::{
-            estimate_envelope_offset_valid, estimate_stretch_and_offset,
-        };
+		use oak_audio::synchronizer::place_by_waveform_offset;
+		use oak_audio::waveformsync::{
+			estimate_envelope_offset_valid, estimate_stretch_and_offset,
+		};
 
-        let Some(cache) = self.waveform_cache() else {
+		let Some(cache) = self.waveform_cache() else {
 			return;
 		};
 		let Some(project) = self.project.clone() else {
@@ -3591,8 +3621,7 @@ impl RealEngine {
 				} else {
 					entry.core.label.clone()
 				};
-				let multicam =
-					super::multicam::clip_is_multicam(graph, block);
+				let multicam = super::multicam::clip_is_multicam(graph, block);
 				Some(RealClip {
 					id: ClipId(block.identity()),
 					range: FrameRange::new(Frame(to_ts(in_r)), Frame(to_ts(out_r))),
@@ -3981,8 +4010,7 @@ impl EngineGateway for RealEngine {
 				if let Some(manager) = oak_audio::manager::instance() {
 					if manager.seconds(&mut secs).is_ok() && secs > start_secs {
 						let rate = self.program_clock.read(cx).frame_rate();
-						let mut target =
-							audio_target_frame(start_frame, start_secs, secs, rate);
+						let mut target = audio_target_frame(start_frame, start_secs, secs, rate);
 						if length.0 > 0 && target >= length.0 {
 							target %= length.0;
 						}
@@ -4648,10 +4676,10 @@ impl AppEngine for RealEngine {
 				// inspector shows that effect's params).
 				let prev = self.selected_graph_node;
 				self.selected_graph_node = (nodes.len() == 1).then(|| {
-					(*nodes
+					nodes
 						.iter()
 						.next()
-						.expect("a one-element set always yields an item"))
+						.expect("a one-element set always yields an item")
 					.0
 				});
 				if prev != self.selected_graph_node {
@@ -5293,10 +5321,7 @@ impl AppEngine for RealEngine {
 		if !guard.graph.is_valid(node) {
 			return None;
 		}
-		guard
-			.graph
-			.get(node)
-			.map(|e| e.core.label.clone().into())
+		guard.graph.get(node).map(|e| e.core.label.clone().into())
 	}
 
 	fn replace_footage(
@@ -5490,12 +5515,18 @@ impl AppEngine for RealEngine {
 			// rearrange afterwards.
 			let audio_target = loop {
 				let video_number = self.tracks[video_target].track_index;
-				if let Some(index) = self.tracks.iter().position(|t| {
-					t.kind == TrackKind::Audio && t.track_index == video_number
-				}) {
+				if let Some(index) = self
+					.tracks
+					.iter()
+					.position(|t| t.kind == TrackKind::Audio && t.track_index == video_number)
+				{
 					break index;
 				}
-				let audio_count = self.tracks.iter().filter(|t| t.kind == TrackKind::Audio).count();
+				let audio_count = self
+					.tracks
+					.iter()
+					.filter(|t| t.kind == TrackKind::Audio)
+					.count();
 				if audio_count > video_number {
 					// Same-numbered audio tracks have run out without a
 					// hit (should not happen: counting is contiguous).
@@ -5507,7 +5538,11 @@ impl AppEngine for RealEngine {
 					return;
 				}
 				self.add_track(TrackKind::Audio, cx);
-				let after = self.tracks.iter().filter(|t| t.kind == TrackKind::Audio).count();
+				let after = self
+					.tracks
+					.iter()
+					.filter(|t| t.kind == TrackKind::Audio)
+					.count();
 				if after == audio_count {
 					// The track add failed: give up this drop.
 					println!(
@@ -5538,8 +5573,8 @@ impl AppEngine for RealEngine {
 				seq,
 				footage,
 				&[
-					(TrackType::Video, video_index as usize),
-					(TrackType::Audio, audio_index as usize),
+					(TrackType::Video, video_index),
+					(TrackType::Audio, audio_index),
 				],
 				in_ts,
 				in_ts + length,
@@ -5801,9 +5836,15 @@ impl AppEngine for RealEngine {
 	fn project_color_settings(&self) -> (String, String, String) {
 		let Some(project) = self.project_ref() else {
 			return (
-                oak_core::colormath::WorkingColorSpace::default().as_setting().to_string(),
-                oak_core::colormath::OutputGamut::default().as_setting().to_string(),
-                oak_core::colormath::OutputTransfer::default().as_setting().to_string(),
+				oak_core::colormath::WorkingColorSpace::default()
+					.as_setting()
+					.to_string(),
+				oak_core::colormath::OutputGamut::default()
+					.as_setting()
+					.to_string(),
+				oak_core::colormath::OutputTransfer::default()
+					.as_setting()
+					.to_string(),
 			);
 		};
 		let guard = graphops::lock(project);
@@ -5817,16 +5858,16 @@ impl AppEngine for RealEngine {
 		};
 		(
 			get(
-                oak_node::project::SETTING_WORKING_COLOR_SPACE,
-                oak_core::colormath::WorkingColorSpace::default().as_setting(),
+				oak_node::project::SETTING_WORKING_COLOR_SPACE,
+				oak_core::colormath::WorkingColorSpace::default().as_setting(),
 			),
 			get(
-                oak_node::project::SETTING_OUTPUT_GAMUT,
-                oak_core::colormath::OutputGamut::default().as_setting(),
+				oak_node::project::SETTING_OUTPUT_GAMUT,
+				oak_core::colormath::OutputGamut::default().as_setting(),
 			),
 			get(
-                oak_node::project::SETTING_OUTPUT_TRANSFER,
-                oak_core::colormath::OutputTransfer::default().as_setting(),
+				oak_node::project::SETTING_OUTPUT_TRANSFER,
+				oak_core::colormath::OutputTransfer::default().as_setting(),
 			),
 		)
 	}
@@ -5933,9 +5974,9 @@ impl AppEngine for RealEngine {
 			.video_params
 			.first()
 			.copied();
-		let (width, height, interlaced) = match params {
-			Some(v) => (v.width.max(1) as u32, v.height.max(1) as u32, v.interlaced),
-			None => return None,
+		let (width, height, interlaced) = {
+			let v = params?;
+			(v.width.max(1) as u32, v.height.max(1) as u32, v.interlaced)
 		};
 		Some(SequenceParameters {
 			name: graphops::node_label(&guard.graph, node),
@@ -6026,7 +6067,10 @@ impl AppEngine for RealEngine {
 		let (core, behavior) = oak_node::factory::Factory::global()
 			.create_any(type_id)
 			.ok_or_else(|| format!("unknown effect \"{type_id}\""))?;
-		if !behavior.categories().contains(&oak_node::node::Category::Generator) {
+		if !behavior
+			.categories()
+			.contains(&oak_node::node::Category::Generator)
+		{
 			return Err(format!("effect \"{type_id}\" is not a generator"));
 		}
 		let generator = {
@@ -6039,8 +6083,7 @@ impl AppEngine for RealEngine {
 			.is_some_and(|t| t.kind == TrackKind::Video)
 		{
 			track_index
-		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
+		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
 			index
 		} else {
 			return Err("no video track".to_string());
@@ -6087,8 +6130,7 @@ impl AppEngine for RealEngine {
 			.is_some_and(|t| t.kind == TrackKind::Video)
 		{
 			track_index
-		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
+		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
 			index
 		} else {
 			return Err("no video track".to_string());
@@ -6125,7 +6167,11 @@ impl AppEngine for RealEngine {
 					continue;
 				};
 				for (edge, start_edge) in [(in_r, true), (out_r, false)] {
-					let dist = if edge > time_r { edge - time_r } else { time_r - edge };
+					let dist = if edge > time_r {
+						edge - time_r
+					} else {
+						time_r - edge
+					};
 					if best.as_ref().is_none_or(|(d, ..)| dist < *d) {
 						best = Some((dist, clip, start_edge));
 					}
@@ -6144,7 +6190,10 @@ impl AppEngine for RealEngine {
 				.map(|t| t.blocks.clone())
 				.unwrap_or_default();
 			let index = blocks.iter().position(|&b| b == clip);
-			let prev = index.and_then(|i| i.checked_sub(1)).and_then(|i| blocks.get(i)).copied();
+			let prev = index
+				.and_then(|i| i.checked_sub(1))
+				.and_then(|i| blocks.get(i))
+				.copied();
 			let next = index.and_then(|i| blocks.get(i + 1)).copied();
 			let prev_touch = prev.is_some_and(|b| {
 				graphops::clip_behavior(&guard.graph, b).is_some()
@@ -6703,7 +6752,11 @@ impl AppEngine for RealEngine {
 			return Vec::new();
 		};
 		let mut out = Vec::new();
-		collect(project, crate::oakui::projectbrowser::roots(project), &mut out);
+		collect(
+			project,
+			crate::oakui::projectbrowser::roots(project),
+			&mut out,
+		);
 		out
 	}
 
@@ -6958,7 +7011,7 @@ impl AppEngine for RealEngine {
 
 	fn multicam_wizard_footage(&self) -> Option<Vec<WizardFootage>> {
 		let project = self.project_ref()?;
-		Some(super::multicam::wizard_footage(&project))
+		Some(super::multicam::wizard_footage(project))
 	}
 
 	fn multicam_wizard_sync_offsets(
@@ -6981,7 +7034,7 @@ impl AppEngine for RealEngine {
 		// reference angle is angle 0.
 		let source_paths: Vec<(u64, String, i32)> = {
 			let project = self.project_ref().ok_or("no project open")?;
-			let g = graphops::lock(&project);
+			let g = graphops::lock(project);
 			let mut out = Vec::new();
 			for entry in selected {
 				let node = graphops::id_of(entry.id).ok_or("angle missing")?;
@@ -7005,10 +7058,8 @@ impl AppEngine for RealEngine {
 			envelopes.push(envelope);
 		}
 		let reference_envelope = envelopes[0].clone();
-		let offsets = super::multicam::estimate_wizard_offsets(
-			&reference_envelope,
-			&envelopes[1..],
-		);
+		let offsets =
+			super::multicam::estimate_wizard_offsets(&reference_envelope, &envelopes[1..]);
 		let mut out = vec![WizardSyncOffset {
 			footage: reference.id,
 			offset_s: 0.0,
@@ -7041,12 +7092,8 @@ impl AppEngine for RealEngine {
 		};
 		// Build the source sequence (one clip per angle on its own track,
 		// offset by the sync result) plus the multicam node over it.
-		let (source_seq, mc_node) = super::multicam::build_multicam_sequence(
-			&project,
-			&selected,
-			&offsets,
-			&name,
-		)?;
+		let (source_seq, mc_node) =
+			super::multicam::build_multicam_sequence(&project, &selected, &offsets, &name)?;
 		// Mount the source sequence under the root folder (non-undoable,
 		// like `create_sequence` does).
 		let root = graphops::lock(&project).root;
@@ -7094,7 +7141,7 @@ impl AppEngine for RealEngine {
 			// wired footage->clip).
 			for (from, input, element) in g.graph.input_connections(host_id) {
 				if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-					let _ = g.graph.disconnect(from, host_id, &input, element);
+					g.graph.disconnect(from, host_id, &input, element);
 				}
 			}
 			g.graph
@@ -7121,9 +7168,7 @@ impl AppEngine for RealEngine {
 				// linked both ways); its source starts at angle 0's audio
 				// and follows every switch. Muting the host audio track
 				// disables the follow-through audio.
-				if let Err(e) =
-					self.ensure_host_afv_audio(&project, host_id, &selected, cx)
-				{
+				if let Err(e) = self.ensure_host_afv_audio(&project, host_id, &selected, cx) {
 					println!("[real engine] AFV audio placement skipped: {e}");
 				}
 				self.apply_edit(Ok(()), "create multicam sequence", cx);
@@ -7188,9 +7233,11 @@ impl RealEngine {
 			let out_r = graphops::clip_range(&g.graph, host_clip)
 				.ok_or_else(|| "host clip has no range".to_string())?
 				.1;
-			let tb = graphops::sequence_time_base(&g.graph, host_seq)
-				.unwrap_or((1, 25));
-			(graphops::rational_to_ts(in_r, tb), graphops::rational_to_ts(out_r, tb))
+			let tb = graphops::sequence_time_base(&g.graph, host_seq).unwrap_or((1, 25));
+			(
+				graphops::rational_to_ts(in_r, tb),
+				graphops::rational_to_ts(out_r, tb),
+			)
 		};
 		let audio_clip = graphops::place_footage_clip(
 			project,
@@ -7232,8 +7279,7 @@ impl RealEngine {
 			.is_some_and(|t| t.kind == TrackKind::Video)
 		{
 			track_index
-		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
+		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
 			index
 		} else {
 			println!("[real engine] drop text: no video track");
@@ -7291,8 +7337,7 @@ impl RealEngine {
 			.is_some_and(|t| t.kind == TrackKind::Video)
 		{
 			track_index
-		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
+		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
 			index
 		} else {
 			println!("[real engine] drop sequence: no video track");
@@ -7350,16 +7395,11 @@ impl RealEngine {
 				let mut g = graphops::lock(project);
 				for (from, input, element) in g.graph.input_connections(placed) {
 					if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-						let _ = g.graph.disconnect(from, placed, &input, element);
+						g.graph.disconnect(from, placed, &input, element);
 					}
 				}
 				g.graph
-					.connect(
-						mc,
-						placed,
-						oak_node::block::clip_input::TEXTURE_INPUT,
-						-1,
-					)
+					.connect(mc, placed, oak_node::block::clip_input::TEXTURE_INPUT, -1)
 					.map_err(|e| format!("connect multicam to dropped clip: {e:?}"))
 			};
 			self.apply_edit(result, "drop sequence (multicam)", cx);
@@ -7440,13 +7480,12 @@ impl RealEngine {
 		let Some(angle) = graphops::id_of(angle.id) else {
 			return Err("the angle footage is not in the project".to_string());
 		};
-		let video_target = if let Some(index) =
-			self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
-			index
-		} else {
-			return Err("no video track on the host sequence".to_string());
-		};
+		let video_target =
+			if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
+				index
+			} else {
+				return Err("no video track on the host sequence".to_string());
+			};
 		let video_index = self.tracks[video_target].track_index;
 		let (length, in_ts) = {
 			let tb = self.frame_rate();
@@ -7917,7 +7956,7 @@ pub fn set_audio_input_device(name: &str) {
 /// enumeration (empty when the configured device is gone).
 pub fn audio_output_device() -> String {
 	let name = config_get_string(CONFIG_KEY_AUDIO_OUTPUT);
-	if name.is_empty() || audio_output_devices().iter().any(|n| *n == name) {
+	if name.is_empty() || audio_output_devices().contains(&name) {
 		name
 	} else {
 		String::new()
@@ -7927,7 +7966,7 @@ pub fn audio_output_device() -> String {
 /// The configured input device name (see [`audio_output_device`]).
 pub fn audio_input_device() -> String {
 	let name = config_get_string(CONFIG_KEY_AUDIO_INPUT);
-	if name.is_empty() || audio_input_devices().iter().any(|n| *n == name) {
+	if name.is_empty() || audio_input_devices().contains(&name) {
 		name
 	} else {
 		String::new()
@@ -7985,11 +8024,11 @@ pub fn library_list() -> Result<Vec<LibraryProject>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::mpsc as std_mpsc;
-    use std::time::Duration;
+	use super::*;
+	use std::sync::mpsc as std_mpsc;
+	use std::time::Duration;
 
-    /// Serializes the media/FFmpeg-heavy tests (the codec library is not
+	/// Serializes the media/FFmpeg-heavy tests (the codec library is not
 	/// thread-safe against concurrent decode sessions) and shares the
 	/// process-global undo stack with the other app test modules.
 	fn media_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -8291,8 +8330,9 @@ mod tests {
 
 		// The app's proxy size: sequence aspect (default 1920x1080) scaled
 		// to a 480px long edge.
-		let frame = crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 480, 270, None)
-			.expect("render_frame must produce a frame");
+		let frame =
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 480, 270, None)
+				.expect("render_frame must produce a frame");
 		assert_eq!((frame.width(), frame.height()), (480, 270));
 		assert!(
 			frame.is_shm(),
@@ -8320,8 +8360,9 @@ mod tests {
 		// Clip covering [0, 10) frames at the sequence's rate.
 		graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
 			.expect("clip placement");
-		let frame = crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 480, 270, None)
-			.expect("render_frame with a clip must produce a frame");
+		let frame =
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 480, 270, None)
+				.expect("render_frame with a clip must produce a frame");
 		let (image, _scope, _samples) = frame.to_display().expect("display image from the slot");
 		let bytes = image.as_bytes(0).expect("one frame");
 		let nonzero = bytes
@@ -8343,13 +8384,15 @@ mod tests {
 		release_rendered_frame(&frame);
 
 		// A second frame at a later timestamp renders too.
-		assert!(
-			crate::oakui::renderops::render_sequence_frame(&project, seq, 30, tb, 480, 270, None).is_ok()
-		);
+		assert!(crate::oakui::renderops::render_sequence_frame(
+			&project, seq, 30, tb, 480, 270, None
+		)
+		.is_ok());
 
 		// Invalid geometry is rejected.
 		assert!(
-			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 0, 270, None).is_err()
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 0, 270, None)
+				.is_err()
 		);
 
 		oak_undo::global::clear().unwrap();
@@ -8367,11 +8410,11 @@ mod tests {
 	fn process_backend_preview_path_is_zero_copy() {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-        use oak_render::manager::{RenderBackendChoice, RenderManager};
-        use oak_render::procpool::{
-            main_heap_frame_copies, reset_main_heap_frame_copies, DispatcherConfig,
-        };
-        RenderManager::shutdown();
+		use oak_render::manager::{RenderBackendChoice, RenderManager};
+		use oak_render::procpool::{
+			main_heap_frame_copies, reset_main_heap_frame_copies, DispatcherConfig,
+		};
+		RenderManager::shutdown();
 		let config = DispatcherConfig {
 			worker_bin: Some(
 				std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -8392,8 +8435,9 @@ mod tests {
 		let tb = graphops::sequence_time_base(&graphops::lock(&project).graph, seq).unwrap();
 
 		reset_main_heap_frame_copies();
-		let frame = crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
-			.expect("render_frame must produce a frame");
+		let frame =
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
+				.expect("render_frame must produce a frame");
 		let crate::oakui::renderops::RenderedFrame::Shm(slot) = &frame else {
 			panic!("the process backend must deliver a shm slot");
 		};
@@ -8409,8 +8453,9 @@ mod tests {
 		assert_eq!(main_heap_frame_copies(), 0);
 
 		// The long-lived full-res path is the one counted copy.
-		let frame = crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
-			.expect("render_frame must produce a frame");
+		let frame =
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
+				.expect("render_frame must produce a frame");
 		let image = rendered_to_owned_image(&frame).expect("owned full-res image");
 		assert_eq!(image.as_bytes(0).expect("one frame").len(), 64 * 64 * 4);
 		assert_eq!(
@@ -8467,7 +8512,7 @@ mod tests {
 		cx: &mut gpui::TestAppContext,
 	) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media =
@@ -8508,7 +8553,7 @@ mod tests {
 	#[gpui::test]
 	async fn real_engine_wizard_footage_lists_imported_media(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// Use the repo's committed fixture media (the same file the other
@@ -8548,7 +8593,7 @@ mod tests {
 		if !crate::oakui::renderops::ensure_render_manager() {
 			panic!("the render manager failed to start");
 		}
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -8581,7 +8626,7 @@ mod tests {
 		// The async path installs it: a fresh engine (no cached done entries)
 		// spawns the worker on `roots()`, and the drain installs the completed
 		// path into the cache so the entry re-reads with the thumbnail.
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		cx.update(|app| engine.update(app, |engine, cx| engine.import_footage(media.clone(), cx)))
 			.expect("re-import the footage");
@@ -8625,7 +8670,7 @@ mod tests {
 	async fn real_engine_track_toggles_are_undoable(cx: &mut gpui::TestAppContext) {
 		use gpui::timeline::TrackHeaderEvent;
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		cx.update(|app| engine.update(app, |engine, cx| engine.add_track(TrackKind::Video, cx)));
 		cx.update(|app| engine.update(app, |engine, cx| engine.add_track(TrackKind::Audio, cx)));
@@ -8670,7 +8715,7 @@ mod tests {
 	#[gpui::test]
 	async fn real_engine_history_tracks_the_undo_stack(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// A fresh project leaves the bottom "New/Open Project" command on
@@ -8686,7 +8731,7 @@ mod tests {
 		assert_eq!(entries.len(), base + 2);
 		assert!(entries.iter().all(|e| e.done), "fresh rows are done");
 		assert!(
-			entries[base].name.is_empty() == false && entries[base + 1].name.is_empty() == false,
+			!entries[base].name.is_empty() && !entries[base + 1].name.is_empty(),
 			"edit rows carry their command labels"
 		);
 		assert_eq!(
@@ -8738,7 +8783,7 @@ mod tests {
 	async fn real_engine_multicam_switch_round_trips_through_undo(cx: &mut gpui::TestAppContext) {
 		use oak_node::block::clip_input::TEXTURE_INPUT;
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 
 		// A project whose clip is fed by a sequence (the multicam host).
 		let clip_id = cx.update(|app| {
@@ -8923,7 +8968,7 @@ mod tests {
 	#[gpui::test]
 	async fn selection_links_timeline_graph_and_inspector(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 
 		let (clip_id, effect_ident, footage_ident) = cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -9305,7 +9350,7 @@ mod tests {
 	async fn real_engine_fills_full_res_behind_the_proxy(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// The sequence's native size is the fill geometry.
@@ -9366,12 +9411,12 @@ mod tests {
 	async fn effect_edit_updates_the_paused_frame(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// A solid green clip on the timeline, selected for the stack.
-		let media = std::env::temp_dir()
-			.join(format!("oakapp_editframe_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oakapp_editframe_{}.mp4", std::process::id()));
 		cx.update(|app| {
 			engine.update(app, |engine, _cx| {
 				let project = engine.project.clone().unwrap();
@@ -9471,7 +9516,7 @@ mod tests {
 		// GLOBAL undo stack, and this test asserts on it — running lock-free
 		// raced a parallel test's undo history.
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let kinds: Vec<TrackKind> =
 			cx.read(|app| engine.read(app).tracks.iter().map(|t| t.kind).collect());
@@ -9494,7 +9539,7 @@ mod tests {
 	#[gpui::test]
 	async fn set_track_height_does_not_self_deadlock(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		cx.update(|app| engine.update(app, |engine, cx| engine.set_track_height(px(96.0), cx)));
 		let height = cx.read(|app| engine.read(app).tracks[0].height());
@@ -9507,7 +9552,7 @@ mod tests {
 	#[gpui::test]
 	async fn drop_av_footage_places_linked_video_and_audio_clips(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// demo.mp4: 1080p H.264 video + AAC audio (+ timecode stream).
@@ -9629,7 +9674,7 @@ mod tests {
 	#[gpui::test]
 	async fn drop_av_footage_same_numbered_tracks(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -9670,7 +9715,10 @@ mod tests {
 		});
 		let (video_index, audio_index) = cx.read(|app| {
 			let engine = engine.read(app);
-			(engine.tracks[video_row].track_index, engine.tracks[audio_row].track_index)
+			(
+				engine.tracks[video_row].track_index,
+				engine.tracks[audio_row].track_index,
+			)
 		});
 		assert_eq!(
 			video_index, 1,
@@ -9690,7 +9738,7 @@ mod tests {
 		cx: &mut gpui::TestAppContext,
 	) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -9711,9 +9759,7 @@ mod tests {
 			.expect("imported footage is listed");
 
 		// Remove A2 (display row 3 in the default [V2, V1, A1, A2] layout).
-		cx.update(|app| {
-			engine.update(app, |engine, cx| engine.remove_track(3, cx))
-		});
+		cx.update(|app| engine.update(app, |engine, cx| engine.remove_track(3, cx)));
 		// Drop onto V2 (row 0): the audio has no A2 to go to.
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -9745,10 +9791,7 @@ mod tests {
 			let engine = engine.read(app);
 			engine.tracks[audio_clip_row.expect("audio clip row")].track_index
 		});
-		assert_eq!(
-			audio_index, 1,
-			"the audio clip lands on the recreated A2"
-		);
+		assert_eq!(audio_index, 1, "the audio clip lands on the recreated A2");
 	}
 
 	/// Dragging a clip of a linked A/V pair drags its partner in lockstep:
@@ -9758,7 +9801,7 @@ mod tests {
 	#[gpui::test]
 	async fn moving_a_linked_clip_drags_its_partner(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -9890,7 +9933,7 @@ mod tests {
 	#[gpui::test]
 	async fn moving_a_multi_selection_drags_the_whole_group(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -9945,7 +9988,14 @@ mod tests {
 				.map(|c| (c.range.start.0, c.id))
 				.collect();
 			audios.sort();
-			(videos[0].1, videos[1].1, audios[0].1, audios[1].1, video_idx, audio_idx)
+			(
+				videos[0].1,
+				videos[1].1,
+				audios[0].1,
+				audios[1].1,
+				video_idx,
+				audio_idx,
+			)
 		});
 		let starts = |cx: &mut gpui::TestAppContext, id: ClipId, track: usize| {
 			cx.read(|app| {
@@ -9960,7 +10010,9 @@ mod tests {
 		// Select BOTH video clips (the audio partners stay unselected) and
 		// drag the first one +40 frames.
 		cx.update(|app| {
-			engine.update(app, |engine, cx| engine.set_selected_clips(vec![v1, v2], cx))
+			engine.update(app, |engine, cx| {
+				engine.set_selected_clips(vec![v1, v2], cx)
+			})
 		});
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -9975,7 +10027,11 @@ mod tests {
 			})
 		});
 
-		assert_eq!(starts(cx, v1, video_idx), Some(80), "the dragged clip moved");
+		assert_eq!(
+			starts(cx, v1, video_idx),
+			Some(80),
+			"the dragged clip moved"
+		);
 		assert_eq!(
 			starts(cx, v2, video_idx),
 			Some(640),
@@ -10006,7 +10062,7 @@ mod tests {
 	#[gpui::test]
 	async fn cross_kind_drag_is_silently_ignored(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -10119,7 +10175,7 @@ mod tests {
 	#[gpui::test]
 	async fn link_unlink_toggles_the_selection_links(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -10245,7 +10301,7 @@ mod tests {
 	#[gpui::test]
 	async fn split_at_playhead_links_the_rear_halves(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
 		cx.update(|app| {
@@ -10337,7 +10393,7 @@ mod tests {
 	async fn playback_window_supplies_playhead_frames(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media =
@@ -10412,7 +10468,7 @@ mod tests {
 	async fn interactive_seek_renders_without_hanging(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
 		cx.update(|app| {
@@ -10471,7 +10527,7 @@ mod tests {
 	#[gpui::test]
 	async fn save_load_roundtrips_a_timeline_clip(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
 		cx.update(|app| {
@@ -10534,7 +10590,7 @@ mod tests {
 	async fn playback_display_tracks_the_playhead(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -10677,10 +10733,13 @@ mod tests {
 		st.next_submit = 40;
 		st.insert(10, audio_chunk(10).1);
 		let _ = st.drain_ready(10); // served cursor now 20
-		// A seek far ahead (past the submitted window) resets.
+							  // A seek far ahead (past the submitted window) resets.
 		assert!(st.needs_reset(200));
 		// A backward seek past the serve-ahead lead resets too.
-		assert!(st.needs_reset(0), "playhead jumped back behind the served cursor");
+		assert!(
+			st.needs_reset(0),
+			"playhead jumped back behind the served cursor"
+		);
 		st.reset(200, 10);
 		assert_eq!(st.buffered.len(), 0, "old chunks dropped");
 		assert!(st.drain_ready(200).is_empty());
@@ -10741,7 +10800,11 @@ mod tests {
 		assert_eq!(audio_target_frame(100, 2.0, 4.0, rate), 150);
 		// Fractional seconds round to the nearest frame.
 		assert_eq!(audio_target_frame(0, 0.0, 0.02, rate), 1, "0.5 s rounds up");
-		assert_eq!(audio_target_frame(0, 0.0, 0.018, rate), 0, "0.45 s rounds down");
+		assert_eq!(
+			audio_target_frame(0, 0.0, 0.018, rate),
+			0,
+			"0.45 s rounds down"
+		);
 		// NTSC 29.97: num/den stays a rational, not rounded to 30.
 		let ntsc = FrameRate::NTSC_2997;
 		assert_eq!(audio_target_frame(0, 0.0, 1.0, ntsc), 30);
@@ -10757,7 +10820,7 @@ mod tests {
 	/// or headless).
 	#[gpui::test]
 	async fn audio_master_anchor_falls_back_to_wall_clock(cx: &mut gpui::TestAppContext) {
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				// A stale anchor (as if the first chunk was pushed).
@@ -10779,7 +10842,7 @@ mod tests {
 	/// proxy proves the non-blocking fallback.
 	#[gpui::test]
 	async fn paused_playhead_miss_serves_last_displayed_frame(cx: &mut gpui::TestAppContext) {
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		let (width, height, samples) = synthetic_frame_samples(Frame(0));
 		let scope = analyze_f32_rgba(width, height, &samples);
 		let image = Arc::new(f32_rgba_to_bgra_image(width, height, &samples));
@@ -10818,7 +10881,7 @@ mod tests {
 	#[gpui::test]
 	async fn engine_creates_folder_and_sequence_with_params(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let folder = cx.update(|app| {
@@ -10925,7 +10988,7 @@ mod tests {
 		cx: &mut gpui::TestAppContext,
 	) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let text = cx.update(|app| {
@@ -10962,21 +11025,20 @@ mod tests {
 
 		// Open a host sequence; the drop targets its first video track.
 		let seq = cx.update(|app| {
-			engine
-				.update(app, |engine, cx| {
-					engine
-						.create_sequence_with_params(
-							"Text Drop".to_string(),
-							VideoFormat {
-								width: 1920,
-								height: 1080,
-								rate: FrameRate::new(30000, 1001),
-							},
-							false,
-							cx,
-						)
-						.expect("create sequence")
-				})
+			engine.update(app, |engine, cx| {
+				engine
+					.create_sequence_with_params(
+						"Text Drop".to_string(),
+						VideoFormat {
+							width: 1920,
+							height: 1080,
+							rate: FrameRate::new(30000, 1001),
+						},
+						false,
+						cx,
+					)
+					.expect("create sequence")
+			})
 		});
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -11063,7 +11125,7 @@ mod tests {
 	#[gpui::test]
 	async fn engine_drops_a_generator_effect_as_a_clip(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let seq = cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -11086,12 +11148,7 @@ mod tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine
-					.drop_generator_clip(
-						"org.olivevideoeditor.Olive.colorbars",
-						0,
-						Frame(25),
-						cx,
-					)
+					.drop_generator_clip("org.olivevideoeditor.Olive.colorbars", 0, Frame(25), cx)
 					.expect("drop generator clip")
 			})
 		});
@@ -11156,7 +11213,7 @@ mod tests {
 	#[gpui::test]
 	async fn engine_drops_a_transition_at_a_clip_edge(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 		let seq = cx.update(|app| {
 			engine.update(app, |engine, cx| {
@@ -11181,12 +11238,7 @@ mod tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine
-					.drop_generator_clip(
-						"org.olivevideoeditor.Olive.colorbars",
-						0,
-						Frame(0),
-						cx,
-					)
+					.drop_generator_clip("org.olivevideoeditor.Olive.colorbars", 0, Frame(0), cx)
 					.expect("drop generator clip")
 			})
 		});
@@ -11196,12 +11248,7 @@ mod tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine
-					.drop_transition_at(
-						"org.olivevideoeditor.Olive.transitionfx",
-						0,
-						Frame(0),
-						cx,
-					)
+					.drop_transition_at("org.olivevideoeditor.Olive.transitionfx", 0, Frame(0), cx)
 					.expect("drop transition at the clip head")
 			})
 		});
@@ -11216,9 +11263,11 @@ mod tests {
 			let transition = graphops::transition_of_clip(&guard.graph, clips[0], true)
 				.expect("a single-sided transition sits on the clip's head edge");
 			assert_eq!(
-				guard
-					.graph
-					.connected_output(transition, oak_node::block::transition_input::OUT_BLOCK, -1),
+				guard.graph.connected_output(
+					transition,
+					oak_node::block::transition_input::OUT_BLOCK,
+					-1
+				),
 				None,
 				"a head transition wires no outgoing clip"
 			);
@@ -11233,7 +11282,7 @@ mod tests {
 	#[gpui::test]
 	async fn engine_adds_and_undoes_adjustment_layer(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let seq = cx.update(|app| {
@@ -11373,7 +11422,11 @@ mod tests {
 			})
 		});
 		let selected = cx.read(|app| engine.read(app).selected_clip_node());
-		assert_eq!(selected, Some(block), "the selected layer resolves to its block");
+		assert_eq!(
+			selected,
+			Some(block),
+			"the selected layer resolves to its block"
+		);
 
 		// One undo removes the placement (and the leading gap) again.
 		oak_undo::global::undo().unwrap();
@@ -11399,7 +11452,7 @@ mod tests {
 	#[gpui::test]
 	async fn engine_update_sequence_parameters_round_trips(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let seq = cx.update(|app| {
@@ -11454,7 +11507,7 @@ mod tests {
 	#[gpui::test]
 	async fn drop_footage_on_empty_timeline_auto_creates_sequence(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::env::temp_dir().join(format!("oak_seq_auto_{}.mp4", std::process::id()));
@@ -11535,10 +11588,11 @@ mod tests {
 	#[gpui::test]
 	async fn footage_video_params_returns_the_probed_stream(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
-		let media = std::env::temp_dir().join(format!("oak_probe_params_{}.mp4", std::process::id()));
+		let media =
+			std::env::temp_dir().join(format!("oak_probe_params_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
 		cx.update(|app| {
 			engine
@@ -11556,14 +11610,13 @@ mod tests {
 			})
 			.expect("imported footage is listed");
 
-		let (width, height, rate_num, rate_den) =
-			cx.read(|app| {
-				let result: Option<(u32, u32, u32, u32)> = engine
-					.read(app)
-					.footage_video_params(entry.id)
-					.map(|(w, h, rate, _)| (w, h, rate.num, rate.den));
-				result.expect("probed video stream")
-			});
+		let (width, height, rate_num, rate_den) = cx.read(|app| {
+			let result: Option<(u32, u32, u32, u32)> = engine
+				.read(app)
+				.footage_video_params(entry.id)
+				.map(|(w, h, rate, _)| (w, h, rate.num, rate.den));
+			result.expect("probed video stream")
+		});
 		// The values match the probe (not hard-coded).
 		let expected = {
 			let project = cx.read(|app| engine.read(app).project.clone().expect("project"));
@@ -11589,11 +11642,9 @@ mod tests {
 	/// clip becomes the multi-cam clip; switching to the source sequence
 	/// left N camera rows on the timeline and an "未检测到多机位片段" panel).
 	#[gpui::test]
-	async fn wizard_create_keeps_host_sequence_and_panel_detects(
-		cx: &mut gpui::TestAppContext,
-	) {
+	async fn wizard_create_keeps_host_sequence_and_panel_detects(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -11608,9 +11659,8 @@ mod tests {
 		let name = media.file_name().unwrap().to_string_lossy();
 		let entry = footage.iter().find(|f| f.name.as_ref() == name).cloned();
 		let entry = entry.expect("the imported file is a wizard angle");
-		let host_before = cx.read(|app| {
-			engine.read(app).current_sequence().map(|s| s.name.clone())
-		});
+		let host_before =
+			cx.read(|app| engine.read(app).current_sequence().map(|s| s.name.clone()));
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine
@@ -11618,15 +11668,14 @@ mod tests {
 					.expect("create multicam")
 			})
 		});
-		let host_after = cx.read(|app| {
-			engine.read(app).current_sequence().map(|s| s.name.clone())
-		});
+		let host_after = cx.read(|app| engine.read(app).current_sequence().map(|s| s.name.clone()));
 		assert_eq!(
 			host_after, host_before,
 			"the user's sequence stays current (no camera rows on the timeline)"
 		);
 		assert_eq!(
-			host_after, Some("Sequence 1".to_string()),
+			host_after,
+			Some("Sequence 1".to_string()),
 			"the fresh project's default sequence stays open"
 		);
 		// The panel resolves the playhead clip to the multicam state now.
@@ -11700,8 +11749,10 @@ mod tests {
 				let Some(project) = engine.project.clone() else {
 					return;
 				};
-				if let Some(audio_row) =
-					engine.tracks.iter().position(|t| t.kind == TrackKind::Audio)
+				if let Some(audio_row) = engine
+					.tracks
+					.iter()
+					.position(|t| t.kind == TrackKind::Audio)
 				{
 					let track = engine.tracks[audio_row].track;
 					let _ = graphops::set_track_muted(&project, track, true);
@@ -11716,7 +11767,11 @@ mod tests {
 				.tracks
 				.iter()
 				.find(|t| t.kind == TrackKind::Audio)
-				.map(|t| graphops::track_behavior(&g.graph, t.track).map(|b| b.muted).unwrap_or(false))
+				.map(|t| {
+					graphops::track_behavior(&g.graph, t.track)
+						.map(|b| b.muted)
+						.unwrap_or(false)
+				})
 				.unwrap_or(false)
 		});
 		assert!(muted, "the AFV audio track is muted — no audio follows");
@@ -11732,7 +11787,7 @@ mod tests {
 		cx: &mut gpui::TestAppContext,
 	) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		// The wizard create (host clip placed on the default sequence).
@@ -11791,7 +11846,10 @@ mod tests {
 				.map(|e| e.id)
 				.expect("the multicam source sequence lists in the project")
 		});
-		assert_ne!(source_entry_id, source_seq, "the return value is the host sequence id");
+		assert_ne!(
+			source_entry_id, source_seq,
+			"the return value is the host sequence id"
+		);
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine.drop_footage(source_entry_id, TrackKind::Video, 0, Frame(80), cx)
@@ -11823,20 +11881,16 @@ mod tests {
 		});
 		let guard = graphops::lock(&project);
 		let dropped_node = graphops::id_of(dropped_clip).expect("clip node");
-		let src = guard
-			.graph
-			.connected_output(dropped_node, oak_node::block::clip_input::TEXTURE_INPUT, -1);
-		assert!(
-			src.is_some(),
-			"the dropped clip has a texture source"
+		let src = guard.graph.connected_output(
+			dropped_node,
+			oak_node::block::clip_input::TEXTURE_INPUT,
+			-1,
 		);
+		assert!(src.is_some(), "the dropped clip has a texture source");
 		let is_multicam = src.is_some_and(|s| {
 			graphops::node_type_id(&guard.graph, s) == "org.olivevideoeditor.Olive.multicam"
 		});
-		assert!(
-			is_multicam,
-			"the drop rewire feeds from the multicam node"
-		);
+		assert!(is_multicam, "the drop rewire feeds from the multicam node");
 		drop(guard);
 		assert!(
 			state.is_some(),
@@ -11849,7 +11903,9 @@ mod tests {
 		// angle's footage. NOTE: the project guard is NOT held across
 		// `video_montage` (it locks the project itself — the same
 		// non-recursive-mutex reentry that froze the wizard).
-		let seq = cx.read(|app| engine.read(app).sequence).expect("current sequence node");
+		let seq = cx
+			.read(|app| engine.read(app).sequence)
+			.expect("current sequence node");
 		let montage_files = {
 			let time = {
 				let g = graphops::lock(&project);
@@ -11866,7 +11922,8 @@ mod tests {
 			"the dropped multi-cam clip's montage resolves media (not black)"
 		);
 		assert_eq!(
-			montage_files.len(), 1,
+			montage_files.len(),
+			1,
 			"the host clip's current angle is the montage's only entry"
 		);
 	}
@@ -11877,19 +11934,21 @@ mod tests {
 	#[gpui::test]
 	async fn multicam_switch_follows_audio_to_the_new_source(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
-		let media_a =
-			std::env::temp_dir().join(format!("oakapp_afv_a_{}.mp4", std::process::id()));
-		let media_b =
-			std::env::temp_dir().join(format!("oakapp_afv_b_{}.mp4", std::process::id()));
+		let media_a = std::env::temp_dir().join(format!("oakapp_afv_a_{}.mp4", std::process::id()));
+		let media_b = std::env::temp_dir().join(format!("oakapp_afv_b_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media_a, 64, 64, 10, 10).expect("media A");
 		oak_codec::testmedia::write_test_clip(&media_b, 64, 64, 10, 10).expect("media B");
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
-				engine.import_footage(media_a.clone(), cx).expect("import A");
-				engine.import_footage(media_b.clone(), cx).expect("import B");
+				engine
+					.import_footage(media_a.clone(), cx)
+					.expect("import A");
+				engine
+					.import_footage(media_b.clone(), cx)
+					.expect("import B");
 			})
 		});
 		let footage = cx
@@ -11910,12 +11969,7 @@ mod tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine
-					.multicam_create_sequence(
-						angles.clone(),
-						vec![0.0, 0.0],
-						"AFV".to_string(),
-						cx,
-					)
+					.multicam_create_sequence(angles.clone(), vec![0.0, 0.0], "AFV".to_string(), cx)
 					.expect("create multicam")
 			})
 		});
@@ -11934,13 +11988,17 @@ mod tests {
 			let f = graphops::footage_behavior(&g.graph, footage)?;
 			Some(f.filename.clone())
 		};
-		let before = cx.read(|app| audio_source(engine.read(app))).expect("AFV audio before");
+		let before = cx
+			.read(|app| audio_source(engine.read(app)))
+			.expect("AFV audio before");
 
 		// Switch to source 1 (the second angle).
 		cx.update(|app| {
 			engine.update(app, |engine, cx| engine.multicam_switch_to(1, false, cx));
 		});
-		let after = cx.read(|app| audio_source(engine.read(app))).expect("AFV audio after switch");
+		let after = cx
+			.read(|app| audio_source(engine.read(app)))
+			.expect("AFV audio after switch");
 		let b_name = media_b.to_string_lossy().into_owned();
 		assert_eq!(after, b_name, "the AFV audio follows to angle 1's media");
 		assert_ne!(before, after, "the audio source actually changed");
@@ -11949,8 +12007,9 @@ mod tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| engine.undo(cx));
 		});
-		let undone =
-			cx.read(|app| audio_source(engine.read(app))).expect("AFV audio after undo");
+		let undone = cx
+			.read(|app| audio_source(engine.read(app)))
+			.expect("AFV audio after undo");
 		assert_eq!(undone, before, "undo restores the previous source's audio");
 
 		let _ = std::fs::remove_file(&media_a);
@@ -11964,7 +12023,7 @@ mod tests {
 	#[gpui::test]
 	async fn entry_rename_and_delete_are_real(cx: &mut gpui::TestAppContext) {
 		let _media = media_lock();
-		let engine = cx.update(|cx| cx.new(|cx| RealEngine::create(cx)));
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
 		let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4");
@@ -11973,15 +12032,14 @@ mod tests {
 				engine.import_footage(media.clone(), cx).expect("import")
 			})
 		});
-		let entry = cx
-			.read(|app| {
-				engine
-					.read(app)
-					.roots()
-					.into_iter()
-					.find(|e| e.name.as_ref() == "demo.mp4")
-					.expect("imported")
-			});
+		let entry = cx.read(|app| {
+			engine
+				.read(app)
+				.roots()
+				.into_iter()
+				.find(|e| e.name.as_ref() == "demo.mp4")
+				.expect("imported")
+		});
 
 		// Rename: the node label changes.
 		cx.update(|app| {
@@ -11998,16 +12056,8 @@ mod tests {
 
 		// Delete: the entry leaves the project browser; ONE undo brings it
 		// back with the rename still applied.
-		cx.update(|app| {
-			engine.update(app, |engine, cx| engine.delete_entry(entry.id, cx))
-		});
-		let gone = cx.read(|app| {
-			engine
-				.read(app)
-				.roots()
-				.iter()
-				.any(|e| e.id == entry.id)
-		});
+		cx.update(|app| engine.update(app, |engine, cx| engine.delete_entry(entry.id, cx)));
+		let gone = cx.read(|app| engine.read(app).roots().iter().any(|e| e.id == entry.id));
 		assert!(!gone, "the deleted entry leaves the project browser");
 		cx.update(|app| {
 			engine.update(app, |engine, cx| engine.undo(cx));

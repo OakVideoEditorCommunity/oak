@@ -410,6 +410,17 @@ fn create_crop_side_input(core: &mut NodeCore, id: &str) {
 	core.add_input(input);
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.crop`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.crop",
+		name: "Crop",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,15 +538,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Crop");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.crop`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.crop",
-		name: "Crop",
-		categories: &[Category::Distort],
-		create,
-	});
 }

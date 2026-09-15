@@ -196,6 +196,16 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(DilateNode))
 }
 
+/// Register this node type.
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.dilate",
+		name: "Dilate",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -317,14 +327,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Dilate");
 	}
-}
-
-/// Register this node type.
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.dilate",
-		name: "Dilate",
-		categories: &[Category::Filter],
-		create,
-	});
 }

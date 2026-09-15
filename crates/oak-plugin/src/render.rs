@@ -108,7 +108,7 @@ pub fn texture_create(
 		return Err(Error::Invalid);
 	}
 	// 行跨度推导通道数（RGB 3 通道等非常规分量）。
-	if linesize > 0 && w > 0 && (linesize as usize) % (w * bpc) == 0 {
+	if linesize > 0 && w > 0 && (linesize as usize).is_multiple_of(w * bpc) {
 		frame.channels = (linesize as usize / (w * bpc)) as i32;
 	}
 	let tight = frame.linesize_bytes();

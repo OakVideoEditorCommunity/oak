@@ -317,11 +317,10 @@ impl ProxyManager {
 	/// Locate an ffmpeg executable (empty string when none found).
 	pub fn find_ffmpeg(configured_path: &str) -> String {
 		// An explicitly configured path takes precedence if it is usable.
-		if !configured_path.is_empty() {
-			if is_executable_file(Path::new(configured_path)) {
+		if !configured_path.is_empty()
+			&& is_executable_file(Path::new(configured_path)) {
 				return absolute(configured_path);
 			}
-		}
 
 		// Fall back to searching the system PATH (split per platform:
 		// `;` on Windows, `:` elsewhere — see [`split_path_env`]).

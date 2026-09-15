@@ -559,7 +559,7 @@ impl RenderEvalHooks {
         in_flight: &mut HashSet<usize>,
     ) -> NodeValue {
         let mut payload = payload.clone();
-        for (_, value) in payload.params.iter_mut() {
+        for value in payload.params.values_mut() {
             self.resolve_value(value, depth, in_flight);
         }
         match self.process_shader_job(&payload) {
@@ -584,7 +584,7 @@ impl RenderEvalHooks {
         in_flight: &mut HashSet<usize>,
     ) -> Option<NodeValue> {
         let mut payload = payload.clone();
-        for (_, value) in payload.values.iter_mut() {
+        for value in payload.values.values_mut() {
             self.resolve_value(value, depth, in_flight);
         }
 
@@ -843,7 +843,7 @@ impl RenderEvalHooks {
                         return None;
                     }
                     let nested = (unsafe { oak_node::jobs::shader_job(handle) }).cloned()?;
-                    Some(self.process_shader_job_depth(&nested, depth + 1)?)
+                    self.process_shader_job_depth(&nested, depth + 1)
                 });
             let tex = tex?;
             let (token, tex_size) = match &tex {
@@ -1797,7 +1797,7 @@ fn blend_transition(
     // Fallback: without a blend (a missing side, or a shader job that
     // could not run) show the side that natively covers `time` — the
     // outgoing block before the cut, the incoming one at or after it.
-    Ok(blended.or_else(|| if progress < 0.5 { from } else { to }))
+    Ok(blended.or(if progress < 0.5 { from } else { to }))
 }
 
 /// Walk an adjustment block's effect chain to its head: the first node

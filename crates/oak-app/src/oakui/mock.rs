@@ -43,19 +43,19 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gpui::effect_stack::{
-    EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
+	EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
 };
 use gpui::node_graph::{
-    EdgeData, EdgeId, NodeData, NodeGraphDataSource, NodeGraphEvent, NodeId, PortData,
-    PortDataType, PortId, PortKind,
+	EdgeData, EdgeId, NodeData, NodeGraphDataSource, NodeGraphEvent, NodeId, PortData,
+	PortDataType, PortId, PortKind,
 };
 use gpui::timeline::{
-    ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
-    TrackData, TrackKind,
+	ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
+	TrackData, TrackKind,
 };
 use gpui::{
-    hsla, point, prelude::*, px, App, Context, Entity, Hsla, Pixels, Point, RenderImage,
-    SharedString,
+	hsla, point, prelude::*, px, App, Context, Entity, Hsla, Pixels, Point, RenderImage,
+	SharedString,
 };
 use gpui_widgets::audio_meter::AudioMeterDataSource;
 use gpui_widgets::project_explorer::{ProjectDataSource, ProjectEntry};
@@ -67,8 +67,8 @@ use oak_node::track::TrackType;
 use oak_timeline::util::{block_clip_create, track_append_block};
 
 use super::engine::{
-    AppEngine, EngineGateway, ExportEvent, ExportSession, LibraryProject, Monitor, MulticamState,
-    Project, ScopeData, Sequence, VideoFormat, WizardFootage, WizardSyncOffset,
+	AppEngine, EngineGateway, ExportEvent, ExportSession, LibraryProject, Monitor, MulticamState,
+	Project, ScopeData, Sequence, VideoFormat, WizardFootage, WizardSyncOffset,
 };
 use super::graphops;
 use super::nodegraph::GraphEndpoint;
@@ -1001,7 +1001,7 @@ impl MockEngine {
 			NodeGraphEvent::NodeMoveRequested { nodes, delta } => {
 				for id in nodes {
 					if let Some(node) = self.nodes.iter_mut().find(|n| n.id() == *id) {
-						node.position = node.position + *delta;
+						node.position += *delta;
 					}
 				}
 			}
@@ -2099,8 +2099,7 @@ impl AppEngine for MockEngine {
 			.is_some_and(|t| t.kind == TrackKind::Video)
 		{
 			track_index
-		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video)
-		{
+		} else if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
 			index
 		} else {
 			return Err("no video track".to_string());
@@ -2494,7 +2493,7 @@ impl AppEngine for MockEngine {
 				if entry.is_dir {
 					continue;
 				}
-				let is_audio = crate::oakui::filename_is_audio(&entry.name.to_string());
+				let is_audio = crate::oakui::filename_is_audio(entry.name.as_ref());
 				let state = self
 					.proxy_states
 					.get(&entry.id)
@@ -2916,7 +2915,11 @@ impl ProjectDataSource for MockEngine {
 		// shared node label `文本`, so the demo's browser stays locale-
 		// independent).
 		for &id in &self.text_footages {
-			roots.push(ProjectEntry::new(id, super::graphops::TEXT_FOOTAGE_LABEL, false));
+			roots.push(ProjectEntry::new(
+				id,
+				super::graphops::TEXT_FOOTAGE_LABEL,
+				false,
+			));
 		}
 		roots
 	}
@@ -2969,11 +2972,11 @@ impl DemoMulticamGraph {
 	/// tracks are built directly in the graph (no `Add Track` undo entries —
 	/// the demo's initial state is not a user edit).
 	fn build() -> Self {
-        use oak_node::node::NodeCore;
-        use oak_node::sequence::SequenceBehavior;
-        use oak_node::track::{TrackBehavior, TrackListBehavior};
+		use oak_node::node::NodeCore;
+		use oak_node::sequence::SequenceBehavior;
+		use oak_node::track::{TrackBehavior, TrackListBehavior};
 
-        let project = graphops::create_project();
+		let project = graphops::create_project();
 		let sequence = graphops::create_sequence(&project, "Multicam Demo");
 		// A video track list with four tracks, wired into the sequence.
 		{
@@ -3257,12 +3260,12 @@ impl MockEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use gpui::TestAppContext;
-    use gpui::timeline::TrimEdge;
+	use super::*;
+	use gpui::timeline::TrimEdge;
+	use gpui::TestAppContext;
 
-    fn demo_engine(app: &mut gpui::App) -> Entity<MockEngine> {
-		app.new(|cx| MockEngine::demo(cx))
+	fn demo_engine(app: &mut gpui::App) -> Entity<MockEngine> {
+		app.new(MockEngine::demo)
 	}
 
 	#[gpui::test]
@@ -3327,8 +3330,8 @@ mod tests {
 	/// The stop-on-last tick pauses on the final frame instead of wrapping.
 	#[test]
 	fn clock_tick_stops_on_the_last_frame_when_asked() {
-        use std::time::{Duration, Instant};
-        let mut clock = MockClock::new(FrameRate::new(30, 1));
+		use std::time::{Duration, Instant};
+		let mut clock = MockClock::new(FrameRate::new(30, 1));
 		clock.play();
 		// 10 s at 30 fps = 300 frames into a 5-frame sequence: wrapped 60×.
 		clock.started = Some((Instant::now() - Duration::from_secs(10), Frame(0)));
@@ -3348,8 +3351,8 @@ mod tests {
 	/// Without stop-on-last the tick wraps modulo the sequence length.
 	#[test]
 	fn clock_tick_loops_when_not_stopping() {
-        use std::time::{Duration, Instant};
-        let mut clock = MockClock::new(FrameRate::new(30, 1));
+		use std::time::{Duration, Instant};
+		let mut clock = MockClock::new(FrameRate::new(30, 1));
 		clock.play();
 		clock.started = Some((Instant::now() - Duration::from_secs(10), Frame(0)));
 
@@ -3973,9 +3976,9 @@ mod tests {
 				.collect();
 			assert_eq!(listed.len(), 2, "both text entries are listed in the bin");
 			assert!(
-				listed.iter().all(|e| {
-					e.name == crate::oakui::graphops::TEXT_FOOTAGE_LABEL && !e.is_dir
-				}),
+				listed
+					.iter()
+					.all(|e| { e.name == crate::oakui::graphops::TEXT_FOOTAGE_LABEL && !e.is_dir }),
 				"the entries carry the shared 文本 label as leaves"
 			);
 		});

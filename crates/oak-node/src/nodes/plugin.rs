@@ -546,7 +546,7 @@ mod tests {
 			sample_count: 3,
 			// Planar layout: channel 0 plane [1, 2, 3], channel 1 plane
 			// [4, 5, 6].
-			data: vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]
+			data: [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]
 				.iter()
 				.flat_map(|f| f.to_le_bytes())
 				.collect(),
@@ -580,7 +580,7 @@ mod tests {
 			format: oak_core::SampleFormat::F32,
 			channels: 1,
 			sample_count: 2,
-			data: vec![1.0f32, 2.0]
+			data: [1.0f32, 2.0]
 				.iter()
 				.flat_map(|f| f.to_le_bytes())
 				.collect(),

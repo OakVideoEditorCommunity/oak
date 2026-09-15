@@ -54,6 +54,19 @@ fn plane_mut_ptrs(planes: &mut [Vec<f32>]) -> Vec<*mut f32> {
 	planes.iter_mut().map(|p| p.as_mut_ptr()).collect()
 }
 
+/// [`Processor::convert`] with its raw-pointer contract upheld by the
+/// plane helpers above (the pointer arrays outlive the call). The single
+/// `unsafe` block keeps the call sites readable.
+fn convert(
+	p: &Processor,
+	in_ptrs: *const *const f32,
+	in_frames: i32,
+	out_ptrs: *const *mut f32,
+	out_capacity: i32,
+) -> oak_audio::error::Result<i32> {
+	unsafe { p.convert(in_ptrs, in_frames, out_ptrs, out_capacity) }
+}
+
 /// The crate error code of a failed call (the API surfaces
 /// `Box<dyn std::error::Error>`).
 fn code(err: Box<dyn std::error::Error>) -> i32 {
@@ -67,11 +80,11 @@ fn code(err: Box<dyn std::error::Error>) -> i32 {
 #[test]
 fn processor_open_isopen_close() {
 	let p = Processor::init();
-	assert_eq!(p.is_open().unwrap(), false);
+	assert!(!p.is_open().unwrap());
 	open_identity(&p).unwrap();
-	assert_eq!(p.is_open().unwrap(), true);
+	assert!(p.is_open().unwrap());
 	p.close().unwrap();
-	assert_eq!(p.is_open().unwrap(), false);
+	assert!(!p.is_open().unwrap());
 }
 
 /// open with matching in/out rate and format is an identity passthrough:
@@ -86,7 +99,7 @@ fn identity_convert_passthrough() {
 	let mut out = vec![vec![0f32; 32]; 2];
 	let out_ptrs = plane_mut_ptrs(&mut out);
 
-	let n = p.convert(in_ptrs.as_ptr(), 32, out_ptrs.as_ptr(), 32).unwrap();
+	let n = convert(&p, in_ptrs.as_ptr(), 32, out_ptrs.as_ptr(), 32).unwrap();
 	assert_eq!(n, 32);
 	for ch in 0..2 {
 		for i in 0..32 {
@@ -112,7 +125,7 @@ fn convert_capacity_truncation() {
 	let mut out = vec![vec![9.9f32; 10]; 2];
 	let out_ptrs = plane_mut_ptrs(&mut out);
 
-	let n = p.convert(in_ptrs.as_ptr(), 32, out_ptrs.as_ptr(), 10).unwrap();
+	let n = convert(&p, in_ptrs.as_ptr(), 32, out_ptrs.as_ptr(), 10).unwrap();
 	assert_eq!(n, 10);
 	for ch in 0..2 {
 		for i in 0..10 {
@@ -123,7 +136,7 @@ fn convert_capacity_truncation() {
 	// The graph has already drained; nothing further to pull.
 	let mut out2 = vec![vec![0f32; 32]; 2];
 	let out2_ptrs = plane_mut_ptrs(&mut out2);
-	let n = p.convert(in_ptrs.as_ptr(), 0, out2_ptrs.as_ptr(), 32).unwrap();
+	let n = convert(&p, in_ptrs.as_ptr(), 0, out2_ptrs.as_ptr(), 32).unwrap();
 	assert_eq!(n, 0);
 }
 
@@ -136,7 +149,7 @@ fn open_invalid_params() {
 		code(p.open(params(0), params(48000), 1.0).unwrap_err()),
 		OAKAUDIO_E_INVALID
 	);
-	assert_eq!(p.is_open().unwrap(), false);
+	assert!(!p.is_open().unwrap());
 	// The output format is forced to planar f32 by the processor contract.
 	let mut wrong_out = params(48000);
 	wrong_out.format = SampleFormat::F32;
@@ -144,12 +157,12 @@ fn open_invalid_params() {
 		code(p.open(params(48000), wrong_out, 1.0).unwrap_err()),
 		OAKAUDIO_E_INVALID
 	);
-	assert_eq!(p.is_open().unwrap(), false);
+	assert!(!p.is_open().unwrap());
 
 	// convert before open is a state error; a non-positive speed is
 	// rejected on open.
 	assert_eq!(
-		code(p.convert(std::ptr::null(), 0, std::ptr::null(), 0).unwrap_err()),
+		code(convert(&p, std::ptr::null(), 0, std::ptr::null(), 0).unwrap_err()),
 		OAKAUDIO_E_STATE
 	);
 	assert_eq!(
@@ -173,13 +186,18 @@ fn resample_and_flush() {
 	let mut out = vec![vec![0f32; frames]; 2];
 	let out_ptrs = plane_mut_ptrs(&mut out);
 
-	let mut total = p
-		.convert(in_ptrs.as_ptr(), frames as i32, out_ptrs.as_ptr(), frames as i32)
-		.unwrap();
+	let mut total = convert(
+		&p,
+		in_ptrs.as_ptr(),
+		frames as i32,
+		out_ptrs.as_ptr(),
+		frames as i32,
+	)
+	.unwrap();
 	p.flush().unwrap();
 	// Drain the resampler delay after end-of-input.
 	while total < frames as i32 {
-		let n = p.convert(std::ptr::null(), 0, out_ptrs.as_ptr(), frames as i32).unwrap();
+		let n = convert(&p, std::ptr::null(), 0, out_ptrs.as_ptr(), frames as i32).unwrap();
 		if n == 0 {
 			break;
 		}
@@ -189,7 +207,7 @@ fn resample_and_flush() {
 		(total - 22050).abs() <= 2,
 		"half-rate output must halve the frame count (got {total})"
 	);
-	assert_eq!(p.is_open().unwrap(), true);
+	assert!(p.is_open().unwrap());
 }
 
 /// A tempo factor != 1.0 time-stretches: tempo 2.0 halves the frame count
@@ -207,12 +225,17 @@ fn tempo_stretch() {
 	let mut out = vec![vec![0f32; frames]; 2];
 	let out_ptrs = plane_mut_ptrs(&mut out);
 
-	let mut total = p
-		.convert(in_ptrs.as_ptr(), frames as i32, out_ptrs.as_ptr(), frames as i32)
-		.unwrap();
+	let mut total = convert(
+		&p,
+		in_ptrs.as_ptr(),
+		frames as i32,
+		out_ptrs.as_ptr(),
+		frames as i32,
+	)
+	.unwrap();
 	p.flush().unwrap();
 	while total < frames as i32 {
-		let n = p.convert(std::ptr::null(), 0, out_ptrs.as_ptr(), frames as i32).unwrap();
+		let n = convert(&p, std::ptr::null(), 0, out_ptrs.as_ptr(), frames as i32).unwrap();
 		if n == 0 {
 			break;
 		}
@@ -222,7 +245,7 @@ fn tempo_stretch() {
 		(total - 24000).abs() <= 2400,
 		"tempo 2.0 must halve the frame count (got {total})"
 	);
-	assert_eq!(p.is_open().unwrap(), true);
+	assert!(p.is_open().unwrap());
 	p.close().unwrap();
 
 	// Re-opening a closed processor works; opening an open one is a state

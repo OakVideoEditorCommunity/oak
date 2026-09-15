@@ -106,7 +106,7 @@ mod tests {
 		let peaks: Vec<MinMax> = (0..points)
 			.map(|i| {
 				let sample = i64::from(i) * i64::from(SPP);
-				let inside = sample >= 48_000 && sample < 96_000;
+				let inside = (48_000..96_000).contains(&sample);
 				if inside {
 					MinMax { min: -1.0, max: 1.0 }
 				} else {

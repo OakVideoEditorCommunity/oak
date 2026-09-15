@@ -942,9 +942,7 @@ fn shared_plugin_instance(identifier: &str) -> Option<u64> {
 		return Some(id);
 	}
 	let host = Host::global();
-	if host.cache.find(identifier).is_none() {
-		return None;
-	}
+	host.cache.find(identifier)?;
 	// 上下文选择：filter 优先、实例化失败按序回退（与
 	// [`register_plugin_nodes`] 同一策略，见
 	// [`Host::create_instance_preferred`]）。

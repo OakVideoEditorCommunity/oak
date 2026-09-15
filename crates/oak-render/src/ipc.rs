@@ -287,9 +287,11 @@ pub struct HelloCapsMsg {
 /// representation and are dropped by [`WireNodeValue::from_node_value`].
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "t", content = "v", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WireNodeValue {
 	/// No value.
-	None,
+	#[default]
+ None,
 	/// Integer.
 	Int(i64),
 	/// Float.
@@ -318,11 +320,6 @@ pub enum WireNodeValue {
 	Binary(Vec<u8>),
 }
 
-impl Default for WireNodeValue {
-	fn default() -> Self {
-		WireNodeValue::None
-	}
-}
 
 impl WireNodeValue {
 	/// The wire form of a node value, or `None` when the variant has no
@@ -1174,7 +1171,8 @@ impl FrameSlotPool {
 		if unsafe { (*header).magic } != FRAMEPOOL_MAGIC {
 			return FrameSlotPool::invalid();
 		}
-		let pool = unsafe {
+		
+		unsafe {
 			FrameSlotPool {
 				base: mem,
 				header,
@@ -1183,8 +1181,7 @@ impl FrameSlotPool {
 				meta: mem.add((*header).meta_offset as usize) as *mut FrameSlotMeta,
 				data: mem.add((*header).data_offset as usize),
 			}
-		};
-		pool
+		}
 	}
 
 	/// An invalid pool (attach on a non-pool segment).

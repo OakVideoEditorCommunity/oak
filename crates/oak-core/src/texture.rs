@@ -16,8 +16,8 @@
 
 //! Textures and CPU frames.
 
-use crate::Rational;
 use crate::PixelFormat;
+use crate::Rational;
 use std::sync::Arc;
 
 use crate::backend::{BackendKind, GpuContextLike};
@@ -385,7 +385,7 @@ mod tests {
 		let pod = f.video_params();
 		assert_eq!(pod.width, 3);
 		assert_eq!(pod.pixel_aspect_num, 2);
-		assert_eq!(f.is_float(), true);
+		assert!(f.is_float());
 		assert_eq!(f.pixel_count(), 6);
 		f.allocate();
 		assert!(!f.data().is_null());

@@ -144,7 +144,7 @@ fn uuid_text_to_bytes(uuid: &str) -> [u8; 16] {
 			break;
 		}
 		let d = c.to_digit(16).unwrap_or(0) as u8;
-		if nibble % 2 == 0 {
+		if nibble.is_multiple_of(2) {
 			bytes[nibble / 2] = d << 4;
 		} else {
 			bytes[nibble / 2] |= d;
@@ -286,7 +286,7 @@ impl PlaybackCache {
 	pub fn set_uuid(&mut self, uuid: &str) {
 		self.uuid = uuid.to_string();
 		let dir = self.disk_dir.clone();
-		let _ = self.load_state(&std::path::Path::new(&dir));
+		let _ = self.load_state(std::path::Path::new(&dir));
 	}
 
 	/// Set the frame timebase (frame-hash flavors; C++ `set_timebase`).
@@ -319,7 +319,7 @@ impl PlaybackCache {
 		self.passthroughs.retain(|(r, _)| !overlaps(*r, range));
 		if self.saving_enabled {
 			let dir = self.disk_dir.clone();
-			let _ = self.save_state(&std::path::Path::new(&dir));
+			let _ = self.save_state(std::path::Path::new(&dir));
 		}
 	}
 
@@ -328,7 +328,7 @@ impl PlaybackCache {
 		self.validated.insert(range);
 		if self.saving_enabled {
 			let dir = self.disk_dir.clone();
-			let _ = self.save_state(&std::path::Path::new(&dir));
+			let _ = self.save_state(std::path::Path::new(&dir));
 		}
 	}
 
@@ -401,7 +401,7 @@ impl PlaybackCache {
 		}
 		if self.saving_enabled {
 			let dir = self.disk_dir.clone();
-			let _ = self.save_state(&std::path::Path::new(&dir));
+			let _ = self.save_state(std::path::Path::new(&dir));
 		}
 	}
 
@@ -421,7 +421,7 @@ impl PlaybackCache {
 		}
 		if self.saving_enabled {
 			let dir = self.disk_dir.clone();
-			let _ = self.save_state(&std::path::Path::new(&dir));
+			let _ = self.save_state(std::path::Path::new(&dir));
 		}
 	}
 

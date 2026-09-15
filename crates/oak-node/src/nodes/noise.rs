@@ -219,6 +219,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(NoiseGeneratorNode))
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.noise`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.noise",
+		name: "Noise",
+		categories: &[Category::Generator],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,15 +320,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Noise");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.noise`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.noise",
-		name: "Noise",
-		categories: &[Category::Generator],
-		create,
-	});
 }

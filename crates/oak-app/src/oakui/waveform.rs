@@ -90,7 +90,11 @@ impl WaveformCache {
 
 	/// The cached waveform of `clip`, if extracted.
 	pub fn get(&self, clip: u64) -> Option<Arc<ClipWaveform>> {
-		self.map.lock().unwrap_or_else(|e| e.into_inner()).get(&clip).cloned()
+		self.map
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(&clip)
+			.cloned()
 	}
 
 	/// Ensure `clip` (with media `filename`, `duration_frames` long) has a
@@ -105,16 +109,17 @@ impl WaveformCache {
 			return;
 		};
 		let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
-		if !map.contains_key(&clip) {
-			map.insert(clip, Arc::new(waveform));
-			self.version.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		if let std::collections::hash_map::Entry::Vacant(e) = map.entry(clip) {
+			e.insert(Arc::new(waveform));
+			self.version
+				.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 		}
 	}
 }
 
 /// Extract a clip's waveform (first channel) via oakaudio's waveform
 /// extractor.
-	fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
+fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
 	let cname = std::ffi::CString::new(filename).ok()?;
 	const SAMPLES_PER_POINT: i32 = 256;
 	// Audio-stream index 0 (probe numbering).

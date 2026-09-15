@@ -252,9 +252,7 @@ pub fn set_value_at_time_command(
 					.and_then(|e| e.core.keyframe_track(&input, element))
 					.and_then(|t| {
 						t.keys()
-							.iter()
-							.filter(|k| k.time <= time)
-							.next_back()
+							.iter().rfind(|k| k.time <= time)
 							.map(|k| k.interpolation)
 					})
 					.unwrap_or(Interpolation::Linear);

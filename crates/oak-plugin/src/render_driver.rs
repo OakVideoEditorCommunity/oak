@@ -256,7 +256,7 @@ pub fn render_frame(
 		if clip.name == "Output" {
 			continue;
 		}
-		if pick_input(&clip.name, job).map_or(false, |t| usable(&t)) {
+		if pick_input(&clip.name, job).is_some_and(|t| usable(&t)) {
 			clip.set_region_of_definition(region_of_interest, job.time);
 			clip.set_video_params(depth_format, 4);
 		}

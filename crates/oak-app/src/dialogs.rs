@@ -36,23 +36,23 @@ use gpui::colors::DefaultColors;
 use gpui::prelude::*;
 use gpui::timeline::FrameRate;
 use gpui::{
-    div, px, App, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, Keystroke, PathPromptOptions, Render, SharedString, Window,
+	div, px, App, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
+	InteractiveElement, Keystroke, PathPromptOptions, Render, SharedString, Window,
 };
 use gpui_elements::editable_text::{EditableTextState, StringStorage, TextChanged};
 
 use crate::actions::ActionId;
 use crate::i18n;
 use crate::oakui::real::{
-    audio_input_device, audio_input_devices, audio_output_device, audio_output_devices,
-    config_get_bool, config_get_int, config_get_string, config_set_bool, config_set_int,
-    config_set_string, encoding_formats, proxy_dividers, renderer_backends, set_audio_input_device,
-    set_audio_output_device, set_theme_dark, theme_is_dark, CONFIG_KEY_DEFAULT_TRANSITION_SEC,
-    CONFIG_KEY_DISK_CACHE_PATH, CONFIG_KEY_FFMPEG_PATH, CONFIG_KEY_PG_URL,
-    CONFIG_KEY_PREVIEW_WINDOW, CONFIG_KEY_PROXY_DIVIDER, CONFIG_KEY_RENDERER_BACKEND,
-    CONFIG_KEY_SNAPSHOT_INTERVAL_SEC, CONFIG_KEY_STORAGE_BACKEND, CONFIG_KEY_USE_PROXY,
-    DEFAULT_PREVIEW_WINDOW_FORWARD, DEFAULT_SNAPSHOT_INTERVAL_SEC, DEFAULT_TRANSITION_SEC,
-    EXPORT_FORMAT_MP4,
+	audio_input_device, audio_input_devices, audio_output_device, audio_output_devices,
+	config_get_bool, config_get_int, config_get_string, config_set_bool, config_set_int,
+	config_set_string, encoding_formats, proxy_dividers, renderer_backends, set_audio_input_device,
+	set_audio_output_device, set_theme_dark, theme_is_dark, CONFIG_KEY_DEFAULT_TRANSITION_SEC,
+	CONFIG_KEY_DISK_CACHE_PATH, CONFIG_KEY_FFMPEG_PATH, CONFIG_KEY_PG_URL,
+	CONFIG_KEY_PREVIEW_WINDOW, CONFIG_KEY_PROXY_DIVIDER, CONFIG_KEY_RENDERER_BACKEND,
+	CONFIG_KEY_SNAPSHOT_INTERVAL_SEC, CONFIG_KEY_STORAGE_BACKEND, CONFIG_KEY_USE_PROXY,
+	DEFAULT_PREVIEW_WINDOW_FORWARD, DEFAULT_SNAPSHOT_INTERVAL_SEC, DEFAULT_TRANSITION_SEC,
+	EXPORT_FORMAT_MP4,
 };
 // The `DisplayBitDepth` config key lives with the format mapping it
 // drives (oak-render's backend); the preferences dropdown and the
@@ -184,20 +184,22 @@ impl PreferencesContent {
 			];
 			ComboBox::new(12, options, window, cx)
 		});
-		cx.subscribe(&display_bit_depth, |_this, _combo, event: &ComboBoxEvent, cx| {
-			let ComboBoxEvent::Selected { value, .. } = event;
-			let depth = if *value == 1 { "8" } else { "10" };
-			config_set_string(CONFIG_KEY_DISPLAY_BIT_DEPTH, depth);
-			println!("[preferences] display bit depth → {depth}");
-			let _ = cx;
-		})
+		cx.subscribe(
+			&display_bit_depth,
+			|_this, _combo, event: &ComboBoxEvent, cx| {
+				let ComboBoxEvent::Selected { value, .. } = event;
+				let depth = if *value == 1 { "8" } else { "10" };
+				config_set_string(CONFIG_KEY_DISPLAY_BIT_DEPTH, depth);
+				println!("[preferences] display bit depth → {depth}");
+				let _ = cx;
+			},
+		)
 		.detach();
-		let bit_depth_selected =
-			if config_get_string(CONFIG_KEY_DISPLAY_BIT_DEPTH) == "8" {
-				1
-			} else {
-				0
-			};
+		let bit_depth_selected = if config_get_string(CONFIG_KEY_DISPLAY_BIT_DEPTH) == "8" {
+			1
+		} else {
+			0
+		};
 		display_bit_depth.update(cx, |combo, cx| {
 			combo.set_selected(Some(bit_depth_selected), cx)
 		});
@@ -269,11 +271,8 @@ impl PreferencesContent {
 		// playhead during playback (`PlaybackPreRenderFrames`, consumed by
 		// `update_preview_window` every playback tick — no restart needed).
 		let cache_ahead = cx.new(|cx| {
-			let current = config_get_int(
-				CONFIG_KEY_PREVIEW_WINDOW,
-				DEFAULT_PREVIEW_WINDOW_FORWARD,
-			)
-			.clamp(8, 1200);
+			let current = config_get_int(CONFIG_KEY_PREVIEW_WINDOW, DEFAULT_PREVIEW_WINDOW_FORWARD)
+				.clamp(8, 1200);
 			SpinBox::new(
 				10,
 				SliderModel::new(ValueKind::Integer, 8.0, 1200.0, 8.0, current as f64),
@@ -366,13 +365,13 @@ impl PreferencesContent {
 		})
 		.detach();
 
-        // --- 色彩 Color: display ICC color management -----------------------
-        // On by default: the viewer frames are transformed through the
-        // display's ICC profile (system profile, or a custom file below).
-        // A mode change re-evaluates the platform display policy and
-        // retags the windows immediately (no restart).
-        use crate::oakui::displaycolor::{CONFIG_KEY_COLOR_MODE, CONFIG_KEY_CUSTOM_ICC};
-        let display_icc = cx.new(|cx| {
+		// --- 色彩 Color: display ICC color management -----------------------
+		// On by default: the viewer frames are transformed through the
+		// display's ICC profile (system profile, or a custom file below).
+		// A mode change re-evaluates the platform display policy and
+		// retags the windows immediately (no restart).
+		use crate::oakui::displaycolor::{CONFIG_KEY_COLOR_MODE, CONFIG_KEY_CUSTOM_ICC};
+		let display_icc = cx.new(|cx| {
 			let mode = config_get_string(CONFIG_KEY_COLOR_MODE);
 			CheckBox::new(
 				13,
@@ -500,18 +499,21 @@ impl PreferencesContent {
 			];
 			ComboBox::new(11, options, window, cx)
 		});
-		cx.subscribe(&storage_backend, |this, _combo, event: &ComboBoxEvent, cx| {
-			match *event {
-				ComboBoxEvent::Selected { value } => {
-					let backend = if value == 1 { "pg" } else { "sqlite" };
-					this.storage_is_pg = backend == "pg";
-					config_set_string(CONFIG_KEY_STORAGE_BACKEND, backend);
-					// Re-render so the connection-string row shows/hides with
-					// the selection.
-					cx.notify();
+		cx.subscribe(
+			&storage_backend,
+			|this, _combo, event: &ComboBoxEvent, cx| {
+				match *event {
+					ComboBoxEvent::Selected { value } => {
+						let backend = if value == 1 { "pg" } else { "sqlite" };
+						this.storage_is_pg = backend == "pg";
+						config_set_string(CONFIG_KEY_STORAGE_BACKEND, backend);
+						// Re-render so the connection-string row shows/hides with
+						// the selection.
+						cx.notify();
+					}
 				}
-			}
-		})
+			},
+		)
 		.detach();
 		storage_backend.update(cx, |combo, cx| {
 			combo.set_selected(Some(if storage_is_pg { 1 } else { 0 }), cx)
@@ -1085,8 +1087,7 @@ impl ExportDialogContent {
 				ComboBoxOption::new(0, i18n::tr("export.color.sdr")),
 				ComboBoxOption::new(1, i18n::tr("export.color.hdr")),
 			];
-			ComboBox::new(7, options, window, cx)
-				.with_placeholder(i18n::tr("export.color"))
+			ComboBox::new(7, options, window, cx).with_placeholder(i18n::tr("export.color"))
 		});
 		color.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 
@@ -1095,8 +1096,7 @@ impl ExportDialogContent {
 				ComboBoxOption::new(0, i18n::tr("export.range.all")),
 				ComboBoxOption::new(1, i18n::tr("export.range.inout")),
 			];
-			ComboBox::new(8, options, window, cx)
-				.with_placeholder(i18n::tr("export.range"))
+			ComboBox::new(8, options, window, cx).with_placeholder(i18n::tr("export.range"))
 		});
 		range.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 
@@ -1149,8 +1149,7 @@ impl ExportDialogContent {
 		// an empty list disables the dialog's OK via the picker staying
 		// unselected.
 		let sequence = cx.new(|cx| {
-			ComboBox::new(13, Vec::new(), window, cx)
-				.with_placeholder(i18n::tr("export.sequence"))
+			ComboBox::new(13, Vec::new(), window, cx).with_placeholder(i18n::tr("export.sequence"))
 		});
 
 		Self {
@@ -1188,7 +1187,8 @@ impl ExportDialogContent {
 			.enumerate()
 			.map(|(i, (_, name))| ComboBoxOption::new(i, name.clone()))
 			.collect::<Vec<_>>();
-		self.sequence.update(cx, |combo, cx| combo.set_options(options, cx));
+		self.sequence
+			.update(cx, |combo, cx| combo.set_options(options, cx));
 		self.sequence
 			.update(cx, |combo, cx| combo.set_selected(preselect, cx));
 		self.sequences = sequences;
@@ -1386,10 +1386,7 @@ impl Render for ExportDialogContent {
 					.flex()
 					.gap_2()
 					.child(self.resolution_w.clone())
-					.child(div()
-						.text_color(colors.disabled)
-						.text_xs()
-						.child("×"))
+					.child(div().text_color(colors.disabled).text_xs().child("×"))
 					.child(self.resolution_h.clone()),
 			))
 			.child(form_row(
@@ -1639,7 +1636,11 @@ impl<E: crate::oakui::engine::AppEngine> ProxyDialogContent<E> {
 		config_set_bool("ProxyIncludeAudio", params.include_audio);
 		config_set_int(
 			"ProxyMaxConcurrent",
-			self.max_concurrent.read(cx).value().to_f64().clamp(1.0, 16.0) as i64,
+			self.max_concurrent
+				.read(cx)
+				.value()
+				.to_f64()
+				.clamp(1.0, 16.0) as i64,
 		);
 		config_set_string(
 			CONFIG_KEY_FFMPEG_PATH,
@@ -1727,8 +1728,8 @@ fn divider_label(divider: i32) -> String {
 
 /// The display string of a proxy lifecycle state.
 fn proxy_state_label(state: crate::oakui::engine::ProxyMediaState) -> String {
-    use crate::oakui::engine::ProxyMediaState;
-    match state {
+	use crate::oakui::engine::ProxyMediaState;
+	match state {
 		ProxyMediaState::Missing => i18n::tr("proxydialog.state.missing"),
 		ProxyMediaState::Generating => i18n::tr("proxydialog.state.generating"),
 		ProxyMediaState::Ready => i18n::tr("proxydialog.state.ready"),
@@ -1747,7 +1748,7 @@ impl<E: crate::oakui::engine::AppEngine> Render for ProxyDialogContent<E> {
 				.map(|row| {
 					let mut state = proxy_state_label(row.state);
 					if row.has_custom {
-						state.push_str(&i18n::tr("proxydialog.custom_suffix"));
+						state.push_str(i18n::tr("proxydialog.custom_suffix"));
 					}
 					let enabled =
 						row.enabled && row.state == crate::oakui::engine::ProxyMediaState::Ready;
@@ -1960,20 +1961,20 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		let (working, gamut, transfer) = engine.read(cx).project_color_settings();
 		working_space.update(cx, |combo, cx| {
 			combo.set_selected(
-                Some(oak_core::colormath::WorkingColorSpace::from_setting(&working) as usize),
-                cx,
+				Some(oak_core::colormath::WorkingColorSpace::from_setting(&working) as usize),
+				cx,
 			)
 		});
 		output_gamut.update(cx, |combo, cx| {
 			combo.set_selected(
-                Some(oak_core::colormath::OutputGamut::from_setting(&gamut) as usize),
-                cx,
+				Some(oak_core::colormath::OutputGamut::from_setting(&gamut) as usize),
+				cx,
 			)
 		});
 		output_transfer.update(cx, |combo, cx| {
 			combo.set_selected(
-                Some(oak_core::colormath::OutputTransfer::from_setting(&transfer) as usize),
-                cx,
+				Some(oak_core::colormath::OutputTransfer::from_setting(&transfer) as usize),
+				cx,
 			)
 		});
 
@@ -2057,8 +2058,8 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 	/// The color pipeline settings currently selected in the combos, as
 	/// the canonical persisted strings.
 	fn color_settings(&self, cx: &App) -> (String, String, String) {
-        use oak_core::colormath::{OutputGamut, OutputTransfer, WorkingColorSpace};
-        let working = self
+		use oak_core::colormath::{OutputGamut, OutputTransfer, WorkingColorSpace};
+		let working = self
 			.working_space
 			.read(cx)
 			.selected()
@@ -2139,7 +2140,7 @@ impl<E: crate::oakui::engine::AppEngine> Render for ProjectPropertiesContent<E> 
 						directories: false,
 						multiple: false,
 						prompt: None,
-				allowed_extensions: Vec::new(),
+						allowed_extensions: Vec::new(),
 					});
 					cx.spawn(async move |this, cx| {
 						if let Ok(Ok(Some(paths))) = receiver.await {
@@ -2742,7 +2743,7 @@ impl Render for KeyboardTabContent {
 					.child(
 						div()
 							.id(ElementId::named_usize("keyboard-shortcut-capture", index))
-							.debug_selector(move || format!("keyboard-capture-{index}").into())
+							.debug_selector(move || format!("keyboard-capture-{index}"))
 							.min_w(px(150.0))
 							.px_2()
 							.py_0p5()
@@ -3348,7 +3349,11 @@ impl Render for TextValue {
 			.bg(colors.background)
 			.px_2()
 			.py_1()
-			.child(text_input("oak-seq-name", cx).state(weak).accepts_input(true))
+			.child(
+				text_input("oak-seq-name", cx)
+					.state(weak)
+					.accepts_input(true),
+			)
 	}
 }
 
@@ -3388,12 +3393,13 @@ impl SequenceFormatSeed {
 	pub fn from_format(format: &crate::oakui::engine::VideoFormat, interlaced: bool) -> Self {
 		let preset = (1..=SEQUENCE_PRESET_COUNT)
 			.find(|i| {
-				sequence_preset_format(*i) == Some((
-					format.width,
-					format.height,
-					format.rate.num,
-					format.rate.den,
-				))
+				sequence_preset_format(*i)
+					== Some((
+						format.width,
+						format.height,
+						format.rate.num,
+						format.rate.den,
+					))
 			})
 			.unwrap_or(0);
 		let rate = SEQUENCE_RATES
@@ -3424,26 +3430,14 @@ pub struct SequenceFormatFields {
 
 impl SequenceFormatFields {
 	/// Builds the fields and wires the preset / field cross-updates.
-	pub fn build(
-		seed: SequenceFormatSeed,
-		window: &mut Window,
-		cx: &mut Context<Self>,
-	) -> Self {
+	pub fn build(seed: SequenceFormatSeed, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let preset = cx.new(|cx| ComboBox::new(40, sequence_preset_options(), window, cx));
-		preset.update(cx, |combo, cx| {
-			combo.set_selected(Some(seed.preset), cx)
-		});
+		preset.update(cx, |combo, cx| combo.set_selected(Some(seed.preset), cx));
 
 		let width = cx.new(|cx| {
 			SpinBox::new(
 				41,
-				SliderModel::new(
-					ValueKind::Integer,
-					16.0,
-					8192.0,
-					2.0,
-					f64::from(seed.width),
-				),
+				SliderModel::new(ValueKind::Integer, 16.0, 8192.0, 2.0, f64::from(seed.width)),
 				window,
 				cx,
 			)
@@ -3504,27 +3498,24 @@ impl SequenceFormatFields {
 		// Editing a dimension or the frame rate reverts to the custom entry.
 		cx.subscribe(&width, |this, _spin, event: &SpinBoxEvent, cx| {
 			if let SpinBoxEvent::ValueChanged { .. } = event {
-				this.preset.update(cx, |combo, cx| {
-					combo.set_selected(Some(0), cx)
-				});
+				this.preset
+					.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 				cx.notify();
 			}
 		})
 		.detach();
 		cx.subscribe(&height, |this, _spin, event: &SpinBoxEvent, cx| {
 			if let SpinBoxEvent::ValueChanged { .. } = event {
-				this.preset.update(cx, |combo, cx| {
-					combo.set_selected(Some(0), cx)
-				});
+				this.preset
+					.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 				cx.notify();
 			}
 		})
 		.detach();
 		cx.subscribe(&rate, |this, _combo, event: &ComboBoxEvent, cx| {
 			let ComboBoxEvent::Selected { .. } = event;
-			this.preset.update(cx, |combo, cx| {
-				combo.set_selected(Some(0), cx)
-			});
+			this.preset
+				.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 			cx.notify();
 		})
 		.detach();
@@ -3709,17 +3700,15 @@ impl<E: crate::oakui::engine::AppEngine> Render for NewSequenceContent<E> {
 				self.name.clone(),
 			))
 			.child(format_rows)
-			.child(
-				if let Some(error) = &self.error {
-					div()
-						.debug_selector(|| "seqprops-error".into())
-						.text_color(gpui::rgb(0xe5484d))
-						.text_xs()
-						.child(error.clone())
-				} else {
-					div()
-				},
-			)
+			.child(if let Some(error) = &self.error {
+				div()
+					.debug_selector(|| "seqprops-error".into())
+					.text_color(gpui::rgb(0xe5484d))
+					.text_xs()
+					.child(error.clone())
+			} else {
+				div()
+			})
 	}
 }
 
@@ -3818,13 +3807,7 @@ impl<E: crate::oakui::engine::AppEngine> SequencePropertiesContent<E> {
 		let format = self.format(cx);
 		let interlaced = self.interlaced(cx);
 		self.engine.update(cx, |engine, cx| {
-			engine.update_sequence_parameters(
-				self.sequence_id,
-				name,
-				format,
-				interlaced,
-				cx,
-			)
+			engine.update_sequence_parameters(self.sequence_id, name, format, interlaced, cx)
 		})?;
 		self.set_error(None, cx);
 		Ok(())
@@ -3858,17 +3841,15 @@ impl<E: crate::oakui::engine::AppEngine> Render for SequencePropertiesContent<E>
 				self.name.clone(),
 			))
 			.child(format_rows)
-			.child(
-				if let Some(error) = &self.error {
-					div()
-						.debug_selector(|| "seqprops-error".into())
-						.text_color(gpui::rgb(0xe5484d))
-						.text_xs()
-						.child(error.clone())
-				} else {
-					div()
-				},
-			)
+			.child(if let Some(error) = &self.error {
+				div()
+					.debug_selector(|| "seqprops-error".into())
+					.text_color(gpui::rgb(0xe5484d))
+					.text_xs()
+					.child(error.clone())
+			} else {
+				div()
+			})
 	}
 }
 
@@ -3970,11 +3951,7 @@ const WIZARD_SYNC_MODES: &[&str] = &[
 
 impl<E: crate::oakui::engine::AppEngine> MulticamWizardContent<E> {
 	/// Builds the content seeded with the engine's wizard footage.
-	pub fn new(
-		engine: Entity<E>,
-		window: &mut Window,
-		cx: &mut Context<Self>,
-	) -> Self {
+	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let name = cx.new(|cx| {
 			let editor = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
 			TextValue { editor }
@@ -4061,18 +4038,22 @@ impl<E: crate::oakui::engine::AppEngine> Render for MulticamWizardContent<E> {
 				.rounded_sm()
 				.hover(|style| style.bg(colors.container))
 				.cursor_pointer()
-				.on_click(cx.listener(
-					move |this: &mut Self, _event: &ClickEvent, _window, cx| {
+				.on_click(
+					cx.listener(move |this: &mut Self, _event: &ClickEvent, _window, cx| {
 						this.toggle_row(index, cx);
-					},
-				))
+					}),
+				)
 				.child(
 					div()
 						.size(px(12.0))
 						.flex()
 						.items_center()
 						.justify_center()
-						.bg(if is_checked { colors.selected } else { colors.background })
+						.bg(if is_checked {
+							colors.selected
+						} else {
+							colors.background
+						})
 						.text_color(colors.text)
 						.child(if is_checked { "✓" } else { "" }),
 				)
@@ -4083,10 +4064,12 @@ impl<E: crate::oakui::engine::AppEngine> Render for MulticamWizardContent<E> {
 						.child(entry.name.clone()),
 				)
 				.child(
-					div()
-						.text_xs()
-						.text_color(colors.disabled)
-						.child(entry.duration_s.map(|d| format!("{d:.1}s")).unwrap_or_default()),
+					div().text_xs().text_color(colors.disabled).child(
+						entry
+							.duration_s
+							.map(|d| format!("{d:.1}s"))
+							.unwrap_or_default(),
+					),
 				);
 			rows_div = rows_div.child(row);
 		}
@@ -4157,16 +4140,11 @@ impl RenameContent {
 impl Render for RenameContent {
 	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		let colors = cx.default_colors().clone();
-		div()
-			.flex()
-			.flex_col()
-			.gap_3()
-			.w_full()
-			.child(form_row(
-				&colors,
-				i18n::tr("project.context.rename").into(),
-				self.field.clone(),
-			))
+		div().flex().flex_col().gap_3().w_full().child(form_row(
+			&colors,
+			i18n::tr("project.context.rename").into(),
+			self.field.clone(),
+		))
 	}
 }
 
@@ -4193,7 +4171,10 @@ impl ExportProjectDialogContent {
 		let formats: Vec<(i32, String)> = vec![
 			(PROJECT_FORMAT_OTIO, "OpenTimelineIO (.otio)".to_string()),
 			(PROJECT_FORMAT_OVE, "Oak (.ove)".to_string()),
-			(PROJECT_FORMAT_FCPXML, "Final Cut Pro XML (.fcpxml)".to_string()),
+			(
+				PROJECT_FORMAT_FCPXML,
+				"Final Cut Pro XML (.fcpxml)".to_string(),
+			),
 		];
 		let options = formats
 			.iter()
@@ -4204,7 +4185,9 @@ impl ExportProjectDialogContent {
 			ComboBox::new(4, options, window, cx)
 				.with_placeholder(i18n::tr("project.export.format"))
 		});
-		format.update(cx, |combo, cx| combo.set_selected(Some(PROJECT_FORMAT_OTIO as usize), cx));
+		format.update(cx, |combo, cx| {
+			combo.set_selected(Some(PROJECT_FORMAT_OTIO as usize), cx)
+		});
 		Self { format, formats }
 	}
 
@@ -4232,16 +4215,11 @@ impl ExportProjectDialogContent {
 impl Render for ExportProjectDialogContent {
 	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		let colors = cx.default_colors().clone();
-		div()
-			.flex()
-			.flex_col()
-			.gap_3()
-			.w_full()
-			.child(form_row(
-				&colors,
-				i18n::tr("project.export.format").into(),
-				self.format.clone(),
-			))
+		div().flex().flex_col().gap_3().w_full().child(form_row(
+			&colors,
+			i18n::tr("project.export.format").into(),
+			self.format.clone(),
+		))
 	}
 }
 
@@ -4264,9 +4242,8 @@ impl NewProjectContent {
 		name.update(cx, |field, cx| {
 			field.set_value(i18n::tr("manager.new.default_name"), cx)
 		});
-		let format = cx.new(|cx| {
-			SequenceFormatFields::build(SequenceFormatSeed::hd_1080p25(), window, cx)
-		});
+		let format =
+			cx.new(|cx| SequenceFormatFields::build(SequenceFormatSeed::hd_1080p25(), window, cx));
 		Self { name, format }
 	}
 
@@ -4305,8 +4282,8 @@ impl Render for NewProjectContent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    fn keystroke(key: &str) -> Keystroke {
+	use super::*;
+	fn keystroke(key: &str) -> Keystroke {
 		gpui::Keystroke::parse(key).unwrap()
 	}
 
@@ -4316,9 +4293,10 @@ mod tests {
 	#[gpui::test]
 	async fn export_dialog_sequence_picker(cx: &mut gpui::TestAppContext) {
 		cx.update(|cx| cx.init_colors());
-		let window = cx.open_window(gpui::size(gpui::px(440.0), gpui::px(400.0)), |window, cx| {
-			ExportDialogContent::new(window, cx)
-		});
+		let window = cx.open_window(
+			gpui::size(gpui::px(440.0), gpui::px(400.0)),
+			ExportDialogContent::new,
+		);
 		cx.run_until_parked();
 		let content = window.root(cx).expect("dialog content root");
 
@@ -4349,7 +4327,9 @@ mod tests {
 		);
 
 		cx.update(|cx| {
-			content.update(cx, |content, cx| content.set_sequences(Vec::new(), None, cx));
+			content.update(cx, |content, cx| {
+				content.set_sequences(Vec::new(), None, cx)
+			});
 		});
 		assert_eq!(
 			cx.read(|cx| content.read(cx).selected_sequence(cx)),
@@ -4370,8 +4350,16 @@ mod tests {
 		assert_eq!(sequence_preset_format(7), None);
 		// The preset labels come from the language packs (default English
 		// here): the 4K entries say what they set.
-		assert!(labels[5].contains("3840×2160"), "4K UHD label: {}", labels[5]);
-		assert!(labels[6].contains("4096×2160"), "4K DCI label: {}", labels[6]);
+		assert!(
+			labels[5].contains("3840×2160"),
+			"4K UHD label: {}",
+			labels[5]
+		);
+		assert!(
+			labels[6].contains("4096×2160"),
+			"4K DCI label: {}",
+			labels[6]
+		);
 	}
 
 	/// A probed footage format seeds the new-sequence fields: an exact

@@ -97,7 +97,7 @@ pub(crate) fn analyze_bgra8(width: u32, height: u32, bytes: &[u8]) -> ScopeData 
 	let mut luma = Vec::with_capacity(pixels);
 	let mut chroma = Vec::with_capacity(pixels);
 	let src = bytes.get(..pixels * 4).unwrap_or_default();
-	for px in src.chunks_exact(4) {
+	for px in src.as_chunks::<4>().0 {
 		let b = f32::from(px[0]) / 255.0;
 		let g = f32::from(px[1]) / 255.0;
 		let r = f32::from(px[2]) / 255.0;

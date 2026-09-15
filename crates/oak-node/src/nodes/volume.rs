@@ -177,6 +177,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(VolumeNode))
 }
 
+/// Register this node type (C++ `k_audio_volume` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.volume",
+		name: "Volume",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -330,15 +341,4 @@ mod tests {
 		assert_eq!(dup.name(), "Volume");
 		assert_eq!(dup.type_id(), "org.olivevideoeditor.Olive.volume");
 	}
-}
-
-/// Register this node type (C++ `k_audio_volume` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.volume",
-		name: "Volume",
-		categories: &[Category::Filter],
-		create,
-	});
 }

@@ -1178,12 +1178,12 @@ impl DecoderState {
 		ctx.run(&f, &mut out).map_err(ffmpeg_err)?;
 		let bytes = if f32_ok {
 			let stride = out.stride(0);
-			convert_rgba_f32_le(&out.data(0), w, h, stride)
+			convert_rgba_f32_le(out.data(0), w, h, stride)
 		} else if out_fmt == Pixel::YUV444P16LE {
 			convert_yuv444p16_to_rgba_f32(&out, w, h, yuv_matrix_for(raw_space, src_w, src_h), full_range)
 		} else {
 			let stride = out.stride(0);
-			convert_rgba8_to_f32(&out.data(0), w, h, stride)
+			convert_rgba8_to_f32(out.data(0), w, h, stride)
 		};
 		let meta = crate::decoder::DecodedColorMeta {
 			color_primaries: raw_primaries,
@@ -2084,9 +2084,9 @@ fn probe_file(filename: &str, cancelled: Option<&CancelAtom>) -> Option<FootageD
 				vp.set_channel_count(VIDEO_CHANNELS);
 				vp.set_interlacing(Interlacing::None);
 				vp.set_pixel_aspect_ratio(1, 1);
-				vp.set_frame_rate(frame_rate.0 as i32, frame_rate.1 as i32);
+				vp.set_frame_rate(frame_rate.0, frame_rate.1);
 				vp.set_start_time(stream.start_time());
-				vp.set_time_base(tb.0 as i32, tb.1 as i32);
+				vp.set_time_base(tb.0, tb.1);
 				vp.set_duration(stream.duration());
 				vp.set_premultiplied_alpha(false);
 				// Stream colorimetry (drives the input→working transform
@@ -2134,7 +2134,7 @@ fn probe_file(filename: &str, cancelled: Option<&CancelAtom>) -> Option<FootageD
 					format: 0,
 					stream_index: i as i32,
 					duration: stream_duration,
-					time_base: (tb.0 as i32, tb.1 as i32),
+					time_base: (tb.0, tb.1),
 				}));
 			}
 			_ => {}

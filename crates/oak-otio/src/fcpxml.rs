@@ -1455,7 +1455,7 @@ mod tests {
 		assert!(FcpxmlError::UnsupportedVersion("x".into())
 			.to_string()
 			.contains("version error"));
-		let io = FcpxmlError::Io(std::io::Error::new(std::io::ErrorKind::Other, "io"));
+		let io = FcpxmlError::Io(std::io::Error::other("io"));
 		assert!(io.to_string().contains("file error"));
 		assert!(io.source().is_some());
 		assert!(FcpxmlError::Xml("x".into()).source().is_none());
@@ -1577,6 +1577,6 @@ mod tests {
 	#[test]
 	fn file_io_errors() {
 		assert!(from_fcpxml_file("/nonexistent/oakotio-test.fcpxml").is_err());
-		assert!(to_fcpxml_file(&[], &std::env::temp_dir()).is_err());
+		assert!(to_fcpxml_file(&[], std::env::temp_dir()).is_err());
 	}
 }

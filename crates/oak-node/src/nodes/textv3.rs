@@ -760,12 +760,12 @@ impl TextGeneratorV3 {
 				text: row
 					.get(PLAIN_TEXT_INPUT)
 					.map(to_text)
-					.unwrap_or_else(String::new),
+					.unwrap_or_default(),
 				mode: TextLayoutMode::PlainText,
 				font_family: row
 					.get(FONT_FAMILY_INPUT)
 					.map(to_text)
-					.unwrap_or_else(String::new),
+					.unwrap_or_default(),
 				font_size_pt: row
 					.get(FONT_SIZE_INPUT)
 					.map(|v| v.to_double())
@@ -776,7 +776,7 @@ impl TextGeneratorV3 {
 			}
 		} else {
 			TextLayoutRequest {
-				text: row.get(TEXT_INPUT).map(to_text).unwrap_or_else(String::new),
+				text: row.get(TEXT_INPUT).map(to_text).unwrap_or_default(),
 				mode: TextLayoutMode::OliveHtml,
 				font_family: String::new(),
 				font_size_pt: 0.0,
@@ -2257,7 +2257,7 @@ mod tests {
 		else {
 			panic!("expected a CPU coverage frame");
 		};
-		let stride = frame.linesize_bytes() as usize;
+		let stride = frame.linesize_bytes();
 		let at = y * stride + x * 16;
 		let mut out = [0f32; 4];
 		for (c, v) in out.iter_mut().enumerate() {

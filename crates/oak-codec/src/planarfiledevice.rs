@@ -243,7 +243,7 @@ mod tests {
 		assert!(!d.is_open());
 
 		// Already open -> refuse.
-		assert!(d.open(&[ok.clone()], OpenMode::WriteOnly));
+		assert!(d.open(std::slice::from_ref(&ok), OpenMode::WriteOnly));
 		assert!(!d.open(&[ok], OpenMode::WriteOnly));
 	}
 

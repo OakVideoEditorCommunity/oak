@@ -69,7 +69,12 @@ fn build_project(media: &str) -> (Arc<Mutex<Project>>, NodeId) {
 		let (ccore, cbehavior) = oak_node::block::clip_create();
 		let clip = p.graph.add_node(ccore, cbehavior);
 		p.graph
-			.connect(footage, clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+			.connect(
+				footage,
+				clip,
+				oak_node::block::clip_input::TEXTURE_INPUT,
+				-1,
+			)
 			.expect("connect footage to clip");
 		p.graph
 			.get_mut(clip)
@@ -207,7 +212,7 @@ fn export_writes_a_real_playable_mp4() {
 	let oak_core::texture::Texture::Cpu(frame) = &tex else {
 		panic!("decode produced a GPU texture");
 	};
-	let off = 32 * frame.linesize_bytes() as usize + 32 * 16;
+	let off = 32 * frame.linesize_bytes() + 32 * 16;
 	let r = f32::from_le_bytes(frame.data[off..off + 4].try_into().unwrap());
 	let g = f32::from_le_bytes(frame.data[off + 4..off + 8].try_into().unwrap());
 	assert!(

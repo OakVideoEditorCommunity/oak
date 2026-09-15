@@ -690,7 +690,7 @@ impl Clone for NodeValue {
 	fn clone(&self) -> Self {
 		match self {
 			NodeValue::Texture(h) => {
-				let h2 = h.clone();
+				let h2 = *h;
 				if let Some(f) = h2.addref {
 					// Safety: `h2` is a valid handle; addref only touches
 					// the refcount.

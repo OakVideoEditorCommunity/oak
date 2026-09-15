@@ -367,6 +367,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(DropShadowFilter))
 }
 
+/// Register this node type (C++ `k_drop_shadow_filter` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.dropshadow",
+		name: "Drop Shadow",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,15 +495,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Drop Shadow");
 	}
-}
-
-/// Register this node type (C++ `k_drop_shadow_filter` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.dropshadow",
-		name: "Drop Shadow",
-		categories: &[Category::Filter],
-		create,
-	});
 }

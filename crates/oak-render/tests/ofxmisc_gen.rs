@@ -11,7 +11,7 @@ fn filled_frame(size: (i32, i32), rgba: [f32; 4]) -> Texture {
     Texture::wrap_frame(f)
 }
 fn pixel_at(frame: &oak_core::texture::Frame, x: usize, y: usize) -> [f32; 4] {
-    let stride = frame.linesize_bytes() as usize;
+    let stride = frame.linesize_bytes();
     let at = y * stride + x * 16;
     let mut out = [0f32; 4];
     for c in 0..4 { out[c] = f32::from_le_bytes(frame.data[at + c*4..at + c*4 + 4].try_into().unwrap()); }
@@ -44,7 +44,7 @@ const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 /// Paint one RGBA pixel into a CPU frame (these F32 frames are 16 bytes a
 /// pixel).
 fn paint(frame: &mut oak_core::texture::Frame, x: usize, y: usize, rgba: [f32; 4]) {
-    let at = y * frame.linesize_bytes() as usize + x * 16;
+    let at = y * frame.linesize_bytes() + x * 16;
     for (c, v) in rgba.iter().enumerate() {
         frame.data[at + c * 4..at + c * 4 + 4].copy_from_slice(&v.to_le_bytes());
     }

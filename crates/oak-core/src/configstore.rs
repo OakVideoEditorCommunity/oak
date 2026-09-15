@@ -308,10 +308,7 @@ impl ConfigStore {
 					Some(slash) => {
 						let group = key[..slash].to_string();
 						let sub = key[slash + 1..].to_string();
-						sections
-							.entry(group)
-							.or_default()
-							.insert(sub, toml_value);
+						sections.entry(group).or_default().insert(sub, toml_value);
 					}
 					None => {
 						sections
@@ -823,7 +820,7 @@ fn format_g(v: f64) -> String {
 	let sci = format!("{:.*e}", (PRECISION - 1) as usize, a); // "d.ddddd e±N"
 	let exp = sci.split('e').nth(1).unwrap().parse::<i32>().unwrap();
 	let xr = exp;
-	let body = if xr < -4 || xr >= PRECISION {
+	let body = if !(-4..PRECISION).contains(&xr) {
 		// Scientific notation: mantissa is already rounded; strip trailing zeros.
 		let mant = sci.split('e').next().unwrap();
 		let m = trim_mantissa(mant);
@@ -1164,7 +1161,11 @@ mod tests {
 			let content = std::fs::read_to_string(dir.join("config.toml")).unwrap();
 			// Native TOML types: ints/bools/floats unquoted, strings quoted.
 			assert!(content.contains("FlatKey = 1"), "content: {}", content);
-			assert!(content.contains("StrKey = \"hello\""), "content: {}", content);
+			assert!(
+				content.contains("StrKey = \"hello\""),
+				"content: {}",
+				content
+			);
 			assert!(content.contains("DblKey = 2.5"), "content: {}", content);
 			assert!(content.contains("BoolKey = true"), "content: {}", content);
 			// Grouped keys land in [group] tables.
@@ -1262,9 +1263,21 @@ UnknownTypedThing=hello
 			assert_eq!(s.get_double(Some("render"), "gain", -1.0), -1.0);
 			// The file holds native TOML types, not stringified values.
 			let content = std::fs::read_to_string(dir.join("config.toml")).unwrap();
-			assert!(content.contains("DefaultSequenceWidth = 640"), "content: {}", content);
-			assert!(content.contains("SplitClipsCopyNodes = false"), "content: {}", content);
-			assert!(content.contains("ProxyPreset = \"medium\""), "content: {}", content);
+			assert!(
+				content.contains("DefaultSequenceWidth = 640"),
+				"content: {}",
+				content
+			);
+			assert!(
+				content.contains("SplitClipsCopyNodes = false"),
+				"content: {}",
+				content
+			);
+			assert!(
+				content.contains("ProxyPreset = \"medium\""),
+				"content: {}",
+				content
+			);
 			assert!(content.contains("gain = 1.5"), "content: {}", content);
 		});
 	}
@@ -1293,10 +1306,22 @@ CustomKey=hello
 			assert!(dir.join("config.toml").is_file());
 			assert!(dir.join("config.ini").is_file());
 			let content = std::fs::read_to_string(dir.join("config.toml")).unwrap();
-			assert!(content.contains("DefaultSequenceWidth = 640"), "content: {}", content);
-			assert!(content.contains("UseProxyMedia = false"), "content: {}", content);
+			assert!(
+				content.contains("DefaultSequenceWidth = 640"),
+				"content: {}",
+				content
+			);
+			assert!(
+				content.contains("UseProxyMedia = false"),
+				"content: {}",
+				content
+			);
 			assert!(content.contains("[section]"), "content: {}", content);
-			assert!(content.contains("CustomKey = \"hello\""), "content: {}", content);
+			assert!(
+				content.contains("CustomKey = \"hello\""),
+				"content: {}",
+				content
+			);
 
 			// A second load reads the migrated TOML, not the INI.
 			s.reset_defaults().unwrap();
@@ -1615,7 +1640,11 @@ CustomKey=hello
 			// No group defaults exist; every top-level key is a plain value.
 			assert!(table.values().all(|v| !v.is_table()));
 			// Serialized output must not contain INI-style "k=v" lines.
-			assert!(!content.contains("DefaultSequenceWidth=1920"), "content: {}", content);
+			assert!(
+				!content.contains("DefaultSequenceWidth=1920"),
+				"content: {}",
+				content
+			);
 		});
 	}
 
@@ -1698,7 +1727,7 @@ FlatAfterEmptySection=ok
 			assert_eq!(s.get(Some("g"), "KeyWithEquals").unwrap(), "a=b");
 			// "[]" empties the group, so the key is flat.
 			assert_eq!(s.get(None, "FlatAfterEmptySection").unwrap(), "ok");
-			assert!(matches!(s.get(Some(""), "FlatAfterEmptySection"), Ok(_)));
+			assert!(s.get(Some(""), "FlatAfterEmptySection").is_ok());
 		});
 	}
 

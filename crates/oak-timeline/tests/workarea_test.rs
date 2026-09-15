@@ -107,7 +107,7 @@ fn workarea_zero_out_resets_range() {
 #[test]
 fn workarea_set_enabled_command_redo_undo() {
 	let wa_h = make_owned(TimelineWorkArea::new());
-	let mut cmd = WorkareaSetEnabledCommand::new(wa_h.clone(), true);
+	let mut cmd = WorkareaSetEnabledCommand::new(wa_h, true);
 	cmd.redo();
 	assert!(wa_of(&wa_h).enabled());
 	cmd.undo();
@@ -120,7 +120,7 @@ fn workarea_set_enabled_command_redo_undo() {
 fn workarea_set_range_command_redo_undo() {
 	let wa_h = make_owned(TimelineWorkArea::new());
 	let new_range = TimeRange::new(Rational::new(10, 1), Rational::new(20, 1));
-	let mut cmd = WorkareaSetRangeCommand::new(wa_h.clone(), new_range);
+	let mut cmd = WorkareaSetRangeCommand::new(wa_h, new_range);
 	cmd.redo();
 	assert_eq!(*wa_of(&wa_h).range(), new_range);
 	cmd.undo();
@@ -135,14 +135,14 @@ fn workarea_set_range_command_redo_undo() {
 #[test]
 fn workarea_commands_box_to_undo_command() {
 	let wa_h = make_owned(TimelineWorkArea::new());
-	let mut enabled_cmd = WorkareaSetEnabledCommand::new(wa_h.clone(), true).to_command();
+	let mut enabled_cmd = WorkareaSetEnabledCommand::new(wa_h, true).to_command();
 	enabled_cmd.redo_now();
 	assert!(wa_of(&wa_h).enabled());
 	enabled_cmd.undo_now();
 	assert!(!wa_of(&wa_h).enabled());
 
 	let mut range_cmd = WorkareaSetRangeCommand::new(
-		wa_h.clone(),
+		wa_h,
 		TimeRange::new(Rational::new(1, 1), Rational::new(2, 1)),
 	)
 	.to_command();
@@ -158,14 +158,14 @@ fn workarea_commands_box_to_undo_command() {
 fn workarea_commands_trait_dispatch() {
 	let wa_h = make_owned(TimelineWorkArea::new());
 
-	let mut e = WorkareaSetEnabledCommand::new(wa_h.clone(), true);
+	let mut e = WorkareaSetEnabledCommand::new(wa_h, true);
 	Command::redo(&mut e);
 	assert!(wa_of(&wa_h).enabled());
 	Command::undo(&mut e);
 	assert!(!wa_of(&wa_h).enabled());
 
 	let mut r = WorkareaSetRangeCommand::new(
-		wa_h.clone(),
+		wa_h,
 		TimeRange::new(Rational::new(3, 1), Rational::new(4, 1)),
 	);
 	Command::redo(&mut r);

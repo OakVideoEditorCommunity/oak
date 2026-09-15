@@ -213,6 +213,17 @@ pub const OPERATION_NAMES: [&str; 9] = [
 	"Hyperbolic Tangent",
 ];
 
+/// Register this node type (C++ `k_trigonometry_node` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.trigonometry",
+		name: "Trigonometry",
+		categories: &[Category::Math],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -362,15 +373,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Trigonometry");
 	}
-}
-
-/// Register this node type (C++ `k_trigonometry_node` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.trigonometry",
-		name: "Trigonometry",
-		categories: &[Category::Math],
-		create,
-	});
 }

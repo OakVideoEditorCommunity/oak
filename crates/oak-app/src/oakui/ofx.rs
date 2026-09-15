@@ -309,7 +309,9 @@ fn active_interact_slot() -> &'static Mutex<Option<ActiveInteract>> {
 pub fn sync_active_interact(instance: Option<u64>) {
 	// Unchanged target: nothing to do.
 	{
-		let mut slot = active_interact_slot().lock().unwrap_or_else(|e| e.into_inner());
+		let mut slot = active_interact_slot()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		if slot
 			.as_ref()
 			.is_some_and(|active| Some(active.instance) == instance)
@@ -340,7 +342,9 @@ pub fn sync_active_interact(instance: Option<u64>) {
 	// Describe → CreateInstance before any draw/pen/key action).
 	interact.describe();
 	interact.create_instance();
-	let mut slot = active_interact_slot().lock().unwrap_or_else(|e| e.into_inner());
+	let mut slot = active_interact_slot()
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
 	*slot = Some(ActiveInteract {
 		instance: id,
 		interact,
@@ -357,14 +361,19 @@ pub fn sync_active_interact(instance: Option<u64>) {
 /// interact). The viewport reports the last drawn size and updates as the
 /// viewer's frame size changes.
 pub fn active_interact() -> Option<(u64, Arc<Interact>, InteractViewport)> {
-	let slot = active_interact_slot().lock().unwrap_or_else(|e| e.into_inner());
-	slot.as_ref().map(|a| (a.instance, a.interact.clone(), a.viewport))
+	let slot = active_interact_slot()
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
+	slot.as_ref()
+		.map(|a| (a.instance, a.interact.clone(), a.viewport))
 }
 
 /// Records the viewport the interact was last drawn at (keeps
 /// [`active_interact`]'s viewport current).
 fn note_interact_viewport(instance: u64, viewport: InteractViewport) {
-	let mut slot = active_interact_slot().lock().unwrap_or_else(|e| e.into_inner());
+	let mut slot = active_interact_slot()
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
 	if let Some(active) = slot.as_mut() {
 		if active.instance == instance {
 			active.viewport = viewport;
@@ -389,7 +398,7 @@ fn bgra_image_to_f32_rgba(img: &RenderImage) -> Option<(u32, u32, Vec<f32>)> {
 		return None;
 	}
 	let mut out = Vec::with_capacity(expected);
-	for px in bytes[..expected].chunks_exact(4) {
+	for px in bytes[..expected].as_chunks::<4>().0 {
 		out.push(px[2] as f32 / 255.0); // R
 		out.push(px[1] as f32 / 255.0); // G
 		out.push(px[0] as f32 / 255.0); // B
@@ -401,7 +410,9 @@ fn bgra_image_to_f32_rgba(img: &RenderImage) -> Option<(u32, u32, Vec<f32>)> {
 /// Reads an `oakplugin` F32 RGBA image into a tightly packed `Vec<f32>`.
 fn read_image_f32(img: &oak_plugin::image::Image) -> Vec<f32> {
 	img.pixels()
-		.chunks_exact(4)
+		.as_chunks::<4>()
+		.0
+		.iter()
 		.map(|c| f32::from_ne_bytes(c[0..4].try_into().unwrap()))
 		.collect()
 }
@@ -423,7 +434,7 @@ fn read_image_f32(img: &oak_plugin::image::Image) -> Vec<f32> {
 /// straight-alpha "over". `base` is the displayed frame (alpha 1.0), so
 /// the result alpha stays 1.0. Returns `None` on a length mismatch.
 pub fn composite_overlay(overlay: &[f32], base: &[f32]) -> Option<Vec<f32>> {
-	if overlay.len() != base.len() || overlay.len() % 4 != 0 {
+	if overlay.len() != base.len() || !overlay.len().is_multiple_of(4) {
 		return None;
 	}
 	let mut out = vec![0.0f32; overlay.len()];
@@ -519,7 +530,9 @@ pub fn draw_interact_composite(
 	}
 	let merged = composite_overlay(&read_image_f32(&overlay), &base_f32)?;
 	note_interact_viewport(instance, *viewport);
-	Some(Arc::new(super::frames::f32_rgba_to_bgra_image(bw, bh, &merged)))
+	Some(Arc::new(super::frames::f32_rgba_to_bgra_image(
+		bw, bh, &merged,
+	)))
 }
 
 // ---------------------------------------------------------------------------
@@ -695,8 +708,14 @@ mod tests {
 		let p = viewport_pixel_to_pen(point(320.0, 10.0), area, frame);
 		assert_eq!(p, None);
 		// Zero-size inputs.
-		assert_eq!(viewport_pixel_to_pen(point(0.0, 0.0), size(0.0, 0.0), frame), None);
-		assert_eq!(viewport_pixel_to_pen(point(0.0, 0.0), area, size(0.0, 0.0)), None);
+		assert_eq!(
+			viewport_pixel_to_pen(point(0.0, 0.0), size(0.0, 0.0), frame),
+			None
+		);
+		assert_eq!(
+			viewport_pixel_to_pen(point(0.0, 0.0), area, size(0.0, 0.0)),
+			None
+		);
 	}
 
 	/// Key mapping: the common keys land on the ofxKeySyms values; printable
@@ -710,22 +729,49 @@ mod tests {
 		assert_eq!(key_symbol(&ks("z")), (ofx_key::KEY_Z, "z".to_string()));
 		assert_eq!(key_symbol(&ks("1")), (b'1' as i32, "1".to_string()));
 		// Named keys: symbol only, empty string.
-		assert_eq!(key_symbol(&ks("space")), (ofx_key::KEY_SPACE, String::new()));
-		assert_eq!(key_symbol(&ks("enter")), (ofx_key::KEY_RETURN, String::new()));
-		assert_eq!(key_symbol(&ks("escape")), (ofx_key::KEY_ESCAPE, String::new()));
-		assert_eq!(key_symbol(&ks("backspace")), (ofx_key::KEY_BACKSPACE, String::new()));
-		assert_eq!(key_symbol(&ks("delete")), (ofx_key::KEY_DELETE, String::new()));
+		assert_eq!(
+			key_symbol(&ks("space")),
+			(ofx_key::KEY_SPACE, String::new())
+		);
+		assert_eq!(
+			key_symbol(&ks("enter")),
+			(ofx_key::KEY_RETURN, String::new())
+		);
+		assert_eq!(
+			key_symbol(&ks("escape")),
+			(ofx_key::KEY_ESCAPE, String::new())
+		);
+		assert_eq!(
+			key_symbol(&ks("backspace")),
+			(ofx_key::KEY_BACKSPACE, String::new())
+		);
+		assert_eq!(
+			key_symbol(&ks("delete")),
+			(ofx_key::KEY_DELETE, String::new())
+		);
 		assert_eq!(key_symbol(&ks("left")), (ofx_key::KEY_LEFT, String::new()));
-		assert_eq!(key_symbol(&ks("right")), (ofx_key::KEY_RIGHT, String::new()));
+		assert_eq!(
+			key_symbol(&ks("right")),
+			(ofx_key::KEY_RIGHT, String::new())
+		);
 		assert_eq!(key_symbol(&ks("up")), (ofx_key::KEY_UP, String::new()));
 		assert_eq!(key_symbol(&ks("down")), (ofx_key::KEY_DOWN, String::new()));
 		assert_eq!(key_symbol(&ks("home")), (ofx_key::KEY_HOME, String::new()));
 		assert_eq!(key_symbol(&ks("end")), (ofx_key::KEY_END, String::new()));
-		assert_eq!(key_symbol(&ks("pageup")), (ofx_key::KEY_PAGE_UP, String::new()));
-		assert_eq!(key_symbol(&ks("pagedown")), (ofx_key::KEY_PAGE_DOWN, String::new()));
+		assert_eq!(
+			key_symbol(&ks("pageup")),
+			(ofx_key::KEY_PAGE_UP, String::new())
+		);
+		assert_eq!(
+			key_symbol(&ks("pagedown")),
+			(ofx_key::KEY_PAGE_DOWN, String::new())
+		);
 		assert_eq!(key_symbol(&ks("tab")), (ofx_key::KEY_TAB, String::new()));
 		assert_eq!(key_symbol(&ks("f1")), (ofx_key::KEY_F1, String::new()));
-		assert_eq!(key_symbol(&ks("f12")), (ofx_key::KEY_F1 + 11, String::new()));
+		assert_eq!(
+			key_symbol(&ks("f12")),
+			(ofx_key::KEY_F1 + 11, String::new())
+		);
 		// Unknown multi-character keys.
 		let (sym, s) = key_symbol(&ks("insert"));
 		assert_eq!(sym, ofx_key::KEY_UNKNOWN);
@@ -745,7 +791,11 @@ mod tests {
 		let overlay = [1.0, 0.0, 0.0, 0.5];
 		let out = composite_overlay(&overlay, &base).unwrap();
 		for (i, expected) in [(0, 0.5), (1, 0.0), (2, 0.5), (3, 1.0)] {
-			assert!((out[i] - expected).abs() < 1e-6, "channel {i}: {} != {expected}", out[i]);
+			assert!(
+				(out[i] - expected).abs() < 1e-6,
+				"channel {i}: {} != {expected}",
+				out[i]
+			);
 		}
 		// Transparent overlay → base unchanged.
 		let overlay = [0.0, 0.0, 0.0, 0.0];
@@ -763,8 +813,21 @@ mod tests {
 		let img = super::super::frames::f32_rgba_to_bgra_image(w, h, &samples);
 		let (got_w, got_h, rgba) = bgra_image_to_f32_rgba(&img).unwrap();
 		assert_eq!((got_w, got_h), (w, h));
-		for (i, expected) in [(0, 1.0), (1, 0.0), (2, 0.5), (3, 1.0), (4, 0.25), (5, 0.5), (6, 0.75), (7, 1.0)] {
-			assert!((rgba[i] - expected).abs() < 0.01, "channel {i}: {} != {expected}", rgba[i]);
+		for (i, expected) in [
+			(0, 1.0),
+			(1, 0.0),
+			(2, 0.5),
+			(3, 1.0),
+			(4, 0.25),
+			(5, 0.5),
+			(6, 0.75),
+			(7, 1.0),
+		] {
+			assert!(
+				(rgba[i] - expected).abs() < 0.01,
+				"channel {i}: {} != {expected}",
+				rgba[i]
+			);
 		}
 	}
 
@@ -823,7 +886,11 @@ mod tests {
 			println!("SKIP: minimal test plugin not built");
 			return false;
 		};
-		if oak_plugin::host::Host::global().cache.scan_path(&dir).is_err() {
+		if oak_plugin::host::Host::global()
+			.cache
+			.scan_path(&dir)
+			.is_err()
+		{
 			println!("SKIP: test plugin scan failed");
 			return false;
 		}
@@ -913,9 +980,7 @@ mod tests {
 		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
 		let lines = loop {
 			let lines = read_marker(&marker);
-			if lines.iter().any(|l| l == "destroy")
-				|| std::time::Instant::now() >= deadline
-			{
+			if lines.iter().any(|l| l == "destroy") || std::time::Instant::now() >= deadline {
 				break lines;
 			}
 			std::thread::sleep(std::time::Duration::from_millis(10));
@@ -939,15 +1004,21 @@ mod tests {
 		// The forwarded events with real arguments (C %g drops trailing
 		// zeros).
 		assert!(
-			lines.iter().any(|l| l == "pen_motion vp=20,20 canon=20,20 pressure=1"),
+			lines
+				.iter()
+				.any(|l| l == "pen_motion vp=20,20 canon=20,20 pressure=1"),
 			"pen_motion not recorded with pen-down state: {lines:?}"
 		);
 		assert!(
-			lines.iter().any(|l| l == "pen_down vp=20,20 canon=20,20 pressure=1"),
+			lines
+				.iter()
+				.any(|l| l == "pen_down vp=20,20 canon=20,20 pressure=1"),
 			"pen_down not recorded: {lines:?}"
 		);
 		assert!(
-			lines.iter().any(|l| l == "pen_up vp=20,20 canon=20,20 pressure=0"),
+			lines
+				.iter()
+				.any(|l| l == "pen_up vp=20,20 canon=20,20 pressure=0"),
 			"pen_up not recorded: {lines:?}"
 		);
 		assert!(
@@ -992,7 +1063,11 @@ mod tests {
 		for px in base_samples.chunks_exact_mut(4) {
 			px.copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
 		}
-		let base = Arc::new(super::super::frames::f32_rgba_to_bgra_image(w, h, &base_samples));
+		let base = Arc::new(super::super::frames::f32_rgba_to_bgra_image(
+			w,
+			h,
+			&base_samples,
+		));
 		let viewport = InteractViewport::at_frame_size(w, h);
 		let composite = draw_interact_composite(handle, &interact, &viewport, 0.0, &base)
 			.expect("GL overlay composite");

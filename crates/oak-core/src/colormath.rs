@@ -495,15 +495,14 @@ const LUT_N: usize = 4096;
 /// Declare one lazily-built transfer LUT over [0, 1].
 macro_rules! tf_lut {
 	($name:ident, $f:expr) => {
-		static $name: std::sync::LazyLock<[f32; LUT_N + 1]> =
-			std::sync::LazyLock::new(|| {
-				let f: fn(f32) -> f32 = $f;
-				let mut t = [0.0f32; LUT_N + 1];
-				for (i, e) in t.iter_mut().enumerate() {
-					*e = f(i as f32 / LUT_N as f32);
-				}
-				t
-			});
+		static $name: std::sync::LazyLock<[f32; LUT_N + 1]> = std::sync::LazyLock::new(|| {
+			let f: fn(f32) -> f32 = $f;
+			let mut t = [0.0f32; LUT_N + 1];
+			for (i, e) in t.iter_mut().enumerate() {
+				*e = f(i as f32 / LUT_N as f32);
+			}
+			t
+		});
 	};
 }
 
@@ -663,8 +662,8 @@ pub enum SourceTransfer {
 /// (AVCOL_PRI_* numbering, H.273 ISO codes.)
 pub fn source_primaries_from_av(color_primaries: i32) -> SourcePrimaries {
 	match color_primaries {
-		1 => SourcePrimaries::Bt709, // BT.709
-		9 => SourcePrimaries::Bt2020, // BT.2020
+		1 => SourcePrimaries::Bt709,      // BT.709
+		9 => SourcePrimaries::Bt2020,     // BT.2020
 		11 => SourcePrimaries::DisplayP3, // SMPTE RP 431-2 (DCI-P3)
 		12 => SourcePrimaries::DisplayP3, // SMPTE EG 432-1 (Display P3)
 		_ => SourcePrimaries::Unknown,
@@ -675,16 +674,16 @@ pub fn source_primaries_from_av(color_primaries: i32) -> SourcePrimaries {
 /// (AVCOL_TRC_* numbering, H.273 ISO codes.)
 pub fn source_transfer_from_av(color_trc: i32) -> SourceTransfer {
 	match color_trc {
-		1 => SourceTransfer::SdrGamma,  // BT.709 (see the enum docs: OETF inverse ≈ 2.2)
-		4 => SourceTransfer::Gamma22,   // gamma 2.2
-		5 => SourceTransfer::Gamma28,   // gamma 2.8
-		6 => SourceTransfer::SdrGamma,  // SMPTE 170M
+		1 => SourceTransfer::SdrGamma, // BT.709 (see the enum docs: OETF inverse ≈ 2.2)
+		4 => SourceTransfer::Gamma22,  // gamma 2.2
+		5 => SourceTransfer::Gamma28,  // gamma 2.8
+		6 => SourceTransfer::SdrGamma, // SMPTE 170M
 		13 => SourceTransfer::SdrGamma, // sRGB (its EOTF is applied at decode)
 		14 => SourceTransfer::SdrGamma, // BT.2020 10-bit
 		15 => SourceTransfer::SdrGamma, // BT.2020 12-bit
-		16 => SourceTransfer::Pq,       // SMPTE ST 2084
-		18 => SourceTransfer::Hlg,      // ARIB STD-B67
-		8 => SourceTransfer::Linear,    // linear
+		16 => SourceTransfer::Pq,      // SMPTE ST 2084
+		18 => SourceTransfer::Hlg,     // ARIB STD-B67
+		8 => SourceTransfer::Linear,   // linear
 		_ => SourceTransfer::Unknown,
 	}
 }
@@ -708,15 +707,11 @@ impl SourcePrimaries {
 /// own primaries) → ACEScg linear. `samples` is an F32 RGBA buffer,
 /// transformed in place. Linearize and the primaries matrix are fused
 /// into a single pass (LUT'd transfer, row-band parallel).
-pub fn decode_to_acescg(
-	samples: &mut [f32],
-	primaries: SourcePrimaries,
-	transfer: SourceTransfer,
-) {
+pub fn decode_to_acescg(samples: &mut [f32], primaries: SourcePrimaries, transfer: SourceTransfer) {
 	let linearize = decode_transfer_fn(transfer);
 	let matrix = rgb_to_rgb_matrix(primaries.primaries(), PRIMARIES_AP1);
 	par_pixels_f32(samples, move |band| {
-		for px in band.chunks_exact_mut(4) {
+		for px in band.as_chunks_mut::<4>().0 {
 			for c in 0..3 {
 				px[c] = linearize(px[c]);
 			}
@@ -740,7 +735,7 @@ pub fn decode_to_acescg_bytes(
 	let linearize = decode_transfer_fn(transfer);
 	let matrix = rgb_to_rgb_matrix(primaries.primaries(), PRIMARIES_AP1);
 	par_pixels_bytes(bytes, move |band| {
-		for px in band.chunks_exact_mut(16) {
+		for px in band.as_chunks_mut::<16>().0 {
 			let mut v = [
 				f32::from_le_bytes(px[0..4].try_into().unwrap()),
 				f32::from_le_bytes(px[4..8].try_into().unwrap()),
@@ -772,7 +767,7 @@ pub fn acescg_to_output(samples: &mut [f32], spec: OutputColorSpec) {
 	let matrix = rgb_to_rgb_matrix(PRIMARIES_AP1, spec.gamut.primaries());
 	let encode = output_transfer_fn(spec.transfer);
 	par_pixels_f32(samples, move |band| {
-		for px in band.chunks_exact_mut(4) {
+		for px in band.as_chunks_mut::<4>().0 {
 			apply_mat(matrix, px);
 			for c in 0..3 {
 				px[c] = encode(px[c].clamp(0.0, 1.0));
@@ -792,7 +787,7 @@ pub fn acescg_to_output_bytes(bytes: &mut [u8], pixels: usize, spec: OutputColor
 	let matrix = rgb_to_rgb_matrix(PRIMARIES_AP1, spec.gamut.primaries());
 	let encode = output_transfer_fn(spec.transfer);
 	par_pixels_bytes(bytes, move |band| {
-		for px in band.chunks_exact_mut(16) {
+		for px in band.as_chunks_mut::<16>().0 {
 			let mut v = [
 				f32::from_le_bytes(px[0..4].try_into().unwrap()),
 				f32::from_le_bytes(px[4..8].try_into().unwrap()),
@@ -816,7 +811,7 @@ pub fn acescg_to_output_bytes(bytes: &mut [u8], pixels: usize, spec: OutputColor
 pub fn apply_transfer_oetf(samples: &mut [f32], transfer: OutputTransfer) {
 	let encode = output_transfer_fn(transfer);
 	par_pixels_f32(samples, move |band| {
-		for px in band.chunks_exact_mut(4) {
+		for px in band.as_chunks_mut::<4>().0 {
 			for c in 0..3 {
 				px[c] = encode(px[c]);
 			}
@@ -860,7 +855,7 @@ pub fn output_spec_to_xyz_d65(samples: &mut [f32], spec: OutputColorSpec) {
 	});
 	let matrix = rgb_to_xyz_matrix(spec.gamut.primaries());
 	par_pixels_f32(samples, move |band| {
-		for px in band.chunks_exact_mut(4) {
+		for px in band.as_chunks_mut::<4>().0 {
 			for c in 0..3 {
 				px[c] = linearize(px[c]);
 			}
@@ -931,9 +926,18 @@ pub fn yuv444p16_to_rgb_f32(
 	// `width` samples.
 	let row_bytes = width.saturating_mul(2);
 	let rows_after = height.saturating_sub(1);
-	if y_plane.len() < rows_after.saturating_mul(y_stride).saturating_add(row_bytes)
-		|| u_plane.len() < rows_after.saturating_mul(u_stride).saturating_add(row_bytes)
-		|| v_plane.len() < rows_after.saturating_mul(v_stride).saturating_add(row_bytes)
+	if y_plane.len()
+		< rows_after
+			.saturating_mul(y_stride)
+			.saturating_add(row_bytes)
+		|| u_plane.len()
+			< rows_after
+				.saturating_mul(u_stride)
+				.saturating_add(row_bytes)
+		|| v_plane.len()
+			< rows_after
+				.saturating_mul(v_stride)
+				.saturating_add(row_bytes)
 	{
 		return;
 	}
@@ -946,7 +950,11 @@ pub fn yuv444p16_to_rgb_f32(
 	} else {
 		(4096.0f32, 32768.0f32, 1.0 / 57344.0)
 	};
-	let y_scale = if full_range { 1.0 / 65535.0 } else { 1.0 / 56064.0 };
+	let y_scale = if full_range {
+		1.0 / 65535.0
+	} else {
+		1.0 / 56064.0
+	};
 	for row in 0..height {
 		let y_row = row * y_stride;
 		let u_row = row * u_stride;
@@ -1002,9 +1010,9 @@ mod tests {
 		// 0.0206157712 0.1095697056 0.8698145232
 		let m = rgb_to_rgb_matrix(PRIMARIES_SRGB, PRIMARIES_AP1);
 		let expected: Mat3 = [
-			[0.6131324224, 0.3395230762, 0.0473445014],
-			[0.0701922769, 0.9163536767, 0.0134540464],
-			[0.0206157712, 0.1095697056, 0.8698145232],
+			[0.613_132_4, 0.339_523_08, 0.047_344_502],
+			[0.070_192_28, 0.916_353_7, 0.013_454_046],
+			[0.020_615_771, 0.109_569_706, 0.869_814_5],
 		];
 		for r in 0..3 {
 			for c in 0..3 {
@@ -1034,7 +1042,11 @@ mod tests {
 		// → sRGB linear → (OETF) → the original codes.
 		let original = [0.25f32, 0.5, 0.75, 1.0];
 		let mut samples = original;
-		decode_to_acescg(&mut samples, SourcePrimaries::Bt709, SourceTransfer::SdrGamma);
+		decode_to_acescg(
+			&mut samples,
+			SourcePrimaries::Bt709,
+			SourceTransfer::SdrGamma,
+		);
 		acescg_to_output(
 			&mut samples,
 			OutputColorSpec {
@@ -1056,7 +1068,11 @@ mod tests {
 	fn round_trip_bt2020_acescg_bt2020() {
 		let original = [0.2f32, 0.6, 0.9, 1.0];
 		let mut samples = original;
-		decode_to_acescg(&mut samples, SourcePrimaries::Bt2020, SourceTransfer::SdrGamma);
+		decode_to_acescg(
+			&mut samples,
+			SourcePrimaries::Bt2020,
+			SourceTransfer::SdrGamma,
+		);
 		acescg_to_output(
 			&mut samples,
 			OutputColorSpec {
@@ -1081,7 +1097,11 @@ mod tests {
 		let mut samples = [1.0f32, 1.0, 1.0, 1.0];
 		decode_to_acescg(&mut samples, SourcePrimaries::Bt709, SourceTransfer::Linear);
 		for i in 0..3 {
-			assert!(approx(samples[i], 1.0, 1e-3), "white channel {i} = {}", samples[i]);
+			assert!(
+				approx(samples[i], 1.0, 1e-3),
+				"white channel {i} = {}",
+				samples[i]
+			);
 		}
 	}
 
@@ -1093,7 +1113,11 @@ mod tests {
 		assert!(approx(srgb_eotf(0.0), 0.0, 1e-6), "eotf(0)");
 		assert!(approx(srgb_eotf(1.0), 1.0, 1e-6), "eotf(1)");
 		// Mid-grey: linear 0.18 → ~0.461 sRGB code (the classic check).
-		assert!(approx(srgb_oetf(0.18), 0.4613, 1e-3), "oetf(0.18) = {}", srgb_oetf(0.18));
+		assert!(
+			approx(srgb_oetf(0.18), 0.4613, 1e-3),
+			"oetf(0.18) = {}",
+			srgb_oetf(0.18)
+		);
 		// Round trip.
 		for v in [0.0f32, 0.01, 0.18, 0.5, 0.99, 1.0] {
 			assert!(approx(srgb_eotf(srgb_oetf(v)), v, 1e-4), "round trip {v}");
@@ -1103,9 +1127,17 @@ mod tests {
 	#[test]
 	fn pq_transfer_anchors() {
 		// PQ code 1.0 = 10 000 nits = normalized 1.0.
-		assert!(approx(pq_eotf(1.0), 1.0, 1e-4), "pq eotf(1) = {}", pq_eotf(1.0));
+		assert!(
+			approx(pq_eotf(1.0), 1.0, 1e-4),
+			"pq eotf(1) = {}",
+			pq_eotf(1.0)
+		);
 		// PQ code 0.5 ≈ 100 nits (normalized 0.01).
-		assert!(approx(pq_eotf(0.5), 0.01008, 2e-3), "pq eotf(0.5) = {}", pq_eotf(0.5));
+		assert!(
+			approx(pq_eotf(0.5), 0.01008, 2e-3),
+			"pq eotf(0.5) = {}",
+			pq_eotf(0.5)
+		);
 		// Round trip.
 		for v in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
 			assert!(approx(pq_eotf(pq_oetf(v)), v, 1e-3), "pq round trip {v}");
@@ -1115,9 +1147,17 @@ mod tests {
 	#[test]
 	fn hlg_transfer_anchors() {
 		assert!(approx(hlg_eotf(0.0), 0.0, 1e-6), "hlg eotf(0)");
-		assert!(approx(hlg_eotf(1.0), 1.0, 1e-3), "hlg eotf(1) = {}", hlg_eotf(1.0));
+		assert!(
+			approx(hlg_eotf(1.0), 1.0, 1e-3),
+			"hlg eotf(1) = {}",
+			hlg_eotf(1.0)
+		);
 		// The piecewise join: code 0.5 ↔ linear 1/12.
-		assert!(approx(hlg_eotf(0.5), 1.0 / 12.0, 1e-3), "hlg eotf(0.5) = {}", hlg_eotf(0.5));
+		assert!(
+			approx(hlg_eotf(0.5), 1.0 / 12.0, 1e-3),
+			"hlg eotf(0.5) = {}",
+			hlg_eotf(0.5)
+		);
 		// Round trip.
 		for v in [0.0f32, 0.1, 0.5, 0.9, 1.0] {
 			assert!(approx(hlg_eotf(hlg_oetf(v)), v, 1e-3), "hlg round trip {v}");
@@ -1146,18 +1186,30 @@ mod tests {
 
 	#[test]
 	fn setting_round_trips() {
-		assert_eq!(WorkingColorSpace::from_setting("acescg"), WorkingColorSpace::AcesCg);
+		assert_eq!(
+			WorkingColorSpace::from_setting("acescg"),
+			WorkingColorSpace::AcesCg
+		);
 		assert_eq!(
 			WorkingColorSpace::from_setting("srgb_legacy"),
 			WorkingColorSpace::SrgbLegacy
 		);
-		assert_eq!(WorkingColorSpace::from_setting("bogus"), WorkingColorSpace::AcesCg);
-		assert_eq!(OutputGamut::from_setting("displayp3"), OutputGamut::DisplayP3);
+		assert_eq!(
+			WorkingColorSpace::from_setting("bogus"),
+			WorkingColorSpace::AcesCg
+		);
+		assert_eq!(
+			OutputGamut::from_setting("displayp3"),
+			OutputGamut::DisplayP3
+		);
 		assert_eq!(OutputGamut::from_setting("bt2020"), OutputGamut::Bt2020);
 		assert_eq!(OutputGamut::from_setting(""), OutputGamut::Srgb);
 		assert_eq!(OutputTransfer::from_setting("pq"), OutputTransfer::Pq);
 		assert_eq!(OutputTransfer::from_setting("hlg"), OutputTransfer::Hlg);
-		assert_eq!(OutputTransfer::from_setting("gamma22"), OutputTransfer::Gamma22);
+		assert_eq!(
+			OutputTransfer::from_setting("gamma22"),
+			OutputTransfer::Gamma22
+		);
 		assert_eq!(OutputTransfer::from_setting(""), OutputTransfer::Srgb);
 		assert_eq!(
 			OutputColorSpec::from_settings("displayp3", "pq"),
@@ -1184,13 +1236,31 @@ mod tests {
 	fn gamma_transfer_anchors() {
 		// Pure-power EOTFs at code 0.5. The 2.4 case is the BT.1886
 		// mid-grey link: 0.5²·⁴ ≈ 0.189 (≈ the classic 18 % grey).
-		assert!(approx(gamma_eotf(0.5, 2.4), 0.1894646, 1e-5), "eotf(0.5, 2.4) = {}", gamma_eotf(0.5, 2.4));
-		assert!(approx(gamma_eotf(0.5, 2.2), 0.2176376, 1e-5), "eotf(0.5, 2.2) = {}", gamma_eotf(0.5, 2.2));
-		assert!(approx(gamma_eotf(0.5, 2.8), 0.1435894, 1e-5), "eotf(0.5, 2.8) = {}", gamma_eotf(0.5, 2.8));
+		assert!(
+			approx(gamma_eotf(0.5, 2.4), 0.1894646, 1e-5),
+			"eotf(0.5, 2.4) = {}",
+			gamma_eotf(0.5, 2.4)
+		);
+		assert!(
+			approx(gamma_eotf(0.5, 2.2), 0.2176376, 1e-5),
+			"eotf(0.5, 2.2) = {}",
+			gamma_eotf(0.5, 2.2)
+		);
+		assert!(
+			approx(gamma_eotf(0.5, 2.8), 0.1435894, 1e-5),
+			"eotf(0.5, 2.8) = {}",
+			gamma_eotf(0.5, 2.8)
+		);
 		// Endpoints and round trips.
 		for gamma in [2.2f32, 2.4, 2.8] {
-			assert!(approx(gamma_eotf(0.0, gamma), 0.0, 1e-6), "eotf(0) g{gamma}");
-			assert!(approx(gamma_eotf(1.0, gamma), 1.0, 1e-6), "eotf(1) g{gamma}");
+			assert!(
+				approx(gamma_eotf(0.0, gamma), 0.0, 1e-6),
+				"eotf(0) g{gamma}"
+			);
+			assert!(
+				approx(gamma_eotf(1.0, gamma), 1.0, 1e-6),
+				"eotf(1) g{gamma}"
+			);
 			for v in [0.0f32, 0.18, 0.5, 0.9, 1.0] {
 				assert!(
 					approx(gamma_eotf(gamma_oetf(v, gamma), gamma), v, 1e-4),
@@ -1244,14 +1314,20 @@ mod tests {
 			.map(|i: usize| ((i.wrapping_mul(2654435761)) % 1000) as f32 / 999.0)
 			.collect();
 		let reference: Vec<f32> = samples
-			.chunks_exact(4)
+			.as_chunks::<4>()
+			.0
+			.iter()
 			.flat_map(|px| {
 				let mut v = [srgb_eotf(px[0]), srgb_eotf(px[1]), srgb_eotf(px[2]), px[3]];
 				apply_mat(rgb_to_rgb_matrix(PRIMARIES_SRGB, PRIMARIES_AP1), &mut v);
 				v
 			})
 			.collect();
-		decode_to_acescg(&mut samples, SourcePrimaries::Bt709, SourceTransfer::SdrGamma);
+		decode_to_acescg(
+			&mut samples,
+			SourcePrimaries::Bt709,
+			SourceTransfer::SdrGamma,
+		);
 		for (i, (&got, &want)) in samples.iter().zip(reference.iter()).enumerate() {
 			assert!(approx(got, want, 1e-4), "pixel {i}: {got} vs {want}");
 		}
@@ -1267,7 +1343,11 @@ mod tests {
 		// (the ~1.1 system gamma belongs at final display only).
 		for code in [0.05f32, 0.18, 0.5, 0.75, 1.0] {
 			let mut samples = [code, code, code, 1.0];
-			decode_to_acescg(&mut samples, SourcePrimaries::Bt709, SourceTransfer::SdrGamma);
+			decode_to_acescg(
+				&mut samples,
+				SourcePrimaries::Bt709,
+				SourceTransfer::SdrGamma,
+			);
 			acescg_to_output(&mut samples, OutputColorSpec::default());
 			for i in 0..3 {
 				assert!(
@@ -1283,7 +1363,12 @@ mod tests {
 		bytes[0..4].copy_from_slice(&0.5f32.to_le_bytes());
 		bytes[4..8].copy_from_slice(&0.5f32.to_le_bytes());
 		bytes[8..12].copy_from_slice(&0.5f32.to_le_bytes());
-		decode_to_acescg_bytes(&mut bytes, 1, SourcePrimaries::Bt709, SourceTransfer::SdrGamma);
+		decode_to_acescg_bytes(
+			&mut bytes,
+			1,
+			SourcePrimaries::Bt709,
+			SourceTransfer::SdrGamma,
+		);
 		let r = f32::from_le_bytes(bytes[0..4].try_into().unwrap());
 		let m = rgb_to_rgb_matrix(PRIMARIES_SRGB, PRIMARIES_AP1);
 		let expected = mat_vec(m, [srgb_eotf(0.5); 3]);
@@ -1321,7 +1406,11 @@ mod tests {
 				samples[c],
 				expected[c]
 			);
-			assert!(samples[c] >= 0.0 && samples[c] <= 1.0, "channel {c} escaped [0, 1]: {}", samples[c]);
+			assert!(
+				samples[c] >= 0.0 && samples[c] <= 1.0,
+				"channel {c} escaped [0, 1]: {}",
+				samples[c]
+			);
 		}
 		assert_eq!(samples[3], 0.5, "alpha must be untouched");
 	}
@@ -1373,10 +1462,26 @@ mod tests {
 		let u = yuv_plane16(&[&[128 << 8], &[128 << 8]], width, stride);
 		let v = u.clone();
 		let mut out = [0.0f32; 8];
-		yuv444p16_to_rgb_f32(&y, stride, &u, stride, &v, stride, width, height, YuvMatrix::Bt709, false, &mut out);
+		yuv444p16_to_rgb_f32(
+			&y,
+			stride,
+			&u,
+			stride,
+			&v,
+			stride,
+			width,
+			height,
+			YuvMatrix::Bt709,
+			false,
+			&mut out,
+		);
 		for c in 0..3 {
 			assert!(approx(out[c], 1.0, 1e-4), "white channel {c}: {}", out[c]);
-			assert!(approx(out[4 + c], 0.0, 1e-4), "black channel {c}: {}", out[4 + c]);
+			assert!(
+				approx(out[4 + c], 0.0, 1e-4),
+				"black channel {c}: {}",
+				out[4 + c]
+			);
 		}
 		assert_eq!(out[3], 1.0, "alpha");
 		assert_eq!(out[7], 1.0, "alpha");
@@ -1394,7 +1499,19 @@ mod tests {
 		let u = yuv_plane16(&[&[11059]], width, stride);
 		let v = yuv_plane16(&[&[5329]], width, stride);
 		let mut out = [0.0f32; 4];
-		yuv444p16_to_rgb_f32(&y, stride, &u, stride, &v, stride, width, height, YuvMatrix::Bt601, true, &mut out);
+		yuv444p16_to_rgb_f32(
+			&y,
+			stride,
+			&u,
+			stride,
+			&v,
+			stride,
+			width,
+			height,
+			YuvMatrix::Bt601,
+			true,
+			&mut out,
+		);
 		assert!(approx(out[0], 0.0, 1e-3), "R = {}", out[0]);
 		assert!(approx(out[1], 1.0, 1e-3), "G = {}", out[1]);
 		assert!(approx(out[2], 0.0, 1e-3), "B = {}", out[2]);
@@ -1412,7 +1529,19 @@ mod tests {
 		let u = yuv_plane16(&[&[10666]], width, stride);
 		let v = yuv_plane16(&[&[6725]], width, stride);
 		let mut out = [0.0f32; 4];
-		yuv444p16_to_rgb_f32(&y, stride, &u, stride, &v, stride, width, height, YuvMatrix::Bt709, false, &mut out);
+		yuv444p16_to_rgb_f32(
+			&y,
+			stride,
+			&u,
+			stride,
+			&v,
+			stride,
+			width,
+			height,
+			YuvMatrix::Bt709,
+			false,
+			&mut out,
+		);
 		assert!(approx(out[0], 0.0, 1e-3), "R = {}", out[0]);
 		assert!(approx(out[1], 1.0, 1e-3), "G = {}", out[1]);
 		assert!(approx(out[2], 0.0, 1e-3), "B = {}", out[2]);
@@ -1423,11 +1552,35 @@ mod tests {
 		// A 2×2 frame at stride 4 needs (2−1)·4 + 2·2 = 8 bytes per plane;
 		// 4 bytes is too short → early return, `out` untouched.
 		let mut out = [7.0f32; 4];
-		yuv444p16_to_rgb_f32(&[0u8; 4], 4, &[0u8; 4], 4, &[0u8; 4], 4, 2, 2, YuvMatrix::Bt709, false, &mut out);
+		yuv444p16_to_rgb_f32(
+			&[0u8; 4],
+			4,
+			&[0u8; 4],
+			4,
+			&[0u8; 4],
+			4,
+			2,
+			2,
+			YuvMatrix::Bt709,
+			false,
+			&mut out,
+		);
 		assert_eq!(out, [7.0; 4]);
 		// `out` too short for the frame → early return.
 		let mut out2 = [7.0f32; 3];
-		yuv444p16_to_rgb_f32(&[0u8; 8], 4, &[0u8; 8], 4, &[0u8; 8], 4, 2, 2, YuvMatrix::Bt709, false, &mut out2);
+		yuv444p16_to_rgb_f32(
+			&[0u8; 8],
+			4,
+			&[0u8; 8],
+			4,
+			&[0u8; 8],
+			4,
+			2,
+			2,
+			YuvMatrix::Bt709,
+			false,
+			&mut out2,
+		);
 		assert_eq!(out2, [7.0; 3]);
 	}
 

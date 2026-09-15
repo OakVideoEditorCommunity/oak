@@ -199,8 +199,9 @@ impl ProxyTask {
 	/// 探测本机可用的硬件 H.264 编码器（每进程每 ffmpeg 路径缓存一次：
 	/// `ffmpeg -hide_banner -encoders` 的输出里按平台优先级找）。
 	pub fn probe_hw_encoder(ffmpeg_path: &str) -> HwEncoder {
-		static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, HwEncoder>>> =
-			std::sync::OnceLock::new();
+		static CACHE: std::sync::OnceLock<
+			std::sync::Mutex<std::collections::HashMap<String, HwEncoder>>,
+		> = std::sync::OnceLock::new();
 		let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 		let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
 		if let Some(enc) = cache.get(ffmpeg_path) {
@@ -424,13 +425,14 @@ impl TaskBehavior for ProxyTask {
 
 		// Create the output directory if needed.
 		if let Some(parent) = std::path::Path::new(&self.output_filename).parent() {
-			if !parent.as_os_str().is_empty() && !parent.exists() {
-				if std::fs::create_dir_all(parent).is_err() {
-					task.set_error("Failed to create proxy output directory");
-					return Err(Error::Failed(
-						"Failed to create proxy output directory".to_string(),
-					));
-				}
+			if !parent.as_os_str().is_empty()
+				&& !parent.exists()
+				&& std::fs::create_dir_all(parent).is_err()
+			{
+				task.set_error("Failed to create proxy output directory");
+				return Err(Error::Failed(
+					"Failed to create proxy output directory".to_string(),
+				));
 			}
 		}
 
@@ -583,7 +585,12 @@ mod tests {
 	#[test]
 	fn transcode_arguments_software_keeps_parity_body() {
 		let args = ProxyTask::build_transcode_arguments(
-			"/src.mov", 0, &params(), "/dst.mp4", HwEncoder::Software, 4,
+			"/src.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+			HwEncoder::Software,
+			4,
 		);
 		assert!(args.windows(2).any(|w| w == ["-hwaccel", "auto"]));
 		assert!(args.windows(2).any(|w| w == ["-threads", "4"]));
@@ -600,27 +607,47 @@ mod tests {
 	#[test]
 	fn transcode_arguments_hw_swaps_encoder() {
 		let vt = ProxyTask::build_transcode_arguments(
-			"/src.mov", 0, &params(), "/dst.mp4", HwEncoder::VideoToolbox, 4,
+			"/src.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+			HwEncoder::VideoToolbox,
+			4,
 		);
 		assert!(vt.windows(2).any(|w| w == ["-c:v", "h264_videotoolbox"]));
 		assert!(vt.windows(2).any(|w| w == ["-q:v", "23"]));
 		assert!(!vt.iter().any(|a| a == "libx264" || a == "-crf"));
 
 		let nv = ProxyTask::build_transcode_arguments(
-			"/src.mov", 0, &params(), "/dst.mp4", HwEncoder::Nvenc, 4,
+			"/src.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+			HwEncoder::Nvenc,
+			4,
 		);
 		assert!(nv.windows(2).any(|w| w == ["-c:v", "h264_nvenc"]));
 		assert!(nv.windows(2).any(|w| w == ["-preset", "p3"]));
 		assert!(nv.windows(2).any(|w| w == ["-cq", "23"]));
 
 		let qsv = ProxyTask::build_transcode_arguments(
-			"/src.mov", 0, &params(), "/dst.mp4", HwEncoder::Qsv, 4,
+			"/src.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+			HwEncoder::Qsv,
+			4,
 		);
 		assert!(qsv.windows(2).any(|w| w == ["-c:v", "h264_qsv"]));
 		assert!(qsv.windows(2).any(|w| w == ["-global_quality", "23"]));
 
 		let amf = ProxyTask::build_transcode_arguments(
-			"/src.mov", 0, &params(), "/dst.mp4", HwEncoder::Amf, 4,
+			"/src.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+			HwEncoder::Amf,
+			4,
 		);
 		assert!(amf.windows(2).any(|w| w == ["-c:v", "h264_amf"]));
 		assert!(amf.windows(2).any(|w| w == ["-quality", "speed"]));

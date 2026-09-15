@@ -171,6 +171,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(ValueNode))
 }
 
+/// Register this node type (C++ `k_value_node` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.value",
+		name: "Value",
+		categories: &[Category::Generator],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -261,15 +272,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Value");
 	}
-}
-
-/// Register this node type (C++ `k_value_node` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.value",
-		name: "Value",
-		categories: &[Category::Generator],
-		create,
-	});
 }

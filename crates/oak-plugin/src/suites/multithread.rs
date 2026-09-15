@@ -84,7 +84,7 @@ unsafe extern "C" fn multi_thread(
 		// 裸指针不可 Send：以 usize 搬运，线程内还原（C 侧本即
 		// 整数传递语义）。
 		let arg = thread_arg as usize;
-		let _ = std::thread::scope(|scope| {
+		std::thread::scope(|scope| {
 			for i in 0..n_threads {
 				scope.spawn(move || {
 					THREAD_INDEX.with(|t| t.set(Some(i)));
@@ -244,15 +244,15 @@ unsafe extern "C" fn mutex_try_lock(handle: *mut c_void) -> c_int {
 pub fn suite_v1() -> &'static MultiThreadSuiteV1 {
 	static SUITE: std::sync::OnceLock<MultiThreadSuiteV1> = std::sync::OnceLock::new();
 	SUITE.get_or_init(|| MultiThreadSuiteV1 {
-		multi_thread: multi_thread,
+		multi_thread,
 		num_cpus: multi_thread_num_cpus,
 		index: multi_thread_index,
 		is_spawned: multi_thread_is_spawned,
-		mutex_create: mutex_create,
-		mutex_destroy: mutex_destroy,
-		mutex_lock: mutex_lock,
-		mutex_unlock: mutex_unlock,
-		mutex_try_lock: mutex_try_lock,
+		mutex_create,
+		mutex_destroy,
+		mutex_lock,
+		mutex_unlock,
+		mutex_try_lock,
 	})
 }
 

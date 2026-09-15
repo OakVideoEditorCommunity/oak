@@ -1546,7 +1546,7 @@ mod tests {
 	) {
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-			let engine = cx.new(|cx| crate::oakui::MockEngine::demo(cx));
+			let engine = cx.new(crate::oakui::MockEngine::demo);
 			let timeline = cx.new(|cx| TimelineView::new(engine.clone(), window, cx).zoom(2.0));
 			TimelinePanel::new(engine, timeline, window, cx)
 		});

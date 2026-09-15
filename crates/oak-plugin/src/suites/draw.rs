@@ -257,7 +257,7 @@ unsafe extern "C" fn set_colour(ctx: *mut c_void, colour: *const OfxRGBAColourF)
 		if colour.is_null() {
 			return Err(status::ERR_VALUE);
 		}
-		let _ = resolve_mut(ctx)?;
+		resolve_mut(ctx)?;
 		let v = unsafe { &*colour };
 		let addr = ctx as usize;
 		let mut live = lock();
@@ -269,7 +269,7 @@ unsafe extern "C" fn set_colour(ctx: *mut c_void, colour: *const OfxRGBAColourF)
 
 unsafe extern "C" fn set_line_width(ctx: *mut c_void, width: c_float) -> c_int {
 	caught(|| {
-		let _ = resolve_mut(ctx)?;
+		resolve_mut(ctx)?;
 		let addr = ctx as usize;
 		let mut live = lock();
 		let slot = live.get_mut(&addr).expect("resolve 已保证存活");
@@ -283,7 +283,7 @@ unsafe extern "C" fn set_line_stipple(ctx: *mut c_void, pattern: c_int) -> c_int
 		if !(0..=stipple::DOT_DASH).contains(&pattern) {
 			return Err(status::ERR_VALUE);
 		}
-		let _ = resolve_mut(ctx)?;
+		resolve_mut(ctx)?;
 		let addr = ctx as usize;
 		let mut live = lock();
 		let slot = live.get_mut(&addr).expect("resolve 已保证存活");

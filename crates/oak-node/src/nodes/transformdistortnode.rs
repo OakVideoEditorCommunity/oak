@@ -246,19 +246,19 @@ impl TransformDistortNode {
 
 				let scale_by_x = sequence_res.0 / texture_res.0;
 				let scale_by_y = sequence_res.1 / texture_res.1;
-				let autoscale_val;
+				
 
-				if (autoscale_type == AutoScaleType::Fit) == (sequence_real_ar > footage_real_ar) {
+				let autoscale_val = if (autoscale_type == AutoScaleType::Fit) == (sequence_real_ar > footage_real_ar) {
 					// Scale by height. Either the sequence is wider than
 					// the footage or we're using fill and cutting off the
 					// sides.
-					autoscale_val = scale_by_y;
+					scale_by_y
 				} else {
 					// Scale by width. Either the footage is wider than the
 					// sequence or we're using fill and cutting off the top
 					// and bottom.
-					autoscale_val = scale_by_x;
-				}
+					scale_by_x
+				};
 
 				adjusted_matrix =
 					super::matrix::matrix_scale(adjusted_matrix, autoscale_val, autoscale_val, 1.0);
@@ -671,6 +671,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	)
 }
 
+/// Register this node type (C++ factory entry for
+/// `org.olivevideoeditor.Olive.transform`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.transform",
+		name: "Transform",
+		categories: &[Category::Distort],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -959,15 +970,4 @@ mod tests {
 		assert_eq!(dup.name(), "Transform");
 		assert_eq!(dup.short_name(), "Transform");
 	}
-}
-
-/// Register this node type (C++ factory entry for
-/// `org.olivevideoeditor.Olive.transform`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.transform",
-		name: "Transform",
-		categories: &[Category::Distort],
-		create,
-	});
 }

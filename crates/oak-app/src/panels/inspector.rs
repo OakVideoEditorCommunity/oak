@@ -19,6 +19,7 @@
 //! 输出) with add / remove / reorder — no engine, the mock applies the edits
 //! to its own model.
 
+use crate::oakui::component::menu::{Menu, MenuItem};
 use gpui::colors::DefaultColors;
 use gpui::dock::{DockPanel, PanelEvent};
 use gpui::effect_stack::{EffectCardKind, EffectId, EffectStackEvent, EffectStackView};
@@ -26,7 +27,6 @@ use gpui::{
 	div, prelude::*, AnyElement, App, Context, Entity, EventEmitter, MouseButton, Render,
 	SharedString, Window,
 };
-use crate::oakui::component::menu::{Menu, MenuItem};
 
 use crate::oakui::component::menu::{ContextMenuHandle, ContextMenuTriggered};
 use crate::oakui::effectchain::group_label;
@@ -57,15 +57,13 @@ impl<E: AppEngine> InspectorPanel<E> {
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let stack = cx.new(|cx| {
 			let engine_for_params = engine.clone();
-			EffectStackView::new(engine.clone(), cx).params_renderer(
-				move |effect, window, cx| {
-					// The OFX parameter view: auto-generated controls for the
-					// effect's inputs (empty state for effects without a
-					// parameter UI).
-					cx.new(|cx| OfxParamsView::new(*effect, engine_for_params.clone(), window, cx))
-						.into()
-				},
-			)
+			EffectStackView::new(engine.clone(), cx).params_renderer(move |effect, window, cx| {
+				// The OFX parameter view: auto-generated controls for the
+				// effect's inputs (empty state for effects without a
+				// parameter UI).
+				cx.new(|cx| OfxParamsView::new(*effect, engine_for_params.clone(), window, cx))
+					.into()
+			})
 		});
 		// The "edits are requests" loop: forward each request to the engine,
 		// which applies it to its model and notifies. `AddRequested` carries
@@ -98,7 +96,8 @@ impl<E: AppEngine> InspectorPanel<E> {
 		// The stack re-renders whenever the engine changes (selection-driven
 		// highlight, effect edits, project drops) — the stack itself does not
 		// subscribe to the engine entity.
-		cx.observe(&engine, |_this, _engine, cx| cx.notify()).detach();
+		cx.observe(&engine, |_this, _engine, cx| cx.notify())
+			.detach();
 
 		let context_menu = ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
 
@@ -174,7 +173,7 @@ impl<E: AppEngine> InspectorPanel<E> {
 					list = list.child(
 						div()
 							.id(SharedString::from(format!("add-effect-group-{key}")))
-							.debug_selector(move || format!("add-effect-group-row-{key}").into())
+							.debug_selector(move || format!("add-effect-group-row-{key}"))
 							.pt_2()
 							.pb_1()
 							.px_2()

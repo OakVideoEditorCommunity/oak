@@ -399,13 +399,13 @@ unsafe extern "C" fn parametric_param_delete_all_control_points(
 pub fn suite_v1() -> &'static ParametricParameterSuiteV1 {
 	static SUITE: std::sync::OnceLock<ParametricParameterSuiteV1> = std::sync::OnceLock::new();
 	SUITE.get_or_init(|| ParametricParameterSuiteV1 {
-		parametric_param_get_value: parametric_param_get_value,
-		parametric_param_get_n_control_points: parametric_param_get_n_control_points,
-		parametric_param_get_nth_control_point: parametric_param_get_nth_control_point,
-		parametric_param_set_nth_control_point: parametric_param_set_nth_control_point,
-		parametric_param_add_control_point: parametric_param_add_control_point,
-		parametric_param_delete_control_point: parametric_param_delete_control_point,
-		parametric_param_delete_all_control_points: parametric_param_delete_all_control_points,
+		parametric_param_get_value,
+		parametric_param_get_n_control_points,
+		parametric_param_get_nth_control_point,
+		parametric_param_set_nth_control_point,
+		parametric_param_add_control_point,
+		parametric_param_delete_control_point,
+		parametric_param_delete_all_control_points,
 	})
 }
 

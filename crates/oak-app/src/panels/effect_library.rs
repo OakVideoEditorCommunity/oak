@@ -23,6 +23,7 @@
 
 use std::collections::HashSet;
 
+use crate::oakui::component::text_input;
 use gpui::colors::DefaultColors;
 use gpui::dock::{DockPanel, PanelEvent};
 use gpui::{
@@ -30,7 +31,6 @@ use gpui::{
 	Render, SharedString, Window,
 };
 use gpui_elements::editable_text::{EditableTextState, StringStorage, TextChanged};
-use crate::oakui::component::text_input;
 
 use crate::i18n;
 use crate::oakui::effectchain::group_label;
@@ -60,7 +60,8 @@ impl<E: AppEngine> EffectLibraryPanel<E> {
 	pub fn new(engine: Entity<E>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// Re-read the effect table whenever the engine notifies (the table
 		// itself is static, but the selection hint depends on the target).
-		cx.observe(&engine, |_this, _engine, cx| cx.notify()).detach();
+		cx.observe(&engine, |_this, _engine, cx| cx.notify())
+			.detach();
 		let search = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
 		cx.subscribe(&search, |_this, _state, _event: &TextChanged, cx| {
 			cx.notify();
@@ -212,7 +213,7 @@ impl<E: AppEngine> Render for EffectLibraryPanel<E> {
 			list = list.child(
 				div()
 					.id(SharedString::from(format!("effect-library-{type_id}")))
-					.debug_selector(move || format!("effect-library-row-{row_id}").into())
+					.debug_selector(move || format!("effect-library-row-{row_id}"))
 					.cursor_pointer()
 					.px_2()
 					.py_1()
@@ -296,7 +297,9 @@ fn group_header(
 	on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
 	div()
-		.id(SharedString::from(format!("effect-library-group-{group_key}")))
+		.id(SharedString::from(format!(
+			"effect-library-group-{group_key}"
+		)))
 		.debug_selector({
 			let key = group_key.to_string();
 			move || format!("effect-library-group-row-{key}")
@@ -397,7 +400,10 @@ mod tests {
 		let mut collapsed = HashSet::new();
 
 		assert!(!hidden_by_collapse(&color, "", &collapsed));
-		assert!(toggle_collapsed(&mut collapsed, "color"), "first toggle collapses");
+		assert!(
+			toggle_collapsed(&mut collapsed, "color"),
+			"first toggle collapses"
+		);
 		assert!(hidden_by_collapse(&color, "", &collapsed));
 		assert!(
 			!hidden_by_collapse(&color, "blur", &collapsed),
@@ -407,7 +413,10 @@ mod tests {
 			!hidden_by_collapse(&color, "", &HashSet::new()),
 			"an unlisted group stays open"
 		);
-		assert!(!toggle_collapsed(&mut collapsed, "color"), "second toggle expands");
+		assert!(
+			!toggle_collapsed(&mut collapsed, "color"),
+			"second toggle expands"
+		);
 		assert!(collapsed.is_empty());
 	}
 
@@ -440,9 +449,14 @@ mod tests {
 	#[test]
 	fn collapsed_state_persists_in_the_config() {
 		let _guard = collapsed_config_lock();
-		assert!(load_collapsed().is_empty(), "the lock starts from a clear key");
-		let collapsed: HashSet<String> =
-			["distort", "general"].iter().map(|k| k.to_string()).collect();
+		assert!(
+			load_collapsed().is_empty(),
+			"the lock starts from a clear key"
+		);
+		let collapsed: HashSet<String> = ["distort", "general"]
+			.iter()
+			.map(|k| k.to_string())
+			.collect();
 		store_collapsed(&collapsed);
 		assert_eq!(load_collapsed(), collapsed);
 		store_collapsed(&HashSet::new());
@@ -456,7 +470,7 @@ mod tests {
 		let _guard = collapsed_config_lock();
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(400.0), px(600.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::demo(cx));
+			let engine = cx.new(MockEngine::demo);
 			EffectLibraryPanel::new(engine, window, cx)
 		});
 		cx.run_until_parked();
@@ -492,7 +506,7 @@ mod tests {
 
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(400.0), px(600.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::demo(cx));
+			let engine = cx.new(MockEngine::demo);
 			let mut panel = EffectLibraryPanel::new(engine, window, cx);
 			// The state the toggle writes (and the config reloads on the
 			// next start), without touching the process-global key.
@@ -546,7 +560,7 @@ mod tests {
 
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(400.0), px(600.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::demo(cx));
+			let engine = cx.new(MockEngine::demo);
 			EffectLibraryPanel::new(engine, window, cx)
 		});
 		cx.run_until_parked();

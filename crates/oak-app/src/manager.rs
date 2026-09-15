@@ -30,6 +30,7 @@
 //! are unit tested here; the app-level flows are covered by the
 //! `OakApp<MockEngine>` tests in `crate::app`.
 
+use crate::oakui::component::text_input;
 use gpui::colors::DefaultColors;
 use gpui::prelude::*;
 use gpui::{
@@ -37,7 +38,6 @@ use gpui::{
 	Window,
 };
 use gpui_elements::editable_text::{EditableTextState, StringStorage};
-use crate::oakui::component::text_input;
 
 use crate::i18n;
 use crate::oakui::{AppEngine, LibraryProject};
@@ -162,7 +162,11 @@ impl<E: AppEngine> ProjectManager<E> {
 	}
 
 	/// An action-row button targeting the selection.
-	fn selected_action(&mut self, action: impl FnOnce(String) -> ManagerEvent, cx: &mut Context<Self>) {
+	fn selected_action(
+		&mut self,
+		action: impl FnOnce(String) -> ManagerEvent,
+		cx: &mut Context<Self>,
+	) {
 		if let Some(uuid) = self.selected_uuid() {
 			self.emit(action(uuid), cx);
 		}
@@ -252,13 +256,11 @@ impl<E: AppEngine> Render for ProjectManager<E> {
 					.min_h_0()
 					.overflow_y_scroll()
 					.children(if self.rows.is_empty() {
-						vec![
-							div()
-								.p_4()
-								.text_color(colors.disabled)
-								.child(i18n::tr("manager.empty"))
-								.into_any_element(),
-						]
+						vec![div()
+							.p_4()
+							.text_color(colors.disabled)
+							.child(i18n::tr("manager.empty"))
+							.into_any_element()]
 					} else {
 						self.rows
 							.iter()
@@ -272,11 +274,14 @@ impl<E: AppEngine> Render for ProjectManager<E> {
 									.gap_2()
 									.py_1()
 									.cursor_pointer()
-									.on_click(cx.listener(move |this, event: &ClickEvent, _w, cx| {
-										this.row_clicked(index, event.click_count(), cx);
-									}));
+									.on_click(cx.listener(
+										move |this, event: &ClickEvent, _w, cx| {
+											this.row_clicked(index, event.click_count(), cx);
+										},
+									));
 								if selected {
-									line = line.bg(colors.selected).text_color(colors.selected_text);
+									line =
+										line.bg(colors.selected).text_color(colors.selected_text);
 								} else {
 									line = line.text_color(colors.text);
 								}
@@ -301,72 +306,69 @@ impl<E: AppEngine> Render for ProjectManager<E> {
 					}),
 			);
 
-		let mut root = div()
-			.flex()
-			.flex_col()
-			.gap_3()
-			.w_full()
-			.child(
-				div()
-					.flex()
-					.gap_2()
-					.child(
-						tool("manager-new", i18n::tr("manager.new")).on_click(
-							cx.listener(|this, _e: &ClickEvent, _w, cx| {
-								this.emit(ManagerEvent::Create, cx);
-							}),
-						),
-					)
-					.child(
-						tool("manager-import", i18n::tr("manager.import")).on_click(
+		let mut root =
+			div()
+				.flex()
+				.flex_col()
+				.gap_3()
+				.w_full()
+				.child(
+					div()
+						.flex()
+						.gap_2()
+						.child(
+							tool("manager-new", i18n::tr("manager.new")).on_click(cx.listener(
+								|this, _e: &ClickEvent, _w, cx| {
+									this.emit(ManagerEvent::Create, cx);
+								},
+							)),
+						)
+						.child(tool("manager-import", i18n::tr("manager.import")).on_click(
 							cx.listener(|this, _e: &ClickEvent, _w, cx| {
 								this.emit(ManagerEvent::Import, cx);
 							}),
-						),
-					),
-			)
-			.child(list)
-			.child(
-				div()
-					.flex()
-					.justify_end()
-					.gap_2()
-					.child(
-						action("manager-open", i18n::tr("manager.open")).on_click(
+						)),
+				)
+				.child(list)
+				.child(
+					div()
+						.flex()
+						.justify_end()
+						.gap_2()
+						.child(action("manager-open", i18n::tr("manager.open")).on_click(
 							cx.listener(|this, _e: &ClickEvent, _w, cx| {
 								this.selected_action(ManagerEvent::Open, cx);
 							}),
+						))
+						.child(
+							action("manager-rename", i18n::tr("manager.rename")).on_click(
+								cx.listener(|this, _e: &ClickEvent, _w, cx| {
+									this.selected_action(ManagerEvent::Rename, cx);
+								}),
+							),
+						)
+						.child(
+							action("manager-duplicate", i18n::tr("manager.duplicate")).on_click(
+								cx.listener(|this, _e: &ClickEvent, _w, cx| {
+									this.selected_action(ManagerEvent::Duplicate, cx);
+								}),
+							),
+						)
+						.child(
+							action("manager-delete", i18n::tr("manager.delete")).on_click(
+								cx.listener(|this, _e: &ClickEvent, _w, cx| {
+									this.selected_action(ManagerEvent::Delete, cx);
+								}),
+							),
+						)
+						.child(
+							action("manager-export", i18n::tr("manager.export")).on_click(
+								cx.listener(|this, _e: &ClickEvent, _w, cx| {
+									this.selected_action(ManagerEvent::Export, cx);
+								}),
+							),
 						),
-					)
-					.child(
-						action("manager-rename", i18n::tr("manager.rename")).on_click(
-							cx.listener(|this, _e: &ClickEvent, _w, cx| {
-								this.selected_action(ManagerEvent::Rename, cx);
-							}),
-						),
-					)
-					.child(
-						action("manager-duplicate", i18n::tr("manager.duplicate")).on_click(
-							cx.listener(|this, _e: &ClickEvent, _w, cx| {
-								this.selected_action(ManagerEvent::Duplicate, cx);
-							}),
-						),
-					)
-					.child(
-						action("manager-delete", i18n::tr("manager.delete")).on_click(
-							cx.listener(|this, _e: &ClickEvent, _w, cx| {
-								this.selected_action(ManagerEvent::Delete, cx);
-							}),
-						),
-					)
-					.child(
-						action("manager-export", i18n::tr("manager.export")).on_click(
-							cx.listener(|this, _e: &ClickEvent, _w, cx| {
-								this.selected_action(ManagerEvent::Export, cx);
-							}),
-						),
-					),
-			);
+				);
 		if let Some(status) = &self.status {
 			root = root.child(
 				div()
@@ -396,10 +398,7 @@ pub struct NamePrompt {
 impl NamePrompt {
 	/// Builds the prompt seeded with `initial`.
 	pub fn new(initial: &str, cx: &mut Context<Self>) -> Self {
-		let editor = cx.new(|cx| {
-			let editor = EditableTextState::new(StringStorage::default(), cx);
-			editor
-		});
+		let editor = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
 		editor.update(cx, |editor, cx| editor.emplace(initial, cx));
 		Self { editor }
 	}
@@ -411,7 +410,8 @@ impl NamePrompt {
 
 	/// Replaces the entered name (tests / prefill).
 	pub fn set_value(&mut self, value: &str, cx: &mut Context<Self>) {
-		self.editor.update(cx, |editor, cx| editor.emplace(value, cx));
+		self.editor
+			.update(cx, |editor, cx| editor.emplace(value, cx));
 		cx.notify();
 	}
 }

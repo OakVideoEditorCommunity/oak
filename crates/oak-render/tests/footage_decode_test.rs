@@ -75,24 +75,27 @@ fn footage_decode_renders_known_content() {
 		let off = y * stride + x * 16;
 		let mut out = [0f32; 4];
 		for i in 0..4 {
-			out[i] = f32::from_le_bytes(
-				frame.data[off + i * 4..off + i * 4 + 4]
-					.try_into()
-					.unwrap(),
-			);
+			out[i] =
+				f32::from_le_bytes(frame.data[off + i * 4..off + i * 4 + 4].try_into().unwrap());
 		}
 		out
 	};
 	for &(x, y) in &[(8usize, 32usize), (20, 10)] {
 		let [r, g, b, a] = read(x, y);
 		assert!(r > 0.5, "left half red at ({x},{y}): {r}");
-		assert!(g < 0.4 && b < 0.4, "left half not red at ({x},{y}): {r},{g},{b}");
+		assert!(
+			g < 0.4 && b < 0.4,
+			"left half not red at ({x},{y}): {r},{g},{b}"
+		);
 		assert!(a > 0.9, "opaque at ({x},{y}): {a}");
 	}
 	for &(x, y) in &[(56usize, 32usize), (40, 50)] {
 		let [r, g, b, a] = read(x, y);
 		assert!(b > 0.5, "right half blue at ({x},{y}): {b}");
-		assert!(r < 0.4 && g < 0.4, "right half not blue at ({x},{y}): {r},{g},{b}");
+		assert!(
+			r < 0.4 && g < 0.4,
+			"right half not blue at ({x},{y}): {r},{g},{b}"
+		);
 		assert!(a > 0.9, "opaque at ({x},{y}): {a}");
 	}
 
@@ -131,7 +134,6 @@ fn footage_decode_fails_explainably_for_missing_file() {
 		(16, 16),
 		PixelFormat::F32,
 	)
-	.err()
-	.expect("decode of a missing file must fail");
+	.expect_err("decode of a missing file must fail");
 	let _ = err.code(); // explainable error, not a panic
 }

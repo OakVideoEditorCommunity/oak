@@ -619,7 +619,7 @@ pub(crate) fn param_value_from_node(
 		TYPE_DOUBLE3D => {
 			(v.r#type == T::VEC3).then(|| ParamValue::Double([v.f[0], v.f[1], v.f[2]], 3))
 		}
-		TYPE_INTEGER => (v.r#type == T::INT).then(|| ParamValue::Int([v.num as i32, 0, 0], 1)),
+		TYPE_INTEGER => (v.r#type == T::INT).then_some(ParamValue::Int([v.num as i32, 0, 0], 1)),
 		TYPE_INTEGER2D | TYPE_INTEGER3D => {
 			let dim = if ofx_type == TYPE_INTEGER2D { 2 } else { 3 };
 			Some(ParamValue::Int(
@@ -627,8 +627,8 @@ pub(crate) fn param_value_from_node(
 				dim,
 			))
 		}
-		TYPE_BOOLEAN => (v.r#type == T::BOOL).then(|| ParamValue::Bool(v.num != 0)),
-		TYPE_CHOICE => (v.r#type == T::COMBO).then(|| ParamValue::Choice(v.num as i32)),
+		TYPE_BOOLEAN => (v.r#type == T::BOOL).then_some(ParamValue::Bool(v.num != 0)),
+		TYPE_CHOICE => (v.r#type == T::COMBO).then_some(ParamValue::Choice(v.num as i32)),
 		TYPE_RGB => {
 			(v.r#type == T::COLOR).then(|| ParamValue::Color([v.f[0], v.f[1], v.f[2], 0.0], 3))
 		}

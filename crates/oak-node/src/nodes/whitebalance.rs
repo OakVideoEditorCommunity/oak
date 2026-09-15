@@ -110,7 +110,7 @@ impl WhiteBalanceNode {
 		// exposure, then let tint move along the green-magenta axis.
 		let tint_gain = (1.0 + tint).clamp(0.0, 2.0);
 
-		[red / green, green / green * tint_gain, blue / green]
+		[red / green, tint_gain, blue / green]
 	}
 }
 
@@ -189,16 +189,18 @@ impl NodeBehavior for WhiteBalanceNode {
 		params.insert(GAIN_INPUT.to_string(), crate::value::NodeValue::Vec3(gain));
 		table.push(
 			crate::value::ValueType::Texture,
-			crate::value::NodeValue::Texture(crate::handle::make_owned(Job::ShaderJob(ShaderJobPayload {
-				node_id: crate::id::NodeId::INVALID,
-				time,
-				iterations: 1,
-				type_id: self.type_id().to_string(),
-				shader_id: String::new(),
-				effect_input: core.effect_input.clone(),
-				params,
-				iterative_input: String::new(),
-			}))),
+			crate::value::NodeValue::Texture(crate::handle::make_owned(Job::ShaderJob(
+				ShaderJobPayload {
+					node_id: crate::id::NodeId::INVALID,
+					time,
+					iterations: 1,
+					type_id: self.type_id().to_string(),
+					shader_id: String::new(),
+					effect_input: core.effect_input.clone(),
+					params,
+					iterative_input: String::new(),
+				},
+			))),
 			None,
 		);
 	}
@@ -270,11 +272,11 @@ pub fn register(meta: &mut Vec<NodeMeta>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::value::{NodeValue, NodeValueTable, ValueType};
-    use oak_core::Rational;
+	use super::*;
+	use crate::value::{NodeValue, NodeValueTable, ValueType};
+	use oak_core::Rational;
 
-    #[test]
+	#[test]
 	fn input_names() {
 		let n = WhiteBalanceNode;
 		assert_eq!(n.input_name(TEXTURE_INPUT), "Input");
@@ -391,8 +393,7 @@ mod tests {
 			panic!("expected a texture-typed value");
 		};
 		let payload =
-			unsafe { crate::jobs::shader_job(handle) }
-				.expect("payload boxed behind the handle");
+			unsafe { crate::jobs::shader_job(handle) }.expect("payload boxed behind the handle");
 		assert_eq!(payload.type_id, "org.olivevideoeditor.Olive.whitebalance");
 		assert_eq!(payload.shader_id, "");
 		assert_eq!(payload.iterations, 1);

@@ -364,12 +364,11 @@ impl NodeBehavior for BlurFilterNode {
 		let mut can_push_job = true;
 		if radius > 0.0 {
 			// Method-specific considerations.
-			if method == Method::Box as i64 || method == Method::Gaussian as i64 {
-				if !horiz && !vert {
+			if (method == Method::Box as i64 || method == Method::Gaussian as i64)
+				&& !horiz && !vert {
 					// Disable the job if both directions are unchecked.
 					can_push_job = false;
 				}
-			}
 		} else {
 			can_push_job = false;
 		}
@@ -378,11 +377,10 @@ impl NodeBehavior for BlurFilterNode {
 		// all other methods are single-pass (C++ `iterations = 2` only for
 		// the double-pass case).
 		let mut iterations = 1;
-		if method == Method::Box as i64 || method == Method::Gaussian as i64 {
-			if horiz && vert {
+		if (method == Method::Box as i64 || method == Method::Gaussian as i64)
+			&& horiz && vert {
 				iterations = 2;
 			}
-		}
 
 		if can_push_job {
 			// The shader-job box (C++ ShaderJob): the behavior's type id
@@ -578,6 +576,17 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(BlurFilterNode))
 }
 
+/// Register this node type (C++ `k_blur_filter` in
+/// `factory.cpp::create_from_factory_index`).
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.blur",
+		name: "Blur",
+		categories: &[Category::Filter],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -735,15 +744,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Blur");
 	}
-}
-
-/// Register this node type (C++ `k_blur_filter` in
-/// `factory.cpp::create_from_factory_index`).
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.blur",
-		name: "Blur",
-		categories: &[Category::Filter],
-		create,
-	});
 }

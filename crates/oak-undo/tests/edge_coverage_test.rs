@@ -20,7 +20,10 @@
 //! (the former handle-level/refcount tests were removed together with
 //! the `CHandle` layer they exercised).
 
-use oak_undo::error::{Error, OAKUNDO_E_FAILED, OAKUNDO_E_INVALID, OAKUNDO_E_NOMEM, OAKUNDO_E_NOT_FOUND, OAKUNDO_E_STATE};
+use oak_undo::error::{
+	Error, OAKUNDO_E_FAILED, OAKUNDO_E_INVALID, OAKUNDO_E_NOMEM, OAKUNDO_E_NOT_FOUND,
+	OAKUNDO_E_STATE,
+};
 use oak_undo::undocommand::{MultiUndoCommand, UndoCommand};
 use oak_undo::undostack::{EmptyCommand, UndoStack, K_MAX_UNDO_COMMANDS};
 
@@ -37,7 +40,7 @@ fn error_code_mapping_is_complete() {
 /// `Default` impls mirror `new()`.
 #[test]
 fn default_impls_match_new() {
-	let _empty = EmptyCommand::default();
+	let _empty = EmptyCommand;
 	let stack = UndoStack::default();
 	assert_eq!(
 		stack.done_count(),
@@ -71,7 +74,10 @@ fn push_pre_executed_clears_redo_tail_and_caps() {
 	}
 	stack.undo().unwrap();
 	stack.push_pre_executed(UndoCommand::from_closures(|| {}, || {}), name);
-	assert!(!stack.can_redo(), "push_pre_executed drops the redoable tail");
+	assert!(
+		!stack.can_redo(),
+		"push_pre_executed drops the redoable tail"
+	);
 
 	// Fill past the cap with pre-executed commands: the oldest rows are
 	// evicted and the count stays at K_MAX_UNDO_COMMANDS.

@@ -20,7 +20,9 @@
 //! version) and lenient handling of unknown elements.
 
 use oak_core::Rational;
-use oak_otio::{Clip, Composable, ExternalReference, MediaReference, RationalTime, Timeline, Track};
+use oak_otio::{
+	Clip, Composable, ExternalReference, MediaReference, RationalTime, Timeline, Track,
+};
 
 /// The NTSC video rate 30000/1001 (~29.97 fps) as an exact rational.
 const NTSC_RATE: f64 = 30000.0 / 1001.0;
@@ -189,7 +191,7 @@ fn parse_synthetic_document() {
 #[test]
 fn model_round_trips_through_fcpxml() {
 	let original = parse_synthetic();
-	let xml = oak_otio::to_fcpxml_string(&[original.clone()]).expect("export fcpxml");
+	let xml = oak_otio::to_fcpxml_string(std::slice::from_ref(&original)).expect("export fcpxml");
 	let reparsed = oak_otio::from_fcpxml_string(&xml).expect("reparse exported fcpxml");
 	assert_eq!(reparsed.len(), 1);
 	assert_eq!(reparsed[0], original, "model survives fcpxml round trip");

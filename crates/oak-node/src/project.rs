@@ -347,8 +347,8 @@ impl Project {
 					return self.custom_cache_path.clone();
 				}
 			}
-			1 => {
-				if !self.filename.is_empty() {
+			1
+				if !self.filename.is_empty() => {
 					let dir = std::path::Path::new(&self.filename)
 						.parent()
 						.map(|p| p.to_string_lossy().into_owned())
@@ -357,7 +357,6 @@ impl Project {
 						return format!("{}/cache", dir);
 					}
 				}
-			}
 			_ => {}
 		}
 		// Default location: the shared disk-cache directory (single-lib:

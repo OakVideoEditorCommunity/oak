@@ -194,9 +194,7 @@ impl TaskManager {
 
 	/// Index of the task with the given address.
 	pub fn find_index(&self, ptr: *const Task) -> Option<usize> {
-		self.tasks
-			.iter()
-			.position(|t| t.task() as *const Task == ptr)
+		self.tasks.iter().position(|t| std::ptr::eq(t.task(), ptr))
 	}
 
 	/// Cancel the task with the given address (no-op when absent).

@@ -563,11 +563,10 @@ unsafe extern "C" fn prop_get_int(
 				}
 				_ => Err(status::FAILED),
 			}
-			.map_err(|c| {
+			.inspect_err(|&c| {
 				if std::env::var_os("OAK_OFX_TRACE").is_some() {
 					eprintln!("[ofx] propGetInt({name}) -> {c}");
 				}
-				c
 			})
 		})
 	}
@@ -618,14 +617,13 @@ fn get_n(
 		}
 		Ok(())
 	})
-	.map_err(|code| {
+	.inspect_err(|&code| {
 		// The property the plugin asked for and we did not have — the
 		// single most useful line when a plugin reports
 		// MissingHostFeature (trace-gated, like fetchSuite misses).
 		if std::env::var_os("OAK_OFX_TRACE").is_some() {
 			eprintln!("[ofx] property miss: {name} (code {code})");
 		}
-		code
 	})
 }
 
@@ -641,10 +639,7 @@ unsafe extern "C" fn prop_get_pointer_n(
 			if count > 0 && out.is_null() {
 				return Err(status::ERR_VALUE);
 			}
-			get_n(set, name, count, Kind::Pointer, |v, i| match v {
-				Value::Pointer(p) => *out.add(i) = *p,
-				_ => {}
-			})
+			get_n(set, name, count, Kind::Pointer, |v, i| if let Value::Pointer(p) = v { *out.add(i) = *p })
 		})
 	}
 }
@@ -661,10 +656,7 @@ unsafe extern "C" fn prop_get_string_n(
 			if count > 0 && out.is_null() {
 				return Err(status::ERR_VALUE);
 			}
-			get_n(set, name, count, Kind::Str, |v, i| match v {
-				Value::String(s) => *out.add(i) = s.as_ptr() as *mut c_char,
-				_ => {}
-			})
+			get_n(set, name, count, Kind::Str, |v, i| if let Value::String(s) = v { *out.add(i) = s.as_ptr() as *mut c_char })
 		})
 	}
 }

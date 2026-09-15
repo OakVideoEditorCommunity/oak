@@ -144,7 +144,7 @@ impl UndoStack {
 			&& !self
 				.commands
 				.back()
-				.map_or(true, |entry| entry.command.is_empty())
+				.is_none_or(|entry| entry.command.is_empty())
 	}
 
 	/// Whether a redo is possible.

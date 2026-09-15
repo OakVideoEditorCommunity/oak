@@ -24,15 +24,15 @@
 //! Recording goes through the oakcodec encoder C ABI ([`crate::bridge`]);
 //! device/config lookups go through oak_core.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use cpal::Device;
-use cpal::traits::{DeviceTrait, HostTrait};
-use oak_codec::encoder::Encoder;
-use oak_codec::encodingparams::EncodingParams;
 use crate::error::{Error, Result};
 use crate::params::AudioParams;
 use crate::previewdevice::PreviewAudioDevice;
+use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::Device;
+use oak_codec::encoder::Encoder;
+use oak_codec::encodingparams::EncodingParams;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 /// `paNoDevice` (PortAudio "no device" sentinel; also the default when no
 /// device is configured).
@@ -178,7 +178,9 @@ impl ManagerInner {
 			let rate = params.sample_rate;
 			let channels = params.channel_count();
 			let sink = self.output_buffer.clone();
-			let _ = self.output_device_stream.ensure_open(device, rate, channels, sink);
+			let _ = self
+				.output_device_stream
+				.ensure_open(device, rate, channels, sink);
 		}
 		self.output_buffer.write(samples);
 		self.output_started = true;
@@ -339,8 +341,6 @@ impl ManagerInner {
 		Ok(())
 	}
 
-
-
 	/// Peak level (linear, 0..1 and above) of each channel of the buffered,
 	/// not-yet-consumed output, written to `peaks` in channel order.
 	/// Returns the channel count (0 when no output is configured or the
@@ -394,7 +394,7 @@ impl ManagerInner {
 		} else {
 			for (ch, plane) in planes.iter_mut().enumerate() {
 				let start = ch * frame_count * 4;
-				for b in buf[start..start + frame_count * 4].chunks_exact(4) {
+				for b in buf[start..start + frame_count * 4].as_chunks::<4>().0 {
 					plane.push(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
 				}
 			}
@@ -406,7 +406,6 @@ impl ManagerInner {
 		}
 		Ok(channels)
 	}
-
 }
 
 /// Lock the process-wide manager singleton (the direct-Rust replacement
@@ -441,7 +440,7 @@ pub fn find_config_device_by_name_s(is_output_device: bool) -> Result<Device> {
 pub fn find_device_by_name_s_or_default(name: &String, _is_output_device: bool) -> Result<Device> {
 	let host = cpal::default_host();
 	let device = host.devices()?.find(|d| {
-		if d.id().is_err(){
+		if d.id().is_err() {
 			return false;
 		}
 		if d.supports_output() && d.id().unwrap().id() == name {
@@ -451,16 +450,13 @@ pub fn find_device_by_name_s_or_default(name: &String, _is_output_device: bool) 
 	});
 	if let Some(device) = device {
 		Ok(device)
-	}
-	else{
+	} else {
 		if let Some(device) = host.default_output_device() {
 			Ok(device)
-		}
-		else{
+		} else {
 			Err(Box::new(Error::NotFound))
 		}
 	}
-
 }
 
 /// The host's output device names in enumeration order; the list index is
@@ -505,7 +501,6 @@ pub fn device_index_by_name(name: &str, output: bool) -> Option<i32> {
 	names.iter().position(|n| n == name).map(|i| i as i32)
 }
 
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -527,22 +522,19 @@ mod tests {
 			output_callback_body();
 			let _ = tx.send(());
 		});
-		if rx
-			.recv_timeout(std::time::Duration::from_secs(60))
-			.is_err()
-		{
+		if rx.recv_timeout(std::time::Duration::from_secs(60)).is_err() {
 			eprintln!("audio host wedged (headless/CI); skipping");
-			return;
 		}
 	}
 
 	/// The test body (see the wrapping test for the watchdog rationale).
-	fn output_callback_body() {		// Skip when the audio system cannot actually run a stream: open a
+	fn output_callback_body() {
+		// Skip when the audio system cannot actually run a stream: open a
 		// silent stream and require at least one callback within 2 s. A
 		// device existing is not enough — headless sessions report the
 		// stream running while delivering zero callbacks.
-		use std::sync::atomic::AtomicI64 as A;
 		use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+		use std::sync::atomic::AtomicI64 as A;
 		static PROBE: A = A::new(0);
 		PROBE.store(0, Ordering::Relaxed);
 		let can_play = (|| {
@@ -556,12 +548,7 @@ mod tests {
 				}
 			};
 			let stream = device
-				.build_output_stream(
-					config.config(),
-					cb,
-					|_| {},
-					None,
-				)
+				.build_output_stream(config.config(), cb, |_| {}, None)
 				.ok()?;
 			stream.play().ok()?;
 			let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -593,16 +580,12 @@ mod tests {
 			samples.push(v);
 			samples.push(v);
 		}
-		let bytes: Vec<u8> = samples
-			.iter()
-			.flat_map(|s| s.to_le_bytes())
-			.collect();
-		manager.lock().unwrap().push_to_output(
-			params,
-			&bytes,
-			&mut vec![0u8; 256],
-		)
-		.expect("push succeeds even without an explicit device");
+		let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+		manager
+			.lock()
+			.unwrap()
+			.push_to_output(params, &bytes, &mut vec![0u8; 256])
+			.expect("push succeeds even without an explicit device");
 
 		// Give the audio thread time to consume. PortAudio/CoreAudio
 		// stream startup can take SECONDS in some environments (audio HAL
@@ -614,7 +597,11 @@ mod tests {
 		let target = frames as i64 - 1024;
 		let mut consumed = 0i64;
 		while std::time::Instant::now() < deadline {
-			consumed = manager.lock().unwrap().output_buffer.output_frames_consumed();
+			consumed = manager
+				.lock()
+				.unwrap()
+				.output_buffer
+				.output_frames_consumed();
 			if consumed >= target {
 				break;
 			}

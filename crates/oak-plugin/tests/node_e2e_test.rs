@@ -27,6 +27,7 @@
 
 mod common;
 
+use oak_core::texture::Texture;
 use oak_core::{PixelFormat, Rational};
 use oak_node::factory::Factory;
 use oak_node::graph::Graph;
@@ -34,7 +35,6 @@ use oak_node::node::{NodeBehavior, NodeCore};
 use oak_node::traverser::{EvalRequest, Traverser};
 use oak_node::value::{NodeValue, ValueType};
 use oak_plugin::host::Host;
-use oak_core::texture::Texture;
 
 const PLUGIN_ID: &str = "org.oak.test-plugin";
 const IDENTITY_ID: &str = "org.oak.test-plugin.identity";
@@ -70,7 +70,7 @@ impl NodeBehavior for ConstSource {
 	) {
 		let mut frame =
 			oak_render::eval::generate_frame(time, self.size, PixelFormat::F32).unwrap();
-		for pixel in frame.data.chunks_exact_mut(16) {
+		for pixel in frame.data.as_chunks_mut::<16>().0 {
 			for (i, v) in self.rgba.iter().enumerate() {
 				pixel[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
 			}
@@ -98,12 +98,8 @@ fn scan_and_register() -> bool {
 }
 
 /// 取输出表的渲染纹理（resolve 后的真纹理盒）。
-fn rendered_texture(
-	table: &oak_node::value::NodeValueTable,
-) -> Texture {
-	let NodeValue::Texture(handle) = table
-		.get(ValueType::Texture)
-		.expect("根输出应有纹理")
+fn rendered_texture(table: &oak_node::value::NodeValueTable) -> Texture {
+	let NodeValue::Texture(handle) = table.get(ValueType::Texture).expect("根输出应有纹理")
 	else {
 		panic!("纹理槽不是 Texture 值");
 	};
@@ -143,10 +139,7 @@ fn plugin_nodes_register_with_translated_inputs() {
 		);
 		let meta = entries.iter().find(|m| m.type_id == PLUGIN_ID).unwrap();
 		assert_eq!(meta.sub_category, "Filter");
-		assert_eq!(
-			meta.categories,
-			vec![oak_node::node::Category::OpenFx]
-		);
+		assert_eq!(meta.categories, vec![oak_node::node::Category::OpenFx]);
 
 		let (core, behavior) = Factory::global()
 			.create_any(PLUGIN_ID)
@@ -214,9 +207,7 @@ fn plugin_renders_constant_frame_end_to_end() {
 		if !scan_and_register() {
 			return;
 		}
-		let (core, behavior) = Factory::global()
-			.create_any(PLUGIN_ID)
-			.expect("create_any");
+		let (core, behavior) = Factory::global().create_any(PLUGIN_ID).expect("create_any");
 
 		let mut graph = Graph::new();
 		let src_id = graph.add_node(
@@ -306,10 +297,7 @@ fn param_overrides_reach_instance() {
 		let id = oak_plugin::node_factory::register_instance(inst.clone());
 
 		// 数值覆盖（gain = 1.25）。
-		let job_values = vec![(
-			"gain".to_string(),
-			oak_node::value::NodeValue::Float(1.25),
-		)];
+		let job_values = [("gain".to_string(), oak_node::value::NodeValue::Float(1.25))];
 		let pod: Vec<(String, oak_plugin::node::Value)> = job_values
 			.iter()
 			.filter_map(|(k, v)| {
@@ -331,8 +319,7 @@ fn param_overrides_reach_instance() {
 			clear_destination: false,
 			interactive: false,
 		};
-		oak_plugin::render_driver::render_frame(&inst.value, &job)
-			.expect("render_frame 应成功");
+		oak_plugin::render_driver::render_frame(&inst.value, &job).expect("render_frame 应成功");
 		let gain = inst.value.params.find("gain").unwrap().get();
 		assert_eq!(
 			gain,
@@ -340,10 +327,7 @@ fn param_overrides_reach_instance() {
 		);
 
 		// NaN 覆盖回退默认（gain 默认 0.0）。
-		let pod_nan = vec![(
-			"gain".to_string(),
-			oak_plugin::node::Value::float(f64::NAN),
-		)];
+		let pod_nan = vec![("gain".to_string(), oak_plugin::node::Value::float(f64::NAN))];
 		let dst = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
 			.unwrap();
 		let src = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
@@ -359,8 +343,7 @@ fn param_overrides_reach_instance() {
 			clear_destination: false,
 			interactive: false,
 		};
-		oak_plugin::render_driver::render_frame(&inst.value, &job)
-			.expect("NaN 覆盖不应失败");
+		oak_plugin::render_driver::render_frame(&inst.value, &job).expect("NaN 覆盖不应失败");
 		assert_eq!(
 			inst.value.params.find("gain").unwrap().get(),
 			oak_plugin::param::ParamValue::Double([0.0, 0.0, 0.0], 1)

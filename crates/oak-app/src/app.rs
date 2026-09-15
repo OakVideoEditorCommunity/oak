@@ -5653,7 +5653,7 @@ mod tests {
 	/// the mock engine's playback ticks with executor time, so a clock
 	/// advance would move the playhead out from under the assertions.
 	fn settle_key(cx: &mut TestAppContext, window: AnyWindowHandle, key: &str) {
-		cx.dispatch_keystroke(window.into(), gpui::Keystroke::parse(key).unwrap());
+		cx.dispatch_keystroke(window, gpui::Keystroke::parse(key).unwrap());
 		cx.run_until_parked();
 		cx.run_until_parked();
 	}

@@ -271,10 +271,10 @@ impl SubtitleParams {
 			out.push_str("<subtitle");
 			out.push_str(" in=\"");
 			out.push_str(&escape_attribute(&rational_to_string(sub.in_time)));
-			out.push_str("\"");
+			out.push('"');
 			out.push_str(" out=\"");
 			out.push_str(&escape_attribute(&rational_to_string(sub.out_time)));
-			out.push_str("\"");
+			out.push('"');
 			out.push('>');
 			out.push_str(&escape_text(&sub.text));
 			out.push_str("</subtitle>");

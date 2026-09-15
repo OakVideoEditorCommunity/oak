@@ -200,7 +200,10 @@ unsafe extern "C" fn clip_define(
 			EffectRef::Instance(_) => return Err(status::ERR_BAD_HANDLE),
 		};
 		let clip = ClipDescriptor::new(n);
-		// 重复定义：替换原 Box（HS map 覆盖语义）。
+		// 重复定义：替换原 Box（HS map 覆盖语义）。必须是新的 Box：
+		// 旧句柄随即失效（测试断言 clip != clip2），复用同一分配会
+		// 破坏这一 C ABI 契约，故此处保留 `Box::new`。
+		#[allow(clippy::replace_box)]
 		if let Some(existing) = desc.clips.iter_mut().find(|c| c.name == n) {
 			*existing = Box::new(clip);
 		} else {
@@ -469,19 +472,19 @@ use crate::property::Value;
 pub fn suite_v1() -> &'static ImageEffectSuiteV1 {
 	static SUITE: std::sync::OnceLock<ImageEffectSuiteV1> = std::sync::OnceLock::new();
 	SUITE.get_or_init(|| ImageEffectSuiteV1 {
-		get_property_set: get_property_set,
-		get_param_set: get_param_set,
-		clip_define: clip_define,
-		clip_get_handle: clip_get_handle,
-		clip_get_property_set: clip_get_property_set,
-		clip_get_image: clip_get_image,
-		clip_release_image: clip_release_image,
-		clip_get_region_of_definition: clip_get_region_of_definition,
-		abort: abort,
-		image_memory_alloc: image_memory_alloc,
-		image_memory_free: image_memory_free,
-		image_memory_lock: image_memory_lock,
-		image_memory_unlock: image_memory_unlock,
+		get_property_set,
+		get_param_set,
+		clip_define,
+		clip_get_handle,
+		clip_get_property_set,
+		clip_get_image,
+		clip_release_image,
+		clip_get_region_of_definition,
+		abort,
+		image_memory_alloc,
+		image_memory_free,
+		image_memory_lock,
+		image_memory_unlock,
 	})
 }
 

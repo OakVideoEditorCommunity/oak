@@ -640,11 +640,10 @@ impl Instance {
 
 		// 进度报告器（facade 回调优先；无回调而 app 注册了 UI 工厂
 		// 时装静默报告器，progressStart 再经工厂现造 UI 报告器）。
-		if let Some((cb, userdata)) = self
+		if let Some((cb, userdata)) = *self
 			.progress_cb
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
-			.clone()
 		{
 			crate::suites::progress::set_current(Some(unsafe {
 				crate::progress::ProgressReporter::new(cb, userdata as *mut std::ffi::c_void)
@@ -735,11 +734,10 @@ impl Instance {
 		}));
 		// GL 模式无 CPU 输出图像（current_output 保持 None）。
 
-		if let Some((cb, userdata)) = self
+		if let Some((cb, userdata)) = *self
 			.progress_cb
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
-			.clone()
 		{
 			crate::suites::progress::set_current(Some(unsafe {
 				crate::progress::ProgressReporter::new(cb, userdata as *mut std::ffi::c_void)

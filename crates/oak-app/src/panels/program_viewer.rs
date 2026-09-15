@@ -138,45 +138,55 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		// Route every transport request to the engine's program monitor, and
 		// forward the picture's pointer/key events to the active OFX interact
 		// (no-op when none is live).
-		cx.subscribe(&viewer, |this, _viewer, event: &ViewerEvent, cx| match event {
-			ViewerEvent::InteractPointer {
-				kind,
-				position,
-				button,
-				pressed,
-			} => this.forward_interact_pointer(*kind, *position, *button, *pressed, cx),
-			ViewerEvent::InteractKey { down, keystroke } => {
-				this.forward_interact_key(*down, keystroke, cx)
-			}
-			// The widget already toggled its own overlay state; nothing to
-			// forward to the engine.
-			ViewerEvent::ToggleSafeFramesRequested { .. } | ViewerEvent::ToggleZoomRequested { .. } => {}
-			// The loop in/out range is the shell-owned program workarea, so
-			// the panel re-emits the request.
-			ViewerEvent::InPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetInPoint),
-			ViewerEvent::OutPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetOutPoint),
-			ViewerEvent::ClearRangeRequested { .. } => cx.emit(menu::ViewerPanelEvent::ClearRange),
-			// The OFX color picker armed the eyedropper and the user clicked
-			// the frame: hand the sampled colour back to the engine's mailbox.
-			ViewerEvent::EyedropperPick { color } => {
-				this.engine
-					.update(cx, |engine, cx| engine.eyedropper_picked(*color, cx))
-			}
-			event => {
-				let monitor = Monitor::Program;
-				this.engine.update(cx, |engine, cx| match event {
-					ViewerEvent::PlayRequested { .. } => engine.play(monitor, cx),
-					ViewerEvent::PauseRequested { .. } => engine.pause(monitor, cx),
-					ViewerEvent::StepRequested { delta, .. } => engine.step(monitor, *delta, cx),
-					other => println!("[program viewer] request: {other:?}"),
-				});
-			}
-		})
+		cx.subscribe(
+			&viewer,
+			|this, _viewer, event: &ViewerEvent, cx| match event {
+				ViewerEvent::InteractPointer {
+					kind,
+					position,
+					button,
+					pressed,
+				} => this.forward_interact_pointer(*kind, *position, *button, *pressed, cx),
+				ViewerEvent::InteractKey { down, keystroke } => {
+					this.forward_interact_key(*down, keystroke, cx)
+				}
+				// The widget already toggled its own overlay state; nothing to
+				// forward to the engine.
+				ViewerEvent::ToggleSafeFramesRequested { .. }
+				| ViewerEvent::ToggleZoomRequested { .. } => {}
+				// The loop in/out range is the shell-owned program workarea, so
+				// the panel re-emits the request.
+				ViewerEvent::InPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetInPoint),
+				ViewerEvent::OutPointRequested { .. } => {
+					cx.emit(menu::ViewerPanelEvent::SetOutPoint)
+				}
+				ViewerEvent::ClearRangeRequested { .. } => {
+					cx.emit(menu::ViewerPanelEvent::ClearRange)
+				}
+				// The OFX color picker armed the eyedropper and the user clicked
+				// the frame: hand the sampled colour back to the engine's mailbox.
+				ViewerEvent::EyedropperPick { color } => this
+					.engine
+					.update(cx, |engine, cx| engine.eyedropper_picked(*color, cx)),
+				event => {
+					let monitor = Monitor::Program;
+					this.engine.update(cx, |engine, cx| match event {
+						ViewerEvent::PlayRequested { .. } => engine.play(monitor, cx),
+						ViewerEvent::PauseRequested { .. } => engine.pause(monitor, cx),
+						ViewerEvent::StepRequested { delta, .. } => {
+							engine.step(monitor, *delta, cx)
+						}
+						other => println!("[program viewer] request: {other:?}"),
+					});
+				}
+			},
+		)
 		.detach();
 
 		// Re-render whenever the engine's global eyedropper arm state flips,
 		// so `sync_frame` mirrors it into the viewer widget.
-		cx.observe(&engine, |_this, _engine, cx| cx.notify()).detach();
+		cx.observe(&engine, |_this, _engine, cx| cx.notify())
+			.detach();
 
 		// A throttled idle pump for the OFX interact: the plugin's UI work
 		// loop is served on the viewer's own timer (the app tick is
@@ -198,8 +208,7 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			})
 			.detach();
 
-		let context_menu =
-			ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
+		let context_menu = ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
 
 		let scope_state = cx.new(|_cx| ScopeState {
 			luma: Vec::new(),
@@ -246,11 +255,13 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		match action {
 			menu::ViewerMenuAction::ZoomFit => {
 				let zoom = ViewerZoom::Fit;
-				self.viewer.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
 			}
 			menu::ViewerMenuAction::ZoomLevel(index) => {
 				let zoom = ViewerZoom::Level(index);
-				self.viewer.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
 			}
 			menu::ViewerMenuAction::Resolution(divider) => self
 				.engine
@@ -280,7 +291,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			}),
 			menu::ViewerMenuAction::ShowFps => {
 				let show = self.viewer.read(cx).show_fps();
-				self.viewer.update(cx, |viewer, cx| viewer.set_show_fps(!show, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_show_fps(!show, cx));
 			}
 			menu::ViewerMenuAction::SaveFrame => self.save_frame(cx),
 			menu::ViewerMenuAction::FullScreen => {
@@ -306,7 +318,11 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			.filter(|dir| std::fs::create_dir_all(dir).is_ok())
 			.unwrap_or_else(|| std::path::PathBuf::from("."));
 		let path = dir.join(name);
-		match self.engine.read(cx).save_frame(Monitor::Program, path.clone(), cx) {
+		match self
+			.engine
+			.read(cx)
+			.save_frame(Monitor::Program, path.clone(), cx)
+		{
 			Ok(path) => println!("[program viewer] saved frame to {}", path.display()),
 			Err(error) => println!("[program viewer] save frame failed: {error}"),
 		}
@@ -335,7 +351,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		// cursor (the setter no-ops when the state is unchanged, so a paused
 		// viewer stays inert).
 		let armed = self.engine.read(cx).eyedropper_armed(cx);
-		self.viewer.update(cx, |viewer, cx| viewer.set_eyedropper_armed(armed, cx));
+		self.viewer
+			.update(cx, |viewer, cx| viewer.set_eyedropper_armed(armed, cx));
 
 		// Keep the main-process interact in sync with the inspector's
 		// current selection (creates/destroys the interact as the target
@@ -380,7 +397,7 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 				if let Some(bytes) = displayed.as_bytes(0) {
 					let (w, h) = (sz.width.0 as usize, sz.height.0 as usize);
 					let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
-					for px in bytes[..w * h * 4].chunks_exact(4) {
+					for px in bytes[..w * h * 4].as_chunks::<4>().0 {
 						ppm.extend_from_slice(&[px[2], px[1], px[0]]);
 					}
 					let _ = std::fs::write("/tmp/oak_viewer_frame.ppm", ppm);
@@ -406,10 +423,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			return frame.clone();
 		};
 		let frame_size = frame.size(0);
-		let viewport = InteractViewport::at_frame_size(
-			frame_size.width.0 as u32,
-			frame_size.height.0 as u32,
-		);
+		let viewport =
+			InteractViewport::at_frame_size(frame_size.width.0 as u32, frame_size.height.0 as u32);
 		let time = self.playhead_seconds(cx);
 
 		// Redraw when the base frame, the target instance, the playhead, or
@@ -428,11 +443,7 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			});
 		if stale {
 			if let Some(image) = crate::oakui::ofx::draw_interact_composite(
-				instance,
-				&interact,
-				&viewport,
-				time,
-				frame,
+				instance, &interact, &viewport, time, frame,
 			) {
 				self.overlay = Some(OverlayComposite {
 					frame: frame.clone(),
@@ -480,14 +491,9 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			return;
 		};
 		let area = size(f32::from(bounds.size.width), f32::from(bounds.size.height));
-		let frame_size = self
-			.engine
-			.read(cx)
-			.cpu_frame(Monitor::Program, cx)
-			.size(0);
+		let frame_size = self.engine.read(cx).cpu_frame(Monitor::Program, cx).size(0);
 		let frame = size(frame_size.width.0 as f32, frame_size.height.0 as f32);
-		let Some((px, py)) = crate::oakui::ofx::viewport_pixel_to_pen(position, area, frame)
-		else {
+		let Some((px, py)) = crate::oakui::ofx::viewport_pixel_to_pen(position, area, frame) else {
 			// The pointer is in the letterbox (outside the frame rect).
 			return;
 		};
@@ -519,7 +525,12 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 	/// consumed by any binding. The plugin's return status is deliberately
 	/// not acted on: the app does not steal key repeat or other listeners,
 	/// so the interact is a passive consumer of otherwise-unused keys.
-	fn forward_interact_key(&mut self, down: bool, keystroke: &gpui::Keystroke, cx: &mut Context<Self>) {
+	fn forward_interact_key(
+		&mut self,
+		down: bool,
+		keystroke: &gpui::Keystroke,
+		cx: &mut Context<Self>,
+	) {
 		let Some((_, interact, _)) = crate::oakui::ofx::active_interact() else {
 			return;
 		};
@@ -790,7 +801,7 @@ mod tests {
 	async fn scopes_tab_renders_from_the_current_frame(cx: &mut TestAppContext) {
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(640.0), px(360.0)), |window, cx| {
-			let engine = cx.new(|cx| MockEngine::demo(cx));
+			let engine = cx.new(MockEngine::demo);
 			let clock = engine.read(cx).program_clock().clone();
 			let meter = cx.new(|cx| AudioLevelMeter::new(30, engine.clone(), window, cx));
 			ProgramViewerPanel::new(engine, clock, meter, window, cx)

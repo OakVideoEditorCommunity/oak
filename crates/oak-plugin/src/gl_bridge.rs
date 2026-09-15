@@ -960,7 +960,7 @@ mod tests {
 		let stride = w as usize * 4;
 		for (i, g) in got.iter().enumerate() {
 			let row = i / stride;
-			let inv_row = (h as usize - 1 - row) as usize;
+			let inv_row = h as usize - 1 - row;
 			let expected = want[inv_row * stride + i % stride];
 			assert!(
 				(g - expected).abs() < 1e-6,

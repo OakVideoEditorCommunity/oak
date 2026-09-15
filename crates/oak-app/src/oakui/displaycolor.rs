@@ -82,9 +82,9 @@
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use oak_core::color::{pipeline_output_spec, ColorProcessor};
 use oak_core::colormath::{output_spec_to_xyz_d65, OutputColorSpec, OutputGamut, OutputTransfer};
 use oak_core::configstore::ConfigStore;
-use oak_core::color::{pipeline_output_spec, ColorProcessor};
 
 /// Config key: the display color management mode ("icc" / "off"). The
 /// preference only applies where the platform policy allows self-management
@@ -167,9 +167,7 @@ pub fn display_policy() -> DisplayPolicy {
 			"os" => return DisplayPolicy::OsManaged,
 			"self" => return DisplayPolicy::SelfManaged,
 			other => {
-				log::warn!(
-					"OAK_DISPLAY_POLICY={other:?} ignored (expected \"os\" or \"self\")"
-				);
+				log::warn!("OAK_DISPLAY_POLICY={other:?} ignored (expected \"os\" or \"self\")");
 			}
 		}
 	}
@@ -208,7 +206,10 @@ pub fn display_policy() -> DisplayPolicy {
 	// mapping, so self-management is the only way to honor wide-gamut
 	// displays there (the "off" preference opts back into OS-management).
 	#[cfg(target_os = "macos")]
-	match ConfigStore::instance().get(None, CONFIG_KEY_COLOR_MODE).as_deref() {
+	match ConfigStore::instance()
+		.get(None, CONFIG_KEY_COLOR_MODE)
+		.as_deref()
+	{
 		Ok("icc") => DisplayPolicy::SelfManaged,
 		_ => DisplayPolicy::OsManaged,
 	}
@@ -288,7 +289,7 @@ fn current_monitor_fingerprint(window: &gpui::Window, cx: &gpui::App) -> Option<
 		let center = window.bounds().center();
 		let x = f64::from(center.x) * f64::from(window.scale_factor());
 		let y = f64::from(center.y) * f64::from(window.scale_factor());
-		return oak_core::displayicc::x11_monitor_fingerprint_at(x, y);
+		oak_core::displayicc::x11_monitor_fingerprint_at(x, y)
 	}
 	#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 	{

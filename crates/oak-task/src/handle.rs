@@ -101,6 +101,11 @@ pub unsafe fn get<T: 'static>(h: &CHandle) -> Option<&T> {
 /// # Safety
 /// `T` must be the boxed type, and the handle must not be concurrently
 /// shared mutably.
+// The shared reference is the ABI input; exclusivity is the caller's
+// `unsafe` contract above, so the lint's usual aliasing concern is
+// discharged by the caller, not by `&mut CHandle` (which the C ABI does
+// not pass).
+#[allow(clippy::mut_from_ref)]
 pub unsafe fn get_mut<T: 'static>(h: &CHandle) -> Option<&mut T> {
 	if h.ctx.is_null() {
 		return None;

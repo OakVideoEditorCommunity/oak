@@ -250,7 +250,7 @@ impl CodecStream {
 
 	/// Associated timeline block (borrowed; only compared, never used).
 	pub fn block(&self) -> Option<OakNodeBlock> {
-		self.block.clone()
+		self.block
 	}
 }
 

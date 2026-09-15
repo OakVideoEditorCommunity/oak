@@ -111,9 +111,9 @@ impl WorkareaSetEnabledCommand {
 		let wa = unsafe { get::<Arc<Mutex<TimelineWorkArea>>>(&points) }.cloned();
 		let old_enabled = wa
 			.as_ref()
-			.and_then(|w| {
+			.map(|w| {
 				let w = w.lock().unwrap_or_else(|e| e.into_inner());
-				Some(w.enabled())
+				w.enabled()
 			})
 			.unwrap_or(false);
 		Self {
@@ -187,9 +187,9 @@ impl WorkareaSetRangeCommand {
 		let wa = unsafe { get::<Arc<Mutex<TimelineWorkArea>>>(&workarea) }.cloned();
 		let old_range = wa
 			.as_ref()
-			.and_then(|w| {
+			.map(|w| {
 				let w = w.lock().unwrap_or_else(|e| e.into_inner());
-				Some(*w.range())
+				*w.range()
 			})
 			.unwrap_or(range);
 		Self::new_with_old_opt(wa, range, old_range)

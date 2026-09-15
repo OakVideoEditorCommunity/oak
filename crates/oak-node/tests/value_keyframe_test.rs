@@ -70,7 +70,7 @@ fn texture_value_drop_releases() {
 	assert_eq!(refs(&h), 2);
 
 	{
-		let v = NodeValue::Texture(h.clone());
+		let v = NodeValue::Texture(h);
 		assert_eq!(refs(&h), 2, "no extra reference taken on clone");
 		drop(v); // must release the payload's reference
 		assert_eq!(refs(&h), 1);
@@ -97,7 +97,7 @@ fn texture_value_clone_addrefs() {
 	assert_eq!(refs(&h), 1);
 
 	{
-		let a = NodeValue::Texture(h.clone());
+		let a = NodeValue::Texture(h);
 		assert_eq!(refs(&h), 1, "construction takes the caller's reference");
 		{
 			let b = a.clone();

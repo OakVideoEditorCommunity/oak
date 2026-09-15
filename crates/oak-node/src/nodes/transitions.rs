@@ -403,6 +403,16 @@ pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {
 	(core, Box::new(TransitionNode))
 }
 
+/// Register this node type.
+pub fn register(meta: &mut Vec<NodeMeta>) {
+	meta.push(NodeMeta {
+		type_id: "org.olivevideoeditor.Olive.transition",
+		name: "Transition",
+		categories: &[Category::Timeline],
+		create,
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -595,14 +605,4 @@ mod tests {
 		let dup = behavior.duplicate(&core).unwrap();
 		assert_eq!(dup.name(), "Transition");
 	}
-}
-
-/// Register this node type.
-pub fn register(meta: &mut Vec<NodeMeta>) {
-	meta.push(NodeMeta {
-		type_id: "org.olivevideoeditor.Olive.transition",
-		name: "Transition",
-		categories: &[Category::Timeline],
-		create,
-	});
 }
