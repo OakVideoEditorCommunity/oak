@@ -623,3 +623,8 @@ pub(crate) fn write_output_frame(dst: &mut Texture, image: &Image) -> crate::err
 	}
 	Ok(())
 }
+ 			ctx.upload(*token, &frame)
+ 				.map_err(|e| Error::Failed(format!("输出纹理上传失败：{e}")))?;
+ 		}
++		// 未解析的平面纹理不会成为插件输出目标（解码路径会先解析）。
++		Texture::Planar(_) => {

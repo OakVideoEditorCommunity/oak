@@ -153,6 +153,9 @@ fn playback_decode_requests(
 			time: clip.media_in + (time - clip.in_time),
 			size,
 			format: PixelFormat::F32,
+			// The montage compositor is CPU-side: importing would only
+			// be downloaded again.
+			allow_import: false,
 		});
 	}
 	if let Some((filename, stream_index)) = &params.footage {
@@ -165,6 +168,7 @@ fn playback_decode_requests(
 			time,
 			size,
 			format: params.force_format.unwrap_or(PixelFormat::F32),
+			allow_import: true,
 		});
 	}
 	requests
@@ -191,6 +195,11 @@ pub struct DecodeRequest {
 	pub size: (i32, i32),
 	/// Target pixel format.
 	pub format: PixelFormat,
+	/// Whether the M5 zero-copy hardware import may serve this request.
+	/// The CPU montage compositor sets `false` (it needs CPU pixels); the
+	/// flag is part of the cache key, so the service never hands an
+	/// imported texture to a staging consumer (M5 audit).
+	pub allow_import: bool,
 }
 
 /// Decode-service counters (M1's evidence that the service really decodes
@@ -553,12 +562,13 @@ fn prefetch_into(
 /// decode thread.
 fn decode(request: &DecodeRequest, inner: &DecodeInner) -> Result<Texture> {
 	inner.counters.decodes.fetch_add(1, Ordering::Relaxed);
-	let result = crate::eval::render_footage_frame_inner(
+	let result = crate::eval::render_footage_frame_inner_opts(
 		&request.filename,
 		request.stream_index,
 		request.time,
 		request.size,
 		request.format,
+		request.allow_import,
 	);
 	if result.is_err() {
 		inner.counters.errors.fetch_add(1, Ordering::Relaxed);

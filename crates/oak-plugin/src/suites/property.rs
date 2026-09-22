@@ -769,3 +769,4 @@ pub fn suite_v1() -> &'static PropertySuiteV1 {
 		get_dimension: prop_get_dimension,
 	})
 }
+ 		get_dimension: prop_get_dimension,

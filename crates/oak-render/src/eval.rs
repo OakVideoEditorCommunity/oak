@@ -345,7 +345,9 @@ impl RenderEvalHooks {
                 height,
                 ..
             } => (*token, ctx.clone(), *width, *height),
-            Texture::Cpu(_) => unreachable!("handled above"),
+            // Imported planar frames never reach node processing (the
+            // footage path resolves them first); pass through defensively.
+            Texture::Cpu(_) | Texture::Planar(_) => return Ok(tex),
         };
         let concrete = ctx
             .as_any()
@@ -869,6 +871,11 @@ impl RenderEvalHooks {
                     scratch.push(token);
                     (token, (frame.width, frame.height))
                 }
+                // Resolved by the footage path; never a shader input.
+                Texture::Planar(_) => {
+                    warn("planar texture reached a shader job input (unresolved)");
+                    return None;
+                }
             };
             // The pass size follows the effect input's texture (C++ the
             // job's video params = the main input size); any other bound
@@ -1125,7 +1132,7 @@ const MAX_CACHED_DECODERS: usize = 6;
 /// LRU tick source for [`DECODERS`].
 static DECODER_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Count of [`render_footage_frame_inner`] entries, i.e. of real codec work
+/// Count of [`render_footage_frame_inner_opts`] entries, i.e. of real codec work
 /// on the footage path (frame-cache hits and decode-service LRU hits do not
 /// count). Visible for the decode-service tests, which use it to tell a
 /// cached frame from a re-decode.
@@ -1151,26 +1158,74 @@ pub fn reset_decode_invocations() {
 /// on every pre-render restart and on repeat plays).
 const MAX_CACHED_FRAMES: usize = 24;
 
-/// Decoded-frame LRU: `(filename, stream, time, w, h)` -> F32 CPU frame.
-/// Frame data is the expensive part (a 1080p frame ≈ 31 MB); the decoder
-/// session cache alone still re-decodes every `render_footage_frame`.
-/// The size is part of the key: the same media at a different target
-/// resolution is a different frame (an interleaved source-monitor/proxy
-/// request must not reuse a wrongly-sized pixel buffer).
-static DECODED_FRAMES: std::sync::OnceLock<
-    std::sync::Mutex<
-        std::collections::HashMap<(String, i32, (i64, i64), i32, i32), (Frame, u64)>,
-    >,
-> = std::sync::OnceLock::new();
+/// Cap on cached PLANAR hardware frames (M5 audit): each planar entry
+/// pins a decoder surface through its keep-alive guard, and the driver's
+/// surface pool is finite. Planar textures only need to bridge the decode
+/// thread → resolve, so they get a much smaller budget than the general
+/// frame LRU. Eviction drops only the import; the decoder session cache
+/// still holds the raw frame, so a re-request re-imports (no re-decode).
+const MAX_CACHED_PLANAR_FRAMES: usize = 4;
 
-fn decoded_frames() -> std::sync::MutexGuard<
-    'static,
-    std::collections::HashMap<(String, i32, (i64, i64), i32, i32), (Frame, u64)>,
-> {
+/// Decoded-frame LRU key: `(filename, stream, time, w, h)`. The size is
+/// part of the key: the same media at a different target resolution is a
+/// different frame (an interleaved source-monitor/proxy request must not
+/// reuse a wrongly-sized pixel buffer).
+type DecodedFrameKey = (String, i32, (i64, i64), i32, i32);
+
+/// Decoded-frame LRU map. Values are decoded textures (CPU frame, or the
+/// M5 imported planar texture when the hardware import took the frame)
+/// plus their LRU tick. Frame data is the expensive part (a 1080p F32
+/// frame ≈ 31 MB); the decoder session cache alone still re-decodes every
+/// `render_footage_frame`.
+type DecodedFrameCache = std::collections::HashMap<DecodedFrameKey, (Texture, u64)>;
+
+static DECODED_FRAMES: std::sync::OnceLock<std::sync::Mutex<DecodedFrameCache>> =
+    std::sync::OnceLock::new();
+
+fn decoded_frames() -> std::sync::MutexGuard<'static, DecodedFrameCache> {
     DECODED_FRAMES
         .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Insert `texture` under `key` with the general and planar caps applied.
+fn insert_cached_frame(cache: &mut DecodedFrameCache, key: DecodedFrameKey, texture: Texture, tick: u64) {
+    if cache.contains_key(&key) {
+        return;
+    }
+    while cache.len() >= MAX_CACHED_FRAMES {
+        let Some(victim) = cache
+            .iter()
+            .filter(|(_, (_, t))| *t > 0)
+            .min_by_key(|(_, (_, t))| *t)
+            .map(|(k, _)| k.clone())
+        else {
+            break;
+        };
+        cache.remove(&victim);
+    }
+    if texture.is_planar() {
+        prune_planar_frames(cache, MAX_CACHED_PLANAR_FRAMES.saturating_sub(1));
+    }
+    cache.insert(key, (texture, tick));
+}
+
+/// Evict the least-recently-used planar entries until at most `keep`
+/// remain (hardware-surface residency bound, M5 audit).
+fn prune_planar_frames(cache: &mut DecodedFrameCache, keep: usize) {
+    let mut planar: Vec<(DecodedFrameKey, u64)> = cache
+        .iter()
+        .filter(|(_, (t, _))| t.is_planar())
+        .map(|(k, (_, tick))| (k.clone(), *tick))
+        .collect();
+    if planar.len() <= keep {
+        return;
+    }
+    planar.sort_by_key(|(_, tick)| *tick);
+    for (key, _) in planar.drain(..planar.len() - keep) {
+        cache.remove(&key);
+    }
 }
 
 /// Time-key rational (the frame-LRU's deterministic key half).
@@ -1272,24 +1327,67 @@ pub fn render_footage_frame(
     format: PixelFormat,
 ) -> Result<Texture> {
     let started = std::time::Instant::now();
-    let result = match crate::pipeline::decode_service() {
-        Some(service) => {
-            let request = crate::pipeline::DecodeRequest {
-                filename: filename.to_string(),
+    let decode = |allow_import: bool| -> Result<Texture> {
+        match crate::pipeline::decode_service() {
+            Some(service) => {
+                let request = crate::pipeline::DecodeRequest {
+                    filename: filename.to_string(),
+                    stream_index,
+                    time,
+                    size,
+                    format,
+                    allow_import: true,
+                };
+                match service.request(request) {
+                    Some(result) => result,
+                    // The service went away (shutdown) mid-flight: decode here
+                    // rather than failing the frame.
+                    None => render_footage_frame_inner_opts(
+                        filename,
+                        stream_index,
+                        time,
+                        size,
+                        format,
+                        allow_import,
+                    ),
+                }
+            }
+            None => render_footage_frame_inner_opts(
+                filename,
                 stream_index,
                 time,
                 size,
                 format,
-            };
-            match service.request(request) {
-                Some(result) => result,
-                // The service went away (shutdown) mid-flight: decode here
-                // rather than failing the frame.
-                None => render_footage_frame_inner(filename, stream_index, time, size, format),
-            }
+                allow_import,
+            ),
         }
-        None => render_footage_frame_inner(filename, stream_index, time, size, format),
     };
+    let mut result = decode(true);
+    // M5: an imported hardware frame is planar YUV; resolve it to
+    // working-space RGBA on the GPU before it leaves the footage path.
+    // A resolution failure is a per-frame fallback: re-decode through the
+    // CPU scaler with the import disabled (the decoder session cache makes
+    // this a transfer, not a second decode).
+    if let Ok(texture) = &result {
+        if texture.is_planar() {
+            result = match resolve_planar_footage(texture) {
+                Ok(resolved) => Ok(resolved),
+                Err(err) => {
+                    eprintln!("planar footage resolve failed, staging fallback: {err:#}");
+                    // Bypass the decode service: its cache still holds the
+                    // planar entry that just failed to resolve.
+                    render_footage_frame_inner_opts(
+                        filename,
+                        stream_index,
+                        time,
+                        size,
+                        format,
+                        false,
+                    )
+                }
+            };
+        }
+    }
     if std::env::var_os("OAK_PERF").is_some() {
         eprintln!(
             "[decode] {:?} s{} time {}/{} ({:.3}s) size {:?} -> {:.3}s {:?}",
@@ -1306,15 +1404,84 @@ pub fn render_footage_frame(
     result
 }
 
-/// The synchronous decode behind [`render_footage_frame`] (frame-LRU →
-/// decoder session → codec → F32 frame). `pub(crate)` because the decode
-/// service runs exactly this on its own thread.
-pub(crate) fn render_footage_frame_inner(
+/// The CPU-staging decode for consumers that composite on the CPU (the
+/// montage compositor): same service/FRU semantics as
+/// [`render_footage_frame`], but the M5 zero-copy import is disabled and
+/// the result is always a CPU frame.
+///
+/// This is not just an optimization: the montage compositor runs on the
+/// CPU, so an imported `Texture::Gpu` would have to be downloaded again —
+/// and before this entry point existed it was silently SKIPPED (the M5
+/// audit's all-black montage bug). A planar texture must never reach a
+/// CPU consumer here.
+pub(crate) fn render_footage_frame_staged(
     filename: &str,
     stream_index: i32,
     time: Rational,
     size: (i32, i32),
     format: PixelFormat,
+) -> Result<Texture> {
+    let result = match crate::pipeline::decode_service() {
+        Some(service) => {
+            let request = crate::pipeline::DecodeRequest {
+                filename: filename.to_string(),
+                stream_index,
+                time,
+                size,
+                format,
+                allow_import: false,
+            };
+            match service.request(request) {
+                Some(result) => result,
+                None => render_footage_frame_inner_opts(
+                    filename,
+                    stream_index,
+                    time,
+                    size,
+                    format,
+                    false,
+                ),
+            }
+        }
+        None => render_footage_frame_inner_opts(
+            filename,
+            stream_index,
+            time,
+            size,
+            format,
+            false,
+        ),
+    };
+    // Defensive: a planar texture (a stale service entry from an older
+    // key layout) can never satisfy a staging request — re-decode CPU.
+    match result {
+        Ok(texture) if texture.is_planar() => render_footage_frame_inner_opts(
+            filename,
+            stream_index,
+            time,
+            size,
+            format,
+            false,
+        ),
+        other => other,
+    }
+}
+
+/// The synchronous decode behind [`render_footage_frame`] (frame-LRU →
+/// decoder session → codec → F32 frame). `pub(crate)` because the decode
+/// service runs exactly this on its own thread, with the request's own
+/// `allow_import` flag (the montage requests stage on purpose, §M5 audit).
+///
+/// `allow_import` false forces the CPU staging path: the resolve step's
+/// fallback re-decodes with it off, and the montage compositor never
+/// wants a GPU frame.
+pub(crate) fn render_footage_frame_inner_opts(
+    filename: &str,
+    stream_index: i32,
+    time: Rational,
+    size: (i32, i32),
+    format: PixelFormat,
+    allow_import: bool,
 ) -> Result<Texture> {
     // (file, stream, time) repeatedly (pre-render restarts, repeated
     // scale-up at the same time, graph + montage interleaving); the
@@ -1327,10 +1494,16 @@ pub(crate) fn render_footage_frame_inner(
     {
         let mut cache = decoded_frames();
         let tick = DECODER_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let frame = cache.get(&cache_key).map(|(f, _)| f.clone());
-        if let Some(frame) = frame {
-            cache.insert(cache_key.clone(), (frame.clone(), tick));
-            return Ok(Texture::wrap_frame(frame));
+        let texture = cache.get(&cache_key).map(|(f, _)| f.clone());
+        if let Some(texture) = texture {
+            // A planar entry cannot satisfy a staging request (the resolve
+            // step failed and asked for CPU pixels): treat it as a miss and
+            // decode through the scaler instead.
+            if allow_import || !texture.is_planar() {
+                cache.insert(cache_key.clone(), (texture.clone(), tick));
+                return Ok(texture);
+            }
+            cache.remove(&cache_key);
         }
     }
     // Past the frame cache: this call really goes to the codec (the
@@ -1355,6 +1528,20 @@ pub(crate) fn render_footage_frame_inner(
             None
         },
     };
+
+    // M5: hardware frames are offered to the zero-copy import first; the
+    // CPU retrieval below is the per-frame staging fallback (the decoder
+    // session cache holds the raw surface, so the fallback never
+    // re-decodes).
+    if allow_import {
+        if let Ok(Some(imported)) = decoder.retrieve_video_frame_gpu(&params) {
+            let mut cache = decoded_frames();
+            let tick = DECODER_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            insert_cached_frame(&mut cache, cache_key, imported.clone(), tick);
+            return Ok(imported);
+        }
+    }
+
     let decoded = decoder
         .retrieve_video_frame(&params)
         .map_err(|e| Error::Failed(format!("footage decode at {time:?}: {e:?}")))?;
@@ -1398,24 +1585,127 @@ pub(crate) fn render_footage_frame_inner(
     // by default; the legacy sRGB working space keeps the pass-through).
     convert_decoded_to_working(&mut dst, &decoded);
     // Memoize the finished working-space frame (LRU-capped).
+    let texture = Texture::wrap_frame(dst);
     {
         let mut cache = decoded_frames();
         let tick = DECODER_TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if !cache.contains_key(&cache_key) {
-            if cache.len() >= MAX_CACHED_FRAMES {
-                if let Some(victim) = cache
-                    .iter()
-                    .filter(|(_, (_, t))| *t > 0)
-                    .min_by_key(|(_, (_, t))| *t)
-                    .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&victim);
-                }
+        insert_cached_frame(&mut cache, cache_key, texture.clone(), tick);
+    }
+    Ok(texture)
+}
+
+/// Resolve an imported planar hardware frame (M5) to working-space RGBA
+/// on the GPU: the YUV→RGB pass (matrix + range from the frame's own
+/// colorimetry) followed by the source→working transform. In the legacy
+/// sRGB working space the transform is a pass-through (matching the CPU
+/// path's `convert_decoded_to_working`); otherwise it is applied as a CPU
+/// reference-baked 3D LUT, exactly like the OCIO color transforms.
+fn resolve_planar_footage(texture: &Texture) -> Result<Texture> {
+    let planar = texture
+        .as_planar()
+        .ok_or_else(|| Error::Failed("resolve_planar_footage: not planar".into()))?;
+    let Some(gpu) = planar
+        .ctx
+        .as_any()
+        .and_then(|a| a.downcast_ref::<oak_core::backend::GpuContext>())
+    else {
+        return Err(Error::Failed(
+            "planar texture belongs to a non-wgpu context".into(),
+        ));
+    };
+    let (w, h) = (planar.width.max(1), planar.height.max(1));
+    let dst = gpu
+        .create_texture(w, h)
+        .map_err(|e| Error::Failed(format!("planar resolve target: {e:?}")))?;
+    if let Err(e) = gpu.run_planar_yuv_to_rgb(planar.y, planar.uv, dst, &planar.transform) {
+        gpu.destroy_texture(dst);
+        return Err(Error::Failed(format!("planar YUV pass: {e:?}")));
+    }
+    let token = match footage_working_lut(planar.color_primaries, planar.color_trc) {
+        Some((key, lut)) => match gpu.apply_color_lut(dst, &key, &lut) {
+            Ok(transformed) => {
+                gpu.destroy_texture(dst);
+                transformed
             }
-            cache.insert(cache_key.clone(), (dst.clone(), tick));
+            Err(e) => {
+                eprintln!("footage working-space LUT failed, using source RGB: {e:?}");
+                dst
+            }
+        },
+        None => dst,
+    };
+    Ok(Texture::gpu(planar.ctx.clone(), token, w, h, PixelFormat::F32))
+}
+
+/// The source→working-space 3D LUT for a decoded frame (M5 GPU import
+/// path): baked from the same CPU reference (`colormath::decode_to_acescg`)
+/// the staging path uses, cached per colorimetry. `None` in the legacy
+/// sRGB working space (pass-through) or when the LUT cannot be built.
+fn footage_working_lut(
+    color_primaries: i32,
+    color_trc: i32,
+) -> Option<(String, std::sync::Arc<oak_core::lut::Lut3d>)> {
+    use oak_core::colormath::WorkingColorSpace;
+    if oak_core::color::pipeline_working_space() == WorkingColorSpace::SrgbLegacy {
+        return None;
+    }
+    let key = format!("footage/{color_primaries}/{color_trc}");
+    type Cache = std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<oak_core::lut::Lut3d>>,
+    >;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(lut) = cache.get(&key) {
+        return Some((key, lut.clone()));
+    }
+    let lut = build_footage_working_lut(color_primaries, color_trc)?;
+    if cache.len() >= 16 {
+        cache.clear();
+    }
+    cache.insert(key.clone(), lut.clone());
+    Some((key, lut))
+}
+
+/// Bake the source→ACEScg transform into a 3D LUT over the display
+/// domain (the same domain the color-transform LUTs use).
+fn build_footage_working_lut(
+    color_primaries: i32,
+    color_trc: i32,
+) -> Option<std::sync::Arc<oak_core::lut::Lut3d>> {
+    use oak_core::colormath::{decode_to_acescg, source_primaries_from_av, source_transfer_from_av};
+    use oak_core::lut::Lut3d;
+    let edge = Lut3d::DISPLAY_EDGE;
+    let (lo, hi) = (Lut3d::DISPLAY_LO, Lut3d::DISPLAY_HI);
+    let n = (edge as usize).pow(3);
+    let mut samples = vec![0.0f32; n * 4];
+    let step = |i: usize, axis: usize| -> f32 {
+        let t = i as f32 / (edge - 1) as f32;
+        lo[axis] + (hi[axis] - lo[axis]) * t
+    };
+    for b in 0..edge as usize {
+        for g in 0..edge as usize {
+            for r in 0..edge as usize {
+                let idx = ((b * edge as usize + g) * edge as usize + r) * 4;
+                samples[idx] = step(r, 0);
+                samples[idx + 1] = step(g, 1);
+                samples[idx + 2] = step(b, 2);
+                samples[idx + 3] = 1.0;
+            }
         }
     }
-    Ok(Texture::wrap_frame(dst))
+    decode_to_acescg(
+        &mut samples,
+        source_primaries_from_av(color_primaries),
+        source_transfer_from_av(color_trc),
+    );
+    let mut data = Vec::with_capacity(n * 3);
+    for px in samples.chunks_exact(4) {
+        data.extend_from_slice(&px[..3]);
+    }
+    Some(std::sync::Arc::new(Lut3d { edge, lo, hi, data }))
 }
 
 /// Convert a decoded footage frame (display-referred RGB in the source's
@@ -1531,6 +1821,11 @@ fn composite_tracks_gpu(
 					ctx.upload(t, f)?;
 					scratch.push(t);
 					t
+				}
+				Texture::Planar(_) => {
+					return Err(Error::Failed(
+						"unresolved planar texture in composite".into(),
+					))
 				}
 			};
 			let out = ctx.create_texture(w, h)?;
@@ -2503,7 +2798,8 @@ pub fn render_montage_frame_into(
             continue;
         }
         let media_time = clip.media_in + (time - clip.in_time);
-        let decoded = render_footage_frame(
+        // CPU compositor: stage on purpose (never an imported GPU frame).
+        let decoded = render_footage_frame_staged(
             &clip.filename,
             clip.stream_index,
             media_time,
@@ -2514,9 +2810,24 @@ pub fn render_montage_frame_into(
         // (C++ semantics: the clip texture passes through the chain
         // bottom-up, the chain top feeds the track composite).
         let effected = apply_clip_effects(decoded, clip, time);
+        // The compositor is CPU-side. The decode is staged above, but a
+        // clip effect may still hand back a GPU texture: read it back
+        // (an explicit CPU boundary) instead of silently dropping the
+        // clip (M5 audit: that skip produced all-black sequences).
+        let downloaded: Frame;
         let (src_data, src_stride) = match &effected {
             Texture::Cpu(src) => (&src.data, src.linesize_bytes() as i32),
-            _ => continue,
+            Texture::Gpu { .. } => {
+                downloaded = effected.to_frame().map_err(|e| {
+                    Error::Failed(format!("montage GPU readback failed: {e:?}"))
+                })?;
+                (&downloaded.data, downloaded.linesize_bytes() as i32)
+            }
+            Texture::Planar(_) => {
+                return Err(Error::Failed(
+                    "unresolved planar texture reached the montage compositor".into(),
+                ))
+            }
         };
         composite_over(dst, dst_stride, w, h, src_data, src_stride, clip.gain);
     }
@@ -4420,3 +4731,4 @@ mod tests {
 
 }
 
++    static LOCK: Mutex<()> = Mutex::new(());

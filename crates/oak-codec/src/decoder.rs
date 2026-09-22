@@ -292,6 +292,21 @@ pub trait Decoder: Send + Sync {
 	/// Retrieve a video frame into CPU memory.
 	fn retrieve_video_frame(&self, p: &RetrieveVideoParams) -> crate::error::Result<Arc<Frame>>;
 
+	/// Retrieve a video frame as an imported GPU planar texture (M5 zero
+	/// copy). `Ok(None)` when the frame is not an importable hardware
+	/// surface, the import switch is off, no GPU context is available, or
+	/// the requested output cannot be delivered zero-copy (a size/format
+	/// that needs the CPU scaler) — the caller then falls back to
+	/// [`Decoder::retrieve_video_frame`]. Implementations that decode only
+	/// in software keep the default.
+	fn retrieve_video_frame_gpu(
+		&self,
+		p: &RetrieveVideoParams,
+	) -> crate::error::Result<Option<oak_core::texture::Texture>> {
+		let _ = p;
+		Ok(None)
+	}
+
 	/// Retrieve a video frame as a render texture (owned by caller).
 	fn retrieve_video(&self, p: &RetrieveVideoParams) -> crate::error::Result<OakRenderTexture>;
 
@@ -771,3 +786,5 @@ mod tests_unimplemented {
 		assert_eq!(off.denominator(), 1);
 	}
 }
++	/// Held for the test's duration; never read, only dropped.
++		set_test_decoders(Vec::new());

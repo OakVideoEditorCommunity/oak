@@ -78,4 +78,9 @@ pub mod lut;
 pub use handle::CHandle;
 pub use rational::Rational;
 pub use samplefmt::{PixelFormat, SampleFormat};
+
+/// The wgpu generation the engine and the UI share (M2/M5). Re-exported
+/// so consumers of the external-import API can name texture formats
+/// without another dependency on the same major version.
+pub use wgpu;
 pub use timerange::{TimeRange, TimeRangeList};

@@ -42,7 +42,10 @@ jobs:
           # OpenColorIO build (ocio-sys `bundled`; Ubuntu's
           # libopencolorio-dev is 2.1, older than the bridge's API floor),
           # and the headless test infra gpui needs: X11, software Mesa
-          # Vulkan (lavapipe) and xvfb.
+          # Vulkan (lavapipe) and xvfb. `icc-profiles-free` gives the
+          # oak-core display-ICC tests a system profile (sRGB.icc); without
+          # it `color.rs::system_icc` finds nothing on this runner and the
+          # viewer black-screen guard silently skips.
           sudo apt-get install -y \
             build-essential clang libclang-dev cmake pkg-config nasm \
             git curl zip unzip tar python3 \
@@ -50,6 +53,7 @@ jobs:
             libasound2-dev libpulse-dev libsndfile1-dev \
             libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
             libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
+            icc-profiles-free \
             autoconf autoconf-archive automake libtool
 
       # ------------------------------------------------------------------

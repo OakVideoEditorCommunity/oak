@@ -3882,6 +3882,14 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 					{
 						crate::oakui::gpu::register_context(ctx.0, ctx.1);
 					}
+					// macOS/Windows: gpui does not expose its device, so the
+					// engine's shared context is the app's render device —
+					// mark it as such so the decoder's zero-copy import
+					// (host-gated) can engage on those platforms (M5).
+					#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+					{
+						let _ = crate::oakui::gpu::register_engine_context();
+					}
 					// Compact pro-app text metrics: gpui's default rem is
 					// 16px (desktop-app large); 14px matches the design's
 					// density. All rem-based text scales; px spacing is

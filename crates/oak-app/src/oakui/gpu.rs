@@ -49,7 +49,7 @@ static DISPLAY_LUT: Mutex<Option<(String, oak_core::lut::Lut3d)>> = Mutex::new(N
 fn display_lut_key() -> String {
 	format!(
 		"{}|{:?}|{:?}",
-		super::displaycolor::generation(),
+		crate::oakui::displaycolor::generation(),
 		oak_core::color::pipeline_working_space(),
 		oak_core::color::pipeline_output_spec()
 	)
@@ -145,6 +145,18 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 			);
 		}
 	}
+}
+
+/// Declare the engine's shared GPU context as the host's render device
+/// (M5) on platforms where gpui does not expose the window device
+/// (macOS/Windows): there the engine-created shared context is what the
+/// render thread renders on, so the decoder's zero-copy hardware import
+/// must treat it as the host device. Same rationale as
+/// [`register_context`]'s adoption on Linux/FreeBSD. No-op result is
+/// reported for diagnostics only.
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+pub fn register_engine_context() -> bool {
+	oak_core::backend::GpuContext::mark_host_context()
 }
 
 /// Whether a GPU context is registered (a window is open). The viewer uses
@@ -262,3 +274,4 @@ pub fn register_texture(
 		},
 	);
 }
+ 		},

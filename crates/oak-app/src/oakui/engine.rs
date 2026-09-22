@@ -1675,3 +1675,4 @@ pub struct ExportSession {	/// The event receiver (the background thread's sende
 	/// Cancels the running export as soon as possible.
 	pub cancel: Box<dyn Fn() + Send>,
 }
+ 	/// Cancels the running export as soon as possible.

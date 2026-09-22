@@ -244,3 +244,4 @@ impl ClipDecorator for OakClipDecorator {
 		}
 	}
 }
+ 		}

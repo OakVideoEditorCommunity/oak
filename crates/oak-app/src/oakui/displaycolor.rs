@@ -510,3 +510,4 @@ pub fn apply_bgra8(data: &mut [u8], pixels: i64) {
 		let _ = processor.convert_bgra8(data, pixels);
 	}
 }
+ 		let _ = processor.convert_bgra8(data, pixels);

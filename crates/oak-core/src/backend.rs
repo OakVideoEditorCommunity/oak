@@ -44,6 +44,12 @@ use crate::error::{Error, Result};
 use crate::frame::VideoParamsPod;
 use crate::texture::{Frame, Texture};
 
+pub mod external;
+
+#[cfg(target_os = "linux")]
+pub use external::DmaBufPlane;
+pub use external::ImportGuard;
+
 /// Backend selection preference (mapped onto wgpu backends).
 ///
 /// The choice is user-visible: the settings panel exposes a renderer
@@ -222,6 +228,15 @@ struct GpuTexture {
 	width: u32,
 	height: u32,
 	format: wgpu::TextureFormat,
+	/// The view aspect to use for sampling. Plane-imported textures
+	/// (Windows NV12: one texture, two plane views) register one token
+	/// per plane with the matching aspect; everything else is `All`.
+	aspect: wgpu::TextureAspect,
+	/// Selected array layer range for array-imported textures (Windows
+	/// D3D11VA frames are slices of one array texture): `Some((base,
+	/// count))` when this token aliases one slice. `None` = the whole
+	/// (single-layer) texture.
+	layer: Option<(u32, u32)>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -295,6 +310,9 @@ pub struct GpuContext {
 	present: Mutex<Vec<(wgpu::TextureFormat, PresentPipeline)>>,
 	/// The compiled YUV→RGB pass (M5 decode import dependency).
 	yuv: Mutex<Option<PresentPipeline>>,
+	/// The compiled planar (imported hardware NV12/P010) YUV→RGB pass
+	/// (M5): luma + interleaved chroma plane bindings.
+	yuv_planar: Mutex<Option<PresentPipeline>>,
 	/// Caller-keyed 3D LUT textures (per-node color transforms; M2).
 	color_luts: Mutex<Vec<(String, u64)>>,
 	/// Set once this context has created a GPU resource (texture or
@@ -337,6 +355,12 @@ pub fn reset_gpu_transfer_counters() {
 /// The process-wide shared-context slot (`shared` / `install_shared`).
 struct SharedSlot {
 	decided: bool,
+	/// The HOST (app/UI) explicitly installed the context, as opposed to
+	/// the engine lazily creating one from the user config. External
+	/// hardware-surface imports (M5) only run on a host-installed device:
+	/// a lazily created private context in a worker/CLI/test must not
+	/// silently switch decode onto the GPU.
+	host_installed: bool,
 	ctx: Option<Arc<GpuContext>>,
 }
 
@@ -345,9 +369,21 @@ fn shared_slot() -> &'static Mutex<SharedSlot> {
 	SLOT.get_or_init(|| {
 		Mutex::new(SharedSlot {
 			decided: false,
+			host_installed: false,
 			ctx: None,
 		})
 	})
+}
+
+/// Parse an `OAK_REQUIRE_GPU` value: unset means "skipping is allowed";
+/// only `0`/`false` (case-insensitive) disable the requirement. Kept pure
+/// so the policy test needs no process-wide environment mutation (which
+/// would race the GPU acceptance tests reading the variable in parallel).
+fn require_gpu_from_value(value: Option<&str>) -> bool {
+	match value {
+		Some(v) => !(v == "0" || v.eq_ignore_ascii_case("false")),
+		None => false,
+	}
 }
 
 /// Whether GPU-dependent tests must hard-fail when no adapter is
@@ -355,19 +391,24 @@ fn shared_slot() -> &'static Mutex<SharedSlot> {
 /// (lavapipe is present), so a degraded environment fails the suite
 /// instead of silently losing the GPU acceptance signal.
 pub fn require_gpu_adapter() -> bool {
-	match std::env::var("OAK_REQUIRE_GPU") {
-		Ok(v) => !(v == "0" || v.eq_ignore_ascii_case("false")),
-		Err(_) => false,
+	require_gpu_from_value(std::env::var("OAK_REQUIRE_GPU").ok().as_deref())
+}
+
+/// Handle a missing adapter: panic when `required`, otherwise log the
+/// skip (the caller returns). Taking the flag as a parameter lets the
+/// policy test drive the hard-fail arm without flipping the real
+/// environment variable of a running test process.
+fn skip_or_fail_gpu_with(required: bool, what: &str) {
+	if required {
+		panic!("no GPU adapter available for {what} (OAK_REQUIRE_GPU is set)");
 	}
+	eprintln!("no GPU adapter; skipping {what}");
 }
 
 /// Handle a missing adapter in a GPU acceptance test: panic when
 /// `OAK_REQUIRE_GPU` is set, otherwise log the skip (the caller returns).
 pub fn skip_or_fail_gpu(what: &str) {
-	if require_gpu_adapter() {
-		panic!("no GPU adapter available for {what} (OAK_REQUIRE_GPU is set)");
-	}
-	eprintln!("no GPU adapter; skipping {what}");
+	skip_or_fail_gpu_with(require_gpu_adapter(), what);
 }
 
 /// A fresh [`GpuContext`] for a test, or `None` when no adapter exists
@@ -438,6 +479,18 @@ impl GpuContext {
 			if filterable {
 				required_features |= wgpu::Features::FLOAT32_FILTERABLE;
 			}
+			// M5 (Windows): the D3D11VA import wraps a multi-planar
+			// NV12/P010 texture; those formats need their features
+			// enabled at device creation (no-op on adapters without
+			// them — the import then falls back per frame).
+			for feature in [
+				wgpu::Features::TEXTURE_FORMAT_NV12,
+				wgpu::Features::TEXTURE_FORMAT_P010,
+			] {
+				if adapter.features().contains(feature) {
+					required_features |= feature;
+				}
+			}
 			let (device, queue) =
 				match pollster_block_on(adapter.request_device(&wgpu::DeviceDescriptor {
 					label: Some("oakrender"),
@@ -469,6 +522,7 @@ impl GpuContext {
 				display_lut: Mutex::new(None),
 				present: Mutex::new(Vec::new()),
 				yuv: Mutex::new(None),
+				yuv_planar: Mutex::new(None),
 				color_luts: Mutex::new(Vec::new()),
 				used: AtomicBool::new(false),
 			}));
@@ -508,6 +562,7 @@ impl GpuContext {
 			display_lut: Mutex::new(None),
 			present: Mutex::new(Vec::new()),
 			yuv: Mutex::new(None),
+			yuv_planar: Mutex::new(None),
 			color_luts: Mutex::new(Vec::new()),
 			used: AtomicBool::new(false),
 		})
@@ -600,6 +655,8 @@ impl GpuContext {
 				width: width as u32,
 				height: height as u32,
 				format,
+				aspect: wgpu::TextureAspect::All,
+				layer: None,
 			},
 		);
 		Ok(token)
@@ -1245,6 +1302,202 @@ impl GpuContext {
 		Ok(program)
 	}
 
+	/// Run the planar YUV→RGB pass (M5 zero-copy decode): the imported
+	/// luma plane (R8/R16, bind 0) and interleaved chroma plane
+	/// (R8G8/R16G16, bind 1) → one `Rgba32Float` destination. The
+	/// matrix/range live in `transform`, exactly like
+	/// [`GpuContext::run_yuv_to_rgb`].
+	pub fn run_planar_yuv_to_rgb(
+		&self,
+		y: u64,
+		uv: u64,
+		dst: u64,
+		transform: &YuvTransform,
+	) -> Result<()> {
+		let y_view = self.texture_view(y)?;
+		let uv_view = self.texture_view(uv)?;
+		let dst_tex = lock(&self.textures)
+			.get(&dst)
+			.cloned()
+			.ok_or(Error::NotFound)?;
+		let (y_size, uv_size) = {
+			let textures = lock(&self.textures);
+			let y = textures.get(&y).ok_or(Error::NotFound)?;
+			let uv = textures.get(&uv).ok_or(Error::NotFound)?;
+			((y.width, y.height), (uv.width, uv.height))
+		};
+		let pipeline = self.planar_yuv_pipeline()?;
+		let m = transform.matrix;
+		let b = transform.offset;
+		let params: [f32; 16] = [
+			m[0][0],
+			m[0][1],
+			m[0][2],
+			b[0],
+			m[1][0],
+			m[1][1],
+			m[1][2],
+			b[1],
+			m[2][0],
+			m[2][1],
+			m[2][2],
+			b[2],
+			uv_size.0 as f32 / y_size.0.max(1) as f32,
+			uv_size.1 as f32 / y_size.1.max(1) as f32,
+			0.0,
+			0.0,
+		];
+		let uniform = self.device.create_buffer(&wgpu::BufferDescriptor {
+			label: Some("oakrender-yuv-planar-params"),
+			size: 64,
+			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+			mapped_at_creation: false,
+		});
+		self.queue
+			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		let dst_view = dst_tex
+			.texture
+			.create_view(&wgpu::TextureViewDescriptor::default());
+		let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+			label: Some("oakrender-yuv-planar-bg"),
+			layout: &pipeline.layout,
+			entries: &[
+				wgpu::BindGroupEntry {
+					binding: 0,
+					resource: wgpu::BindingResource::TextureView(&y_view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 1,
+					resource: wgpu::BindingResource::TextureView(&uv_view),
+				},
+				wgpu::BindGroupEntry {
+					binding: 2,
+					resource: uniform.as_entire_binding(),
+				},
+			],
+		});
+		let mut encoder = self
+			.device
+			.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+				label: Some("oakrender-yuv-planar"),
+			});
+		{
+			let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("oakrender-yuv-planar-pass"),
+				color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+					view: &dst_view,
+					depth_slice: None,
+					resolve_target: None,
+					ops: wgpu::Operations {
+						load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+						store: wgpu::StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: None,
+				timestamp_writes: None,
+				occlusion_query_set: None,
+				multiview_mask: None,
+			});
+			pass.set_pipeline(&pipeline.pipeline);
+			pass.set_bind_group(0, &bind_group, &[]);
+			pass.draw(0..3, 0..1);
+		}
+		self.queue.submit(Some(encoder.finish()));
+		Ok(())
+	}
+
+	/// The planar YUV→RGB pass pipeline (built once).
+	fn planar_yuv_pipeline(&self) -> Result<PresentPipeline> {
+		let mut cache = lock(&self.yuv_planar);
+		if let Some(p) = cache.as_ref() {
+			return Ok(p.clone());
+		}
+		let plane = |binding: u32| wgpu::BindGroupLayoutEntry {
+			binding,
+			visibility: wgpu::ShaderStages::FRAGMENT,
+			ty: wgpu::BindingType::Texture {
+				sample_type: wgpu::TextureSampleType::Float { filterable: false },
+				view_dimension: wgpu::TextureViewDimension::D2,
+				multisampled: false,
+			},
+			count: None,
+		};
+		let layout = self
+			.device
+			.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+				label: Some("oakrender-yuv-planar-layout"),
+				entries: &[
+					plane(0),
+					plane(1),
+					wgpu::BindGroupLayoutEntry {
+						binding: 2,
+						visibility: wgpu::ShaderStages::FRAGMENT,
+						ty: wgpu::BindingType::Buffer {
+							ty: wgpu::BufferBindingType::Uniform,
+							has_dynamic_offset: false,
+							min_binding_size: None,
+						},
+						count: None,
+					},
+				],
+			});
+		let vs = self
+			.device
+			.create_shader_module(wgpu::ShaderModuleDescriptor {
+				label: Some("oakrender-yuv-planar-vs"),
+				source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(EFFECT_VS_WGSL)),
+			});
+		let fs = self
+			.device
+			.create_shader_module(wgpu::ShaderModuleDescriptor {
+				label: Some("oakrender-yuv-planar-fs"),
+				source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(YUV_PLANAR_WGSL)),
+			});
+		let pipeline_layout = self
+			.device
+			.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+				label: Some("oakrender-yuv-planar-pipeline-layout"),
+				bind_group_layouts: &[Some(&layout)],
+				immediate_size: 0,
+			});
+		let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+		let pipeline = self
+			.device
+			.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+				label: Some("oakrender-yuv-planar"),
+				layout: Some(&pipeline_layout),
+				vertex: wgpu::VertexState {
+					module: &vs,
+					entry_point: Some("vs_main"),
+					compilation_options: Default::default(),
+					buffers: &[],
+				},
+				primitive: wgpu::PrimitiveState::default(),
+				depth_stencil: None,
+				multisample: wgpu::MultisampleState::default(),
+				fragment: Some(wgpu::FragmentState {
+					module: &fs,
+					entry_point: Some("main"),
+					compilation_options: Default::default(),
+					targets: &[Some(wgpu::ColorTargetState {
+						format: wgpu::TextureFormat::Rgba32Float,
+						blend: None,
+						write_mask: wgpu::ColorWrites::ALL,
+					})],
+				}),
+				multiview_mask: None,
+				cache: None,
+			});
+		if let Some(err) = pollster_block_on(scope.pop()) {
+			return Err(Error::Failed(format!(
+				"planar YUV pipeline validation failed: {err}"
+			)));
+		}
+		let program = PresentPipeline { pipeline, layout };
+		*cache = Some(program.clone());
+		Ok(program)
+	}
+
 	/// Clear a texture to transparent black on the GPU (no CPU transfer):
 	/// the graph compositor's starting accumulator and single-sided
 	/// transition sides.
@@ -1605,9 +1858,38 @@ impl GpuContext {
 				return false;
 			}
 		}
+		slot.host_installed = ctx.is_some();
 		slot.ctx = ctx;
 		slot.decided = true;
 		true
+	}
+
+	/// True when the host installed the shared device (the app's UI
+	/// context). The M5 hardware-surface import requires this: a lazily
+	/// created engine context belongs to a worker/CLI/test and must not
+	/// pull decode onto the GPU.
+	pub fn host_gpu_installed() -> bool {
+		lock(shared_slot()).host_installed
+	}
+
+	/// Declare the process's shared context as the HOST's render device
+	/// (M5), creating it on first use if the engine has not yet.
+	///
+	/// On Linux/FreeBSD the app adopts the window's wgpu device via
+	/// [`GpuContext::install_shared`]; on macOS/Windows gpui does not
+	/// expose that device, so the engine-created shared context *is* the
+	/// app's render device and must be marked here — otherwise the decode
+	/// import's host gate would make the D3D11VA/VideoToolbox rows dead
+	/// code (M5 audit). Worker, CLI and test processes never call this,
+	/// which is what keeps their decode on the CPU staging path.
+	pub fn mark_host_context() -> bool {
+		let mut slot = lock(shared_slot());
+		if !slot.decided {
+			slot.ctx = Self::create(BackendKind::from_user_config());
+			slot.decided = true;
+		}
+		slot.host_installed = slot.ctx.is_some();
+		slot.ctx.is_some()
 	}
 
 	/// True when the app installed the shared context (as opposed to the
@@ -1931,22 +2213,46 @@ pub struct YuvTransform {
 }
 
 impl YuvTransform {
-	/// Build the transform for a luma matrix and range.
+	/// Build the transform for a luma matrix and range. Inputs are
+	/// normalized 16-bit code values (code / 65535).
 	pub fn from_matrix(matrix: crate::colormath::YuvMatrix, full_range: bool) -> Self {
+		Self::from_matrix_depth(matrix, full_range, 16)
+	}
+
+	/// Build the transform for a luma matrix, range and source bit depth.
+	/// Plane inputs are normalized code values (code / (2^bits - 1));
+	/// the limited-range expansion uses the depth's own code limits
+	/// (16..235 luma, 16..240 chroma scaled to the depth).
+	pub fn from_matrix_depth(
+		matrix: crate::colormath::YuvMatrix,
+		full_range: bool,
+		bit_depth: u32,
+	) -> Self {
 		let (kr, kb) = matrix.kr_kb();
 		let kg = 1.0 - kr - kb;
-		// CPU reference: Y spans 219<<8 for limited, chroma 224<<8, both
-		// divided per code value; inputs here are code/65535.
-		let (ay, by, ac, bc) = if full_range {
-			(1.0, 0.0, 1.0, 32768.0 / 65535.0)
+		let max = ((1u32 << bit_depth) - 1) as f32;
+		// Code limits for this depth. `scale` is the 8-bit-code shift the
+		// CPU reference uses (depth 16 = 8-bit codes << 8, so 16 stays
+		// bit-identical with `colormath::yuv444p16_to_rgb_f32`).
+		let scale = if bit_depth > 8 {
+			1u32 << (bit_depth - 8)
+		} else {
+			1
+		};
+		let (y_black, y_white, c_mid, c_span) = if full_range {
+			(0.0, max, (1u32 << (bit_depth - 1)) as f32, max)
 		} else {
 			(
-				65535.0 / 56064.0,
-				4096.0 / 56064.0,
-				65535.0 / 57344.0,
-				32768.0 / 57344.0,
+				(16 * scale) as f32,
+				(235 * scale) as f32,
+				(128 * scale) as f32,
+				(224 * scale) as f32,
 			)
 		};
+		let ay = max / (y_white - y_black);
+		let by = y_black / (y_white - y_black);
+		let ac = max / c_span;
+		let bc = c_mid / c_span;
 		let rv = 2.0 * (1.0 - kr) * ac;
 		let bu = 2.0 * (1.0 - kb) * ac;
 		let gu = -(2.0 * kb * (1.0 - kb) / kg) * ac;
@@ -2087,6 +2393,46 @@ fn main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = textureLoad(u_tex, uc, 0).r;
     let vv = textureLoad(v_tex, uc, 0).r;
     let yuv = vec3<f32>(yv, uv, vv);
+    let rgb = vec3<f32>(
+        dot(p.m0.xyz, yuv) + p.m0.w,
+        dot(p.m1.xyz, yuv) + p.m1.w,
+        dot(p.m2.xyz, yuv) + p.m2.w,
+    );
+    return vec4<f32>(rgb, 1.0);
+}
+"#;
+
+/// The planar (hardware-import) YUV→RGB pass (M5): luma + interleaved
+/// chroma plane inputs (R8/R8G8 or R16/R16G16, normalized 0..1), one
+/// `Rgba32Float` output. Same matrix/range math as [`YUV_WGSL`].
+const YUV_PLANAR_WGSL: &str = r#"
+struct Params {
+    m0: vec4<f32>,
+    m1: vec4<f32>,
+    m2: vec4<f32>,
+    uv_scale: vec4<f32>,
+};
+@group(0) @binding(0) var y_tex: texture_2d<f32>;
+@group(0) @binding(1) var uv_tex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> p: Params;
+
+@fragment
+fn main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    let yd = textureDimensions(y_tex);
+    let coord = clamp(
+        vec2<i32>(i32(frag.x), i32(frag.y)),
+        vec2<i32>(0, 0),
+        vec2<i32>(i32(yd.x), i32(yd.y)) - vec2<i32>(1, 1),
+    );
+    let yv = textureLoad(y_tex, coord, 0).r;
+    let ud = textureDimensions(uv_tex);
+    let uc = clamp(
+        vec2<i32>(vec2<f32>(coord) * p.uv_scale.xy),
+        vec2<i32>(0, 0),
+        vec2<i32>(i32(ud.x), i32(ud.y)) - vec2<i32>(1, 1),
+    );
+    let uv = textureLoad(uv_tex, uc, 0);
+    let yuv = vec3<f32>(yv, uv.r, uv.g);
     let rgb = vec3<f32>(
         dot(p.m0.xyz, yuv) + p.m0.w,
         dot(p.m1.xyz, yuv) + p.m1.w,
@@ -2368,6 +2714,9 @@ impl DisplayRenderer {
 				let frame = unsafe { frame_from_pixels_for_upload(size, pixels, linesize) }?;
 				ctx.upload(*token, &frame)
 			}
+			// Imported hardware planes are immutable views of decoder
+			// memory (M5); uploading into them is never valid.
+			Texture::Planar(_) => Err(Error::State),
 			Texture::Cpu(frame) => {
 				let stride = frame.linesize_bytes();
 				if linesize != stride {
@@ -2477,7 +2826,9 @@ impl DisplayRenderer {
 pub fn texture_id_of(t: &Texture) -> i32 {
 	match t {
 		Texture::Gpu { token, .. } => *token as i32,
-		Texture::Cpu(_) => 0,
+		// Imported planar frames have no single displayable texture id;
+		// the footage path resolves them before presentation.
+		Texture::Planar(_) | Texture::Cpu(_) => 0,
 	}
 }
 

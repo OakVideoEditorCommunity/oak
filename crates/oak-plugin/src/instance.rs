@@ -1216,3 +1216,4 @@ pub struct ClipPreferences {
 	/// field 处理模式（kOfxImageField*）。
 	pub field: String,
 }
+ 	/// field 处理模式（kOfxImageField*）。

@@ -295,6 +295,13 @@ impl ExportTask {
 					"Render frame readback for the encoder failed: {e:?}"
 				))
 			})?,
+			// Unresolved planar frames never reach an encoder; the
+			// decode path resolves them before delivery.
+			Texture::Planar(_) => {
+				return Err(Error::Failed(
+					"unresolved planar texture for the encoder".into(),
+				))
+			}
 		};
 		let frame = &frame;
 		let params = CommonVideoParams::new_basic(

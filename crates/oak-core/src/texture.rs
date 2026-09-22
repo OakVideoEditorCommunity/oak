@@ -20,8 +20,8 @@ use crate::PixelFormat;
 use crate::Rational;
 use std::sync::Arc;
 
-use crate::backend::{BackendKind, GpuContextLike};
-use crate::error::Result;
+use crate::backend::{BackendKind, GpuContextLike, YuvTransform};
+use crate::error::{Error, Result};
 use crate::frame::VideoParamsPod;
 
 /// A CPU frame (the payload oakcodec frames bridge into, and the value
@@ -199,6 +199,146 @@ impl Drop for GpuLease {
 	}
 }
 
+/// A hardware surface's chroma layout, as imported for the planar GPU
+/// textures (M5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanarFormat {
+	/// 8-bit NV12: R8 luma + interleaved R8G8 chroma.
+	Nv12,
+	/// 10-bit P010: 16-bit left-aligned luma + interleaved 16-bit chroma.
+	P010,
+}
+
+impl PlanarFormat {
+	/// The single-channel luma plane format.
+	pub fn y_format(self) -> wgpu::TextureFormat {
+		match self {
+			PlanarFormat::Nv12 => wgpu::TextureFormat::R8Unorm,
+			PlanarFormat::P010 => wgpu::TextureFormat::R16Unorm,
+		}
+	}
+
+	/// The interleaved two-channel chroma plane format.
+	pub fn uv_format(self) -> wgpu::TextureFormat {
+		match self {
+			PlanarFormat::Nv12 => wgpu::TextureFormat::Rg8Unorm,
+			PlanarFormat::P010 => wgpu::TextureFormat::Rg16Unorm,
+		}
+	}
+
+	/// Display name (diagnostics).
+	pub fn name(self) -> &'static str {
+		match self {
+			PlanarFormat::Nv12 => "nv12",
+			PlanarFormat::P010 => "p010",
+		}
+	}
+
+	/// The source bit depth (the limited-range expansion depth for
+	/// [`crate::backend::YuvTransform::from_matrix_depth`]).
+	pub fn bit_depth(self) -> u32 {
+		match self {
+			PlanarFormat::Nv12 => 8,
+			PlanarFormat::P010 => 16,
+		}
+	}
+}
+
+/// A zero-copy hardware-decode frame (M5): the decoder's YUV hardware
+/// surface imported as two GPU plane textures (luma + interleaved
+/// chroma), plus everything the render thread needs to turn it into a
+/// working-space RGBA texture — [`GpuContext::run_planar_yuv_to_rgb`]
+/// for the matrix/range and the raw source colorimetry for the
+/// source→working transform.
+///
+/// This is a *transient* texture: footage decode produces it and the
+/// footage path resolves it to `Texture::Gpu` before any node samples
+/// it. Every other consumer sees only `Gpu`/`Cpu`.
+///
+/// [`GpuContext::run_planar_yuv_to_rgb`]: crate::backend::GpuContext::run_planar_yuv_to_rgb
+#[derive(Clone)]
+pub struct PlanarTexture {
+	/// Luma plane token (registry entry, `R8Unorm`/`R16Unorm`).
+	pub y: u64,
+	/// Interleaved chroma plane token (`R8G8Unorm`/`R16G16Unorm`).
+	pub uv: u64,
+	/// Plane layout (bit depth and chroma interleave).
+	pub format: PlanarFormat,
+	/// Frame width (luma resolution).
+	pub width: i32,
+	/// Frame height (luma resolution).
+	pub height: i32,
+	/// The YUV→RGB matrix/range for the planes.
+	pub transform: YuvTransform,
+	/// Source color-primaries code point (`AVCOL_PRI_*`).
+	pub color_primaries: i32,
+	/// Source transfer-characteristic code point (`AVCOL_TRC_*`).
+	pub color_trc: i32,
+	/// The context owning both plane textures.
+	pub ctx: Arc<dyn GpuContextLike>,
+	/// Plane-token ownership: dropping the last `PlanarTexture` clone
+	/// releases both registry tokens (and with them the imported
+	/// surfaces). Never read directly.
+	#[allow(dead_code)]
+	y_lease: Arc<GpuLease>,
+	#[allow(dead_code)]
+	uv_lease: Arc<GpuLease>,
+	/// Extra lifetime guard for platforms whose GPU texture types cannot
+	/// carry a drop callback (macOS/Metal): the decoder's pixel-buffer
+	/// reference is held here and released with the planar texture.
+	#[allow(dead_code)]
+	pub keep_alive: Option<Arc<dyn std::any::Any + Send + Sync>>,
+}
+
+impl PlanarTexture {
+	/// Build a planar texture from imported plane tokens: `planes` is
+	/// `(luma, chroma)`, `size` the luma dimensions.
+	pub fn new(
+		ctx: Arc<dyn GpuContextLike>,
+		format: PlanarFormat,
+		size: (i32, i32),
+		planes: (u64, u64),
+		transform: YuvTransform,
+		color: (i32, i32),
+	) -> Self {
+		let (width, height) = size;
+		let (y, uv) = planes;
+		let (color_primaries, color_trc) = color;
+		Self {
+			y,
+			uv,
+			format,
+			width,
+			height,
+			transform,
+			color_primaries,
+			color_trc,
+			y_lease: GpuLease::new(ctx.clone(), y),
+			uv_lease: GpuLease::new(ctx.clone(), uv),
+			keep_alive: None,
+			ctx,
+		}
+	}
+
+	/// Attach a non-CPU lifetime guard (macOS: the decoder's pixel
+	/// buffer), released with this texture.
+	pub fn set_keep_alive(&mut self, guard: Arc<dyn std::any::Any + Send + Sync>) {
+		self.keep_alive = Some(guard);
+	}
+}
+
+impl std::fmt::Debug for PlanarTexture {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("PlanarTexture")
+			.field("y", &self.y)
+			.field("uv", &self.uv)
+			.field("format", &self.format)
+			.field("width", &self.width)
+			.field("height", &self.height)
+			.finish_non_exhaustive()
+	}
+}
+
 /// A texture: either backend-resident (GPU) or a CPU-frame wrapper.
 ///
 /// GPU textures carry an `Arc` to their [`GpuContext`](crate::backend::GpuContext)
@@ -226,6 +366,9 @@ pub enum Texture {
 		/// Shared token ownership (destroyed with the last clone).
 		lease: Arc<GpuLease>,
 	},
+	/// Imported hardware-decode YUV frame (M5); resolved to `Gpu` by the
+	/// footage path before consumers run.
+	Planar(PlanarTexture),
 	/// CPU-frame wrapper (uploaded lazily by the backend).
 	Cpu(Frame),
 }
@@ -248,6 +391,7 @@ impl std::fmt::Debug for Texture {
 				.field("height", height)
 				.field("format", format)
 				.finish(),
+			Texture::Planar(p) => f.debug_tuple("Texture::Planar").field(p).finish(),
 			Texture::Cpu(frame) => f.debug_tuple("Texture::Cpu").field(frame).finish(),
 		}
 	}
@@ -284,7 +428,7 @@ impl Texture {
 	/// True for dummy textures.
 	pub fn is_dummy(&self) -> bool {
 		match self {
-			Texture::Gpu { .. } => false,
+			Texture::Gpu { .. } | Texture::Planar(_) => false,
 			Texture::Cpu(f) => f.is_dummy(),
 		}
 	}
@@ -294,11 +438,33 @@ impl Texture {
 		Texture::Cpu(frame)
 	}
 
-	/// Read back into a CPU frame (downloads for GPU textures).
+	/// Wrap an imported hardware YUV frame (M5).
+	pub fn wrap_planar(planar: PlanarTexture) -> Self {
+		Texture::Planar(planar)
+	}
+
+	/// The imported planar frame, when this is one.
+	pub fn as_planar(&self) -> Option<&PlanarTexture> {
+		match self {
+			Texture::Planar(p) => Some(p),
+			_ => None,
+		}
+	}
+
+	/// True for imported hardware YUV frames (M5) — the footage path's
+	/// resolve trigger.
+	pub fn is_planar(&self) -> bool {
+		matches!(self, Texture::Planar(_))
+	}
+
+	/// Read back into a CPU frame (downloads for GPU textures). An
+	/// unresolved planar texture is an error: the caller must resolve
+	/// (YUV→RGB) through the footage path first.
 	pub fn to_frame(&self) -> Result<Frame> {
 		match self {
 			Texture::Cpu(f) => Ok(f.clone()),
 			Texture::Gpu { token, ctx, .. } => ctx.download(*token),
+			Texture::Planar(_) => Err(Error::State),
 		}
 	}
 
@@ -306,14 +472,18 @@ impl Texture {
 	pub fn size(&self) -> (i32, i32) {
 		match self {
 			Texture::Gpu { width, height, .. } => (*width, *height),
+			Texture::Planar(p) => (p.width, p.height),
 			Texture::Cpu(f) => (f.width, f.height),
 		}
 	}
 
-	/// The texture's pixel format.
+	/// The texture's pixel format. A planar texture reports `F32`: it is
+	/// transient, and the footage path always resolves it to an F32 RGBA
+	/// GPU texture before any consumer sees it.
 	pub fn format(&self) -> PixelFormat {
 		match self {
 			Texture::Gpu { format, .. } => *format,
+			Texture::Planar(_) => PixelFormat::F32,
 			Texture::Cpu(f) => f.format,
 		}
 	}
@@ -322,6 +492,7 @@ impl Texture {
 	pub fn backend(&self) -> BackendKind {
 		match self {
 			Texture::Gpu { backend, .. } => *backend,
+			Texture::Planar(p) => p.ctx.kind(),
 			Texture::Cpu(_) => BackendKind::Cpu,
 		}
 	}

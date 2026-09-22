@@ -347,3 +347,6 @@ mod tests {
 		}
 	}
 }
++	/// Held for the test's duration; never read, only dropped.
++		set_test_encoders(Vec::new());
++		_lock: crate::lock_tests(),

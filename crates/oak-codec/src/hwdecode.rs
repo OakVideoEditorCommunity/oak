@@ -31,14 +31,15 @@
 //! hardware surface.
 //!
 //! - **macOS**: `AV_HWDEVICE_TYPE_VIDEOTOOLBOX`
-//! - **Linux**: `CUDA` (NVDEC, the discrete-GPU path), then `VAAPI`
+//! - **Linux**: `VAAPI` (DMA-BUF, the M5 import path), then `CUDA` (NVDEC)
 //! - **Windows**: `D3D11VA`, then `CUDA` (NVDEC)
 //!
 //! Device creation can fail on machines without the device/driver (a
 //! headless Linux box, no NVIDIA GPU) — the candidate is skipped and
 //! the next one (or the software decoder) is used. Hardware frames
 //! (`AV_PIX_FMT_VIDEOTOOLBOX` / `VAAPI` / `CUDA` / `D3D11VA_VLD` /
-//! `D3D11`) are transferred to system memory with
+//! `D3D11`) either go through the M5 zero-copy import
+//! (`crate::gpuinterop`) or are transferred to system memory with
 //! `av_hwframe_transfer_data` before the swscale conversion.
 
 use ffmpeg::ffi as sys;
@@ -131,16 +132,17 @@ pub fn device_type_candidates() -> &'static [sys::AVHWDeviceType] {
 	}
 	#[cfg(all(unix, not(target_os = "macos")))]
 	{
-		// CUDA (native NVDEC) first: it is the discrete-GPU path, and on
-		// multi-GPU boxes VAAPI's default render node can point at a
-		// device with no VA driver (e.g. NVIDIA without
-		// libva-nvidia-driver) while the AMD/Intel node would work —
-		// trying NVDEC first sidesteps that misdirection. VAAPI stays as
-		// the fallback for AMD/Intel-only machines (CUDA device creation
-		// fails fast without libcuda).
+		// VAAPI first: it is the DMA-BUF path the M5 zero-copy import
+		// consumes (`VK_EXT_external_memory_dma_buf`), and on NVIDIA boxes
+		// with the VA-API driver it is just as reachable as NVDEC — while
+		// a CUDA (NVDEC) surface has no public handle export, so frames
+		// decoded through it can only take the staging fallback. CUDA
+		// stays as the fallback for machines without libva; it also
+		// sidesteps VAAPI's default render node pointing at a device with
+		// no VA driver (CUDA device creation fails fast without libcuda).
 		&[
-			sys::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
 			sys::AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI,
+			sys::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA,
 		]
 	}
 }
@@ -363,3 +365,6 @@ mod tests {
 		assert!(!device_unavailable(dev));
 	}
 }
++	/// would let their attempts perturb the negative-cache assertion on
++#[cfg(test)]
++#[cfg(test)]

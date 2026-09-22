@@ -46,6 +46,7 @@ pub mod ffmpeg;
 pub mod footagedescription;
 pub mod frame;
 pub mod framemanager;
+pub mod gpuinterop;
 pub mod hwdecode;
 pub mod oiio;
 pub mod oiioframebridge;

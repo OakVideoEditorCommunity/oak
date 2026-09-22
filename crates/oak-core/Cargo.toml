@@ -15,6 +15,11 @@ ocio-rs = { version = "0.2", features = ["bundled"] }
 # generation (29, matching the gpui_wgpu device the app presents with, so
 # the render thread's textures are directly sampleable by the UI).
 wgpu = "29"
+# wgpu-types: the HAL descriptor types (`TextureUses`) that wgpu 29 does
+# re-export through `wgpu::hal`'s descriptors but not by name (M5 external
+# image import builds a `wgpu_hal::TextureDescriptor` by hand). Pinned to
+# the same generation as wgpu 29.
+wgpu-types = "29"
 log = "0.4.34"
 # half: f16↔f32 conversion for format-aware texture downloads (the M2
 # present target is Rgba16Float; the rest of the pipeline is Rgba32Float).
@@ -26,3 +31,35 @@ quick-xml = "0.41.0"
 # Pure-Rust image I/O for oiioutils.rs (TIFF only — the only format current
 # callers need).
 image = { version = "0.25", default-features = false, features = ["tiff"] }
+
+# --- M5 zero-copy hardware-decode import (platform natives) ---------------
+# Linux: raw Vulkan through wgpu-hal's own `ash` generation (the version is
+# pinned by wgpu-hal 29's dependency, so the `vk` types unify) + `dup(2)`
+# for the DMA-BUF fds handed to `VkImportMemoryFdInfoKHR`.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# The raw Vulkan import path is shared by Linux (DMA-BUF) and Windows
+# (D3D11 shared handle).
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+ash = "0.38"
+
+# Windows: D3D11VA surfaces arrive as an `ID3D11Texture2D`; the shared NT
+# handle is handed to Vulkan's `VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE`
+# path. Only the raw ash structs are needed inside oak-core (the COM side
+# lives in oak-codec), so no `windows` dependency here.
+#
+# macOS: VideoToolbox surfaces are IOSurfaces; the Metal texture wrapping
+# them is built with the same objc2 generation wgpu-hal 29 uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-metal = { version = "0.3", features = [
+    "MTLAllocation",
+    "MTLDevice",
+    "MTLPixelFormat",
+    "MTLResource",
+    "MTLTexture",
+    "objc2-io-surface",
+] }
+objc2-io-surface = "0.3"

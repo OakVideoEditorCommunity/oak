@@ -1181,3 +1181,4 @@ pub fn add_track_command(project: ProjectRef, list: NodeId) -> UndoCommand {
 		kind: TrackType::Video,
 	})
 }
+ 		kind: TrackType::Video,

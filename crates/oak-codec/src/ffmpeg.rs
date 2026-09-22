@@ -385,6 +385,79 @@ impl Decoder for FFmpegDecoder {
 		Ok(Arc::new(frame))
 	}
 
+	fn retrieve_video_frame_gpu(
+		&self,
+		p: &RetrieveVideoParams,
+	) -> crate::error::Result<Option<oak_core::texture::Texture>> {
+		ffmpeg_init()?;
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+		let state = state.as_mut().ok_or(crate::error::Error::State)?;
+		if !matches!(state.inner, DecoderInner::Video(_)) {
+			return Err(fail("decoder is not open on a video stream"));
+		}
+		// Only hardware sessions can produce importable surfaces, and the
+		// whole path is switch-gated (`OAK_GPU_IMPORT=0` / config).
+		if state.hw_device.is_none() || !crate::gpuinterop::gpu_import_enabled() {
+			return Ok(None);
+		}
+
+		// Same session cache and first-frame hardware fallback as the CPU
+		// path: an import attempt and its fallback share one decode.
+		let mut decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
+		if decoded.is_err() && state.hw_device.is_some() {
+			state.reopen_software()?;
+			decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
+		}
+		let Some(f) = decoded? else {
+			// No frame at this time: the CPU path reports the error.
+			return Ok(None);
+		};
+		// SAFETY: plain read of the frame's format field.
+		let format = unsafe {
+			std::mem::transmute::<i32, sys::AVPixelFormat>((*f.as_ptr()).format)
+		};
+		if !crate::hwdecode::is_hw_format(format) {
+			return Ok(None);
+		}
+		// Zero-copy cannot resize or deliver a non-F32 format: only a
+		// native-size request takes the import path (proxy playback keeps
+		// the staging path, design §3.6).
+		let native = (f.width(), f.height());
+		if let Some(target) = p.target_size {
+			if target != native {
+				return Ok(None);
+			}
+		}
+		let (primaries, trc, space, full_range) = frame_colorimetry(f.as_ptr(), p.force_range);
+		let matrix = yuv_matrix_for(space, f.width(), f.height());
+		let req = crate::gpuinterop::HwImportRequest {
+			frame: f.as_ptr(),
+			_marker: std::marker::PhantomData,
+			device_type: state.hw_device,
+			luma_size: native,
+			matrix,
+			full_range,
+			color_primaries: primaries,
+			color_trc: trc,
+		};
+		let Some(imported) = crate::gpuinterop::try_import_hw_frame(&req) else {
+			return Ok(None);
+		};
+		let transform = imported.transform(matrix, full_range);
+		let mut planar = oak_core::texture::PlanarTexture::new(
+			imported.ctx,
+			imported.format,
+			(imported.width as i32, imported.height as i32),
+			(imported.y, imported.uv),
+			transform,
+			(primaries, trc),
+		);
+		if let Some(guard) = imported.keep_alive {
+			planar.set_keep_alive(guard);
+		}
+		Ok(Some(oak_core::texture::Texture::wrap_planar(planar)))
+	}
+
 	fn retrieve_video(&self, p: &RetrieveVideoParams) -> crate::error::Result<OakRenderTexture> {
 		// The Rust `RetrieveVideoParams` carries no `OakRenderRenderer`, so
 		// texture creation cannot be performed — the C++ failure path returns
@@ -465,6 +538,108 @@ enum DecodedFrame {
 	Audio(ffmpeg::frame::Audio),
 }
 
+/// A reference-counted `AVFrame` with `av_frame_ref` clone semantics.
+///
+/// ffmpeg-next's `Video::clone` deep-copies with `av_frame_copy`, which
+/// does **not** reproduce hardware-surface references (a cloned VAAPI
+/// frame loses its buffers and `av_hwframe_transfer_data` then fails with
+/// EINVAL). The M5 decode path keeps raw hardware frames in the frame
+/// cache, so the cache stores `RefFrame` — cloning one only bumps the
+/// buffer references.
+pub(crate) struct RefFrame(*mut sys::AVFrame);
+
+// SAFETY: an `AVFrame` is a plain refcounted buffer holder; FFmpeg
+// itself allows moving/freeing frames across threads. Every access is
+// serialized by the decoder's state mutex.
+unsafe impl Send for RefFrame {}
+unsafe impl Sync for RefFrame {}
+
+impl RefFrame {
+	/// Take a reference to a raw `AVFrame` (shallow, like
+	/// [`RefFrame::from_video`]).
+	pub(crate) fn clone_raw(frame: *const sys::AVFrame) -> Option<Self> {
+		let ptr = unsafe { sys::av_frame_clone(frame) };
+		if ptr.is_null() {
+			None
+		} else {
+			Some(RefFrame(ptr))
+		}
+	}
+
+	/// Take a reference to `video`'s `AVFrame` (shallow: buffer refs are
+	/// incremented, pixel data is not copied).
+	fn from_video(video: &ffmpeg::frame::Video) -> Option<Self> {
+		let ptr = unsafe { sys::av_frame_clone(video.as_ptr()) };
+		if ptr.is_null() {
+			None
+		} else {
+			Some(RefFrame(ptr))
+		}
+	}
+
+	/// A fresh owning `Video` sharing this frame's buffers (the CPU scale
+	/// path and `av_hwframe_transfer_data` need the owned type).
+	fn to_video(&self) -> Option<ffmpeg::frame::Video> {
+		let video = ffmpeg::frame::Video::empty();
+		unsafe {
+			let dst = video.as_ptr() as *mut sys::AVFrame;
+			sys::av_frame_unref(dst);
+			if sys::av_frame_ref(dst, self.0) < 0 {
+				return None;
+			}
+		}
+		Some(video)
+	}
+
+	/// The raw frame (borrowed).
+	fn as_ptr(&self) -> *const sys::AVFrame {
+		self.0
+	}
+
+	/// Presentation timestamp.
+	fn pts(&self) -> Option<i64> {
+		let pts = unsafe { (*self.0).pts };
+		if pts == AV_NOPTS_VALUE {
+			None
+		} else {
+			Some(pts)
+		}
+	}
+
+	/// Frame width in pixels.
+	fn width(&self) -> u32 {
+		unsafe { (*self.0).width as u32 }
+	}
+
+	/// Frame height in pixels.
+	fn height(&self) -> u32 {
+		unsafe { (*self.0).height as u32 }
+	}
+}
+
+impl Clone for RefFrame {
+	fn clone(&self) -> Self {
+		let ptr = unsafe { sys::av_frame_clone(self.0) };
+		assert!(!ptr.is_null(), "av_frame_clone failed");
+		RefFrame(ptr)
+	}
+}
+
+impl Drop for RefFrame {
+	fn drop(&mut self) {
+		unsafe {
+			let mut ptr = self.0;
+			sys::av_frame_free(&mut ptr);
+		}
+	}
+}
+
+impl std::fmt::Debug for RefFrame {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("RefFrame").field("pts", &self.pts()).finish()
+	}
+}
+
 /// Outcome of a single decoder receive attempt.
 enum Pull {
 	Frame(DecodedFrame),
@@ -521,7 +696,7 @@ unsafe impl Sync for DecoderState {}
 /// Video decode state: the frame cache plus a cached swscale context.
 struct VideoDecodeState {
 	scaler: Option<ScalingCache>,
-	cache: VecDeque<ffmpeg::frame::Video>,
+	cache: VecDeque<RefFrame>,
 	cache_at_zero: bool,
 	cache_at_eof: bool,
 	/// One second in the stream's time base.
@@ -895,7 +1070,7 @@ impl DecoderState {
 		time: &Rational,
 		any_timecode: bool,
 		cancelled: Option<&CancelAtom>,
-	) -> crate::error::Result<Option<ffmpeg::frame::Video>> {
+	) -> crate::error::Result<Option<RefFrame>> {
 		// Move the video state out so `self.seek` / `self.pull` (which touch
 		// other fields) can be called without conflicting borrows.
 		let mut video = self
@@ -942,7 +1117,7 @@ impl DecoderState {
 		}
 
 		let mut retried_after_eof = false;
-		let mut return_frame: Option<ffmpeg::frame::Video> = None;
+		let mut return_frame: Option<RefFrame> = None;
 
 		loop {
 			if cancel_atom_is_cancelled(cancelled) {
@@ -951,20 +1126,13 @@ impl DecoderState {
 
 			let frame = match self.pull()? {
 				Pull::Frame(DecodedFrame::Video(f)) => {
-					// A hardware decoder yields hardware surfaces
-					// (AV_PIX_FMT_VIDEOTOOLBOX/VAAPI/CUDA/D3D11*):
-					// transfer to system memory so the cache and swscale
-					// only ever see CPU frames.
-					// SAFETY: plain read of the frame's format field.
-					let raw_format = unsafe { (*f.as_ptr()).format };
-					if self.hw_device.is_some()
-						&& crate::hwdecode::is_hw_format(unsafe {
-							std::mem::transmute::<i32, sys::AVPixelFormat>(raw_format)
-						}) {
-						crate::hwdecode::transfer_to_cpu(&f)?
-					} else {
-						f
-					}
+					// Hardware surfaces stay as they are: the import path
+					// (M5) and `scale_video_to_f32` decide between
+					// zero-copy GPU import and the CPU transfer. Keeping
+					// the raw frame in the cache lets an import attempt
+					// and a CPU fallback share one decode.
+					RefFrame::from_video(&f)
+						.ok_or_else(|| fail("frame reference allocation failed"))?
 				}
 				Pull::Frame(_) => unreachable!("video session yields only video frames"),
 				Pull::Eof => {
@@ -1070,47 +1238,39 @@ impl DecoderState {
 	/// full-resolution float intermediate (~132 MB at 4K) ever exists.
 	fn scale_video_to_f32(
 		&mut self,
-		f: ffmpeg::frame::Video,
+		f: RefFrame,
 		force_range: i32,
 		target_size: Option<(u32, u32)>,
 	) -> crate::error::Result<(u32, u32, Vec<u8>, crate::decoder::DecodedColorMeta)> {
+		// The frame's own colorimetry (set by the decoder from the
+		// bitstream); raw code points pass through to the render layer.
+		let (raw_primaries, raw_trc, raw_space, full_range) =
+			frame_colorimetry(f.as_ptr(), force_range);
+		let f = f
+			.to_video()
+			.ok_or_else(|| fail("frame reference failed"))?;
+		// Hardware frames reaching the CPU path are downloaded here — the
+		// per-frame staging fallback when the zero-copy import declined
+		// the frame (or the caller explicitly wants CPU pixels).
+		let f = if crate::hwdecode::is_hw_format(unsafe {
+			std::mem::transmute::<i32, sys::AVPixelFormat>((*f.as_ptr()).format)
+		}) {
+			crate::hwdecode::transfer_to_cpu(&f)?
+		} else {
+			f
+		};
 		let video = self
 			.video
 			.as_mut()
 			.expect("scale_video_to_f32 requires a video session");
-
-		// The frame's own colorimetry (set by the decoder from the
-		// bitstream); raw code points pass through to the render layer.
-		let (raw_primaries, raw_trc, raw_space, raw_range) = unsafe {
-			let av = f.as_ptr();
-			(
-				(*av).color_primaries as i32,
-				(*av).color_trc as i32,
-				(*av).colorspace as i32,
-				(*av).color_range as i32,
-			)
-		};
 
 		// # CPP-PARITY ffmpegdecoder.cpp:376: disregard "JPEG" pixel formats
 		// — but a YUVJ source is full range by definition, so remember it
 		// for the range decision below.
 		let orig_format = f.format();
 		let src_format = convert_jpeg_space_to_regular_space(orig_format);
-		let yuvj_full = orig_format != src_format;
 		let mut f = f;
 		f.set_format(src_format);
-
-		// The effective color range: the caller's force wins; otherwise the
-		// frame's own metadata (YUVJ sources are full range). The old path
-		// forced MPEG/limited for everything, crushing full-range screen
-		// captures and JPEG-derived footage.
-		let full_range = if force_range == oak_core_COLOR_RANGE_FULL {
-			true
-		} else if force_range == oak_core_COLOR_RANGE_LIMITED {
-			false
-		} else {
-			yuvj_full || raw_range == AVCOL_RANGE_JPEG
-		};
 		f.set_color_range(if full_range {
 			ffmpeg::color::Range::JPEG
 		} else {
@@ -1800,6 +1960,36 @@ fn yuv_matrix_for(av_colorspace: i32, src_w: u32, src_h: u32) -> YuvMatrix {
 	}
 }
 
+/// The frame's raw colorimetry and effective range: `(color_primaries,
+/// color_trc, colorspace, full_range)`. Shared by the CPU scale path and
+/// the GPU import path so both hand the render layer identical
+/// colorimetry. `force_range` wins when it is one of the explicit
+/// `oak_core_COLOR_RANGE_*` values; otherwise the frame's own metadata
+/// decides (YUVJ sources are full range by definition — the caller
+/// resolves the format before this call for the CPU path, but the raw
+/// AVFrame format is also checked here).
+fn frame_colorimetry(f: *const sys::AVFrame, force_range: i32) -> (i32, i32, i32, bool) {
+	// SAFETY: plain reads of the frame's color fields.
+	let (primaries, trc, space, range) = unsafe {
+		(
+			(*f).color_primaries as i32,
+			(*f).color_trc as i32,
+			(*f).colorspace as i32,
+			(*f).color_range as i32,
+		)
+	};
+	let format = unsafe { Pixel::from(std::mem::transmute::<i32, sys::AVPixelFormat>((*f).format)) };
+	let yuvj_full = convert_jpeg_space_to_regular_space(format) != format;
+	let full_range = if force_range == oak_core_COLOR_RANGE_FULL {
+		true
+	} else if force_range == oak_core_COLOR_RANGE_LIMITED {
+		false
+	} else {
+		yuvj_full || range == AVCOL_RANGE_JPEG
+	};
+	(primaries, trc, space, full_range)
+}
+
 /// Bit depth (bits per component) and YUV-ness of a pixel format, from its
 /// `AVPixFmtDescriptor` (8 and false for formats without one — none in
 /// practice for decoder output).
@@ -1845,7 +2035,7 @@ fn apply_sws_colorspace(
 }
 
 /// The frame's presentation timestamp (NOPTS when unset).
-fn pts_of(f: Option<&ffmpeg::frame::Video>) -> Option<i64> {
+fn pts_of(f: Option<&RefFrame>) -> Option<i64> {
 	f.and_then(|f| f.pts())
 }
 
@@ -1853,7 +2043,7 @@ fn pts_of(f: Option<&ffmpeg::frame::Video>) -> Option<i64> {
 ///
 /// # CPP-PARITY
 /// `FFmpegDecoder::get_frame_from_cache`.
-fn get_frame_from_cache(video: &VideoDecodeState, t: i64) -> Option<ffmpeg::frame::Video> {
+fn get_frame_from_cache(video: &VideoDecodeState, t: i64) -> Option<RefFrame> {
 	let front = pts_of(video.cache.front()).unwrap_or(AV_NOPTS_VALUE);
 	let back = pts_of(video.cache.back()).unwrap_or(AV_NOPTS_VALUE);
 	if t < front {

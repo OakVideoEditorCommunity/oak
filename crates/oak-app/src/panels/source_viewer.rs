@@ -341,3 +341,4 @@ impl<E: AppEngine> DockPanel for SourceViewerPanel<E> {
 			.into_any_element()
 	}
 }
+ 			.into_any_element()

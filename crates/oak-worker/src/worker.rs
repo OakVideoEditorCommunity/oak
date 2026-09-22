@@ -1308,6 +1308,16 @@ fn render_f32_into(
 									}
 								}
 							}
+							Ok(oak_core::texture::Texture::Planar(_)) => {
+								// The footage path resolves imported planar
+								// frames before returning; a planar texture
+								// here is a bug, not a frame.
+								warn_graph_fallback(
+									spec.viewer_node,
+									"unresolved planar texture",
+								);
+								None
+							}
 							Err(e) => {
 								warn_graph_fallback(spec.viewer_node, &e.to_string());
 								None
@@ -1356,6 +1366,11 @@ fn render_f32_into(
 			gpu @ oak_core::texture::Texture::Gpu { .. } => gpu
 				.to_frame()
 				.map_err(|e| format!("decode readback: {e}"))?,
+			// Resolved by the footage path; a planar frame cannot cross
+			// into the shm slot without a readback.
+			oak_core::texture::Texture::Planar(_) => {
+				return Err("unresolved planar decode texture".to_string())
+			}
 		};
 		let src_stride = frame.linesize_bytes() as usize;
 		let row_bytes = (w as usize) * 16;

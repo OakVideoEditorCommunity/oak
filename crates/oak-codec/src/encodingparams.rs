@@ -1118,3 +1118,4 @@ mod tests {
 		assert_eq!(offset_of!(EncodingParams, color_range), 1548);
 	}
 }
+ 		assert_eq!(offset_of!(EncodingParams, color_range), 1548);

@@ -28,3 +28,16 @@ oak-core = { path = "../oak-core" }
 ffmpeg-next = { version = "9", features = ["static"] }
 # `std::error::Error` impls for the crate-internal error enum.
 thiserror = "2"
+
+# M5 zero-copy import: the D3D11VA COM side (shared NT handle creation
+# from the decoder's ID3D11Texture2D). Same `windows` generation as
+# wgpu-hal 29 so the Foundation/DXGI types unify.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    "Win32_System_Com",
+] }
