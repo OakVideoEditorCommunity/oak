@@ -14,7 +14,7 @@
 ### 1.1 节点/渲染管线（完全够用）
 
 - 内置特效 = `oak-node/src/nodes/*.rs` 的 `NodeBehavior` 实现：声明输入（`Input`），
-  `value()` 推 `ShaderJobPayload`（`crates/oak-node/src/jobs.rs`），`shader_code()`
+  `value()` 推 `ShaderJobPayload`（`../../../../crates/oak-node/src/jobs.rs`），`shader_code()`
   返回 GLSL 片段。渲染端 `crates/oak-render/src/eval.rs::process_shader_job`：
   编译（naga→WGSL，**不支持 GLSL switch**——新 shader 一律 if/else，教训见提交
   `37df1d3d3`）、按名绑定全部纹理参数、嵌套 payload 递归（深度上限 8）、
@@ -32,7 +32,7 @@
 
 - `crates/oak-app/src/oakui/effectchain.rs::addable_effects`：内置（`group: None`）
   + OFX 动态条目（`group: Some(子类)`），排序已按组+名字。
-- `crates/oak-app/src/panels/effect_library.rs`：渲染时组头已存在
+- `../../../../crates/oak-app/src/panels/effect_library.rs`：渲染时组头已存在
   （`group_header()`，内置统一一个 "Built-in" 头），**不可折叠**；有搜索框。
 - 检查器"添加特效"菜单（`panels/inspector.rs:157`）吃同一张 `addable_effects` 表。
 
@@ -102,7 +102,7 @@ ClipTest（斑马纹超范围指示）、Matrix3x3/Matrix5x5（通用卷积）�
    像素尺寸参数用 `resolution_in`；采样偏移用中心原点像素空间与否按特效语义——
    颜色类与坐标无关，几何类参照 transform 的中心原点）。
 4. `register()` 进 `nodes/mod.rs` 的注册表。
-5. 单元测试（输入默认值/隐藏标志/job 参数）+ **`crates/oak-render/src/eval.rs`
+5. 单元测试（输入默认值/隐藏标志/job 参数）+ **`../../../../crates/oak-render/src/eval.rs`
    GPU 像素测试**（eval_node_row 模式，无 GPU 自动跳过）。颜色类用纯色输入断言
    输出值；几何/模糊类用点/块图案断言位移/扩散。
 

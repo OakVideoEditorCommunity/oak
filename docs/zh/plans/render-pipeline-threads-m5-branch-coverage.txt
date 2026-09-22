@@ -1,0 +1,450 @@
+# M5 阶段性验收：分支覆盖率（branch coverage）留档（平台行未验证）
+
+> 生成日期：2026-09-17（管线改造 M0a–M5 **阶段性**；M5 未完全关闭）
+>
+> **状态说明（2026-09-17 审计后补注）**：
+>
+> - 本轮采集在当天的 M5 审计修复（montage staging、导入计数器三态、
+>   planar 表面驻留上限）**之前**；修复后的数字将在下一轮覆盖率门禁重测。
+> - Windows（D3D11VA）/macOS（IOSurface）两行只有 cfg 代码，**尚未在
+>   对应平台编译过**，也无硬件实测；平台编译 + 真机测试是 M5 关闭前置。
+> - P010/HDR 导入未单独实测；平台错误回退分支单机走不到。
+> - 因此本文件是**阶段性质量快照**，不构成 M5 收官证明。
+> - **口径勘误（2026-09-17 晚）**：本文件的数字是**陈旧对象集拉低的
+>   下界**——`target/coverage-obj` 累积了多次构建的测试二进制，同一
+>   源文件的新旧副本 region 被合并，未执行的旧副本显著拉低行/分支
+>   比例（实测同一文件：多对象 51% vs 干净对象 95%）。清空测试二进制
+>   重测后的干净基线为**行 81.72% / 分支 55.45%**
+>   （2026-09-17 干净基线），后续覆盖率门禁一律使用干净对象集；
+>   详见 `test-coverage-90-80.md` §4.1。
+>
+> 工具链：`nightly-2026-07-21`（rustc 1.99.0-nightly，`-Zcoverage-options=branch`）
+> 采集命令：
+
+```sh
+RUSTFLAGS="-Cinstrument-coverage -Zcoverage-options=branch" \
+  LLVM_PROFILE_FILE="$PWD/target/coverage/%p-%m.profraw" \
+  CARGO_TARGET_DIR=target/coverage-obj \
+  cargo +nightly-2026-07-21 test --workspace --no-fail-fast
+
+~/.rustup/toolchains/nightly-2026-07-21-*/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-profdata \
+  merge -sparse target/coverage/*.profraw -o target/coverage.profdata
+
+~/.rustup/toolchains/nightly-2026-07-21-*/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-cov report \
+  -instr-profile=target/coverage.profdata --show-branch-summary \
+  --ignore-filename-regex="(\.cargo|registry/src|rustlib|/gpui/|target/coverage-obj|/tooling/|\.rustup)" \
+  $(find target/coverage-obj/debug/deps -maxdepth 1 -type f -executable)
+```
+
+> 口径：仅统计本仓库 `crates/oak-*` 源码（vendored gpui、ocio-rs、Rust 标准库与
+> 目标目录均已排除）。分支列来自 `-Zcoverage-options=branch` 的分支区域计数；
+> 硬件导入的真机路径（VAAPI/DMA-BUF）由 `oak-render/tests/footage_import_test.rs`
+> 覆盖（该二进制随后单独串行补采，保证导入分支计入），其平台错误回退分支
+> 单机无法全部走到，因此 `gpuinterop.rs` 的分支覆盖率天然偏低。
+> 本次汇总（项目源码）：区域 53.60% / 函数 49.90% / 行 53.15% / **分支 27.94%**。
+
+> **管线改造关键文件（Regions / Lines / Branches）：**
+
+
+crates/oak-codec/src/gpuinterop.rs                              471               164    65.18%          34                 7    79.41%         300                98    67.33%          36                18    50.00%
+crates/oak-codec/src/hwdecode.rs                                408               217    46.81%          28                14    50.00%         256               138    46.09%          12                 5    58.33%
+crates/oak-core/src/backend.rs                                 5977              2997    49.86%         279               142    49.10%        4941              2423    50.96%         178                97    45.51%
+crates/oak-core/src/backend/external.rs                         293                45    84.64%          11                 2    81.82%         268                28    89.55%          18                10    44.44%
+crates/oak-core/src/texture.rs                                  589               263    55.35%          57                19    66.67%         412               159    61.41%          24                11    54.17%
+crates/oak-render/src/eval.rs                                  9865              5441    44.85%         450               261    42.00%        5742              3311    42.34%         510               288    43.53%
+crates/oak-render/src/pipeline.rs                              1226                41    96.66%          78                 9    88.46%         807                25    96.90%         108                59    45.37%
+
+## 全量报告（项目源码过滤后）
+
+
+
+```
+Filename                                                    Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+crates/oak-app/src/actions.rs                                  1721               903    47.53%         135                75    44.44%        1027               544    47.03%          48                48     0.00%
+crates/oak-app/src/app.rs                                     15900             10379    34.72%        1464               974    33.47%        8754              5782    33.95%         286               286     0.00%
+crates/oak-app/src/dialogs.rs                                 10313              6952    32.59%         823               587    28.68%        6336              4284    32.39%         194               194     0.00%
+crates/oak-app/src/i18n.rs                                      882               408    53.74%          79                45    43.04%         490               237    51.63%          34                34     0.00%
+crates/oak-app/src/lib.rs                                         4                 4     0.00%           1                 1     0.00%           4                 4     0.00%           0                 0         -
+crates/oak-app/src/logging.rs                                   202                58    71.29%          15                 5    66.67%         104                36    65.38%          16                16     0.00%
+crates/oak-app/src/main.rs                                        3                 3     0.00%           1                 1     0.00%           3                 3     0.00%           0                 0         -
+crates/oak-app/src/manager.rs                                   903               450    50.17%          65                36    44.62%         575               291    49.39%          26                26     0.00%
+crates/oak-app/src/oakui/audio_thread.rs                        154                 3    98.05%          11                 1    90.91%         104                 2    98.08%           6                 6     0.00%
+crates/oak-app/src/oakui/component/controls.rs                 1233               546    55.72%          78                30    61.54%         782               299    61.76%         122               122     0.00%
+crates/oak-app/src/oakui/component/menu.rs                     1345               678    49.59%          92                52    43.48%         822               401    51.22%          14                14     0.00%
+crates/oak-app/src/oakui/component/text_input.rs                 67                 7    89.55%           7                 1    85.71%          44                 4    90.91%           0                 0         -
+crates/oak-app/src/oakui/displaycolor.rs                        595               475    20.17%          46                34    26.09%         378               298    21.16%          50                50     0.00%
+crates/oak-app/src/oakui/effectchain.rs                        3372              1580    53.14%         193                93    51.81%        1726               774    55.16%          98                98     0.00%
+crates/oak-app/src/oakui/engine.rs                             1072              1017     5.13%         215               201     6.51%        1109              1051     5.23%          14                14     0.00%
+crates/oak-app/src/oakui/frames.rs                              219                 3    98.63%           8                 0   100.00%         120                 2    98.33%           8                 8     0.00%
+crates/oak-app/src/oakui/gpu.rs                                 293               157    46.42%          22                14    36.36%         232               139    40.09%          28                28     0.00%
+crates/oak-app/src/oakui/graphops.rs                          11296              5702    49.52%         792               489    38.26%        5995              3100    48.29%         466               466     0.00%
+crates/oak-app/src/oakui/icons.rs                                70                 0   100.00%           6                 0   100.00%          57                 0   100.00%           2                 2     0.00%
+crates/oak-app/src/oakui/mock.rs                               7864              4670    40.62%         777               437    43.76%        5499              3215    41.53%         248               248     0.00%
+crates/oak-app/src/oakui/mod.rs                                  54                28    48.15%           6                 3    50.00%          24                13    45.83%           0                 0         -
+crates/oak-app/src/oakui/multicam.rs                           1135                89    92.16%          64                 7    89.06%         646                41    93.65%          92                92     0.00%
+crates/oak-app/src/oakui/nodegraph.rs                          1876              1238    34.01%         133                89    33.08%        1116               731    34.50%          92                92     0.00%
+crates/oak-app/src/oakui/ofx.rs                                1945              1187    38.97%         121                71    41.32%        1079               632    41.43%          74                71     4.05%
+crates/oak-app/src/oakui/projectbrowser.rs                       81                 9    88.89%           8                 0   100.00%          49                 6    87.76%          12                12     0.00%
+crates/oak-app/src/oakui/real.rs                              28448             17333    39.07%        2411              1389    42.39%       16413             10102    38.45%        1180              1180     0.00%
+crates/oak-app/src/oakui/renderops.rs                          6005              3186    46.94%         209               128    38.76%        3461              1921    44.50%         182               182     0.00%
+crates/oak-app/src/oakui/scopes.rs                              180                 1    99.44%           7                 0   100.00%          96                 0   100.00%           0                 0         -
+crates/oak-app/src/oakui/timecode.rs                            126                 0   100.00%          14                 0   100.00%          70                 0   100.00%           4                 4     0.00%
+crates/oak-app/src/oakui/transport.rs                           244                 4    98.36%          25                 1    96.00%         138                 4    97.10%           6                 6     0.00%
+crates/oak-app/src/oakui/waveform.rs                            407               324    20.39%          19                13    31.58%         229               176    23.14%          24                17    29.17%
+crates/oak-app/src/oakui/waveformsync.rs                        167                 0   100.00%          10                 0   100.00%          91                 0   100.00%          12                12     0.00%
+crates/oak-app/src/panels/commands.rs                           877               856     2.39%          88                85     3.41%         459               442     3.70%           8                 8     0.00%
+crates/oak-app/src/panels/effect_library.rs                     977               347    64.48%          80                30    62.50%         563               207    63.23%          20                20     0.00%
+crates/oak-app/src/panels/history.rs                            365               141    61.37%          31                12    61.29%         208                75    63.94%          16                16     0.00%
+crates/oak-app/src/panels/inspector.rs                          787               569    27.70%          54                41    24.07%         522               386    26.05%          18                18     0.00%
+crates/oak-app/src/panels/mod.rs                                 29                 5    82.76%           2                 0   100.00%          19                 2    89.47%           4                 4     0.00%
+crates/oak-app/src/panels/multicam.rs                           736               160    78.26%          48                 9    81.25%         413                94    77.24%          54                54     0.00%
+crates/oak-app/src/panels/node_editor.rs                       1961               990    49.52%         148                77    47.97%        1077               550    48.93%          48                48     0.00%
+crates/oak-app/src/panels/ofx_params.rs                        7801              4542    41.78%         467               267    42.83%        4365              2464    43.55%         218               218     0.00%
+crates/oak-app/src/panels/program_viewer.rs                    1907              1430    25.01%         148               114    22.97%        1068               778    27.15%          44                44     0.00%
+crates/oak-app/src/panels/project_explorer.rs                   987               629    36.27%          65                41    36.92%         608               384    36.84%          46                46     0.00%
+crates/oak-app/src/panels/source_viewer.rs                      434               403     7.14%          41                37     9.76%         226               200    11.50%           4                 4     0.00%
+crates/oak-app/src/panels/status_bar.rs                         137                 9    93.43%           5                 1    80.00%          85                11    87.06%           6                 6     0.00%
+crates/oak-app/src/panels/timeline.rs                          4453              3064    31.19%         339               255    24.78%        2665              1778    33.28%          96                96     0.00%
+crates/oak-app/tests/waveform_e2e.rs                             52                 0   100.00%           3                 0   100.00%          24                 0   100.00%           0                 0         -
+crates/oak-audio/src/config.rs                                   69                50    27.54%           4                 2    50.00%          31                21    32.26%           0                 0         -
+crates/oak-audio/src/error.rs                                    61                 0   100.00%           5                 0   100.00%          41                 0   100.00%           0                 0         -
+crates/oak-audio/src/levelmeter.rs                               82                 1    98.78%           4                 0   100.00%          66                 1    98.48%           0                 0         -
+crates/oak-audio/src/manager.rs                                 915               509    44.37%          76                44    42.11%         605               322    46.78%           0                 0         -
+crates/oak-audio/src/outputdevice.rs                            435               277    36.32%          30                22    26.67%         296               199    32.77%           0                 0         -
+crates/oak-audio/src/params.rs                                   78                17    78.21%           7                 1    85.71%          54                17    68.52%           0                 0         -
+crates/oak-audio/src/previewdevice.rs                           178                47    73.60%          18                 4    77.78%         120                29    75.83%           0                 0         -
+crates/oak-audio/src/processor.rs                               587               313    46.68%          34                20    41.18%         382               204    46.60%           0                 0         -
+crates/oak-audio/src/synchronizer.rs                             32                 0   100.00%           2                 0   100.00%          38                 0   100.00%          10                 3    70.00%
+crates/oak-audio/src/waveform.rs                                785                88    88.79%          29                 2    93.10%         478                45    90.59%           0                 0         -
+crates/oak-audio/src/waveformsync.rs                            268                10    96.27%           6                 0   100.00%         201                13    93.53%           0                 0         -
+crates/oak-audio/tests/common/mod.rs                            255               127    50.20%          13                 7    46.15%         103                51    50.49%           0                 0         -
+crates/oak-audio/tests/golden_test.rs                           211                 4    98.10%          12                 0   100.00%          97                 4    95.88%           0                 0         -
+crates/oak-audio/tests/levelmeter_test.rs                       123                 0   100.00%           8                 0   100.00%          63                 0   100.00%           0                 0         -
+crates/oak-audio/tests/manager_test.rs                          571               248    56.57%          21                 8    61.90%         291               120    58.76%           8                 4    50.00%
+crates/oak-audio/tests/processor_test.rs                        616               290    52.92%          28                 9    67.86%         272               117    56.99%           0                 0         -
+crates/oak-audio/tests/sync_test.rs                             252                 0   100.00%          16                 0   100.00%         131                 0   100.00%           2                 0   100.00%
+crates/oak-audio/tests/waveform_test.rs                         290                 5    98.28%          11                 0   100.00%         118                 1    99.15%           0                 0         -
+crates/oak-cli/src/cmd/info.rs                                  234                40    82.91%          17                12    29.41%         119                23    80.67%          22                11    50.00%
+crates/oak-cli/src/cmd/probe.rs                                 101                 5    95.05%           3                 0   100.00%          72                 1    98.61%          16                 5    68.75%
+crates/oak-cli/src/cmd/render.rs                                256                63    75.39%           7                 3    57.14%         150                53    64.67%          44                23    47.73%
+crates/oak-cli/src/cmd/transcode.rs                             345               118    65.80%          14                 6    57.14%         229                92    59.83%          64                32    50.00%
+crates/oak-cli/src/engine.rs                                    998               328    67.13%          87                33    62.07%         699               253    63.81%          88                52    40.91%
+crates/oak-cli/src/fmt.rs                                       148                 4    97.30%          18                 0   100.00%         149                 3    97.99%          10                 4    60.00%
+crates/oak-cli/src/main.rs                                       66                 0   100.00%           2                 0   100.00%          38                 0   100.00%          10                 1    90.00%
+crates/oak-cli/src/ppm.rs                                       212                11    94.81%          11                 3    72.73%         113                 4    96.46%          12                 1    91.67%
+crates/oak-cli/src/wav.rs                                       238                39    83.61%          17                 7    58.82%         114                10    91.23%           8                 3    62.50%
+crates/oak-cli/tests/cli.rs                                     326                 0   100.00%          27                 0   100.00%         201                 0   100.00%           0                 0         -
+crates/oak-codec/src/audioparams.rs                               7                 4    42.86%           2                 1    50.00%           6                 3    50.00%           0                 0         -
+crates/oak-codec/src/conformmanager.rs                          276                 4    98.55%          17                 0   100.00%         202                 3    98.51%          10                 3    70.00%
+crates/oak-codec/src/decoder.rs                                 905               491    45.75%          91                54    40.66%         613               358    41.60%          14                 3    78.57%
+crates/oak-codec/src/encoder.rs                                 239                74    69.04%          30                19    36.67%         157                58    63.06%          24                 9    62.50%
+crates/oak-codec/src/encodingparams.rs                         1046                46    95.60%          47                 0   100.00%         770                31    95.97%         142                28    80.28%
+crates/oak-codec/src/error.rs                                    68                 0   100.00%           5                 0   100.00%          45                 0   100.00%           0                 0         -
+crates/oak-codec/src/exportcodec.rs                             179                 0   100.00%           7                 0   100.00%          96                 0   100.00%           0                 0         -
+crates/oak-codec/src/exportformat.rs                            408                24    94.12%          14                 0   100.00%         225                17    92.44%           2                 0   100.00%
+crates/oak-codec/src/ffmpeg.rs                                 7068              4052    42.67%         373               223    40.21%        4328              2442    43.58%         422               215    49.05%
+crates/oak-codec/src/footagedescription.rs                      205                 0   100.00%          32                 0   100.00%         159                 0   100.00%           0                 0         -
+crates/oak-codec/src/frame.rs                                   449                14    96.88%          41                 0   100.00%         253                12    95.26%          32                 7    78.12%
+crates/oak-codec/src/framemanager.rs                            221                24    89.14%          18                 5    72.22%         109                20    81.65%           4                 1    75.00%
+crates/oak-codec/src/gpuinterop.rs                              471               164    65.18%          34                 7    79.41%         300                98    67.33%          36                18    50.00%
+crates/oak-codec/src/hwdecode.rs                                408               217    46.81%          28                14    50.00%         256               138    46.09%          12                 5    58.33%
+crates/oak-codec/src/lib.rs                                      24                14    41.67%           8                 5    37.50%          18                10    44.44%           0                 0         -
+crates/oak-codec/src/oiio.rs                                    239                 9    96.23%          35                 4    88.57%         200                 6    97.00%           0                 0         -
+crates/oak-codec/src/oiioframebridge.rs                         394                 7    98.22%          12                 0   100.00%         240                 4    98.33%          20                 5    75.00%
+crates/oak-codec/src/planarfiledevice.rs                        338                 4    98.82%          16                 1    93.75%         154                 4    97.40%          16                 2    87.50%
+crates/oak-codec/src/proxymanager.rs                           1351               713    47.22%          99                50    49.49%         814               427    47.54%          58                23    60.34%
+crates/oak-codec/src/realmedia_tests.rs                         824                39    95.27%          28                 4    85.71%         348                17    95.11%          20                 9    55.00%
+crates/oak-codec/src/task.rs                                    374               189    49.47%          26                13    50.00%         280               141    49.64%           2                 0   100.00%
+crates/oak-codec/src/testmedia.rs                               236                18    92.37%           7                 2    71.43%         114                 5    95.61%          20                13    35.00%
+crates/oak-codec/src/timecodemetadata.rs                        363                14    96.14%          27                 1    96.30%         203                 4    98.03%          34                 6    82.35%
+crates/oak-core/src/backend.rs                                 5977              2997    49.86%         279               142    49.10%        4941              2423    50.96%         178                97    45.51%
+crates/oak-core/src/backend/external.rs                         293                45    84.64%          11                 2    81.82%         268                28    89.55%          18                10    44.44%
+crates/oak-core/src/cancelatom.rs                                58                 2    96.55%           9                 1    88.89%          38                 1    97.37%           2                 0   100.00%
+crates/oak-core/src/color.rs                                   2394              1360    43.19%         175               105    40.00%        1381               757    45.18%         122                64    47.54%
+crates/oak-core/src/colormath.rs                               2904              1335    54.03%         171                76    55.56%        1570               688    56.18%          66                13    80.30%
+crates/oak-core/src/colortransform.rs                           132                 0   100.00%          13                 0   100.00%          77                 0   100.00%           0                 0         -
+crates/oak-core/src/commandlineparser.rs                       1245                18    98.55%          59                 2    96.61%         517                 7    98.65%          26                 0   100.00%
+crates/oak-core/src/commonutil.rs                                70                 5    92.86%          10                 2    80.00%          40                 2    95.00%           4                 3    25.00%
+crates/oak-core/src/configstore.rs                             5199              2469    52.51%         206                97    52.91%        2151              1000    53.51%         118                15    87.29%
+crates/oak-core/src/debug.rs                                    415               181    56.39%          38                16    57.89%         270               116    57.04%           6                 1    83.33%
+crates/oak-core/src/displayicc.rs                              1416               824    41.81%          78                47    39.74%         802               462    42.39%          66                16    75.76%
+crates/oak-core/src/error.rs                                     67                 3    95.52%           7                 1    85.71%          47                 3    93.62%           0                 0         -
+crates/oak-core/src/ffmpegutils.rs                              296                 1    99.66%          27                 0   100.00%         258                 1    99.61%          14                 1    92.86%
+crates/oak-core/src/filefunctions.rs                           1784               736    58.74%          81                29    64.20%         911               358    60.70%          72                21    70.83%
+crates/oak-core/src/frame.rs                                     68                 2    97.06%           8                 0   100.00%          54                 2    96.30%           8                 4    50.00%
+crates/oak-core/src/handle.rs                                    58                40    31.03%          13                10    23.08%          58                37    36.21%           8                 8     0.00%
+crates/oak-core/src/lib.rs                                        3                 0   100.00%           1                 0   100.00%           3                 0   100.00%           0                 0         -
+crates/oak-core/src/lut.rs                                      227                 6    97.36%          14                 1    92.86%         120                 6    95.00%           2                 1    50.00%
+crates/oak-core/src/miscutils.rs                                472                 9    98.09%          41                 4    90.24%         244                 4    98.36%          16                 1    93.75%
+crates/oak-core/src/ocioutils.rs                                309               124    59.87%          34                18    47.06%         197                66    66.50%           0                 0         -
+crates/oak-core/src/oiioutils.rs                                601                34    94.34%          38                 4    89.47%         318                19    94.03%          20                 2    90.00%
+crates/oak-core/src/qtutils.rs                                  197                10    94.92%          20                 1    95.00%         109                 5    95.41%           6                 3    50.00%
+crates/oak-core/src/rational.rs                                 453                27    94.04%          29                 0   100.00%         283                19    93.29%         114                65    42.98%
+crates/oak-core/src/samplefmt.rs                                 46                 7    84.78%           6                 0   100.00%          42                 7    83.33%           2                 2     0.00%
+crates/oak-core/src/subtitleparams.rs                          2368              1021    56.88%         111                43    61.26%        1322               568    57.03%         122                24    80.33%
+crates/oak-core/src/texture.rs                                  589               263    55.35%          57                19    66.67%         412               159    61.41%          24                11    54.17%
+crates/oak-core/src/timerange.rs                                190                 4    97.89%          22                 0   100.00%         131                 3    97.71%          36                36     0.00%
+crates/oak-core/src/videoparams.rs                             2772               179    93.54%         171                 7    95.91%        1581                99    93.74%         298                83    72.15%
+crates/oak-core/src/xmlutils.rs                                1664                18    98.92%          79                 0   100.00%         773                12    98.45%         100                18    82.00%
+crates/oak-core/tests/core_test.rs                              637                 0   100.00%          14                 0   100.00%         256                 0   100.00%           0                 0         -
+crates/oak-ffmpeg-link/src/lib.rs                                 2                 2     0.00%           1                 1     0.00%           1                 1     0.00%           0                 0         -
+crates/oak-node/src/block.rs                                   1396               617    55.80%         121                58    52.07%         972               442    54.53%          30                30     0.00%
+crates/oak-node/src/colormanager.rs                              62                 5    91.94%          10                 1    90.00%          55                 5    90.91%          10                 1    90.00%
+crates/oak-node/src/error.rs                                     57                 0   100.00%           6                 0   100.00%          42                 0   100.00%           0                 0         -
+crates/oak-node/src/factory.rs                                  104                21    79.81%          19                 4    78.95%          72                14    80.56%          10                10     0.00%
+crates/oak-node/src/folder.rs                                   133                30    77.44%          19                 2    89.47%         105                22    79.05%          20                20     0.00%
+crates/oak-node/src/footage.rs                                 1002               151    84.93%          76                17    77.63%         665                97    85.41%         104               104     0.00%
+crates/oak-node/src/graph.rs                                   2049               942    54.03%         134                57    57.46%        1149               523    54.48%         108               108     0.00%
+crates/oak-node/src/handle.rs                                    52                 1    98.08%           6                 0   100.00%          59                 1    98.31%           8                 3    62.50%
+crates/oak-node/src/id.rs                                        25                 0   100.00%           6                 0   100.00%          23                 0   100.00%           2                 2     0.00%
+crates/oak-node/src/input.rs                                     17                 3    82.35%           4                 1    75.00%          20                 3    85.00%           0                 0         -
+crates/oak-node/src/jobs.rs                                      88                37    57.95%          16                 6    62.50%          87                44    49.43%           0                 0         -
+crates/oak-node/src/keyframe.rs                                 606               297    50.99%          28                12    57.14%         299               147    50.84%          62                62     0.00%
+crates/oak-node/src/node.rs                                     495                12    97.58%          87                 2    97.70%         418                 7    98.33%          36                34     5.56%
+crates/oak-node/src/nodes/blur.rs                              1011               478    52.72%          48                25    47.92%         531               243    54.24%          32                32     0.00%
+crates/oak-node/src/nodes/checkerboard.rs                       371                10    97.30%          19                 2    89.47%         221                10    95.48%           2                 2     0.00%
+crates/oak-node/src/nodes/chromakey.rs                          807               415    48.57%          39                23    41.03%         485               254    47.63%           0                 0         -
+crates/oak-node/src/nodes/clamp.rs                              293                 5    98.29%          19                 1    94.74%         170                 5    97.06%           2                 2     0.00%
+crates/oak-node/src/nodes/colorbars.rs                          293                 7    97.61%          19                 1    94.74%         179                 7    96.09%           2                 2     0.00%
+crates/oak-node/src/nodes/colorcorrect.rs                       394                 5    98.73%          20                 1    95.00%         233                 5    97.85%           2                 2     0.00%
+crates/oak-node/src/nodes/colordifferencekey.rs                 569               301    47.10%          37                22    40.54%         359               193    46.24%           0                 0         -
+crates/oak-node/src/nodes/colormatrix.rs                        351                 7    98.01%          22                 1    95.45%         191                 7    96.34%           4                 4     0.00%
+crates/oak-node/src/nodes/compositesource.rs                    140                 8    94.29%          13                 2    84.62%          86                 7    91.86%           2                 2     0.00%
+crates/oak-node/src/nodes/cornerpindistortnode.rs               932               496    46.78%          60                35    41.67%         566               305    46.11%          10                10     0.00%
+crates/oak-node/src/nodes/cropdistortnode.rs                    645               228    64.65%          35                15    57.14%         385               114    70.39%           8                 8     0.00%
+crates/oak-node/src/nodes/despill.rs                            488               265    45.70%          34                20    41.18%         314               170    45.86%           0                 0         -
+crates/oak-node/src/nodes/dilate.rs                             310                 5    98.39%          22                 1    95.45%         184                 5    97.28%           2                 2     0.00%
+crates/oak-node/src/nodes/dirblur.rs                            350                 4    98.86%          23                 1    95.65%         203                 4    98.03%           0                 0         -
+crates/oak-node/src/nodes/displaytransform.rs                   724               377    47.93%          62                34    45.16%         446               235    47.31%           8                 8     0.00%
+crates/oak-node/src/nodes/dissolve.rs                           405                 4    99.01%          26                 1    96.15%         228                 4    98.25%           0                 0         -
+crates/oak-node/src/nodes/dropshadowfilter.rs                   531               196    63.09%          28                11    60.71%         300               103    65.67%           4                 4     0.00%
+crates/oak-node/src/nodes/edgedetect.rs                         277                 4    98.56%          22                 1    95.45%         171                 4    97.66%           0                 0         -
+crates/oak-node/src/nodes/erode.rs                              310                 5    98.39%          22                 1    95.45%         184                 5    97.28%           2                 2     0.00%
+crates/oak-node/src/nodes/flipdistortnode.rs                    511               212    58.51%          30                12    60.00%         276               104    62.32%           4                 4     0.00%
+crates/oak-node/src/nodes/gamma.rs                              294                 5    98.30%          20                 1    95.00%         176                 5    97.16%           2                 2     0.00%
+crates/oak-node/src/nodes/generatorwithmerge.rs                 199                27    86.43%           7                 1    85.71%         146                17    88.36%           0                 0         -
+crates/oak-node/src/nodes/grade.rs                              355                 5    98.59%          19                 1    94.74%         211                 5    97.63%           2                 2     0.00%
+crates/oak-node/src/nodes/graphendpoints.rs                     361                10    97.23%          25                 2    92.00%         213                 8    96.24%           6                 6     0.00%
+crates/oak-node/src/nodes/group.rs                              221                70    68.33%          30                 4    86.67%         179                45    74.86%          18                18     0.00%
+crates/oak-node/src/nodes/invert.rs                             294                 5    98.30%          18                 1    94.44%         200                 5    97.50%           2                 2     0.00%
+crates/oak-node/src/nodes/keymix.rs                             333                 4    98.80%          23                 1    95.65%         190                 4    97.89%           0                 0         -
+crates/oak-node/src/nodes/mask.rs                               712               365    48.74%          33                19    42.42%         453               233    48.57%           2                 2     0.00%
+crates/oak-node/src/nodes/math.rs                               950               509    46.42%          54                32    40.74%         592               320    45.95%           4                 4     0.00%
+crates/oak-node/src/nodes/mathbase.rs                          3493              1772    49.27%         136                65    52.21%        2358              1198    49.19%          90                90     0.00%
+crates/oak-node/src/nodes/matrix.rs                             844               269    68.13%          48                16    66.67%         508               151    70.28%          18                18     0.00%
+crates/oak-node/src/nodes/merge.rs                              523               270    48.37%          39                22    43.59%         329               173    47.42%           0                 0         -
+crates/oak-node/src/nodes/mirror.rs                             346                10    97.11%          19                 2    89.47%         198                 8    95.96%           4                 4     0.00%
+crates/oak-node/src/nodes/mod.rs                                254               112    55.91%           8                 7    12.50%         138                66    52.17%           0                 0         -
+crates/oak-node/src/nodes/mosaicfilternode.rs                   365               141    61.37%          26                10    61.54%         230                83    63.91%           2                 2     0.00%
+crates/oak-node/src/nodes/multicamnode.rs                      1024               550    46.29%          80                44    45.00%         630               339    46.19%          32                32     0.00%
+crates/oak-node/src/nodes/noise.rs                              373               148    60.32%          26                10    61.54%         228                82    64.04%           0                 0         -
+crates/oak-node/src/nodes/ociobase.rs                           162                 5    96.91%          13                 2    84.62%         111                 3    97.30%           2                 2     0.00%
+crates/oak-node/src/nodes/ociogradingtransformlinear.rs        1934              1017    47.41%          85                48    43.53%        1238               671    45.80%          26                26     0.00%
+crates/oak-node/src/nodes/ociogradingtransformlog.rs           1779               948    46.71%          84                47    44.05%        1145               634    44.63%          26                26     0.00%
+crates/oak-node/src/nodes/ociolut.rs                           1464               795    45.70%          87                48    44.83%         883               483    45.30%          26                26     0.00%
+crates/oak-node/src/nodes/opacity.rs                            482               136    71.78%          31                12    61.29%         326               113    65.34%           6                 6     0.00%
+crates/oak-node/src/nodes/pan.rs                                665               283    57.44%          29                12    58.62%         341               145    57.48%          14                14     0.00%
+crates/oak-node/src/nodes/plugin.rs                            1167               599    48.67%          97                51    47.42%         726               374    48.48%          22                22     0.00%
+crates/oak-node/src/nodes/polygon.rs                            599               245    59.10%          30                12    60.00%         346               134    61.27%           4                 4     0.00%
+crates/oak-node/src/nodes/position.rs                           262                 8    96.95%          19                 2    89.47%         164                 8    95.12%           4                 4     0.00%
+crates/oak-node/src/nodes/premult.rs                            325                 4    98.77%          23                 1    95.65%         192                 4    97.92%           0                 0         -
+crates/oak-node/src/nodes/ramp.rs                               365                10    97.26%          19                 2    89.47%         221                10    95.48%           2                 2     0.00%
+crates/oak-node/src/nodes/rippledistortnode.rs                  632               332    47.47%          42                25    40.48%         404               215    46.78%           2                 2     0.00%
+crates/oak-node/src/nodes/saturation.rs                         294                 5    98.30%          20                 1    95.00%         180                 5    97.22%           2                 2     0.00%
+crates/oak-node/src/nodes/shapenode.rs                          744               392    47.31%          40                23    42.50%         505               269    46.73%           8                 8     0.00%
+crates/oak-node/src/nodes/shapenodebase.rs                       96                43    55.21%          11                 5    54.55%          61                27    55.74%           0                 0         -
+crates/oak-node/src/nodes/sharpen.rs                            270                 4    98.52%          21                 1    95.24%         167                 4    97.60%           0                 0         -
+crates/oak-node/src/nodes/solid.rs                              248               100    59.68%          24                 9    62.50%         165                59    64.24%           0                 0         -
+crates/oak-node/src/nodes/stroke.rs                             563               216    61.63%          30                12    60.00%         299               103    65.55%           4                 4     0.00%
+crates/oak-node/src/nodes/swirldistortnode.rs                   683               351    48.61%          40                22    45.00%         402               208    48.26%           4                 4     0.00%
+crates/oak-node/src/nodes/textbackend.rs                        119                50    57.98%          10                 3    70.00%         131                58    55.73%           0                 0         -
+crates/oak-node/src/nodes/textv1.rs                             886               466    47.40%          52                30    42.31%         528               281    46.78%           2                 2     0.00%
+crates/oak-node/src/nodes/textv2.rs                            1138               594    47.80%          60                34    43.33%         714               375    47.48%           2                 2     0.00%
+crates/oak-node/src/nodes/textv3.rs                            3217               952    70.41%         160                55    65.62%        1837               592    67.77%          78                78     0.00%
+crates/oak-node/src/nodes/threewaycolor.rs                      613               315    48.61%          37                21    43.24%         399               208    47.87%           0                 0         -
+crates/oak-node/src/nodes/tiledistortnode.rs                    676               372    44.97%          44                27    38.64%         438               247    43.61%           2                 2     0.00%
+crates/oak-node/src/nodes/timeformat.rs                         605                13    97.85%          30                 2    93.33%         337                10    97.03%          46                46     0.00%
+crates/oak-node/src/nodes/timeinput.rs                          110                 6    94.55%          12                 2    83.33%          71                 6    91.55%           0                 0         -
+crates/oak-node/src/nodes/timeoffsetnode.rs                     395                19    95.19%          29                 3    89.66%         235                17    92.77%           6                 6     0.00%
+crates/oak-node/src/nodes/timeremap.rs                          337                18    94.66%          25                 3    88.00%         212                17    91.98%           4                 4     0.00%
+crates/oak-node/src/nodes/transformdistortnode.rs              1327               721    45.67%          74                41    44.59%         928               499    46.23%           4                 4     0.00%
+crates/oak-node/src/nodes/transitionfx.rs                       642                 4    99.38%          33                 1    96.97%         349                 4    98.85%           4                 4     0.00%
+crates/oak-node/src/nodes/transitions.rs                        505                 4    99.21%          30                 1    96.67%         271                 4    98.52%           0                 0         -
+crates/oak-node/src/nodes/trigonometry.rs                       598               267    55.35%          30                13    56.67%         331               141    57.40%           0                 0         -
+crates/oak-node/src/nodes/unpremult.rs                          306                 4    98.69%          22                 1    95.45%         184                 4    97.83%           0                 0         -
+crates/oak-node/src/nodes/valuenode.rs                          347               150    56.77%          24                10    58.33%         206                88    57.28%           8                 8     0.00%
+crates/oak-node/src/nodes/volume.rs                             657               277    57.84%          29                12    58.62%         337               141    58.16%           6                 6     0.00%
+crates/oak-node/src/nodes/wavedistortnode.rs                    576               303    47.40%          40                23    42.50%         358               191    46.65%           2                 2     0.00%
+crates/oak-node/src/nodes/whitebalance.rs                       730               379    48.08%          44                24    45.45%         433               226    47.81%           8                 8     0.00%
+crates/oak-node/src/ops.rs                                      508               397    21.85%          44                39    11.36%         290               229    21.03%          26                16    38.46%
+crates/oak-node/src/project.rs                                  735               421    42.72%          51                30    41.18%         440               254    42.27%          20                20     0.00%
+crates/oak-node/src/sequence.rs                                 183                 9    95.08%          17                 1    94.12%         149                 7    95.30%          12                12     0.00%
+crates/oak-node/src/serializer.rs                              2046               794    61.19%         116                44    62.07%        1204               493    59.05%         164               164     0.00%
+crates/oak-node/src/track.rs                                    427                21    95.08%          51                 2    96.08%         322                18    94.41%          48                42    12.50%
+crates/oak-node/src/traverser.rs                               1638               338    79.37%          87                32    63.22%         818               189    76.89%          66                66     0.00%
+crates/oak-node/src/value.rs                                   1205               648    46.22%          69                31    55.07%         793               420    47.04%          30                30     0.00%
+crates/oak-node/tests/engine_units_test.rs                     1428                27    98.11%          29                 9    68.97%         677                22    96.75%           2                 1    50.00%
+crates/oak-node/tests/factory_smoke_test.rs                     102                51    50.00%           6                 3    50.00%          44                22    50.00%           0                 0         -
+crates/oak-node/tests/graph_test.rs                             656                10    98.48%          17                 3    82.35%         184                 9    95.11%          28                14    50.00%
+crates/oak-node/tests/phase2_units_test.rs                     1112                13    98.83%          23                 3    86.96%         581                10    98.28%           0                 0         -
+crates/oak-node/tests/serializer_test.rs                       2736              1214    55.63%         118                55    53.39%        1739               777    55.32%           0                 0         -
+crates/oak-node/tests/structure_test.rs                         725               299    58.76%          18                 8    55.56%         419               177    57.76%           0                 0         -
+crates/oak-node/tests/traverser_test.rs                         554                71    87.18%          39                21    46.15%         278                65    76.62%           0                 0         -
+crates/oak-node/tests/value_keyframe_test.rs                    341                 8    97.65%          10                 0   100.00%         202                 4    98.02%           0                 0         -
+crates/oak-otio/src/error.rs                                     74                 2    97.30%           4                 0   100.00%          36                 0   100.00%           0                 0         -
+crates/oak-otio/src/fcpxml.rs                                  3009              1165    61.28%         136                50    63.24%        1535               551    64.10%         148                47    68.24%
+crates/oak-otio/src/lib.rs                                       11                 2    81.82%           2                 0   100.00%           6                 0   100.00%           0                 0         -
+crates/oak-otio/src/model.rs                                    920                88    90.43%          99                 7    92.93%         634                53    91.64%          18                10    44.44%
+crates/oak-otio/tests/fcpxml.rs                                1384               719    48.05%          28                14    50.00%         720               366    49.17%           0                 0         -
+crates/oak-otio/tests/parity.rs                                  65                 3    95.38%          11                 3    72.73%          39                 3    92.31%           0                 0         -
+crates/oak-otio/tests/save_parity.rs                            100                 0   100.00%           3                 0   100.00%          62                 0   100.00%           0                 0         -
+crates/oak-otio/tests/semantic.rs                               225                12    94.67%           5                 0   100.00%         102                 3    97.06%           0                 0         -
+crates/oak-plugin/src/clip.rs                                   387               153    60.47%          17                 7    58.82%         252                90    64.29%           0                 0         -
+crates/oak-plugin/src/descriptor.rs                              89                 9    89.89%           9                 3    66.67%          49                 8    83.67%           0                 0         -
+crates/oak-plugin/src/error.rs                                   60                 0   100.00%           6                 0   100.00%          38                 0   100.00%           0                 0         -
+crates/oak-plugin/src/gl_bridge.rs                              437               383    12.36%          44                32    27.27%         225               175    22.22%           0                 0         -
+crates/oak-plugin/src/host.rs                                  2578              1421    44.88%         143                90    37.06%        1433               792    44.73%           0                 0         -
+crates/oak-plugin/src/image.rs                                  432                29    93.29%          23                 1    95.65%         253                19    92.49%           0                 0         -
+crates/oak-plugin/src/instance.rs                              1553               759    51.13%          94                58    38.30%        1077               565    47.54%           0                 0         -
+crates/oak-plugin/src/lib.rs                                     15                 1    93.33%           1                 0   100.00%          13                 1    92.31%           2                 0   100.00%
+crates/oak-plugin/src/node.rs                                   580                26    95.52%          36                 7    80.56%         422                14    96.68%           0                 0         -
+crates/oak-plugin/src/node_factory.rs                          1986               829    58.26%         101                48    52.48%        1146               450    60.73%           0                 0         -
+crates/oak-plugin/src/param.rs                                  828               122    85.27%          39                12    69.23%         456                60    86.84%           0                 0         -
+crates/oak-plugin/src/param_curve.rs                            812                17    97.91%          43                 0   100.00%         474                12    97.47%           0                 0         -
+crates/oak-plugin/src/progress.rs                               107                49    54.21%          17                 7    58.82%          78                32    58.97%           0                 0         -
+crates/oak-plugin/src/property.rs                                98                 2    97.96%          19                 1    94.74%          69                 1    98.55%           0                 0         -
+crates/oak-plugin/src/render.rs                                 226                31    86.28%          20                10    50.00%         140                38    72.86%           0                 0         -
+crates/oak-plugin/src/render_driver.rs                          574               229    60.10%          30                13    56.67%         376               164    56.38%           0                 0         -
+crates/oak-plugin/src/suites/draw.rs                            400                 7    98.25%          32                 1    96.88%         232                 5    97.84%           0                 0         -
+crates/oak-plugin/src/suites/gl_render.rs                       848               776     8.49%          65                60     7.69%         569               522     8.26%           0                 0         -
+crates/oak-plugin/src/suites/image_effect.rs                   1043               580    44.39%          86                46    46.51%         725               387    46.62%           0                 0         -
+crates/oak-plugin/src/suites/interact.rs                       1229               506    58.83%          60                18    70.00%         730               315    56.85%           0                 0         -
+crates/oak-plugin/src/suites/memory.rs                          125                50    60.00%          18                 8    55.56%         104                45    56.73%           0                 0         -
+crates/oak-plugin/src/suites/message.rs                         293                12    95.90%          24                 5    79.17%         195                 7    96.41%           0                 0         -
+crates/oak-plugin/src/suites/mod.rs                             441               207    53.06%          35                13    62.86%         275               138    49.82%           0                 0         -
+crates/oak-plugin/src/suites/multithread.rs                     399               224    43.86%          56                31    44.64%         272               152    44.12%           0                 0         -
+crates/oak-plugin/src/suites/param.rs                          1995              1134    43.16%         131                72    45.04%        1292               715    44.66%           0                 0         -
+crates/oak-plugin/src/suites/parametric.rs                     1305               391    70.04%          75                27    64.00%         749               238    68.22%           0                 0         -
+crates/oak-plugin/src/suites/progress.rs                        153                30    80.39%          29                 6    79.31%         116                25    78.45%           0                 0         -
+crates/oak-plugin/src/suites/property.rs                       1064               537    49.53%          97                41    57.73%         747               352    52.88%           0                 0         -
+crates/oak-plugin/src/suites/timeline.rs                        136                15    88.97%          20                 4    80.00%         101                 8    92.08%           0                 0         -
+crates/oak-plugin/tests/colour_test.rs                          155                10    93.55%          15                 0   100.00%         109                 7    93.58%           0                 0         -
+crates/oak-plugin/tests/common/mod.rs                           158               100    36.71%          16                11    31.25%         106                67    36.79%           6                 3    50.00%
+crates/oak-plugin/tests/gl_render_test.rs                       474               378    20.25%          27                21    22.22%         301               239    20.60%           9                 4    55.56%
+crates/oak-plugin/tests/golden_test.rs                           12                12     0.00%           6                 6     0.00%          12                12     0.00%           0                 0         -
+crates/oak-plugin/tests/handle_test.rs                           35                 0   100.00%           3                 0   100.00%          23                 0   100.00%           0                 0         -
+crates/oak-plugin/tests/interact_test.rs                        442               184    58.37%          31                 4    87.10%         249                96    61.45%          13                 6    53.85%
+crates/oak-plugin/tests/negotiation_test.rs                     204                25    87.75%          18                 0   100.00%         137                16    88.32%          16                 8    50.00%
+crates/oak-plugin/tests/node_e2e_test.rs                        752               368    51.06%          41                21    48.78%         450               232    48.44%           0                 0         -
+crates/oak-plugin/tests/ofx_roundtrip.rs                         74                69     6.76%           5                 4    20.00%          35                30    14.29%           0                 0         -
+crates/oak-plugin/tests/property_test.rs                        314                 4    98.73%          12                 0   100.00%         114                 0   100.00%           0                 0         -
+crates/oak-plugin/tests/push_button_test.rs                      74                 6    91.89%           2                 0   100.00%          33                 4    87.88%           0                 0         -
+crates/oak-plugin/tests/suites_test.rs                         1570               787    49.87%          40                20    50.00%         913               458    49.84%           0                 0         -
+crates/oak-render/src/autocacher.rs                             891               397    55.44%          80                38    52.50%         538               237    55.95%          22                 8    63.64%
+crates/oak-render/src/cache.rs                                 1166               166    85.76%          72                13    81.94%         594                93    84.34%          88                28    68.18%
+crates/oak-render/src/copier.rs                                 131                27    79.39%          19                 3    84.21%         113                31    72.57%           8                 3    62.50%
+crates/oak-render/src/error.rs                                   36                 0   100.00%           3                 0   100.00%          26                 0   100.00%           0                 0         -
+crates/oak-render/src/eval.rs                                  9865              5441    44.85%         450               261    42.00%        5742              3311    42.34%         510               288    43.53%
+crates/oak-render/src/frameio.rs                                324                24    92.59%          20                 4    80.00%         188                20    89.36%          28                12    57.14%
+crates/oak-render/src/handle.rs                                 132                52    60.61%          12                 4    66.67%          87                29    66.67%           6                 1    83.33%
+crates/oak-render/src/ipc.rs                                   3672              1819    50.46%         203               101    50.25%        2282              1111    51.31%          66                22    66.67%
+crates/oak-render/src/manager.rs                               1005               550    45.27%          77                46    40.26%         661               360    45.54%          52                19    63.46%
+crates/oak-render/src/ofxhost.rs                                791               106    86.60%          52                12    76.92%         544                75    86.21%          68                39    42.65%
+crates/oak-render/src/pipeline.rs                              1226                41    96.66%          78                 9    88.46%         807                25    96.90%         108                59    45.37%
+crates/oak-render/src/procpool.rs                              4622              2718    41.19%         264               156    40.91%        3059              1792    41.42%         264               241     8.71%
+crates/oak-render/src/scheduler.rs                             1689               893    47.13%          98                55    43.88%         925               495    46.49%          46                 7    84.78%
+crates/oak-render/src/shaderfx.rs                              1839               132    92.82%          65                 7    89.23%         969                75    92.26%         124                43    65.32%
+crates/oak-render/src/textengine.rs                             856                17    98.01%          48                 2    95.83%         508                11    97.83%         108                32    70.37%
+crates/oak-render/src/ticket.rs                                1355               698    48.49%         117                61    47.86%         955               494    48.27%          26                13    50.00%
+crates/oak-render/src/worker.rs                                1227               651    46.94%          98                61    37.76%         822               438    46.72%          38                10    73.68%
+crates/oak-render/tests/adjustment_layer.rs                     378                 4    98.94%           9                 0   100.00%         223                 2    99.10%           0                 0         -
+crates/oak-render/tests/common/mod.rs                           272               246     9.56%          51                47     7.84%         210               193     8.10%           2                 2     0.00%
+crates/oak-render/tests/copier_test.rs                          313               156    50.16%          18                 9    50.00%         196                98    50.00%           0                 0         -
+crates/oak-render/tests/footage_decode_test.rs                  149                14    90.60%           6                 1    83.33%          87                15    82.76%           0                 0         -
+crates/oak-render/tests/footage_import_test.rs                  261                26    90.04%           8                 2    75.00%         141                17    87.94%          24                12    50.00%
+crates/oak-render/tests/graph_render.rs                        1566               698    55.43%          40                17    57.50%         962               389    59.56%          26                12    53.85%
+crates/oak-render/tests/ofxmisc_blur.rs                         392                13    96.68%          20                 0   100.00%         152                 0   100.00%           0                 0         -
+crates/oak-render/tests/ofxmisc_color.rs                        318                15    95.28%          15                 0   100.00%         166                12    92.77%          16                 8    50.00%
+crates/oak-render/tests/ofxmisc_gen.rs                          367                15    95.91%          15                 0   100.00%         173                12    93.06%           0                 0         -
+crates/oak-render/tests/ofxmisc_matrix.rs                       357                13    96.36%          17                 0   100.00%         120                 0   100.00%           0                 0         -
+crates/oak-render/tests/ofxmisc_merge.rs                        301                17    94.35%          15                 0   100.00%         136                14    89.71%           0                 0         -
+crates/oak-render/tests/pipeline_test.rs                        224                 7    96.88%           4                 0   100.00%         121                 7    94.21%           0                 0         -
+crates/oak-render/tests/render_threads_test.rs                 1674                72    95.70%          91                19    79.12%         996                37    96.29%           0                 0         -
+crates/oak-render/tests/text_outline_glow.rs                    331                34    89.73%          17                 2    88.24%         127                12    90.55%           0                 0         -
+crates/oak-render/tests/ticket_worker_test.rs                   638               301    52.82%          37                15    59.46%         296               131    55.74%           8                 2    75.00%
+crates/oak-render/tests/transition_render.rs                    696                19    97.27%          12                 0   100.00%         397                 7    98.24%          26                 9    65.38%
+crates/oak-render/tests/transitionfx.rs                         420                17    95.95%          16                 0   100.00%         156                 0   100.00%          18                 9    50.00%
+crates/oak-storage/src/backend.rs                                 9                 0   100.00%           3                 0   100.00%          18                 0   100.00%           0                 0         -
+crates/oak-storage/src/backends/database/migration.rs            25                 5    80.00%           3                 1    66.67%          17                 6    64.71%           0                 0         -
+crates/oak-storage/src/backends/database/mod.rs                3700              2015    45.54%         247               136    44.94%        2220              1155    47.97%           0                 0         -
+crates/oak-storage/src/backends/mod.rs                            6                 0   100.00%           1                 0   100.00%           6                 0   100.00%           0                 0         -
+crates/oak-storage/src/backends/otio.rs                         749               243    67.56%          60                16    73.33%         450               147    67.33%           0                 0         -
+crates/oak-storage/src/backends/ove_xml.rs                      137                17    87.59%          14                 3    78.57%          86                 9    89.53%           0                 0         -
+crates/oak-storage/src/error.rs                                  75                 0   100.00%           6                 0   100.00%          47                 0   100.00%           0                 0         -
+crates/oak-storage/src/nodeutil.rs                              106                 8    92.45%           9                 2    77.78%          72                 4    94.44%           0                 0         -
+crates/oak-storage/src/registry.rs                              199                32    83.92%          31                11    64.52%         133                31    76.69%           0                 0         -
+crates/oak-storage/src/session.rs                                14                 0   100.00%           4                 0   100.00%          12                 0   100.00%           0                 0         -
+crates/oak-storage/src/uri.rs                                   172                 3    98.26%          12                 0   100.00%          96                 1    98.96%           0                 0         -
+crates/oak-storage/src/writethrough.rs                          509               440    13.56%          54                46    14.81%         296               255    13.85%           0                 0         -
+crates/oak-storage/tests/common/mod.rs                          711                84    88.19%          53                15    71.70%         432                56    87.04%           0                 0         -
+crates/oak-storage/tests/database_pg_test.rs                   1444              1382     4.29%          79                64    18.99%         750               701     6.53%           0                 0         -
+crates/oak-storage/tests/database_test.rs                      3313              1431    56.81%         127                50    60.63%        1648               708    57.04%           0                 0         -
+crates/oak-storage/tests/storage_test.rs                       2267               983    56.64%          98                42    57.14%        1172               505    56.91%          12                 3    75.00%
+crates/oak-task/src/codecbridge.rs                               95                95     0.00%           9                 9     0.00%          58                58     0.00%           0                 0         -
+crates/oak-task/src/conform.rs                                  133               102    23.31%           6                 5    16.67%          88                69    21.59%          16                10    37.50%
+crates/oak-task/src/customcache.rs                               90                 8    91.11%          11                 3    72.73%          63                 6    90.48%           8                 1    87.50%
+crates/oak-task/src/error.rs                                     73                 0   100.00%           5                 0   100.00%          47                 0   100.00%           0                 0         -
+crates/oak-task/src/export.rs                                   728               455    37.50%          29                19    34.48%         481               302    37.21%          58                33    43.10%
+crates/oak-task/src/handle.rs                                    51                23    54.90%           6                 3    50.00%          51                20    60.78%           6                 2    66.67%
+crates/oak-task/src/manager.rs                                  266               266     0.00%          34                34     0.00%         175               175     0.00%           2                 2     0.00%
+crates/oak-task/src/nodeops.rs                                 2390              1832    23.35%         259               194    25.10%        1639              1260    23.12%         176               130    26.14%
+crates/oak-task/src/precache.rs                                  69                69     0.00%           5                 5     0.00%          41                41     0.00%           0                 0         -
+crates/oak-task/src/project/format.rs                            16                 1    93.75%           2                 0   100.00%          13                 3    76.92%           0                 0         -
+crates/oak-task/src/project/import.rs                           460               460     0.00%          24                24     0.00%         274               274     0.00%           0                 0         -
+crates/oak-task/src/project/load.rs                              51                51     0.00%           6                 6     0.00%          39                39     0.00%           0                 0         -
+crates/oak-task/src/project/loadotio.rs                         487               487     0.00%          15                15     0.00%         307               307     0.00%           0                 0         -
+crates/oak-task/src/project/save.rs                              47                47     0.00%           4                 4     0.00%          33                33     0.00%           0                 0         -
+crates/oak-task/src/project/saveotio.rs                         874               532    39.13%          48                30    37.50%         512               323    36.91%          56                27    51.79%
+crates/oak-task/src/proxy.rs                                   1356               725    46.53%          85                42    50.59%         838               450    46.30%          78                66    15.38%
+crates/oak-task/src/render.rs                                  2002              1316    34.27%         110                72    34.55%        1415               919    35.05%         182                98    46.15%
+crates/oak-task/src/task.rs                                     184                72    60.87%          26                10    61.54%         129                50    61.24%          16                11    31.25%
+crates/oak-task/tests/bridge_test.rs                             49                 2    95.92%           4                 0   100.00%          38                 3    92.11%           2                 1    50.00%
+crates/oak-task/tests/customcache_test.rs                       133                 3    97.74%           7                 1    85.71%          59                 1    98.31%           0                 0         -
+crates/oak-task/tests/export_test.rs                            197                 8    95.94%           3                 0   100.00%         151                 3    98.01%          10                 5    50.00%
+crates/oak-task/tests/parity_test.rs                             93                 0   100.00%           6                 0   100.00%          73                 0   100.00%           0                 0         -
+crates/oak-task/tests/saveotio_test.rs                          317                11    96.53%           7                 0   100.00%         205                 5    97.56%           0                 0         -
+crates/oak-timeline/src/common.rs                                19                19     0.00%           3                 3     0.00%          18                18     0.00%           0                 0         -
+crates/oak-timeline/src/error.rs                                 67                 0   100.00%           5                 0   100.00%          43                 0   100.00%           0                 0         -
+crates/oak-timeline/src/handle.rs                                69                22    68.12%           7                 2    71.43%          55                17    69.09%          10                 8    20.00%
+crates/oak-timeline/src/marker.rs                               566               147    74.03%          91                33    63.74%         426               125    70.66%           0                 0         -
+crates/oak-timeline/src/multicam.rs                            2903              1483    48.91%         148                85    42.57%        1409               691    50.96%           0                 0         -
+crates/oak-timeline/src/undocommon.rs                            84                24    71.43%          17                 5    70.59%          62                15    75.81%           0                 0         -
+crates/oak-timeline/src/undogeneral.rs                         2033              1288    36.65%         171               124    27.49%        1346               855    36.48%           0                 0         -
+crates/oak-timeline/src/undopointer.rs                          573               396    30.89%          26                16    38.46%         444               326    26.58%           0                 0         -
+crates/oak-timeline/src/undoripple.rs                           799               591    26.03%          54                44    18.52%         567               414    26.98%           0                 0         -
+crates/oak-timeline/src/undosplit.rs                            382                96    74.87%          35                17    51.43%         236                68    71.19%           0                 0         -
+crates/oak-timeline/src/undotrack.rs                            112                84    25.00%          24                18    25.00%          85                63    25.88%           0                 0         -
+crates/oak-timeline/src/util.rs                                1866              1145    38.64%         208               128    38.46%        1020               624    38.82%           0                 0         -
+crates/oak-timeline/src/workarea.rs                             205                66    67.80%          39                14    64.10%         157                47    70.06%           0                 0         -
+crates/oak-timeline/tests/domain_test.rs                       1953               826    57.71%          49                22    55.10%         817               339    58.51%           0                 0         -
+crates/oak-timeline/tests/handle_test.rs                         81                 1    98.77%           6                 0   100.00%          41                 0   100.00%           0                 0         -
+crates/oak-timeline/tests/marker_test.rs                       1299               658    49.35%          44                23    47.73%         616               308    50.00%           0                 0         -
+crates/oak-timeline/tests/workarea_test.rs                      208                 8    96.15%          12                 1    91.67%          93                 1    98.92%           0                 0         -
+crates/oak-undo/src/error.rs                                     66                 9    86.36%           7                 1    85.71%          51                 9    82.35%           0                 0         -
+crates/oak-undo/src/global.rs                                   448                21    95.31%          54                 8    85.19%         231                10    95.67%           0                 0         -
+crates/oak-undo/src/undocommand.rs                              167                 2    98.80%          40                 0   100.00%         147                 2    98.64%           0                 0         -
+crates/oak-undo/src/undostack.rs                                160                 7    95.62%          18                 2    88.89%         127                 4    96.85%           0                 0         -
+crates/oak-undo/tests/edge_coverage_test.rs                     232               123    46.98%          34                24    29.41%         117                65    44.44%           0                 0         -
+crates/oak-undo/tests/undo_safe_test.rs                        1017               498    51.03%          39                18    53.85%         392               186    52.55%           0                 0         -
+crates/oak-worker/src/framecache.rs                             331                13    96.07%          24                 4    83.33%         182                 8    95.60%          12                 4    66.67%
+crates/oak-worker/src/main.rs                                   144                71    50.69%          11                 5    54.55%          98                48    51.02%           8                 2    75.00%
+crates/oak-worker/src/ofx_host.rs                               513               417    18.71%          26                20    23.08%         339               272    19.76%          68                65     4.41%
+crates/oak-worker/src/worker.rs                                4699              2534    46.07%         180               106    41.11%        2782              1533    44.90%         188                68    63.83%
+crates/oak-worker/tests/ofx_host.rs                             367                21    94.28%          23                 7    69.57%         186                10    94.62%           6                 3    50.00%
+crates/oak-worker/tests/procpool_integration.rs                2627              1402    46.63%         126                89    29.37%        1686               876    48.04%           0                 0         -
+crates/oak-worker/tests/worker.rs                                55                 0   100.00%           3                 0   100.00%          31                 0   100.00%           0                 0         -
+examples/simple_player/src/main.rs                                3                 3     0.00%           1                 1     0.00%           3                 3     0.00%           0                 0         -
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                        362437            168169    53.60%       23749             11899    49.90%      214877            100668    53.15%       10714              7720    27.94%
+```

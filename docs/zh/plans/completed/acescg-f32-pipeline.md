@@ -7,7 +7,7 @@
 > （Wayland color-management-v1 / macOS layer.colorspace / Windows
 > SetColorSpace1），UI 保持 sRGB 不进 ACEScg。实际色彩数学在
 > `crates/oak-common/src/colormath.rs`，显示策略在
-> `crates/oak-app/src/oakui/displaycolor.rs`，内容色域声明 API 在 gpui 的
+> `../../../../crates/oak-app/src/oakui/displaycolor.rs`，内容色域声明 API 在 gpui 的
 > `WindowContentColorspace`/`set_content_colorspace`。本文档仅作历史参考，
 > 以代码为准。
 

@@ -426,6 +426,127 @@ fallback。** 解码上传与上屏共用一层 `gpuinteop` 抽象，按后端�
 >   可真机验证；CI（lavapipe，无 hwaccel）只跑 fallback、计数器与
 >   接口单测。
 
+> **M5 落地回填（2026-09-17）**：
+>
+> - **数据面**：`Texture` 新增瞬态变体 `Texture::Planar`（`PlanarFormat`
+>   = NV12/P010，携带 luma/chroma 两个 registry token、YUV 矩阵/范围、
+>   源 primaries/trc 与 keep-alive guard）；`GpuContext::run_planar_yuv_to_rgb`
+>   是 M2 三平面 pass 的双平面（NV12/P010）变体，8 位输入的窄范围展开由
+>   `YuvTransform::from_matrix_depth(matrix, full_range, 8)` 精确给出
+>   （16 位构造与原公式逐位一致）。
+> - **解码侧**（`oak-codec/src/gpuinterop.rs`）：`try_import_hw_frame` 在
+>   `transfer_to_cpu` **之前**尝试导入；计数器 `HW_IMPORTS` /
+>   `HW_IMPORT_FALLBACKS`，硬解导入路径 `HW_TRANSFERS` 保持 0；连续 8 次
+>   失败后进程内熔断（单帧失败不污染后续帧）。开关：全局
+>   `GpuDecodeImport` + `OAK_GPU_IMPORT=0`，逐平台
+>   `GpuDecodeImportVaapi` / `GpuDecodeImportD3d11` /
+>   `GpuDecodeImportVideotoolbox`（各自 `OAK_GPU_IMPORT_*` 环境变量）。
+>   **只有 host 安装的共享设备**（`GpuContext::host_gpu_installed`，即 app
+>   的上屏 device）才走导入：worker/CLI/测试里惰性创建的私有 device 继续
+>   CPU 路径，避免把进程池/导出悄悄拉上 GPU。零拷贝只服务原生尺寸 + F32
+>   请求（不能缩放/改格式）；代理尺寸等按帧回退 staging（解码器会话缓存
+>   复用同一帧，回退不重解）。
+> - **平台实现**：
+>   - **Linux（真机验证）**：VAAPI → `av_hwframe_map`(DRM_PRIME) → 每层
+>     dup fd + `VkImportMemoryFdInfoKHR`（`VK_EXT_external_memory_dma_buf`
+>     + `VK_EXT_image_drm_format_modifier`，显式 plane layout）→
+>     `wgpu_hal::vulkan::texture_from_raw` + `create_texture_from_hal`；
+>     导入的 VkImage/内存由 wgpu-hal 的 drop callback 释放，AVFrame 的引用
+>     作为 guard 一并持有到 GPU 用完。NVDEC/CUDA 表面没有公开句柄导出，按
+>     帧回退 staging；因此 Linux 设备候选顺序改为 **VAAPI 优先、CUDA 兜底**
+>     （§3.6 的"优先通用 DMA-BUF"），本机 RTX 5070 Ti + nvidia-vaapi-driver
+>     实测 NV12 block-linear modifier 导入可用。
+>   - **Windows（cfg 隔离，待 CI 编译验证）**：D3D11VA 纹理经
+>     `IDXGIResource1::CreateSharedHandle` 取 NT 句柄 → 手建多平面
+>     NV12/P010 VkImage（`VK_KHR_external_memory_win32` 导入句柄）→
+>     同一纹理注册 `Plane0`/`Plane1` 两个 token；COM 侧在 oak-codec，
+>     Vulkan 侧在 oak-core。
+>   - **macOS（cfg 隔离，待 CI 编译验证）**：VideoToolbox 的 CVPixelBuffer
+>     → `CVPixelBufferGetIOSurface` → `newTextureWithDescriptor:iosurface:plane:`
+>     两个平面 Metal 纹理 → `wgpu_hal::metal::texture_from_raw`；Metal 纹理
+>     无 drop callback，帧引用经 `ImportedHwFrame::keep_alive` 挂在
+>     `PlanarTexture` 上随纹理释放。
+> - **渲染侧**（`oak-render/eval.rs`）：`render_footage_frame` 把 planar
+>   变体在渲染线程解析为工作空间 RGBA —— YUV→RGB pass + 源→工作空间变换
+>   （legacy sRGB 直通；ACEScg 下按 (primaries, trc) 把
+>   `colormath::decode_to_acescg` 烘焙成 3D LUT 在 GPU 应用，缓存 16 个）；
+>   解析失败按帧回退 CPU staging（import 关掉重解一次，解码器缓存兜底）。
+>   图/蒙太奇/导出等消费者只会看到 `Gpu`/`Cpu`。
+> - **一个必要修复**：ffmpeg-next 的 `Video::clone` 用 `av_frame_copy` 深拷
+>   数据，**不会**复制硬件表面引用（克隆的 VAAPI 帧 transfer 报 EINVAL）。
+>   硬解帧缓存改用内部 `RefFrame`（`av_frame_ref` 语义）持有。
+> - **验收**：`oak-render/tests/footage_import_test.rs`（真机 RTX 5070 Ti）：
+>   导入路径 `HW_TRANSFERS==0`、结果 `Texture::Gpu`、与 staging 逐像素
+>   max diff < 0.15（swscale 色度滤波差异，同硬解/软解测试口径）；ACEScg
+>   下与 CPU 精确变换 max diff 0.011（LUT 三线性插值）；已知红蓝图案断言。
+>   `gpuinterop` 单测覆盖"无 host device 不导入/开关关闭/位深"；oak-core
+>   单测覆盖 8/16 位变换系数；montage 原生尺寸 + host GPU 回归测试见下。
+>   全 workspace `cargo test --workspace` 全绿（全部测试套件）。
+> - **遗留（M5 未完全关闭）**：Windows（D3D11VA 共享句柄）/macOS
+>   （IOSurface）两行是 cfg 代码，**从未在对应平台编译过**；host 可达性
+>   与 Windows 数组 slice/feature 门已在桌面审查后修复（见下面"审计修复"
+>   第 4 条），但平台编译与真机硬件测试仍待补；P010 与 HDR 元数据未单独
+>   实测；代理尺寸的 GPU 缩放导入（省掉 native→proxy 的回退）未立项。
+>   本节的"阶段性验收"不等于 M5 收官。
+
+
+
+> **M5 审计修复（2026-09-17）**：对 M5 落地的自审发现并修复以下问题：
+>
+> 1. **montage 静默黑帧（严重，已实机复现并修复）**：`render_footage_frame`
+>    可返回解析后的 `Texture::Gpu`，而 CPU 蒙太奇合成器只接
+>    `Texture::Cpu`，其余 `_ => continue` 直接跳过该 clip——序列尺寸 ==
+>    素材原生尺寸 + host GPU 已装 + 硬解 + 线程管线（导出最常见情形）时
+>    整条序列输出全透明黑且无任何报错。修复：新增
+>    `render_footage_frame_staged`（`DecodeRequest.allow_import=false`
+>    进 cache key），montage 一律走 staging；合成器遇到意外的 `Gpu`
+>    纹理显式回读而不是丢弃，`Planar` 则报错。回归测试
+>    `footage_import_test::montage_native_size_with_host_gpu_composites_the_clip`
+>    （先按单素材原生尺寸导入并缓存 planar，再合成 montage，断言图案 +
+>    "无新导入 + 发生 staging transfer"）。
+> 2. **计数器/熔断语义**：NVDEC 设备、平台开关关闭、不可导入的表面布局
+>    原本都被记成"失败"并喂给连续失败熔断（NVDEC 8 帧后熔断、
+>    `HW_IMPORT_FALLBACKS` 无界增长）。现在平台导入是三态结果：
+>    `Imported / Unsupported / Failed`；只有真正尝试后失败才计
+>    `HW_IMPORT_FALLBACKS` 并参与熔断，新增 `HW_IMPORT_UNSUPPORTED`
+>    单独观测（含单测）。
+> 3. **硬件表面驻留**：eval 帧 LRU 只允许最多
+>    `MAX_CACHED_PLANAR_FRAMES = 4` 个 planar 条目（每张经 keep-alive
+>    pin 一个解码器表面）；淘汰只丢弃导入，解码器会话缓存仍在，不重解码。
+> 4. **平台状态如实标注 + 桌面审查修复（2026-09-17 二次）**：
+>    Windows/macOS 两行仍未在对应平台编译；符号级复核（对照本机 registry
+>    里的 windows 0.62.2 / objc2-metal 0.3.2 / ash 0.38）发现并修复：
+>    - **macOS**：IOSurface/Metal 路径符号全部匹配（`RG8Unorm`/`RG16Unorm`
+>      命名无误——审查中"应为小写 Rg"的说法经源码核对不成立）；
+>      `newTextureWithDescriptor_iosurface_plane`、`texture_from_raw`
+>      六参签名、`MTLStorageMode::Shared`、P010 MSB 容器与
+>      `from_matrix_depth(16)` 均核对一致。**仍未编译/实测**。
+>    - **Windows 三重失效**（能编译但不可用）已修：
+>      i. **不可达**：`install_shared` 唯一生产调用点（adopt gpui 设备）
+>      只在 Linux/FreeBSD 编译，Windows/macOS 上 `host_gpu_installed()`
+>      恒 false，导入路径是死代码。新增
+>      `GpuContext::mark_host_context()` + `oakui::gpu::register_engine_context()`：
+>      非 Linux 平台的窗口建立时把引擎自建的 shared 上下文登记为 host
+>      设备（worker/CLI/测试不调用，保持 CPU 路径）。
+>      ii. **feature 门互斥**：host 设备现在是引擎 `create()` 建的，
+>      会按适配器能力请求 `TEXTURE_FORMAT_NV12/P010`；将来若仍是
+>      adopt 设备而缺 feature，`import_d3d11_shared_texture` 的
+>      State/Invalid 错误现在归类为 `Unsupported`（不计数、不熔断）。
+>      iii. **array slice 丢帧**：FFmpeg D3D11VA 帧是表面数组的 slice
+>      （`data[1]` 在 0..ArraySize-1 循环），原实现只收 slice 0。
+>      现在导入按 `arrayLayers = ArraySize` 建 VkImage，registry 条目
+>      携带 `layer`（`GpuTexture.layer`），采样视图用
+>      `base_array_layer`/`array_layer_count: 1` 选中该 slice；视图必须
+>      显式 `dimension: D2`（wgpu-core 按纹理层数推导 D2Array，不看
+>      view range，否则与 planar pass 的 D2 布局校验冲突）；UV token 的
+>      登记尺寸用 chroma 半尺寸（planar pass 由它推采样比例）。
+>    - **二次桌面复核追加修复**：`DmaBufPlane` 的 re-export 曾漏 cfg
+>      （非 Linux 上 `cargo check` 直接 E0432）；`import_iosurface_plane`
+>      改为 `unsafe fn`（解引用调用方裸 IOSurface 指针，附 `# Safety`）。
+>    平台编译 + 真机实测仍是 M5 关闭的前置。
+> 5. **口径与小项**："94 个测试目标"改称"全部测试套件"；P010/HDR 未实测；
+>    Vulkan `initial_layout: UNDEFINED` 的首次 transition 属驱动依赖行为
+>    （本机正确，异驱动出伪影时优先排查这里）。
 
 ### 3.7 resolve 重写（M0a，独立先行）
 
@@ -512,6 +633,20 @@ M1（与 M2 可并行）；M4 依赖 M2；M5 依赖 M2（YUV→RGB pass 与互�
 
 **全程验收（用户要求）**：M5 完成、整个任务收官后，跑一轮**分支覆盖率**
 （branch coverage）测量并留档，作为管线改造整体的质量闸门。
+**阶段性测量已完成（2026-09-17，审计修复之前）**：nightly
+`-Zcoverage-options=branch` 全 workspace 采集，项目源码（排除 vendored
+gpui/ocio/标准库）TOTAL = 区域 53.60% / 函数 49.90% / 行 53.15% /
+**分支 27.94%**；关键文件分支覆盖率：`pipeline.rs` 45.37%、`backend.rs`
+45.51%、`texture.rs` 54.17%、`eval.rs` 43.53%、`gpuinterop.rs` 50.00%
+（硬件导入的真机分支；平台错误回退分支单机走不到）。完整报告与采集/合并
+命令见 `docs/zh/plans/render-pipeline-threads-m5-branch-coverage.txt`。
+**该轮采集早于 2026-09-17 审计修复（montage/计数器/驻留），且
+Windows/macOS 行尚未在对应平台编译——它是阶段性质量快照，不构成 M5
+收官证明；M5 关闭以平台编译与真机平台测试完成为准，届时重测。**
+另经 2026-09-17 复查：该留档的多对象合并被**陈旧测试二进制**拉低
+（同文件多对象 51% vs 干净对象 95%），干净重测的基线是
+**行 81.72% / 分支 55.45%**（见 `test-coverage-90-80.md` §4.1 勘误）；
+覆盖率门禁以干净对象集为准。
 
 ## 5. 不变量与边界
 

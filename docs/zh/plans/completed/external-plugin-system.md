@@ -141,7 +141,7 @@ Oak ◄── {"result":{"name":"ai-cut","api":1,"capabilities":[...],
   不引入 tokio）。
 - `HostApi`：把插件请求翻译成内部调用（§3），执行前查能力位（§5）。
 - `PluginPanel`：实现 gpui `DockPanel` 的通用面板壳，注册进
-  `AppPanelRegistry`（`crates/oak-app/src/panels/mod.rs` 目前是硬编码
+  `AppPanelRegistry`（`../../../../crates/oak-app/src/panels/mod.rs` 目前是硬编码
   panel ids——需加一处"动态 panel 注册"扩展点，这是 app 侧唯一的新机制）。
 - `ShmPool`：泛化自 `oak-render/src/ipc.rs`。
 
@@ -182,7 +182,7 @@ Oak ◄── {"result":{"name":"ai-cut","api":1,"capabilities":[...],
 | `ui.*` | 见 §4 | `PluginPanel` + gpui_widgets | `ui.panel` |
 | `edit.*` | `begin` / `commit` / `abort` / `undo` / `redo` | `oak_undo` | 随变更方法 |
 
-**取帧→AI 通路**（旗舰用例的关键路径，对齐 `ai-agent-design.md` §2.2）：
+**取帧→AI 通路**（旗舰用例的关键路径，对齐 `../ai-agent-design.md` §2.2）：
 `render.get_frame {sequence, time, max_size}` → 引擎经 ticket/进程池渲染 →
 BGRA 进 shm 槽 → 返回 `{shm_slot, width, height, format}`；插件侧 SDK 一行
 `frame.to_png_bytes()`（OIIO/stb_image_write 或 Pillow）即可回喂多模态模型。
@@ -265,7 +265,7 @@ AI 剪辑插件的聊天面板、操作日志、确认按钮，这套完全够�
 - **能力位**：manifest `capabilities` 声明，安装/升级时向用户展示差异；
   `HostApi` 在每次调用入口检查，越权调用返回 `CAPABILITY_DENIED` 并记日志。
   v1 能力集合即 §3.2 表右列。
-- **确认模式**（继承 `ai-agent-design.md` §6）：`*.edit` 与 `export` 类调用
+- **确认模式**（继承 `../ai-agent-design.md` §6）：`*.edit` 与 `export` 类调用
   默认弹"插件 X 请求执行：split_clip n17 @ 3/25 [允许] [允许本会话] [拒绝]"；
   用户可在插件设置里改为自动。
 - **可撤销**：事务分组进 UndoStack，历史面板里显示为"插件名：事务标签"，
@@ -295,12 +295,12 @@ AI 剪辑插件的聊天面板、操作日志、确认按钮，这套完全够�
      "聊天指令 → get_thumbnails 扫时间线 → 事务化 split/ripple_delete →
      get_frame 验证"的 AI 粗剪闭环——**它就是 ai-agent-design.md 的落地形态**。
 
-### 与 `ai-agent-design.md` 的关系
+### 与 `../ai-agent-design.md` 的关系
 
 该文档写于 RIIR 拆分前，假设"C ABI 小库 + 引擎内置 MCP server"。RIIR 与
 M15（渲染进程隔离）完成后，更优路径是：**AI 能力不进引擎，作为一个外部
 插件**跑在本系统上；MCP 仍可作为该插件对外的协议（插件自己起 MCP server
-连 LLM 客户端），Oak 内核始终对 AI 无感知。本文落地后，`ai-agent-design.md`
+连 LLM 客户端），Oak 内核始终对 AI 无感知。本文落地后，`../ai-agent-design.md`
 的 M1/M2（工具面、取帧通路）由 §3.2 取代，M3（AI 面板）由 §4.1 取代。
 
 ---

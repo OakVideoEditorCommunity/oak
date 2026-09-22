@@ -9,7 +9,7 @@
 ## 0. 已先行修复（不在本计划范围）
 
 - 输入框无法输入：参数视图每个引擎 tick 都把引擎值重刷进输入框，击键下一帧即被清掉。
-  已改为聚焦期间跳过重同步（`crates/oak-app/src/panels/ofx_params.rs` sync_values 的
+  已改为聚焦期间跳过重同步（`../../../../crates/oak-app/src/panels/ofx_params.rs` sync_values 的
   Text 分支，与曲线编辑器拖拽保护同款），含回归测试
   `text_field_keeps_in_progress_edits_while_focused`。**已提交**（`5f8db8e31`）。
 
@@ -17,7 +17,7 @@
 
 ### 1.1 节点层
 
-- `crates/oak-node/src/nodes/textv3.rs`（type id `org.olivevideoeditor.Olive.text3`）：
+- `../../../../crates/oak-node/src/nodes/textv3.rs`（type id `org.olivevideoeditor.Olive.text3`）：
   当前"Text"特效。输入仅 `text_in`（**HTML 原文**，默认值是
   `<p style='font-size: 72pt; color: white;'>Sample Text</p>`）、`valign_in`、
   `use_args_in`、`args_in`，外加 ShapeNodeBase 继承的 `pos_in`/`size_in`/`color_in`。
@@ -36,7 +36,7 @@
 
 ### 1.2 素材/时间轴层
 
-- bin 条目 = 项目根文件夹 `FolderBehavior.children`（`crates/oak-app/src/oakui/projectbrowser.rs`，
+- bin 条目 = 项目根文件夹 `FolderBehavior.children`（`../../../../crates/oak-app/src/oakui/projectbrowser.rs`，
   `roots()/children()`，条目 id = 节点 identity，名称 = `core.label`）。
 - 时间轴接受 bin 拖放：footage 走 `engine.drop_footage_at` →
   `graphops::place_footage_clip`（footage 节点连到 clip `tex_in`）。**没有**非 footage
@@ -97,7 +97,7 @@
 
 ### 3.2 文本后端（cosmic-text）
 
-- 新增 `crates/oak-app/src/oakui/textengine.rs`（app 层安装 hook，oak-node 不加依赖）：
+- 新增 `../../../../crates/oak-app/src/oakui/textengine.rs`（app 层安装 hook，oak-node 不加依赖）：
   - 用 lockfile 已有的 `cosmic-text`（在 oak-app 的 Cargo.toml 提升为直接依赖，
     版本与 gpui 一致 0.19，避免双版本）。
   - 实现 `measure`/`render` 两个 `fn`，在 `RealEngine::create`（或 app 启动）

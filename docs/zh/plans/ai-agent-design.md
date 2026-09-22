@@ -5,9 +5,9 @@
 > AI 能力现在是一个**外部功能插件**：独立进程、经 OPP/1 协议操作 Oak。
 >
 > 依赖文档（冲突时以它们为准）：
-> - [`external-plugin-system.md`](external-plugin-system.md)——插件系统总体设计
+> - [`completed/external-plugin-system.md`](completed/external-plugin-system.md)——插件系统总体设计
 >   （进程模型、能力位、确认模式、里程碑 P1–P6）
-> - [`external-plugin-protocol.md`](external-plugin-protocol.md)——**OPP/1 协议全文**
+> - [`completed/external-plugin-protocol.md`](completed/external-plugin-protocol.md)——**OPP/1 协议全文**
 >   （方法/事件/事务/shm/UI 的冻结定义，本文引用的 §n 均指该文档）
 >
 > **一句话**：多模态 LLM 跑在一个独立插件进程里，经 OPP/1 的策展宿主 API
