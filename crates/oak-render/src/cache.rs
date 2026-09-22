@@ -880,4 +880,314 @@ mod tests {
 		assert!(!dir.join(&c.uuid).join("state").exists());
 		std::fs::remove_dir_all(&dir).ok();
 	}
+
+	// ---- remaining boundary surface --------------------------------------
+
+	fn work_dir(tag: &str) -> std::path::PathBuf {
+		let dir = std::env::temp_dir().join(format!("oakrender-test-{tag}-{}", next_owner_identity()));
+		std::fs::create_dir_all(&dir).unwrap();
+		dir
+	}
+
+	#[test]
+	fn accessors_and_null_timebase_defaults() {
+		let mut c = PlaybackCache::new(CacheKind::AudioPlayback, 42);
+		assert_eq!(c.uuid().len(), 38);
+		assert_eq!(c.timebase(), Rational::NULL);
+		assert!(c.saving_enabled());
+		assert!(!c.disk_dir().is_empty());
+		assert!(c.requested_ranges().is_empty());
+		assert!(c.passthroughs().is_empty());
+
+		c.set_timebase(Rational::new(1, 25));
+		assert_eq!(c.timebase(), Rational::new(1, 25));
+		c.set_saving_enabled(false);
+		assert!(!c.saving_enabled());
+		c.set_disk_dir("/tmp/oak-cache-test");
+		assert_eq!(c.disk_dir(), "/tmp/oak-cache-test");
+		c.set_uuid("{00000000-0000-4000-8000-000000000000}");
+		assert_eq!(c.uuid(), "{00000000-0000-4000-8000-000000000000}");
+	}
+
+	#[test]
+	fn request_and_clear_ranges() {
+		let mut c = PlaybackCache::new(CacheKind::VideoFrame, 1);
+		c.set_saving_enabled(false);
+		let range = TimeRange::new(Rational::new(1, 1), Rational::new(2, 1));
+		c.request(range);
+		assert_eq!(c.requested_ranges().ranges(), &[range]);
+		c.clear_request_range(range);
+		assert!(c.requested_ranges().is_empty());
+	}
+
+	#[test]
+	fn byte_reader_reads_past_the_end_as_zero() {
+		let data = [0x12u8, 0x34, 0x56, 0x78];
+		let mut r = ByteReader::new(&data);
+		assert_eq!(r.read_u32(), 0x1234_5678);
+		// Past the end: zeroed values, no panic.
+		assert_eq!(r.read_u32(), 0);
+		assert_eq!(r.read_i32(), 0);
+		assert_eq!(r.read_uuid(), [0u8; 16]);
+		let mut out = [0xFFu8; 4];
+		assert_eq!(r.take(&mut out), 0);
+		assert_eq!(out, [0xFFu8; 4]);
+
+		// Partial reads copy only the bytes that exist.
+		let mut r = ByteReader::new(&data);
+		assert_eq!(r.read_be(2), 0x1234);
+		// A partial read is left-aligned and zero-padded on the right.
+		assert_eq!(r.read_be(4), 0x5678_0000);
+		assert_eq!(r.read_be(8), 0);
+		let mut short = [0u8; 2];
+		let mut r = ByteReader::new(&data);
+		assert_eq!(r.take(&mut short), 2);
+		assert_eq!(short, [0x12, 0x34]);
+	}
+
+	#[test]
+	fn uuid_text_conversion_ignores_trailing_nibbles() {
+		let canonical = "{00112233-4455-6677-8899-aabbccddeeff}";
+		let bytes = uuid_text_to_bytes(canonical);
+		assert_eq!(
+			bytes,
+			[
+				0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+				0xdd, 0xee, 0xff
+			]
+		);
+		assert_eq!(bytes_to_uuid_text(&bytes), canonical);
+		// Anything past the 32nd nibble is ignored (QDataStream parity).
+		assert_eq!(uuid_text_to_bytes(&format!("{canonical}ffff")), bytes);
+	}
+
+	#[test]
+	fn modification_time_is_zero_for_missing_paths() {
+		assert_eq!(
+			modification_time_msecs(std::path::Path::new("/definitely/not/here")),
+			0
+		);
+	}
+
+	#[test]
+	fn set_uuid_reloads_the_disk_state() {
+		let dir = work_dir("uuid-reload");
+		let mut source = tb_cache();
+		source.set_saving_enabled(true);
+		source.set_disk_dir(&dir.to_string_lossy());
+		let uuid = source.uuid.clone();
+		source.validate(TimeRange::new(Rational::new(3, 1), Rational::new(9, 1)));
+		source.save_state(&dir).unwrap();
+
+		let mut target = PlaybackCache::new(CacheKind::VideoFrame, 2);
+		target.set_saving_enabled(false);
+		target.set_disk_dir(&dir.to_string_lossy());
+		target.set_uuid(&uuid);
+		assert_eq!(
+			target.validated_ranges().ranges(),
+			&[TimeRange::new(Rational::new(3, 1), Rational::new(9, 1))]
+		);
+
+		// A uuid without a state file clears the ranges (missing state).
+		target.set_uuid("{00000000-0000-4000-8000-000000000000}");
+		assert!(!target.has_validated_ranges());
+
+		std::fs::remove_dir_all(&dir).ok();
+	}
+
+	#[test]
+	fn load_state_loads_a_clean_cache_and_skips_unchanged_files() {
+		let dir = work_dir("load-skip");
+
+		// One validated range persisted as `<dir>/<uuid>/state` by a
+		// separate producer instance.
+		let mut source = tb_cache();
+		source.set_saving_enabled(true);
+		source.set_disk_dir(&dir.to_string_lossy());
+		let loaded = TimeRange::new(Rational::new(3, 1), Rational::new(9, 1));
+		source.validate(loaded);
+		source.save_state(&dir).unwrap();
+
+		// The consumer starts with genuinely empty in-memory ranges (and a
+		// zero `last_loaded_state`): the state has to come from the file.
+		// `validate` is deliberately not called on this instance — that is
+		// what made the old construction isomorphic. A no-op load or an
+		// inverted mtime guard now leaves the assertions below failing.
+		let mut target = PlaybackCache::new(CacheKind::VideoFrame, 2);
+		target.set_saving_enabled(false);
+		target.set_disk_dir(&dir.to_string_lossy());
+		target.uuid = source.uuid.clone();
+		assert!(
+			target.validated_ranges().is_empty(),
+			"the consumer starts with no ranges"
+		);
+
+		target.load_state(&dir).unwrap();
+		assert_eq!(
+			target.validated_ranges().ranges(),
+			&[loaded],
+			"the state file loads into empty memory"
+		);
+		assert_ne!(
+			target.last_loaded_state, 0,
+			"the load records the state file's mtime"
+		);
+
+		// Drop the memory only, then load the unchanged file again: the
+		// mtime guard must skip it, so the range stays gone. A guard that
+		// was removed would resurrect the range here (and an inverted one
+		// would already have failed the load above).
+		target.validated = TimeRangeList::new();
+		target.load_state(&dir).unwrap();
+		assert!(
+			target.validated_ranges().is_empty(),
+			"an unchanged state file is not reloaded"
+		);
+
+		// Force the reload path (a rewrite within the same millisecond
+		// would make the mtime comparison flaky): the now-larger file is
+		// re-read in full.
+		source.validate(TimeRange::new(Rational::new(10, 1), Rational::new(11, 1)));
+		source.save_state(&dir).unwrap();
+		target.last_loaded_state = 0;
+		target.load_state(&dir).unwrap();
+		assert_eq!(
+			target.validated_ranges().ranges(),
+			source.validated_ranges().ranges(),
+			"a forced load re-reads the whole state"
+		);
+
+		std::fs::remove_dir_all(&dir).ok();
+	}
+
+	#[test]
+	fn save_state_reports_directory_creation_errors() {
+		let dir = work_dir("save-error");
+		let blocker = dir.join("not-a-dir");
+		std::fs::write(&blocker, b"file").unwrap();
+		let mut c = tb_cache();
+		c.set_saving_enabled(false);
+		c.set_disk_dir(&blocker.to_string_lossy());
+		c.validate(TimeRange::new(Rational::new(0, 1), Rational::new(1, 1)));
+		let err = c.save_state(&blocker).unwrap_err();
+		assert!(format!("{err}").contains("create cache dir"), "{err}");
+		std::fs::remove_dir_all(&dir).ok();
+	}
+
+	#[test]
+	fn passthrough_snapshot_links_ranges_without_aliasing() {
+		let mut source = PlaybackCache::new(CacheKind::VideoFrame, 3);
+		source.set_saving_enabled(false);
+		source.set_timebase(Rational::new(1, 24));
+		source.validate(TimeRange::new(Rational::new(2, 1), Rational::new(3, 1)));
+		let snapshot = PassthroughSnapshot {
+			validated: source.validated.clone(),
+			passthroughs: vec![(
+				TimeRange::new(Rational::new(8, 1), Rational::new(9, 1)),
+				source.uuid.clone(),
+			)],
+			timebase: source.timebase,
+			uuid: source.uuid.clone(),
+		};
+
+		let mut target = PlaybackCache::new(CacheKind::VideoFrame, 4);
+		target.set_saving_enabled(false);
+		target.set_passthrough_snapshot(snapshot.clone());
+		assert_eq!(target.timebase(), Rational::new(1, 24));
+		assert_eq!(
+			target.passthroughs().len(),
+			2,
+			"validated source range plus the explicit entry"
+		);
+		// Passthroughs cover exactly the linked ranges; the gap between them
+		// is still reported as invalidated.
+		let inv = target.invalidated_ranges(TimeRange::new(Rational::new(2, 1), Rational::new(9, 1)));
+		assert_eq!(
+			inv.ranges(),
+			&[TimeRange::new(Rational::new(3, 1), Rational::new(8, 1))]
+		);
+
+		// Audio caches keep their own timebase (frame-hash-only adoption).
+		let mut audio = PlaybackCache::new(CacheKind::AudioPlayback, 5);
+		audio.set_saving_enabled(false);
+		audio.set_passthrough_snapshot(snapshot);
+		assert_eq!(audio.timebase(), Rational::NULL);
+	}
+
+	#[test]
+	fn passthrough_with_saving_enabled_persists_the_state() {
+		let dir = work_dir("passthrough-save");
+		let mut source = PlaybackCache::new(CacheKind::VideoFrame, 6);
+		source.set_saving_enabled(false);
+		source.validate(TimeRange::new(Rational::new(0, 1), Rational::new(2, 1)));
+
+		let mut target = PlaybackCache::new(CacheKind::VideoFrame, 7);
+		target.set_disk_dir(&dir.to_string_lossy());
+		target.set_passthrough(&source);
+		let state = dir.join(&target.uuid).join("state");
+		assert!(state.exists(), "set_passthrough persists when saving is on");
+
+		// Snapshot variant takes the same saving path.
+		let snapshot = PassthroughSnapshot {
+			validated: source.validated.clone(),
+			passthroughs: Vec::new(),
+			timebase: None,
+			uuid: source.uuid.clone(),
+		};
+		target.set_passthrough_snapshot(snapshot);
+		assert!(state.exists());
+		assert_eq!(target.passthroughs().len(), 2);
+
+		std::fs::remove_dir_all(&dir).ok();
+	}
+
+	#[test]
+	fn frame_paths_use_the_timebase_or_whole_seconds() {
+		// Instance path with a timebase: 15s at 1/30 → frame 450.
+		let mut with_tb = tb_cache();
+		with_tb.validate(TimeRange::new(Rational::new(0, 1), Rational::new(16, 1)));
+		let name = with_tb.frame_filename(Rational::new(15, 1)).expect("cached");
+		assert!(name.ends_with("/450"), "{name}");
+
+		let path = PlaybackCache::frame_cache_path(
+			"/cache",
+			"id",
+			Rational::new(15, 1),
+			Rational::new(1, 30),
+		);
+		assert_eq!(
+			path,
+			std::path::Path::new("/cache")
+				.join("id")
+				.join("450")
+				.to_string_lossy()
+		);
+		assert_eq!(
+			PlaybackCache::frame_cache_path(
+				"/cache",
+				"id",
+				Rational::new(1, 10),
+				Rational::new(1, 1)
+			),
+			std::path::Path::new("/cache")
+				.join("id")
+				.join("0")
+				.to_string_lossy()
+		);
+
+		// No timebase: whole seconds (round-half-away-from-zero).
+		let mut c = PlaybackCache::new(CacheKind::VideoFrame, 8);
+		c.set_saving_enabled(false);
+		c.validate(TimeRange::new(Rational::new(0, 1), Rational::new(4, 1)));
+		let name = c.frame_filename(Rational::new(1, 2)).expect("cached");
+		assert!(name.ends_with("/1"), "{name}");
+		assert!(name.contains(c.uuid()), "{name}");
+	}
+
+	#[test]
+	fn next_owner_identity_is_monotonic() {
+		let a = next_owner_identity();
+		let b = next_owner_identity();
+		assert!(b > a);
+	}
 }

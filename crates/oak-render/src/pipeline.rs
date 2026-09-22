@@ -953,14 +953,21 @@ mod tests {
 		path
 	}
 
-	/// Pin the working space to the legacy sRGB pass-through: these tests
-	/// assert the decoded pattern, not the color transform (the ACEScg
-	/// default would remap the values).
-	fn pin_legacy_working_space() {
+	/// Pin the working space to the legacy sRGB pass-through and hold the
+	/// crate-wide working-space test lock for the entire decoded-pattern
+	/// section: these tests assert the decoded pattern, not the color
+	/// transform (the ACEScg default would remap the values), while the
+	/// eval tests temporarily switch the same process-global settings. The
+	/// caller must keep the returned guard alive.
+	fn pin_legacy_working_space() -> std::sync::MutexGuard<'static, ()> {
+		let guard = crate::eval::working_space_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		oak_core::color::set_pipeline_color_settings(
 			oak_core::colormath::WorkingColorSpace::SrgbLegacy,
 			oak_core::colormath::OutputColorSpec::default(),
 		);
+		guard
 	}
 
 	fn request(filename: &std::path::Path, time: Rational) -> DecodeRequest {
@@ -970,6 +977,7 @@ mod tests {
 			time,
 			size: (64, 64),
 			format: PixelFormat::F32,
+			allow_import: true,
 		}
 	}
 
@@ -1020,7 +1028,7 @@ mod tests {
 	/// The service decodes real media through the real codec path.
 	#[test]
 	fn request_decodes_real_media() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("real");
 		let service = DecodeService::new(DECODE_LRU_CAP, always());
 
@@ -1045,7 +1053,7 @@ mod tests {
 	/// follows is served from the cache with no decode at all.
 	#[test]
 	fn prefetch_then_request_hits_the_lru() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("prefetch");
 		let service = DecodeService::new(DECODE_LRU_CAP, always());
 
@@ -1084,6 +1092,7 @@ mod tests {
 			time: Rational::new(0, 1),
 			size: (64, 64),
 			format: PixelFormat::F32,
+			allow_import: true,
 		};
 		let err = service
 			.request(req)
@@ -1101,7 +1110,7 @@ mod tests {
 	/// frame must be decoded again).
 	#[test]
 	fn lru_evicts_bounded() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("evict");
 		let service = DecodeService::new(2, always());
 		let time = |n: i64| request(&path, Rational::new(n, 10));
@@ -1135,7 +1144,7 @@ mod tests {
 	/// (and counts) without queueing anything.
 	#[test]
 	fn prefetch_gate_refuses_and_recovers() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("gate");
 		let open = Arc::new(AtomicBool::new(false));
 		let gate_open = open.clone();
@@ -1166,7 +1175,7 @@ mod tests {
 	/// prefetch sent before it has been decoded when it returns.
 	#[test]
 	fn wait_idle_barrier_covers_queued_commands() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("barrier");
 		// The barrier test needs four live entries; the production
 		// hand-off capacity is deliberately tiny (see DECODE_LRU_CAP), so
@@ -1188,7 +1197,7 @@ mod tests {
 	/// eval path falls back to decoding inline instead of failing frames.
 	#[test]
 	fn shutdown_makes_the_service_unavailable() {
-		pin_legacy_working_space();
+		let _guard = pin_legacy_working_space();
 		let path = test_clip("shutdown");
 		let service = DecodeService::new(DECODE_LRU_CAP, always());
 		service.shutdown();
@@ -1256,6 +1265,7 @@ mod tests {
 			time,
 			size: (16, 16),
 			format: PixelFormat::F32,
+			allow_import: true,
 		};
 		{
 			let mut queue = lock(&shared.queue);

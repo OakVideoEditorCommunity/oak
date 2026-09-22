@@ -69,6 +69,12 @@ use crate::ipc::{
 };
 use crate::{log_error, PROTOCOL_VERSION};
 
+/// Serializes unit tests that install or drive the process-global
+/// plugin/progress factories (the `ofx_host` tests share this lock: the
+/// worker's and the host's reporter factories are process-wide).
+#[cfg(test)]
+pub(crate) static GLOBAL_FACTORY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// A loaded graph snapshot (M15 S1): the snapshot file path plus what it
 /// deserialized into — a full oaknode project, or only the copied-project
 /// identity (the minimal `{"project_copy":N}` payload the
@@ -1557,9 +1563,70 @@ pub fn worker_main(backend: &str) -> i32 {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ipc::{FrameSlotPool, SharedMemoryRegion, ShmMode};
+	use crate::ipc::{
+		FrameSlotPool, SharedMemoryRegion, ShmMode, WireEffectParam, WireMontageClip,
+		WireMontageEffect, WireNodeValue,
+	};
+	use oak_core::colormath::{OutputColorSpec, WorkingColorSpace};
+	use oak_node::id::NodeId;
+	use oak_node::project::Project;
+	use oak_node::sequence::SequenceBehavior;
+	use oak_node::track::TrackListBehavior;
 	use serde_json::json;
+	use std::collections::HashMap;
 	use std::ptr;
+
+	/// Serializes the tests that mutate the process-global pipeline color
+	/// settings (the two pre-existing adopt/sync tests included).
+	static COLOR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+	/// Saves the process-global pipeline color settings and restores them on
+	/// drop, so a panicking assertion cannot leak the override into the next
+	/// serialized test. All users hold [`COLOR_TEST_LOCK`].
+	struct ColorSettingsGuard {
+		working: oak_core::colormath::WorkingColorSpace,
+		output: oak_core::colormath::OutputColorSpec,
+	}
+
+	impl ColorSettingsGuard {
+		fn capture() -> ColorSettingsGuard {
+			ColorSettingsGuard {
+				working: oak_core::color::pipeline_working_space(),
+				output: oak_core::color::pipeline_output_spec(),
+			}
+		}
+	}
+
+	impl Drop for ColorSettingsGuard {
+		fn drop(&mut self) {
+			oak_core::color::set_pipeline_color_settings(self.working, self.output);
+		}
+	}
+
+	/// Test-only RAII environment override: restores the previous value (or
+	/// absence) on drop, so a panicking assertion cannot leak a crash-mode
+	/// override into the next serialized test.
+	struct EnvGuard {
+		name: &'static str,
+		previous: Option<std::ffi::OsString>,
+	}
+
+	impl EnvGuard {
+		fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+			let previous = std::env::var_os(name);
+			std::env::set_var(name, value);
+			Self { name, previous }
+		}
+	}
+
+	impl Drop for EnvGuard {
+		fn drop(&mut self) {
+			match self.previous.take() {
+				Some(value) => std::env::set_var(self.name, value),
+				None => std::env::remove_var(self.name),
+			}
+		}
+	}
 
 	fn test_key(name: &str) -> String {
 		static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -1579,11 +1646,9 @@ mod tests {
 		let out_key = test_key("out");
 		let out_bytes = FrameSlotPool::bytes_needed(slots as u32, slot_bytes as usize);
 		let mut out_region = SharedMemoryRegion::new();
-		assert!(
-			out_region.open(&out_key, out_bytes, ShmMode::Create),
-			"{}",
-			out_region.error()
-		);
+		let opened = out_region.open(&out_key, out_bytes, ShmMode::Create);
+		let open_error = out_region.error();
+		assert!(opened, "{open_error}");
 		// SAFETY: live mapping sized by bytes_needed.
 		let _pool =
 			unsafe { FrameSlotPool::create(out_region.data(), slots as u32, slot_bytes as usize) };
@@ -1630,6 +1695,20 @@ mod tests {
 		assert!(!s.has_renderer());
 		let resp = s.handle_line(r#"{"type":"shutdown"}"#);
 		assert!(resp.is_none());
+		assert!(s.shutdown_requested());
+	}
+
+	/// The M15 headless "cpu" backend: no renderer, but the session stays
+	/// fully operational (generated frames render through CPU eval).
+	#[test]
+	fn cpu_backend_session_is_headless_but_operational() {
+		assert!(is_cpu_backend("cpu"));
+		assert!(is_cpu_backend("CPU"));
+		assert!(!is_cpu_backend("auto"));
+		let mut s = WorkerSession::create("cpu").unwrap();
+		assert!(!s.has_renderer(), "cpu means no GPU renderer");
+		assert!(!s.shutdown_requested());
+		assert!(s.handle_line(r#"{"type":"shutdown"}"#).is_none());
 		assert!(s.shutdown_requested());
 	}
 
@@ -1904,6 +1983,8 @@ mod tests {
 	#[test]
 	fn load_graph_adopts_pipeline_colors_from_snapshot() {
 		use oak_core::colormath::{OutputColorSpec, WorkingColorSpace};
+		let _guard = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let _colors = ColorSettingsGuard::capture();
 		// Reset the process global to something different from the snapshot's
 		// settings so the adopt step is observable.
 		oak_core::color::set_pipeline_color_settings(
@@ -1931,16 +2012,13 @@ mod tests {
 			"load_graph must adopt the snapshot's working space"
 		);
 		let _ = std::fs::remove_file(&path);
-		// Restore the default global so parallel tests are not disturbed.
-		oak_core::color::set_pipeline_color_settings(
-			WorkingColorSpace::default(),
-			OutputColorSpec::default(),
-		);
 	}
 
 	#[test]
 	fn sync_pipeline_color_from_graph_restores_stale_global() {
-		use oak_core::colormath::{OutputColorSpec, WorkingColorSpace};
+		use oak_core::colormath::WorkingColorSpace;
+		let _guard = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let _colors = ColorSettingsGuard::capture();
 		let project = oak_node::project::Project::new();
 		{
 			let mut guard = project.lock().unwrap_or_else(|e| e.into_inner());
@@ -1978,10 +2056,6 @@ mod tests {
 			"no change means no frame-cache invalidation"
 		);
 		let _ = std::fs::remove_file(&path);
-		oak_core::color::set_pipeline_color_settings(
-			WorkingColorSpace::default(),
-			OutputColorSpec::default(),
-		);
 	}
 
 	#[test]
@@ -2085,6 +2159,11 @@ mod tests {
 
 	#[test]
 	fn render_batch_stream_renders_generated_frames_and_reports_failures() {
+		// The crash-mode env vars are process-wide: serialize with the
+		// crash-hook test that mutates them.
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		let mut s = WorkerSession::create("none").unwrap();
 		// Slots sized for 8x8 BGRA8.
 		let (hs, out_region, _in) = parent_side(4, 8 * 8 * 4, false);
@@ -2137,6 +2216,10 @@ mod tests {
 
 	#[test]
 	fn render_audio_batch_stream_mixes_silence_into_slot() {
+		// Serialize with the crash-hook env test (see render_batch_stream).
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		// M15 S3: an empty-montage audio range pull (1/24 s at 48 kHz
 		// stereo = 2000 frames x 2 ch = 16000 bytes) renders total silence
 		// into the assigned slot and reports frame_ready with the audio
@@ -2227,6 +2310,10 @@ mod tests {
 
 	#[test]
 	fn render_audio_batch_rejects_oversized_range() {
+		// Serialize with the crash-hook env test (see render_batch_stream).
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		// A range longer than the slot can hold must fail with frame_failed
 		// (never a buffer overflow into the next slot).
 		let mut s = WorkerSession::create("none").unwrap();
@@ -2263,13 +2350,10 @@ mod tests {
 		assert_eq!(lines[0]["type"], "batch_accepted");
 		assert_eq!(lines[1]["type"], "frame_failed");
 		assert_eq!(lines[1]["ticket"], 21);
+		let error_text = lines[1]["error"].as_str().unwrap().to_string();
 		assert!(
-			lines[1]["error"]
-				.as_str()
-				.unwrap()
-				.contains("needs 16000 bytes"),
-			"oversized range reported: {}",
-			lines[1]["error"]
+			error_text.contains("needs 16000 bytes"),
+			"oversized range reported: {error_text}"
 		);
 		// Slot 0 acquired but never published.
 		let parent_pool = unsafe { FrameSlotPool::attach(out_region.data()) };
@@ -2310,5 +2394,1056 @@ mod tests {
 			.handle_line(r#"{"type":"handshake","protocol_version":"x"}"#)
 			.unwrap();
 		assert_eq!(resp["message"], "invalid handshake message");
+	}
+
+	// ---- M16 R2 branch-coverage additions ---------------------------------
+
+	/// One render-batch ticket with the pipeline defaults for everything
+	/// the tests do not care about.
+	fn batch_spec(ticket: i64, slot: i32, width: i32, height: i32, format: i32) -> BatchTicketSpec {
+		BatchTicketSpec {
+			ticket,
+			slot,
+			time_num: 0,
+			time_den: 1,
+			width,
+			height,
+			format,
+			channels: 4,
+			..Default::default()
+		}
+	}
+
+	/// A project holding one empty sequence viewer; returns the project,
+	/// the viewer's loaded id and the project uuid.
+	fn sequence_project() -> (Arc<Mutex<Project>>, NodeId, String) {
+		let project = Project::new();
+		let seq;
+		{
+			let mut guard = project.lock().unwrap_or_else(|e| e.into_inner());
+			let (core, behavior) = SequenceBehavior::create();
+			seq = guard.graph.add_node(core, behavior);
+		}
+		let uuid = project.lock().unwrap_or_else(|e| e.into_inner()).uuid.clone();
+		(project, seq, uuid)
+	}
+
+	#[test]
+	fn renderer_creation_falls_back_or_succeeds_headless() {
+		// On a GPU-less host the dynamic -> direct-OpenGL fallback fails and
+		// the session continues headless (M16 S1); on a GPU host it simply
+		// initializes. Either is a valid production outcome — creation must
+		// never error out of `WorkerSession::create`, and the session's
+		// renderer flag must agree with what the factory can do on this host
+		// (the second `create` is the availability oracle; the renderer flag
+		// is not hand-rolled anywhere else).
+		let session = WorkerSession::create("auto").expect("session creation is tolerant");
+		assert_eq!(
+			session.has_renderer(),
+			Renderer::create("auto").is_ok(),
+			"the session carries a renderer exactly when the factory can create one"
+		);
+	}
+
+	#[test]
+	fn renderer_is_open_gl_reports_the_backend_kind() {
+		let gl = Renderer {
+			inner: DisplayRenderer::new(BackendKind::Gl),
+		};
+		assert!(gl.is_open_gl());
+		let vk = Renderer {
+			inner: DisplayRenderer::new(BackendKind::Vulkan),
+		};
+		assert!(!vk.is_open_gl());
+	}
+
+	#[test]
+	fn initialize_runtime_second_call_is_a_noop() {
+		let mut s = WorkerSession::create("none").unwrap();
+		s.runtime_initialized = true;
+		assert!(s.initialize_runtime(), "already initialized");
+	}
+
+	#[test]
+	fn worker_progress_events_flush_in_order_and_cancel_is_sticky() {
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		WORKER_PROGRESS_EVENTS
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clear();
+		WORKER_PLUGIN_CANCEL.store(false, Ordering::Relaxed);
+		install_worker_progress_factory();
+		assert!(
+			oak_plugin::progress::has_reporter_factory(),
+			"the worker factory must be installed for the plugin progress suite"
+		);
+		// Drive progressStart -> worker factory -> update -> progressEnd
+		// through the plugin progress suite, exactly like a real render.
+		oak_plugin::suites::progress::set_current(Some(
+			oak_plugin::progress::ProgressReporter::silent(),
+		));
+		let v2 = oak_plugin::suites::progress::suite_v2();
+		let v1 = oak_plugin::suites::progress::suite_v1();
+		let label = std::ffi::CString::new("render").unwrap();
+		let message = std::ffi::CString::new("frame 1").unwrap();
+		// SAFETY: the suite takes the null handle by contract; the C strings
+		// outlive the calls.
+		unsafe {
+			assert_eq!(
+				(v2.start)(std::ptr::null_mut(), label.as_ptr(), message.as_ptr()),
+				oak_plugin::suites::status::OK
+			);
+			assert_eq!(
+				(v2.update)(std::ptr::null_mut(), 0.25),
+				oak_plugin::suites::status::OK
+			);
+			// progressEnd is forwarded by the v1 suite (v2's end is a no-op).
+			assert_eq!(
+				(v1.end)(std::ptr::null_mut()),
+				oak_plugin::suites::status::OK
+			);
+		}
+		oak_plugin::suites::progress::set_current(None);
+
+		let mut out: Vec<u8> = Vec::new();
+		flush_worker_progress(&mut out);
+		let events: Vec<Value> = String::from_utf8(out)
+			.unwrap()
+			.lines()
+			.map(|line| serde_json::from_str(line).unwrap())
+			.collect();
+		assert_eq!(events.len(), 3, "start + update + end");
+		assert_eq!(events[0]["type"], crate::ipc::TYPE_PLUGIN_PROGRESS);
+		assert_eq!(events[0]["label"], "render");
+		assert_eq!(events[0]["message"], "frame 1");
+		assert_eq!(events[0]["fraction"], 0.0);
+		assert_eq!(events[1]["fraction"], 0.25);
+		assert_eq!(events[2]["fraction"], 1.0);
+
+		// plugin_cancel is sticky until a fresh progressStart resets it.
+		let mut s = WorkerSession::create("none").unwrap();
+		assert!(s
+			.handle_line(r#"{"type":"plugin_cancel"}"#)
+			.is_none());
+		assert!(WORKER_PLUGIN_CANCEL.load(Ordering::Relaxed));
+		WORKER_PLUGIN_CANCEL.store(false, Ordering::Relaxed);
+	}
+
+	/// A writer whose pipe is already closed.
+	struct FailingWriter;
+
+	impl Write for FailingWriter {
+		fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+			Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+		}
+		fn flush(&mut self) -> io::Result<()> {
+			Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+		}
+	}
+
+	#[test]
+	fn flush_worker_progress_breaks_on_the_first_write_error() {
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		WORKER_PROGRESS_EVENTS
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clear();
+		push_worker_progress(0.1, "a", "b");
+		push_worker_progress(0.2, "c", "d");
+		let mut failing = FailingWriter;
+		flush_worker_progress(&mut failing);
+		// The buffer is drained even though the pipe failed.
+		let mut out: Vec<u8> = Vec::new();
+		flush_worker_progress(&mut out);
+		assert!(out.is_empty());
+	}
+
+	#[test]
+	fn crash_hook_env_error_paths_are_inert() {
+		// The env vars are process-wide; the batch tests that call the hook
+		// take this same lock. The `EnvGuard`s restore the environment even
+		// if an assertion below fails (a leaked crash-mode override could
+		// abort a later serialized test).
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let session = WorkerSession::create("none").unwrap();
+
+		let marker = std::env::temp_dir().join(format!(
+			"oak_worker_crash_marker_{}",
+			std::process::id()
+		));
+		let _ = std::fs::remove_file(&marker);
+		let _marker_env = EnvGuard::set("OAK_WORKER_CRASH_MARKER", &marker);
+
+		// A non-numeric ticket id is ignored (no parse, no crash, and no
+		// marker file side effect).
+		let _ticket = EnvGuard::set("OAK_WORKER_CRASH_ON_TICKET", "not-a-number");
+		session.maybe_crash_for_testing(1);
+		assert!(
+			!marker.exists(),
+			"a non-numeric ticket never reaches the marker write"
+		);
+		drop(_ticket);
+
+		// A matching ticket whose one-shot marker already exists does not
+		// crash again (the restarted worker renders for real) and leaves the
+		// marker untouched.
+		std::fs::write(&marker, b"crashed").unwrap();
+		let _ticket = EnvGuard::set("OAK_WORKER_CRASH_ON_TICKET", i64::MIN.to_string());
+		session.maybe_crash_for_testing(i64::MIN);
+		assert_eq!(
+			std::fs::read(&marker).unwrap(),
+			b"crashed".as_slice(),
+			"the existing marker is left untouched"
+		);
+		session.maybe_crash_for_testing(7); // different ticket: early return
+		assert_eq!(
+			std::fs::read(&marker).unwrap(),
+			b"crashed".as_slice(),
+			"a mismatching ticket writes nothing"
+		);
+
+		let _ = std::fs::remove_file(&marker);
+	}
+
+	#[test]
+	fn handshake_input_attach_failure_reports_error() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (mut hs, _out, _in) = parent_side(2, 256, false);
+		hs["input_slots"] = json!(2);
+		hs["input_slot_data_bytes"] = json!(256);
+		hs["input_shm_key"] = json!(format!("olive-rw-{}-missing-in", std::process::id()));
+		let resp = s.handle_line(&hs.to_string()).unwrap();
+		assert_eq!(resp["type"], "error");
+		assert!(
+			resp["message"]
+				.as_str()
+				.unwrap()
+				.starts_with("failed to attach input shared memory: "),
+			"{resp}"
+		);
+	}
+
+	#[test]
+	fn handshake_rejects_non_pool_input_segment() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (mut hs, _out, _in) = parent_side(2, 256, false);
+		let key = test_key("nopool-in");
+		let bytes = FrameSlotPool::bytes_needed(2, 256);
+		let mut region = SharedMemoryRegion::new();
+		assert!(region.open(&key, bytes, ShmMode::Create));
+		hs["input_slots"] = json!(2);
+		hs["input_slot_data_bytes"] = json!(256);
+		hs["input_shm_key"] = json!(key);
+		let resp = s.handle_line(&hs.to_string()).unwrap();
+		assert_eq!(
+			resp["message"],
+			"input shared memory does not contain a frame slot pool"
+		);
+	}
+
+	#[test]
+	fn load_graph_rejects_bad_shape_and_unreadable_files() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let resp = s.handle_line(r#"{"type":"load_graph","path":42}"#).unwrap();
+		assert_eq!(resp["message"], "invalid load_graph message");
+
+		// A non-empty file that is not valid UTF-8: it passes the metadata
+		// checks but cannot be read as a project.
+		let unreadable = std::env::temp_dir().join(format!(
+			"oak_worker_unreadable_{}.ove",
+			std::process::id()
+		));
+		std::fs::write(&unreadable, [0xFFu8, 0xFE, 0x00, 0x80]).unwrap();
+		let resp = s
+			.handle_line(
+				&json!({ "type": "load_graph", "path": unreadable.display().to_string() })
+					.to_string(),
+			)
+			.unwrap();
+		assert!(
+			resp["message"]
+				.as_str()
+				.unwrap()
+				.starts_with("graph file unreadable: "),
+			"{resp}"
+		);
+		let _ = std::fs::remove_file(&unreadable);
+
+		// The identity-only payload still lands as a graph context.
+		let ident = std::env::temp_dir().join(format!(
+			"oak_worker_identity_{}.ove",
+			std::process::id()
+		));
+		std::fs::write(&ident, r#"{"project_copy":11}"#).unwrap();
+		assert!(s
+			.handle_line(
+				&json!({ "type": "load_graph", "path": ident.display().to_string() })
+					.to_string(),
+			)
+			.is_none());
+		let graph = s.graph.as_ref().expect("identity graph loaded");
+		assert!(graph.project.is_none());
+		assert_eq!(graph.project_copy, 11);
+		let _ = std::fs::remove_file(&ident);
+	}
+
+	#[test]
+	fn render_frame_maps_every_supported_pixel_format() {
+		let mut s = WorkerSession::create("none").unwrap();
+		// Five slots so each render can publish without draining.
+		let (hs, _out, _in) = parent_side(5, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		for format in [
+			PixelFormat::U8,
+			PixelFormat::U10,
+			PixelFormat::U16,
+			PixelFormat::F16,
+			PixelFormat::F32,
+		] {
+			let line = json!({
+				"type": "render_frame",
+				"ticket": 100 + format as i64,
+				"time_num": 0,
+				"time_den": 1,
+				"width": 2,
+				"height": 2,
+				"format": format as i32,
+			})
+			.to_string();
+			let resp = s.handle_line(&line).unwrap();
+			assert_eq!(resp["type"], "frame_ready", "{format:?}: {resp}");
+		}
+	}
+
+	#[test]
+	fn render_frame_rejects_invalid_message_and_unsupported_format() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let resp = s
+			.handle_line(r#"{"type":"render_frame","ticket":"nope"}"#)
+			.unwrap();
+		assert_eq!(resp["message"], "invalid render_frame message");
+
+		let (hs, _out, _in) = parent_side(2, 256, false);
+		assert_eq!(
+			s.handle_line(&hs.to_string()).unwrap()["type"],
+			crate::ipc::TYPE_HELLO_CAPS
+		);
+		let resp = s
+			.handle_line(
+				r#"{"type":"render_frame","ticket":9,"time_num":0,"time_den":1,"width":4,"height":4,"format":7}"#,
+			)
+			.unwrap();
+		assert_eq!(resp["message"], "render_frame: unsupported format 7");
+		assert_eq!(resp["ticket"], 9);
+	}
+
+	#[test]
+	fn render_frame_defaults_zero_size_and_rejects_the_oversized_frame() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		// 0x0 means "pipeline default" (1920x1080), which cannot fit the
+		// 64-byte slot.
+		let resp = s
+			.handle_line(
+				r#"{"type":"render_frame","ticket":10,"time_num":0,"time_den":1,"width":0,"height":0,"format":-1}"#,
+			)
+			.unwrap();
+		assert_eq!(
+			resp["message"],
+			"render_frame: frame larger than the shm slot"
+		);
+	}
+
+	#[test]
+	fn render_frame_reports_no_free_slot_on_shutdown() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 256, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		s.shutdown_requested = true;
+		let resp = s
+			.handle_line(
+				r#"{"type":"render_frame","ticket":11,"time_num":0,"time_den":1,"width":4,"height":4,"format":-1}"#,
+			)
+			.unwrap();
+		assert_eq!(resp["message"], "render_frame: no free shm slot");
+	}
+
+	#[test]
+	fn render_frame_reports_ready_ring_full() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 256, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		// Fill the single-entry ready ring, then recycle the slot through
+		// the free ring so the render can acquire it again.
+		let pool = s.output_pool.clone().unwrap();
+		// SAFETY: live attached pool; single-threaded test.
+		unsafe {
+			let mut slot = 0u32;
+			assert!(pool.acquire(&mut slot));
+			assert!(pool.publish(slot));
+			assert!(pool.release(slot));
+		}
+		let resp = s
+			.handle_line(
+				r#"{"type":"render_frame","ticket":12,"time_num":0,"time_den":1,"width":4,"height":4,"format":-1}"#,
+			)
+			.unwrap();
+		assert_eq!(resp["message"], "render_frame: ready ring full");
+	}
+
+	#[test]
+	fn batch_and_audio_batch_reject_invalid_messages() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let mut out: Vec<u8> = Vec::new();
+		s.handle_render_batch_stream(r#"{"type":"render_batch","batch_id":"x"}"#, &mut out)
+			.unwrap();
+		s.handle_render_audio_batch_stream(r#"{"type":"render_audio_batch","tickets":7}"#, &mut out)
+			.unwrap();
+		let lines: Vec<Value> = String::from_utf8(out)
+			.unwrap()
+			.lines()
+			.map(|line| serde_json::from_str(line).unwrap())
+			.collect();
+		assert_eq!(lines.len(), 2);
+		assert_eq!(lines[0]["type"], "error");
+		assert_eq!(lines[0]["message"], "invalid render_batch message");
+		assert_eq!(lines[1]["type"], "error");
+		assert_eq!(lines[1]["message"], "invalid render_audio_batch message");
+	}
+
+	#[test]
+	fn render_ticket_without_pool_and_with_wrong_slot_assignment() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let spec = batch_spec(1, 0, 4, 4, PixelFormat::F32 as i32);
+		assert_eq!(
+			s.render_ticket_to_slot(&spec).unwrap_err(),
+			"no shared-memory pool attached"
+		);
+
+		let (hs, _out, _in) = parent_side(2, 256, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let spec = batch_spec(1, 7, 4, 4, PixelFormat::F32 as i32);
+		assert_eq!(
+			s.render_ticket_to_slot(&spec).unwrap_err(),
+			"slot assignment mismatch: acquired 0, assigned 7"
+		);
+	}
+
+	#[test]
+	fn render_ticket_reports_a_full_ready_ring() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 256, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+		// SAFETY: live attached pool; single-threaded test.
+		unsafe {
+			let mut slot = 0u32;
+			assert!(pool.acquire(&mut slot));
+			assert!(pool.publish(slot));
+			assert!(pool.release(slot));
+		}
+		let spec = batch_spec(2, 0, 4, 4, PixelFormat::F32 as i32);
+		assert_eq!(s.render_ticket_to_slot(&spec).unwrap_err(), "ready ring full");
+	}
+
+	#[test]
+	fn render_spec_pixels_rejects_oversized_and_rerenders_short_cache_entries() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+
+		// 4x4 F32 needs 256 bytes; the slot holds 64.
+		let spec = batch_spec(3, 0, 4, 4, PixelFormat::F32 as i32);
+		let err = s.render_spec_pixels(&spec, &pool).unwrap_err();
+		assert!(err.starts_with("frame 4x4 needs 256 bytes"), "{err}");
+
+		// A 2x2 frame fits exactly; a stale entry smaller than this
+		// geometry is defensively discarded and re-rendered.
+		let spec = batch_spec(4, 0, 2, 2, PixelFormat::F32 as i32);
+		let key = crate::framecache::spec_cache_key(&spec);
+		s.frame_cache.insert(key.clone(), vec![0u8; 4]);
+		s.render_spec_pixels(&spec, &pool).expect("2x2 fits");
+		let cached = s.frame_cache.get(&key).expect("re-rendered and memoized");
+		assert_eq!(cached.len(), 64);
+	}
+
+	#[test]
+	fn render_spec_pixels_reports_footage_decode_failures() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(2, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+		let missing = "/definitely/not/a/real/clip.mp4";
+
+		// F32 slot: the decode error propagates out of `render_f32_into`.
+		let spec = BatchTicketSpec {
+			footage_file: missing.to_string(),
+			..batch_spec(5, 0, 2, 2, PixelFormat::F32 as i32)
+		};
+		let err = s.render_spec_pixels(&spec, &pool).unwrap_err();
+		assert!(err.starts_with("footage decode: "), "{err}");
+
+		// BGRA8 slot: the same failure through the scratch-buffer path.
+		let spec = BatchTicketSpec {
+			footage_file: missing.to_string(),
+			..batch_spec(6, 1, 2, 2, SLOT_FORMAT_BGRA8)
+		};
+		let err = s.render_spec_pixels(&spec, &pool).unwrap_err();
+		assert!(err.starts_with("footage decode: "), "{err}");
+	}
+
+	#[test]
+	fn render_audio_ticket_without_pool_wrong_slot_and_full_ring() {
+		let mut s = WorkerSession::create("none").unwrap();
+		assert_eq!(
+			s.render_audio_ticket_to_slot(&AudioTicketSpec::default())
+				.unwrap_err(),
+			"no shared-memory pool attached"
+		);
+
+		let (hs, _out, _in) = parent_side(2, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let spec = AudioTicketSpec {
+			slot: 5,
+			..Default::default()
+		};
+		assert_eq!(
+			s.render_audio_ticket_to_slot(&spec).unwrap_err(),
+			"slot assignment mismatch: acquired 0, assigned 5"
+		);
+
+		// One sample frame of stereo audio needs 8 bytes; fill the
+		// single-entry ready ring first so the publish fails.
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 8, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+		// SAFETY: live attached pool; single-threaded test.
+		unsafe {
+			let mut slot = 0u32;
+			assert!(pool.acquire(&mut slot));
+			assert!(pool.publish(slot));
+			assert!(pool.release(slot));
+		}
+		let spec = AudioTicketSpec {
+			ticket: 2,
+			slot: 0,
+			time_num: 0,
+			time_den: 1,
+			duration_num: 1,
+			duration_den: 48000,
+			sample_rate: 48000,
+			channel_layout: 0x3,
+			channels: 2,
+			montage: Vec::new(),
+		};
+		assert_eq!(
+			s.render_audio_ticket_to_slot(&spec).unwrap_err(),
+			"ready ring full"
+		);
+	}
+
+	#[test]
+	fn audio_ticket_params_maps_montage_and_effects() {
+		let s = WorkerSession::create("none").unwrap();
+		let spec = AudioTicketSpec {
+			ticket: 1,
+			slot: 0,
+			time_num: 3,
+			time_den: 2,
+			duration_num: 1,
+			duration_den: 4,
+			sample_rate: 44100,
+			channel_layout: 0x3,
+			channels: 2,
+			montage: vec![WireMontageClip {
+				filename: "clip.mp4".to_string(),
+				stream_index: 2,
+				in_num: 1,
+				in_den: 2,
+				out_num: 3,
+				out_den: 2,
+				media_in_num: 0,
+				media_in_den: 1,
+				gain: 0.5,
+				effects: vec![WireMontageEffect {
+					type_id: "org.oak.gain".to_string(),
+					enabled: true,
+					effect_input_id: "Source".to_string(),
+					params: vec![WireEffectParam {
+						input: "gain".to_string(),
+						value: WireNodeValue::Float(2.0),
+					}],
+				}],
+			}],
+		};
+		let params = s.audio_ticket_params(&spec).expect("valid geometry");
+		assert_eq!(params.viewer, 0);
+		assert_eq!(params.range.in_(), Rational::new(3, 2));
+		assert_eq!(params.range.out(), Rational::new(7, 4));
+		assert_eq!(params.sample_rate, 44100);
+		assert_eq!(params.channel_layout, 0x3);
+		assert_eq!(params.montage.len(), 1);
+		let clip = &params.montage[0];
+		assert_eq!(clip.filename, "clip.mp4");
+		assert_eq!(clip.stream_index, 2);
+		assert_eq!(clip.in_time, Rational::new(1, 2));
+		assert_eq!(clip.out_time, Rational::new(3, 2));
+		assert_eq!(clip.media_in, Rational::new(0, 1));
+		assert_eq!(clip.gain, 0.5);
+		assert_eq!(clip.effects.len(), 1);
+		assert_eq!(clip.effects[0].type_id, "org.oak.gain");
+		assert!(clip.effects[0].enabled);
+		assert_eq!(clip.effects[0].effect_input_id.as_deref(), Some("Source"));
+		assert_eq!(clip.effects[0].params.len(), 1);
+		assert_eq!(clip.effects[0].params[0].0, "gain");
+		assert_eq!(
+			clip.effects[0].params[0].1,
+			oak_node::value::NodeValue::Float(2.0)
+		);
+	}
+
+	#[test]
+	fn sync_pipeline_color_without_a_project_is_a_noop() {
+		let mut s = WorkerSession::create("none").unwrap();
+		assert!(!s.sync_pipeline_color_from_graph(), "no graph at all");
+		s.graph = Some(LoadedGraph {
+			path: "identity".to_string(),
+			project: None,
+			project_uuid: None,
+			id_map: HashMap::new(),
+			project_copy: 3,
+		});
+		assert!(
+			!s.sync_pipeline_color_from_graph(),
+			"identity-only graphs carry no color settings"
+		);
+	}
+
+	#[test]
+	fn render_spec_pixels_graph_mode_copies_the_sequence_frame() {
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let (project, seq, uuid) = sequence_project();
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+
+		let mut graph = LoadedGraph {
+			path: "graph".to_string(),
+			project: Some(project),
+			project_uuid: Some(uuid.clone()),
+			id_map: HashMap::new(),
+			project_copy: 0,
+		};
+		graph.id_map.insert(7, seq);
+		s.graph = Some(graph);
+
+		let spec = BatchTicketSpec {
+			viewer_node: 7,
+			project_key: uuid,
+			..batch_spec(41, 0, 2, 2, PixelFormat::F32 as i32)
+		};
+		s.render_spec_pixels(&spec, &pool)
+			.expect("an empty sequence renders");
+		// SAFETY: slot 0 of the attached pool is live and 64 bytes.
+		let dst = unsafe { std::slice::from_raw_parts(pool.slot_data_const(0), 64) };
+		assert!(
+			dst.iter().all(|&b| b == 0),
+			"an empty sequence is transparent black"
+		);
+	}
+
+	#[test]
+	fn graph_mode_falls_back_for_mismatched_or_broken_viewers() {
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let (project, seq, uuid) = sequence_project();
+		// A second, non-sequence node: mapping a viewer to it makes
+		// `render_graph_frame` fail and take the fallback path.
+		let track_list;
+		{
+			let mut guard = project.lock().unwrap_or_else(|e| e.into_inner());
+			let (core, behavior) = TrackListBehavior::create();
+			track_list = guard.graph.add_node(core, behavior);
+		}
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+
+		let mut graph = LoadedGraph {
+			path: "graph".to_string(),
+			project: Some(project),
+			project_uuid: Some(uuid.clone()),
+			id_map: HashMap::new(),
+			project_copy: 0,
+		};
+		graph.id_map.insert(7, seq);
+		graph.id_map.insert(8, track_list);
+		s.graph = Some(graph);
+
+		// (a) A stale project key: the snapshot must not answer it.
+		let spec = BatchTicketSpec {
+			viewer_node: 7,
+			project_key: "another-project".to_string(),
+			..batch_spec(51, 0, 2, 2, PixelFormat::F32 as i32)
+		};
+		s.render_spec_pixels(&spec, &pool)
+			.expect("stale identity falls back");
+
+		// (b) A viewer identity that is not even a valid NodeId.
+		let spec = BatchTicketSpec {
+			viewer_node: u64::MAX,
+			project_key: uuid.clone(),
+			..spec.clone()
+		};
+		s.render_spec_pixels(&spec, &pool)
+			.expect("absent viewer falls back");
+
+		// (c) A viewer mapped to a non-sequence node: graph render errors.
+		let spec = BatchTicketSpec {
+			viewer_node: 8,
+			project_key: uuid.clone(),
+			..spec.clone()
+		};
+		s.render_spec_pixels(&spec, &pool)
+			.expect("broken viewer falls back");
+
+		// (d) A loaded identity-only graph (uuid matches, no project).
+		s.graph = Some(LoadedGraph {
+			path: "identity".to_string(),
+			project: None,
+			project_uuid: Some(uuid.clone()),
+			id_map: HashMap::new(),
+			project_copy: 0,
+		});
+		let spec = BatchTicketSpec {
+			viewer_node: 7,
+			project_key: uuid,
+			..spec
+		};
+		s.render_spec_pixels(&spec, &pool)
+			.expect("identity-only graph falls back");
+	}
+
+	#[test]
+	fn warn_graph_fallback_is_one_shot() {
+		// Smoke test: the only observable effect of the warning is a single
+		// stderr line, and the worker has no test-installable log sink, so
+		// the one-shot suppression itself cannot be asserted. What must hold
+		// either way: repeated and concurrent calls all return without
+		// corrupting shared state (the marker is an AtomicBool and the sink
+		// is stderr, so no call may deadlock or panic).
+		warn_graph_fallback(123, "first reason");
+		warn_graph_fallback(123, "second reason");
+
+		let completed = std::sync::atomic::AtomicUsize::new(0);
+		std::thread::scope(|scope| {
+			for viewer in 0..8u64 {
+				let completed = &completed;
+				scope.spawn(move || {
+					warn_graph_fallback(viewer, "concurrent reason");
+					completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+				});
+			}
+		});
+		assert_eq!(
+			completed.load(std::sync::atomic::Ordering::Relaxed),
+			8,
+			"every concurrent fallback warning must return"
+		);
+	}
+
+	#[test]
+	fn stale_pipeline_colors_are_refreshed_and_clear_the_frame_cache() {
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		// Loop over both starting states so the opposite-selection branch
+		// runs both ways despite the shared process-global color state.
+		for current in [WorkingColorSpace::SrgbLegacy, WorkingColorSpace::AcesCg] {
+			oak_core::color::set_pipeline_color_settings(current, OutputColorSpec::default());
+			let opposite = if current == WorkingColorSpace::SrgbLegacy {
+				WorkingColorSpace::AcesCg
+			} else {
+				WorkingColorSpace::SrgbLegacy
+			};
+			let project = Project::new();
+			{
+				let mut guard = project.lock().unwrap_or_else(|e| e.into_inner());
+				guard.set_working_color_space(opposite);
+			}
+			let uuid = project.lock().unwrap_or_else(|e| e.into_inner()).uuid.clone();
+			let mut s = WorkerSession::create("none").unwrap();
+			s.graph = Some(LoadedGraph {
+				path: "graph".to_string(),
+				project: Some(project),
+				project_uuid: Some(uuid),
+				id_map: HashMap::new(),
+				project_copy: 0,
+			});
+			s.frame_cache.insert("stale".to_string(), vec![1u8; 8]);
+
+			let (hs, _out, _in) = parent_side(1, 64, false);
+			assert!(s.handle_line(&hs.to_string()).is_some());
+			let pool = s.output_pool.clone().unwrap();
+			let spec = batch_spec(61, 0, 2, 2, PixelFormat::F32 as i32);
+			s.render_spec_pixels(&spec, &pool)
+				.expect("renders under the refreshed colors");
+			assert_eq!(
+				oak_core::color::pipeline_working_space(),
+				opposite,
+				"the loaded graph's colors are adopted"
+			);
+			assert!(
+				s.frame_cache.get("stale").is_none(),
+				"a color change invalidates the frame cache"
+			);
+		}
+
+		oak_core::color::set_pipeline_color_settings(
+			WorkingColorSpace::default(),
+			OutputColorSpec::default(),
+		);
+	}
+
+	#[test]
+	fn apply_output_node_is_a_noop_in_the_legacy_working_space() {
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		oak_core::color::set_pipeline_color_settings(
+			WorkingColorSpace::SrgbLegacy,
+			OutputColorSpec::default(),
+		);
+		let mut bytes: Vec<u8> = [0.25f32, 0.5, 0.75, 1.0]
+			.iter()
+			.flat_map(|value| value.to_le_bytes())
+			.collect();
+		let before = bytes.clone();
+		apply_output_node(&mut bytes, 1);
+		assert_eq!(bytes, before, "legacy sRGB is display-referred already");
+		oak_core::color::set_pipeline_color_settings(
+			WorkingColorSpace::default(),
+			OutputColorSpec::default(),
+		);
+	}
+
+	#[test]
+	fn worker_main_without_renderer_exits_one() {
+		// Mirrors oakengine_worker_main(): an explicit no-renderer backend
+		// leaves nothing to evaluate, so the process exits 1 before the
+		// control loop.
+		assert_eq!(worker_main("none"), 1);
+	}
+
+	// ---- M16 R2 branch-coverage additions (runtime + renderer) ------------
+
+	/// The full `initialize_runtime` body on a fresh session: color config,
+	/// text backends, plugin executor, OFX scan/registration and the
+	/// process-global progress factory. A plugin scan failure is tolerated,
+	/// so either outcome is a valid production result.
+	#[test]
+	fn initialize_runtime_installs_the_full_stack() {
+		// The reporter factory is process-global; serialize with every
+		// other factory test (worker and ofx_host share this lock).
+		let _guard = GLOBAL_FACTORY_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let mut s = WorkerSession::create("none").unwrap();
+		assert!(!s.runtime_initialized);
+		assert!(s.initialize_runtime(), "the runtime always initializes");
+		assert!(s.runtime_initialized);
+		assert!(
+			oak_plugin::progress::has_reporter_factory(),
+			"the worker progress factory is installed"
+		);
+		// The second call short-circuits before re-installing anything.
+		assert!(s.initialize_runtime());
+	}
+
+	/// The dynamic / direct-OpenGL renderer factories: a GPU host
+	/// initializes one, a GPU-less host fails both — either outcome is a
+	/// valid production result, so the assertions pin the invariants that
+	/// must hold either way: a successful dynamic attempt reports the
+	/// requested backend kind (init resolves adapters internally but never
+	/// rewrites the kind), a failure names the stage that failed, and the
+	/// chained `create` succeeds exactly when one of its two stages can,
+	/// reporting OpenGL exactly when the fallback produced it.
+	#[test]
+	fn renderer_create_variants_are_tolerant() {
+		match Renderer::create_dynamic("gl") {
+			Ok(renderer) => assert!(renderer.is_open_gl(), "the gl request reports OpenGL"),
+			Err(error) => assert!(
+				error.starts_with("failed to initialize dynamic gl renderer"),
+				"the gl failure names the stage: {error}"
+			),
+		}
+
+		let dynamic_auto = Renderer::create_dynamic("auto");
+		let dynamic_metal = Renderer::create_dynamic("metal");
+		for (label, attempt) in [("auto", &dynamic_auto), ("metal", &dynamic_metal)] {
+			match attempt {
+				Ok(renderer) => assert!(
+					!renderer.is_open_gl(),
+					"{label} is not an OpenGL request"
+				),
+				Err(error) => assert!(
+					error.starts_with(&format!("failed to initialize dynamic {label} renderer")),
+					"the {label} failure names the stage: {error}"
+				),
+			}
+		}
+
+		let opengl = Renderer::create_opengl();
+		match &opengl {
+			Ok(renderer) => assert!(renderer.is_open_gl(), "direct OpenGL reports OpenGL"),
+			Err(error) => assert!(
+				error.starts_with("failed to initialize direct OpenGL renderer"),
+				"the fallback failure names the stage: {error}"
+			),
+		}
+
+		// `Renderer::create` = dynamic stage, then direct-OpenGL fallback:
+		// its outcome is fully determined by the two stages observed above.
+		for (request, dynamic) in [("bogus", &dynamic_auto), ("metal", &dynamic_metal)] {
+			match Renderer::create(request) {
+				Ok(renderer) => {
+					assert_eq!(
+						renderer.is_open_gl(),
+						dynamic.is_err(),
+						"{request}: OpenGL is reported exactly when the dynamic stage failed"
+					);
+					if dynamic.is_err() {
+						assert!(
+							opengl.is_ok(),
+							"{request}: the fallback must have initialized"
+						);
+					}
+				}
+				Err(error) => {
+					assert!(
+						dynamic.is_err() && opengl.is_err(),
+						"{request}: a chained error means both stages failed"
+					);
+					assert!(
+						error.contains(&format!("dynamic {request}"))
+							&& error.contains("direct OpenGL fallback also failed"),
+						"{request}: the chained error names both stages: {error}"
+					);
+				}
+			}
+		}
+	}
+
+	/// An F32 cache hit copies the memoized bytes into the slot instead of
+	/// re-rendering (a miss would produce transparent black).
+	#[test]
+	fn render_spec_pixels_f32_cache_hit_copies_without_render() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+		let spec = batch_spec(71, 0, 2, 2, PixelFormat::F32 as i32);
+		let key = crate::framecache::spec_cache_key(&spec);
+		let known: Vec<u8> = (0..64).map(|i| i as u8).collect();
+		s.frame_cache.insert(key.clone(), known.clone());
+		s.render_spec_pixels(&spec, &pool).expect("cache hit");
+		// SAFETY: slot 0 of the attached pool is live and 64 bytes.
+		let dst = unsafe { std::slice::from_raw_parts(pool.slot_data_const(0), 64) };
+		assert_eq!(dst, &known[..], "the cached F32 bytes land in the slot");
+		assert!(s.frame_cache.get(&key).is_some(), "the entry stays memoized");
+	}
+
+	/// A BGRA8 cache hit runs the output node + format convert on the
+	/// memoized F32 bytes (a miss would produce transparent black BGRA8).
+	#[test]
+	fn render_spec_pixels_bgra8_cache_hit_converts_the_memoized_frame() {
+		let _color = COLOR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		oak_core::color::set_pipeline_color_settings(
+			WorkingColorSpace::SrgbLegacy,
+			OutputColorSpec::default(),
+		);
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		let pool = s.output_pool.clone().unwrap();
+		let spec = batch_spec(72, 0, 2, 2, SLOT_FORMAT_BGRA8);
+		let key = crate::framecache::spec_cache_key(&spec);
+		// Four opaque-white F32 pixels.
+		let white: Vec<u8> = std::iter::repeat_n(1.0f32.to_le_bytes(), 2 * 2 * 4)
+			.flatten()
+			.collect();
+		s.frame_cache.insert(key.clone(), white);
+		s.render_spec_pixels(&spec, &pool).expect("cache hit");
+		// SAFETY: slot 0 of the attached pool holds the 2x2 BGRA8 frame.
+		let dst = unsafe { std::slice::from_raw_parts(pool.slot_data_const(0), 2 * 2 * 4) };
+		assert!(
+			dst.iter().all(|&b| b == 255),
+			"cached white F32 converts to opaque white BGRA8: {dst:?}"
+		);
+		oak_core::color::set_pipeline_color_settings(
+			WorkingColorSpace::default(),
+			OutputColorSpec::default(),
+		);
+	}
+
+	/// The batch path's acquire failure (shutdown) and a render error both
+	/// surface as `Err` from `render_ticket_to_slot` (the slot is never
+	/// published in either case).
+	#[test]
+	fn render_ticket_to_slot_reports_shutdown_and_render_errors() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(2, 256, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+
+		// Shutdown: `acquire_slot` refuses before touching the rings.
+		s.shutdown_requested = true;
+		let spec = batch_spec(1, 0, 4, 4, PixelFormat::F32 as i32);
+		assert_eq!(
+			s.render_ticket_to_slot(&spec).unwrap_err(),
+			"no free shm slot (shutdown or timeout)"
+		);
+		s.shutdown_requested = false;
+
+		// A render failure (missing footage) propagates out of the batch
+		// path unchanged.
+		let spec = BatchTicketSpec {
+			footage_file: "/definitely/not/a/real/clip.mp4".to_string(),
+			..batch_spec(2, 0, 2, 2, PixelFormat::F32 as i32)
+		};
+		let err = s.render_ticket_to_slot(&spec).unwrap_err();
+		assert!(err.starts_with("footage decode: "), "{err}");
+	}
+
+	/// The audio batch path's acquire failure: a shutdown session returns
+	/// "no free shm slot" before mixing anything.
+	#[test]
+	fn render_audio_ticket_to_slot_reports_shutdown() {
+		let mut s = WorkerSession::create("none").unwrap();
+		let (hs, _out, _in) = parent_side(1, 64, false);
+		assert!(s.handle_line(&hs.to_string()).is_some());
+		s.shutdown_requested = true;
+		let spec = AudioTicketSpec {
+			ticket: 5,
+			slot: 0,
+			time_num: 0,
+			time_den: 1,
+			duration_num: 1,
+			duration_den: 48000,
+			sample_rate: 48000,
+			channel_layout: 0x3,
+			channels: 2,
+			montage: Vec::new(),
+		};
+		assert_eq!(
+			s.render_audio_ticket_to_slot(&spec).unwrap_err(),
+			"no free shm slot (shutdown or timeout)"
+		);
 	}
 }

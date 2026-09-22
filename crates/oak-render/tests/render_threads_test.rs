@@ -98,6 +98,32 @@ fn pin_legacy_working_space() {
 	);
 }
 
+/// Force software decoding for the inline-vs-pipeline byte-exact
+/// comparisons: hardware decoders (NVDEC/VAAPI) may differ from the
+/// software decoder by a few LSBs, which is a decode-path property, not a
+/// pipeline bug. Every test in this binary takes `lock()`, so the
+/// process-wide env override is race-free here.
+struct SoftwareDecodeGuard {
+	prev: Option<String>,
+}
+
+impl SoftwareDecodeGuard {
+	fn set() -> Self {
+		let prev = std::env::var("OAK_HWACCEL").ok();
+		std::env::set_var("OAK_HWACCEL", "0");
+		Self { prev }
+	}
+}
+
+impl Drop for SoftwareDecodeGuard {
+	fn drop(&mut self) {
+		match &self.prev {
+			Some(p) => std::env::set_var("OAK_HWACCEL", p),
+			None => std::env::remove_var("OAK_HWACCEL"),
+		}
+	}
+}
+
 fn base_params(time: Rational) -> VideoTicketParams {
 	VideoTicketParams {
 		viewer: 0,
@@ -638,6 +664,7 @@ fn oak_pipeline_env_selects_the_thread_backend() {
 #[test]
 fn pipeline_matches_inline_pixels_across_consecutive_frames() {
 	let _lock = lock();
+	let _software = SoftwareDecodeGuard::set();
 	pin_legacy_working_space();
 	let inline_path = test_clip("consecutive_inline");
 	let pipeline_path = test_clip_copy(&inline_path, "consecutive_pipeline");
@@ -674,6 +701,7 @@ fn pipeline_matches_inline_pixels_across_consecutive_frames() {
 #[test]
 fn pipeline_seek_out_of_order_matches_inline() {
 	let _lock = lock();
+	let _software = SoftwareDecodeGuard::set();
 	pin_legacy_working_space();
 	let inline_path = test_clip("seek_inline");
 	let pipeline_path = test_clip_copy(&inline_path, "seek_pipeline");
@@ -705,6 +733,7 @@ fn pipeline_seek_out_of_order_matches_inline() {
 #[test]
 fn pipeline_viewer_ticket_matches_inline_pixels() {
 	let _lock = lock();
+	let _software = SoftwareDecodeGuard::set();
 	let path = test_clip("viewer");
 	let filename = path.to_string_lossy().to_string();
 	let clip = (filename.as_str(), Rational::new(0, 1), Rational::new(1, 1));
@@ -1280,6 +1309,7 @@ fn pipeline_queue_backpressure_closes_the_prefetch_gate() {
 		time: Rational::new(0, 1),
 		size: (64, 64),
 		format: PixelFormat::F32,
+		allow_import: true,
 	});
 	assert!(!refused, "a saturated pipeline refuses prefetch");
 	let decode = service.stats();

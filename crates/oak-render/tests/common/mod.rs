@@ -58,6 +58,45 @@ impl Drop for ManagerGuard {
 	}
 }
 
+/// A GPU context suitable for the M5 zero-copy hardware import (Vulkan on
+/// Linux/Windows, Metal on macOS), or `None` when no such adapter exists
+/// (CI's software Vulkan still qualifies — the *decoder* side decides
+/// whether there is an importable hardware surface).
+///
+/// Missing adapters follow the repo-wide `OAK_REQUIRE_GPU` policy used by
+/// `backend::gpu_or_skip`/`shared_gpu_or_skip`: on a job that promises a
+/// GPU (the CI runner has lavapipe) a missing adapter panics instead of
+/// silently dropping the import signal; elsewhere the skip prints a
+/// distinctive `SKIP:` marker so CI logs distinguish skipped from executed
+/// tests.
+pub fn gpu_context_for_import() -> Option<std::sync::Arc<oak_core::backend::GpuContext>> {
+	let created = oak_core::backend::GpuContext::create(oak_core::backend::BackendKind::Auto);
+	let Some(ctx) = created else {
+		skip_import_gpu("no GPU adapter");
+		return None;
+	};
+	if matches!(
+		ctx.kind(),
+		oak_core::backend::BackendKind::Vulkan | oak_core::backend::BackendKind::Metal
+	) {
+		return Some(ctx);
+	}
+	skip_import_gpu("the adapter is not Vulkan/Metal");
+	None
+}
+
+/// Report (and under `OAK_REQUIRE_GPU`, fail) a missing import-capable
+/// adapter. The single `SKIP:` line keeps the skip observable in CI logs.
+fn skip_import_gpu(reason: &str) {
+	if oak_core::backend::require_gpu_adapter() {
+		panic!(
+			"no importable GPU context for the M5 hardware import ({reason}); \
+			 OAK_REQUIRE_GPU is set"
+		);
+	}
+	eprintln!("SKIP: footage hardware import: {reason}");
+}
+
 // ---------------------------------------------------------------------------
 // Host-symbol stand-ins (oakcore_* / fb_find_best_pix_fmt_of_list)
 // ---------------------------------------------------------------------------
