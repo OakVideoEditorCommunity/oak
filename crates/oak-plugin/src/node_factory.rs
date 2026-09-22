@@ -967,6 +967,41 @@ mod tests {
 	/// assert the kOfxActionInstanceChanged routing and its inArgs.
 	static PUSH_ENTRY_CALLS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
+	/// PUSH_ENTRY_CALLS 是进程级静态：触碰它的测试必须串行。
+	static PUSH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+	/// Mock 插件入口：instanceChanged 记录 action 与 change reason；
+	/// 其它 action/空 action 静默成功。直接调它以覆盖缺失/类型不符的
+	/// reason 分支（push_button_clicked 只会写 String reason）。
+	unsafe extern "C" fn recording_entry(
+		action: *const c_char,
+		_: *const c_void,
+		in_args: *mut c_void,
+		_: *mut c_void,
+	) -> i32 {
+		if !action.is_null() {
+			let action = unsafe {
+				std::ffi::CStr::from_ptr(action).to_string_lossy().into_owned()
+			};
+			if action == crate::host::ACTION_INSTANCE_CHANGED {
+				let mut calls = PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+				calls.push(action);
+				// The instanceChanged inArgs contract (ofxCore.h:405-435):
+				// kOfxPropChangeReason = kOfxChangeUserEdited.
+				let props = unsafe { &*(in_args as *const crate::property::PropertySet) };
+				let reason = props.get(crate::host::PROP_CHANGE_REASON, 0);
+				let reason = match reason {
+					Some(crate::property::Value::String(s)) => {
+						s.to_string_lossy().into_owned()
+					}
+					_ => String::new(),
+				};
+				calls.push(reason);
+			}
+		}
+		0
+	}
+
 	#[test]
 	fn input_type_table_covers_all_ofx_kinds() {
 		assert_eq!(
@@ -1100,6 +1135,11 @@ mod tests {
 			PropValue::String(CString::new("Matte").unwrap()),
 		);
 		assert_eq!(clip_label_for_name("Overlay", Some(&props)), "Matte");
+		// 有 props 但 label 为空（或类型不符）→ 回退 clip 名。
+		let no_label = PropertySet::new();
+		assert_eq!(clip_label_for_name("Overlay", Some(&no_label)), "Overlay");
+		no_label.set_one(ofx::PROP_LABEL, PropValue::Int(1));
+		assert_eq!(clip_label_for_name("Overlay", Some(&no_label)), "Overlay");
 	}
 
 	#[test]
@@ -1195,37 +1235,8 @@ mod tests {
         use crate::handle::RefBox;
         use crate::host::Plugin;
         use crate::param::{ParamDef, ParamInstance, ParamSetInstance};
-        use std::ffi::{c_char, c_void};
         use std::sync::atomic::AtomicU32;
 
-        unsafe extern "C" fn dummy_entry(
-			action: *const c_char,
-			_: *const c_void,
-			in_args: *mut c_void,
-			_: *mut c_void,
-		) -> i32 {
-			if !action.is_null() {
-				let action = unsafe {
-					std::ffi::CStr::from_ptr(action).to_string_lossy().into_owned()
-				};
-				if action == crate::host::ACTION_INSTANCE_CHANGED {
-					let mut calls = PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner());
-					calls.push(action);
-					// The instanceChanged inArgs contract (ofxCore.h:405-435):
-					// kOfxPropChangeReason = kOfxChangeUserEdited.
-					let props = unsafe { &*(in_args as *const crate::property::PropertySet) };
-					let reason = props.get(crate::host::PROP_CHANGE_REASON, 0);
-					let reason = match reason {
-						Some(crate::property::Value::String(s)) => {
-							s.to_string_lossy().into_owned()
-						}
-						_ => String::new(),
-					};
-					calls.push(reason);
-				}
-			}
-			0
-		}
 		let plugin = Arc::new(Plugin {
 			identifier: "test.plugin".into(),
 			version: (1, 0),
@@ -1233,7 +1244,7 @@ mod tests {
 			contexts: vec![],
 			descriptor: EffectDescriptor::new(),
 			lib: std::ptr::null_mut(),
-			entry: dummy_entry,
+			entry: recording_entry,
 			ofx_plugin: std::ptr::null_mut(),
 			unloaded: std::sync::atomic::AtomicBool::new(false),
 		});
@@ -1273,6 +1284,7 @@ mod tests {
 	/// render scale）。
 	#[test]
 	fn push_button_clicked_routes_instance_changed() {
+		let _g = PUSH_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		*PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner()) = Vec::new();
 		let id = instance_with_push_button();
 		assert!(push_button_clicked(id, "button"));
@@ -1383,10 +1395,13 @@ mod tests {
 		let expected = crate::param_curve::curves_to_json(&[crate::param_curve::Curve::identity(
 			0.0, 1.0,
 		)]);
-		match &input.default {
-			NodeValue::Text(s) => assert_eq!(s, &expected, "默认值应为曲线 JSON"),
-			other => panic!("预期 Text(JSON)，实际 {other:?}"),
-		}
+		assert_eq!(
+			text_of(&input.default).as_deref(),
+			Some(expected.as_str()),
+			"默认值应为曲线 JSON"
+		);
+		// 非 Text 值走 None 臂（helper 自身两臂都有执行）。
+		assert_eq!(text_of(&NodeValue::Int(1)), None);
 		// 标准值 = 默认（工程序列化从这里走）。
 		assert_eq!(core.standard_value("curve", -1), input.default);
 
@@ -1425,12 +1440,12 @@ mod tests {
 		// 有效 JSON（双维，第二维单点）→ 曲线写回，求值即实例曲线。
 		let json = r#"{"curves":[[{"key":0,"value":0,"slope":1},{"key":0.5,"value":0.7,"slope":1}],[{"key":0,"value":0,"slope":1}]]}"#;
 		set_text_param(&inst.value, "curve", json);
-		let curves = match inst.value.params.find("curve").unwrap().get() {
-			ParamValue::Parametric(c) => c,
-			other => panic!("应写回 Parametric，实际 {other:?}"),
-		};
+		let curves = curves_of(inst.value.params.find("curve").unwrap().get())
+			.expect("应写回 Parametric");
 		assert_eq!(curves[0].evaluate(0.5), 0.7);
 		assert_eq!(curves[1].len(), 1);
+		// 非 Parametric 值走 None 臂（helper 自身两臂都有执行）。
+		assert!(curves_of(ParamValue::PushButton).is_none());
 
 		// 坏 JSON → 不改值（与字符串族类型不匹配静默一致）。
 		let before = inst.value.params.find("curve").unwrap().get();
@@ -1444,5 +1459,1027 @@ mod tests {
 			ParamValue::String(_)
 		));
 		unregister_instance(id);
+	}
+
+	// ---- default values / property helpers (coverage batch) --------------
+
+	fn def_of(ofx_type: &str) -> ParamDef {
+		ParamDef {
+			props: PropertySet::new(),
+			name: "p".into(),
+			ofx_type: ofx_type.into(),
+			default: ParamValue::Container,
+		}
+	}
+
+	#[test]
+	fn property_helpers_read_scalars_and_fall_back() {
+		let props = PropertySet::new();
+		props.define(
+			ofx::P_DEFAULT,
+			vec![PropValue::Double(2.5), PropValue::Int(7)],
+		);
+		assert_eq!(prop_double(&props, ofx::P_DEFAULT, 0), 2.5);
+		assert_eq!(prop_double(&props, ofx::P_DEFAULT, 1), 7.0);
+		assert_eq!(prop_int(&props, ofx::P_DEFAULT, 0), 2);
+		assert_eq!(prop_int(&props, ofx::P_DEFAULT, 1), 7);
+		props.set_one("s", PropValue::String(CString::new("hello").unwrap()));
+		assert_eq!(prop_str(&props, "s", 0), "hello");
+
+		// Missing / out-of-range / wrong-type values fall back quietly.
+		assert_eq!(prop_str(&props, "missing", 0), "");
+		assert_eq!(prop_double(&props, "missing", 0), 0.0);
+		assert_eq!(prop_int(&props, "missing", 0), 0);
+		assert_eq!(prop_double(&props, ofx::P_DEFAULT, 9), 0.0);
+		assert_eq!(prop_str(&props, ofx::P_DEFAULT, 0), "");
+	}
+
+	#[test]
+	fn default_value_for_every_scalar_param_type() {
+		let def = def_of(ofx::TYPE_INTEGER);
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Int(3));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Int(3))
+		));
+
+		let def = def_of(ofx::TYPE_CHOICE);
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Int(1));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Combo(1))
+		));
+
+		let def = def_of(ofx::TYPE_BOOLEAN);
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Int(1));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Boolean(true))
+		));
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Int(0));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Boolean(false))
+		));
+
+		let def = def_of(ofx::TYPE_DOUBLE);
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Double(0.25));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Float(v)) if (v - 0.25).abs() < 1e-9
+		));
+
+		for kind in [ofx::TYPE_STRING, ofx::TYPE_STRCHOICE] {
+			let def = def_of(kind);
+			def.props
+				.set_one(ofx::P_DEFAULT, PropValue::String(CString::new("hi").unwrap()));
+			assert!(matches!(
+				default_value_for_param(&def),
+				Some(NodeValue::Text(ref t)) if t == "hi"
+			));
+		}
+
+		// CUSTOM keeps the raw bytes; BYTES is always empty.
+		let def = def_of(ofx::TYPE_CUSTOM);
+		def.props
+			.set_one(ofx::P_DEFAULT, PropValue::String(CString::new("raw").unwrap()));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Binary(ref b)) if b == b"raw"
+		));
+		let def = def_of(ofx::TYPE_BYTES);
+		def.props
+			.set_one(ofx::P_DEFAULT, PropValue::String(CString::new("ignored").unwrap()));
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Binary(ref b)) if b.is_empty()
+		));
+
+		// Unsupported kinds (and a bare parametric default) have no value.
+		assert!(default_value_for_param(&def_of(ofx::TYPE_PUSHBUTTON)).is_none());
+		assert!(default_value_for_param(&def_of(ofx::TYPE_GROUP)).is_none());
+		assert!(default_value_for_param(&def_of("OfxParamTypeBogus")).is_none());
+		assert!(default_value_for_param(&def_of(ofx::TYPE_PARAMETRIC)).is_none());
+	}
+
+	#[test]
+	fn default_value_for_color_and_vector_types() {
+		let def = def_of(ofx::TYPE_RGB);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+			],
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Color(c))
+				if c == [0.1, 0.2, 0.3, 1.0]
+		));
+
+		let def = def_of(ofx::TYPE_RGBA);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+				PropValue::Double(0.4),
+			],
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Color(c))
+				if c == [0.1, 0.2, 0.3, 0.4]
+		));
+
+		let def = def_of(ofx::TYPE_DOUBLE2D);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![PropValue::Double(1.5), PropValue::Double(2.5)],
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Vec2(v)) if v == [1.5, 2.5]
+		));
+
+		let def = def_of(ofx::TYPE_INTEGER2D);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![PropValue::Int(1), PropValue::Int(2)],
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Vec2(v)) if v == [1.0, 2.0]
+		));
+
+		let def = def_of(ofx::TYPE_INTEGER3D);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![PropValue::Int(1), PropValue::Int(2), PropValue::Int(3)],
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Vec3(v)) if v == [1.0, 2.0, 3.0]
+		));
+	}
+
+	#[test]
+	fn project_extent_scales_normalised_defaults() {
+		static EXTENT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+		let _guard = EXTENT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+		set_project_extent(3840.0, 2160.0);
+		assert_eq!(project_extent(), (3840.0, 2160.0));
+		assert_eq!(to_canonical(0.5, 3840.0), 1920.0);
+		// A zero extent passes the normalised value through untouched.
+		assert_eq!(to_canonical(0.5, 0.0), 0.5);
+
+		let def = def_of(ofx::TYPE_DOUBLE);
+		def.props.set_one(ofx::P_DEFAULT, PropValue::Double(0.5));
+		def.props.set_one(
+			ofx::P_DEFAULT_COORD_SYS,
+			PropValue::String(CString::new(ofx::V_COORD_NORMALISED).unwrap()),
+		);
+		assert!(matches!(
+			default_value_for_param(&def),
+			Some(NodeValue::Float(v)) if v == 1920.0
+		));
+
+		let vec3 = def_of(ofx::TYPE_DOUBLE3D);
+		vec3.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.5),
+				PropValue::Double(0.5),
+				PropValue::Double(0.5),
+			],
+		);
+		vec3.props.set_one(
+			ofx::P_DEFAULT_COORD_SYS,
+			PropValue::String(CString::new(ofx::V_COORD_NORMALISED).unwrap()),
+		);
+		assert!(matches!(
+			default_value_for_param(&vec3),
+			Some(NodeValue::Vec3(v)) if v == [1920.0, 1080.0, 1920.0]
+		));
+
+		set_project_extent(1920.0, 1080.0);
+	}
+
+	#[test]
+	fn registered_instance_count_is_observable() {
+		let a = registered_instance_count();
+		let b = registered_instance_count();
+		assert_eq!(a, b);
+	}
+
+	// ---- branch coverage batch: translation tables / executor ------------
+
+	use crate::clip::ClipInstance;
+	use crate::descriptor::ClipDescriptor;
+	use std::ffi::{c_char, c_void};
+
+	/// 宿主测试用最小插件入口：任何 action 都成功（不做任何事）。
+	unsafe extern "C" fn ok_entry(
+		_: *const c_char,
+		_: *const c_void,
+		_: *mut c_void,
+		_: *mut c_void,
+	) -> i32 {
+		crate::suites::status::OK
+	}
+
+	fn text(s: &str) -> PropValue {
+		PropValue::String(CString::new(s).unwrap())
+	}
+
+	/// Text 变体提取（两臂都被调用方触达；避免测试里出现不可达
+	/// panic 分支）。
+	fn text_of(value: &NodeValue) -> Option<String> {
+		match value {
+			NodeValue::Text(s) => Some(s.clone()),
+			_ => None,
+		}
+	}
+
+	/// Parametric 变体提取（同上）。
+	fn curves_of(value: ParamValue) -> Option<Vec<crate::param_curve::Curve>> {
+		match value {
+			ParamValue::Parametric(c) => Some(c),
+			_ => None,
+		}
+	}
+
+	fn param_set(defs: Vec<ParamDef>) -> crate::param::ParamSetInstance {
+		crate::param::ParamSetInstance {
+			params: defs
+				.into_iter()
+				.map(|d| Box::new(crate::param::ParamInstance::from_def(d)))
+				.collect(),
+		}
+	}
+
+	fn clip(name: &str) -> ClipInstance {
+		ClipInstance::from_descriptor(&ClipDescriptor::new(name))
+	}
+
+	fn fake_instance(
+		identifier: &str,
+		entry: crate::host::EntryPoint,
+		params: crate::param::ParamSetInstance,
+		clips: Vec<ClipInstance>,
+	) -> crate::instance::Instance {
+		use crate::descriptor::EffectDescriptor;
+		use crate::host::Plugin;
+		use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+		let plugin = Arc::new(Plugin {
+			identifier: identifier.into(),
+			version: (1, 0),
+			bundle_path: std::path::PathBuf::new(),
+			contexts: vec![],
+			descriptor: EffectDescriptor::new(),
+			lib: std::ptr::null_mut(),
+			entry,
+			ofx_plugin: std::ptr::null_mut(),
+			unloaded: AtomicBool::new(false),
+		});
+		crate::instance::Instance {
+			props: PropertySet::new(),
+			plugin,
+			context: "OfxImageEffectContextFilter".into(),
+			params,
+			clips: clips.into_iter().map(Box::new).collect(),
+			node_identity: AtomicUsize::new(0),
+			destroyed: AtomicBool::new(false),
+			sequence_range: std::sync::Mutex::new(None),
+			progress_cb: std::sync::Mutex::new(None),
+			cancel: AtomicBool::new(false),
+			edit: std::sync::Mutex::new(crate::instance::EditTransaction::new()),
+			render_lock: std::sync::Mutex::new(()),
+			interact: std::sync::Mutex::new(None),
+		}
+	}
+
+	fn register_fake(inst: crate::instance::Instance) -> u64 {
+		use crate::handle::RefBox;
+		use std::sync::atomic::AtomicU32;
+		register_instance(Arc::new(RefBox {
+			refs: AtomicU32::new(1),
+			value: inst,
+		}))
+	}
+
+	fn action_is(action: *const c_char, name: &str) -> bool {
+		!action.is_null()
+			&& unsafe { std::ffi::CStr::from_ptr(action) }.to_bytes() == name.as_bytes()
+	}
+
+	fn prop_values(input: &oak_node::input::Input, key: &str) -> Vec<NodeValue> {
+		input
+			.properties
+			.iter()
+			.filter(|(k, _)| k == key)
+			.map(|(_, v)| v.clone())
+			.collect()
+	}
+
+	/// 规则 4（默认值全相等）与规则 5（parent/group 关键词）以及
+	/// rule-3 的 dmin < -0.01 半边。
+	#[test]
+	fn color_semantic_rules_4_and_5_and_display_min() {
+		let empty = HashMap::new();
+		// 规则 4：默认值全相等 → scalar。
+		let def = def_of(ofx::TYPE_RGB);
+		def.props.define(ofx::P_DEFAULT, vec![PropValue::Double(0.5); 3]);
+		assert_eq!(deduce_color_semantic(&def, &empty), "scalar");
+
+		// 规则 4 不等 + 无 parent → 兜底 color。
+		let def = def_of(ofx::TYPE_RGB);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+			],
+		);
+		assert_eq!(deduce_color_semantic(&def, &empty), "color");
+
+		// 规则 3 的 dmin 半边。
+		let def = def_of(ofx::TYPE_RGB);
+		def.props
+			.set_one(ofx::P_DISPLAY_MIN, PropValue::Double(-0.5));
+		assert_eq!(deduce_color_semantic(&def, &empty), "scalar");
+
+		// 规则 5：parent 名带标量关键词。
+		let def = def_of(ofx::TYPE_RGB);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+			],
+		);
+		def.props
+			.set_one(ofx::P_PARENT, text("gamma_group"));
+		assert_eq!(deduce_color_semantic(&def, &empty), "scalar");
+
+		// 规则 5：parent 经 group 表解析出的 label 带关键词。
+		let mut groups = HashMap::new();
+		groups.insert("grp".to_string(), "Gamma".to_string());
+		let def = def_of(ofx::TYPE_RGB);
+		def.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+			],
+		);
+		def.props.set_one(ofx::P_PARENT, text("grp"));
+		assert_eq!(deduce_color_semantic(&def, &groups), "scalar");
+	}
+
+	/// build_core 的 group/page 第一遍：label 空回退 name、page 子项映射、
+	/// skip row/column 跳过、空名/未知类型参数跳过。
+	#[test]
+	fn build_core_translates_groups_pages_and_skips_unknowns() {
+		let group_labeled = ParamDef::new("grp_labeled", ofx::TYPE_GROUP);
+		group_labeled
+			.props
+			.set_one(ofx::PROP_LABEL, text("Grouped"));
+		let group_bare = ParamDef::new("grp_bare", ofx::TYPE_GROUP);
+		group_bare.props.set_one(ofx::PROP_LABEL, text(""));
+		let page = ParamDef::new("page_a", ofx::TYPE_PAGE);
+		page.props.set_one(ofx::PROP_LABEL, text("Page A"));
+		page.props.define(
+			ofx::P_PAGE_CHILD,
+			vec![
+				text("p_double"),
+				text("p_orphan"),
+				text(ofx::PAGE_SKIP_ROW),
+				text(ofx::PAGE_SKIP_COLUMN),
+			],
+		);
+		let p_double = ParamDef::new("p_double", ofx::TYPE_DOUBLE);
+		p_double
+			.props
+			.set_one(ofx::P_PARENT, text("grp_labeled"));
+		let p_orphan = ParamDef::new("p_orphan", ofx::TYPE_DOUBLE);
+		p_orphan
+			.props
+			.set_one(ofx::P_PARENT, text("missing_group"));
+		let empty_name = ParamDef::new("", ofx::TYPE_DOUBLE);
+		let bogus = ParamDef::new("bogus", "OfxParamTypeBogus");
+
+		let inst = fake_instance(
+			"test.groups.pages",
+			ok_entry,
+			param_set(vec![
+				group_labeled,
+				group_bare,
+				page,
+				p_double,
+				p_orphan,
+				empty_name,
+				bogus,
+			]),
+			vec![],
+		);
+		let core = build_core(&inst);
+
+		let double = core.get_input("p_double").expect("p_double 输入");
+		assert_eq!(
+			prop_values(double, "ui_group"),
+			vec![NodeValue::Text("Grouped".into())]
+		);
+		assert_eq!(
+			prop_values(double, "ui_page"),
+			vec![NodeValue::Text("Page A".into())]
+		);
+
+		let orphan = core.get_input("p_orphan").expect("p_orphan 输入");
+		// 未登记的 group → 回退 parent 名本身。
+		assert_eq!(
+			prop_values(orphan, "ui_group"),
+			vec![NodeValue::Text("missing_group".into())]
+		);
+		assert_eq!(
+			prop_values(orphan, "ui_page"),
+			vec![NodeValue::Text("Page A".into())]
+		);
+
+		// group/page/未知/空名都不产出输入。
+		assert!(core.get_input("grp_labeled").is_none());
+		assert!(core.get_input("page_a").is_none());
+		assert!(core.get_input("bogus").is_none());
+		assert!(core.get_input("").is_none());
+	}
+
+	/// build_core 的 clip→纹理输入与 effect_input 回退链。
+	#[test]
+	fn build_core_selects_effect_input_from_clips() {
+		// Source 存在 → effect_input = Source；Output 不入输入表。
+		let inst = fake_instance(
+			"test.clips.source",
+			ok_entry,
+			param_set(vec![]),
+			vec![clip("Source"), clip("Output")],
+		);
+		let core = build_core(&inst);
+		assert_eq!(core.effect_input, SOURCE_CLIP);
+		assert!(core.get_input("Output").is_none());
+		let source = core.get_input("Source").expect("Source 输入");
+		assert_eq!(source.value_type, ValueType::Texture);
+		assert_eq!(source.display_name, "Source");
+
+		// 无 Source 但有 Texture → effect_input = Texture（不新建）。
+		let inst = fake_instance(
+			"test.clips.texture",
+			ok_entry,
+			param_set(vec![]),
+			vec![clip("Texture"), clip("Output")],
+		);
+		let core = build_core(&inst);
+		assert_eq!(core.effect_input, TEXTURE_INPUT);
+		assert_eq!(core.get_input("Texture").unwrap().display_name, "Texture");
+
+		// 只有非标准 clip → 合成 Texture 输入。
+		let inst = fake_instance(
+			"test.clips.mask",
+			ok_entry,
+			param_set(vec![]),
+			vec![clip("Mask"), clip("Output")],
+		);
+		let core = build_core(&inst);
+		assert_eq!(core.effect_input, TEXTURE_INPUT);
+		let tex = core.get_input(TEXTURE_INPUT).expect("合成 Texture 输入");
+		assert_eq!(tex.value_type, ValueType::Texture);
+		assert_eq!(tex.display_name, "Texture");
+		assert!(core.get_input("Mask").is_some());
+	}
+
+	/// 颜色输入属性（semantic/min/max/tooltip）与 combo 选项表
+	/// （enum 回退、ChoiceOrder 排序、StrCombo 值表）。
+	#[test]
+	fn build_core_color_and_combo_property_tables() {
+		let tint = ParamDef::new("tint", ofx::TYPE_RGB);
+		tint.props.set_one(ofx::PROP_LABEL, text("Tint Color"));
+		tint.props.set_one(ofx::P_HINT, text("Pick me"));
+		tint.props
+			.set_one(ofx::P_DISPLAY_MIN, PropValue::Double(0.0));
+		tint.props
+			.set_one(ofx::P_DISPLAY_MAX, PropValue::Double(1.0));
+
+		let mode = ParamDef::new("mode", ofx::TYPE_CHOICE);
+		mode.props
+			.define(ofx::P_CHOICE_OPTION, vec![text("A"), text("B"), text("C")]);
+		mode.props
+			.define(ofx::P_CHOICE_ENUM, vec![text("a"), text("b"), text("c")]);
+		mode.props.define(
+			ofx::P_CHOICE_ORDER,
+			vec![
+				PropValue::Int(2),
+				PropValue::Int(0),
+				PropValue::Int(1),
+			],
+		);
+
+		let labels_only = ParamDef::new("labels_only", ofx::TYPE_CHOICE);
+		labels_only
+			.props
+			.define(ofx::P_CHOICE_OPTION, vec![text("OnlyA"), text("OnlyB")]);
+
+		let sc = ParamDef::new("sc", ofx::TYPE_STRCHOICE);
+		sc.props
+			.define(ofx::P_CHOICE_ENUM, vec![text("v1"), text("v2")]);
+
+		// 无 label + 默认值不等的 RGBA → 兜底 color，显示名回退参数 id。
+		let plain = ParamDef::new("plain_rgb", ofx::TYPE_RGBA);
+		plain.props.set_one(ofx::PROP_LABEL, text(""));
+		plain.props.define(
+			ofx::P_DEFAULT,
+			vec![
+				PropValue::Double(0.1),
+				PropValue::Double(0.2),
+				PropValue::Double(0.3),
+				PropValue::Double(1.0),
+			],
+		);
+
+		let inst = fake_instance(
+			"test.color.combo",
+			ok_entry,
+			param_set(vec![tint, mode, labels_only, sc, plain]),
+			vec![],
+		);
+		let core = build_core(&inst);
+
+		let tint = core.get_input("tint").unwrap();
+		assert_eq!(
+			prop_values(tint, "color_semantic"),
+			vec![NodeValue::Text("color".into())]
+		);
+		assert_eq!(
+			prop_values(tint, "min"),
+			vec![NodeValue::Float(0.0)]
+		);
+		assert_eq!(
+			prop_values(tint, "max"),
+			vec![NodeValue::Float(1.0)]
+		);
+		assert_eq!(
+			prop_values(tint, "tooltip"),
+			vec![NodeValue::Text("Pick me".into())]
+		);
+
+		let mode = core.get_input("mode").unwrap();
+		assert_eq!(
+			prop_values(mode, "combo_option"),
+			vec![
+				NodeValue::Text("B".into()),
+				NodeValue::Text("C".into()),
+				NodeValue::Text("A".into()),
+			]
+		);
+		assert!(prop_values(mode, "combo_value").is_empty());
+
+		// labels 有、enum 空 → values 回退 labels。
+		let labels_only = core.get_input("labels_only").unwrap();
+		assert_eq!(
+			prop_values(labels_only, "combo_option"),
+			vec![
+				NodeValue::Text("OnlyA".into()),
+				NodeValue::Text("OnlyB".into()),
+			]
+		);
+		assert!(prop_values(labels_only, "combo_value").is_empty());
+
+		// StrCombo：enum 回退 labels + combo_value 表。
+		let sc = core.get_input("sc").unwrap();
+		assert_eq!(
+			prop_values(sc, "combo_option"),
+			vec![
+				NodeValue::Text("v1".into()),
+				NodeValue::Text("v2".into()),
+			]
+		);
+		assert_eq!(
+			prop_values(sc, "combo_value"),
+			vec![
+				NodeValue::Text("v1".into()),
+				NodeValue::Text("v2".into()),
+			]
+		);
+
+		let plain = core.get_input("plain_rgb").unwrap();
+		assert_eq!(plain.display_name, "plain_rgb");
+		assert_eq!(
+			prop_values(plain, "color_semantic"),
+			vec![NodeValue::Text("color".into())]
+		);
+	}
+
+	/// parametric UI 颜色表不足一整维时在循环内 break。
+	#[test]
+	fn build_core_parametric_partial_ui_colour() {
+		let def = ParamDef::new("curve", ofx::TYPE_PARAMETRIC);
+		def.props
+			.set_one(ofx::P_PARAMETRIC_DIMENSION, PropValue::Int(2));
+		def.props.define(
+			ofx::P_PARAMETRIC_RANGE,
+			vec![PropValue::Double(0.0), PropValue::Double(1.0)],
+		);
+		// 只够第 1 维（3 个 double）→ 第 2 维 break。
+		def.props.define(
+			ofx::P_PARAMETRIC_UI_COLOUR,
+			vec![
+				PropValue::Double(1.0),
+				PropValue::Double(0.0),
+				PropValue::Double(0.0),
+			],
+		);
+		let inst = fake_instance(
+			"test.parametric.partial",
+			ok_entry,
+			param_set(vec![def]),
+			vec![],
+		);
+		let core = build_core(&inst);
+		let input = core.get_input("curve").unwrap();
+		assert_eq!(
+			prop_values(input, "parametric_ui_colour"),
+			vec![NodeValue::Color([1.0, 0.0, 0.0, 1.0])]
+		);
+		assert_eq!(
+			prop_values(input, "parametric_dimension"),
+			vec![NodeValue::Int(2)]
+		);
+		assert_eq!(
+			prop_values(input, "parametric_range"),
+			vec![NodeValue::Vec2([0.0, 1.0])]
+		);
+	}
+
+	/// 显示名/描述回退与子分类映射。
+	#[test]
+	fn display_name_description_and_sub_category() {
+		let inst = fake_instance("test.display", ok_entry, param_set(vec![]), vec![]);
+		assert_eq!(plugin_display_name(&inst), "test.display");
+		inst.plugin
+			.descriptor
+			.props
+			.set_one(ofx::PROP_LABEL, text("Pretty"));
+		assert_eq!(plugin_display_name(&inst), "Pretty");
+		inst.plugin
+			.descriptor
+			.props
+			.set_one(PROP_PLUGIN_DESCRIPTION, text("Desc"));
+		assert_eq!(plugin_description(&inst), "Desc");
+		// 未配置 → 空串。
+		let bare = fake_instance("test.display.bare", ok_entry, param_set(vec![]), vec![]);
+		assert_eq!(plugin_description(&bare), "");
+
+		assert_eq!(sub_category_for("OfxImageEffectContextFilter"), "Filter");
+		assert_eq!(
+			sub_category_for("OfxImageEffectContextGenerator"),
+			"Generator"
+		);
+		assert_eq!(
+			sub_category_for("OfxImageEffectContextTransition"),
+			"Transition"
+		);
+		assert_eq!(sub_category_for("OfxImageEffectContextGeneral"), "General");
+		assert_eq!(sub_category_for("OfxImageEffectContextBogus"), "General");
+	}
+
+	/// set_text_param 的类型分发：String/StrChoice 写回、NUL 拒绝、
+	/// 非文本类型与查无参数静默忽略。
+	#[test]
+	fn set_text_param_type_dispatch_and_nul_rejection() {
+		let s = ParamDef::new("s", ofx::TYPE_STRING);
+		let sc = ParamDef::new("sc", ofx::TYPE_STRCHOICE);
+		let d = ParamDef::new("d", ofx::TYPE_DOUBLE);
+		let inst = fake_instance(
+			"test.text.dispatch",
+			ok_entry,
+			param_set(vec![s, sc, d]),
+			vec![],
+		);
+
+		// 查无参数 → no-op。
+		set_text_param(&inst, "missing", "x");
+
+		// String：NUL → 拒绝（值保持），有效 → 写回。
+		let before = inst.params.find("s").unwrap().get();
+		set_text_param(&inst, "s", "with\0nul");
+		assert_eq!(inst.params.find("s").unwrap().get(), before);
+		set_text_param(&inst, "s", "hello");
+		assert!(matches!(
+			inst.params.find("s").unwrap().get(),
+			ParamValue::String(_)
+		));
+
+		// StrChoice：NUL → 拒绝，有效 → 写回。
+		let before = inst.params.find("sc").unwrap().get();
+		set_text_param(&inst, "sc", "with\0nul");
+		assert_eq!(inst.params.find("sc").unwrap().get(), before);
+		set_text_param(&inst, "sc", "pick");
+		assert!(matches!(
+			inst.params.find("sc").unwrap().get(),
+			ParamValue::StrChoice(_)
+		));
+
+		// 非文本类型 → 静默忽略。
+		let before = inst.params.find("d").unwrap().get();
+		set_text_param(&inst, "d", "5");
+		assert_eq!(inst.params.find("d").unwrap().get(), before);
+	}
+
+	/// recording entry 的边界分支（空 action、非 instanceChanged、
+	/// 缺失/类型不符的 change reason）——直接调 entry 覆盖。
+	#[test]
+	fn push_button_recording_entry_edge_branches() {
+		let _g = PUSH_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		// 空 action → 不记录。
+		let rc = unsafe {
+			recording_entry(
+				std::ptr::null(),
+				std::ptr::null(),
+				std::ptr::null_mut(),
+				std::ptr::null_mut(),
+			)
+		};
+		assert_eq!(rc, 0);
+		// 其它 action → 不记录。
+		let other = CString::new("OfxActionSomethingElse").unwrap();
+		let rc = unsafe {
+			recording_entry(
+				other.as_ptr(),
+				std::ptr::null(),
+				std::ptr::null_mut(),
+				std::ptr::null_mut(),
+			)
+		};
+		assert_eq!(rc, 0);
+
+		// instanceChanged 但 inArgs 缺 reason → 记录空串。
+		*PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner()) = Vec::new();
+		let changed = CString::new(crate::host::ACTION_INSTANCE_CHANGED).unwrap();
+		let props = PropertySet::new();
+		unsafe {
+			recording_entry(
+				changed.as_ptr(),
+				std::ptr::null(),
+				&props as *const PropertySet as *mut c_void,
+				std::ptr::null_mut(),
+			)
+		};
+		assert_eq!(
+			*PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner()),
+			vec!["OfxActionInstanceChanged".to_string(), String::new()]
+		);
+
+		// reason 类型不符 → 空串。
+		*PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner()) = Vec::new();
+		props.set_one(crate::host::PROP_CHANGE_REASON, PropValue::Int(3));
+		unsafe {
+			recording_entry(
+				changed.as_ptr(),
+				std::ptr::null(),
+				&props as *const PropertySet as *mut c_void,
+				std::ptr::null_mut(),
+			)
+		};
+		assert_eq!(
+			*PUSH_ENTRY_CALLS.lock().unwrap_or_else(|e| e.into_inner()),
+			vec!["OfxActionInstanceChanged".to_string(), String::new()]
+		);
+	}
+
+	/// push_button_clicked 的 instanceChanged 失败只记日志、仍返回 true。
+	#[test]
+	fn push_button_clicked_instance_changed_failure_returns_true() {
+		unsafe extern "C" fn fail_changed(
+			action: *const c_char,
+			_: *const c_void,
+			_: *mut c_void,
+			_: *mut c_void,
+		) -> i32 {
+			if action_is(action, crate::host::ACTION_INSTANCE_CHANGED) {
+				crate::suites::status::ERR_FATAL
+			} else {
+				crate::suites::status::OK
+			}
+		}
+		let button = ParamDef::new("button", ofx::TYPE_PUSHBUTTON);
+		button.props.set_one(ofx::PROP_LABEL, text("Button"));
+		let inst = fake_instance(
+			"test.push.fail",
+			fail_changed,
+			param_set(vec![button]),
+			vec![],
+		);
+		let id = register_fake(inst);
+		assert!(push_button_clicked(id, "button"));
+		unregister_instance(id);
+	}
+
+	/// execute_plugin_job：非 Plugin spec、未登记实例、dummy/零尺寸
+	/// 输入、参数值分发的 PushButton/None 分支。
+	#[test]
+	fn execute_plugin_job_spec_and_source_branches() {
+		let inst = fake_instance("test.exec.branches", ok_entry, param_set(vec![]), vec![]);
+		let id = register_fake(inst);
+
+		fn plugin_spec(instance: u64, values: Vec<(String, NodeValue)>) -> oak_render::eval::JobSpec {
+			oak_render::eval::JobSpec::Plugin {
+				instance,
+				type_id: "org.oak.test.exec".to_string(),
+				time: 0.0,
+				effect_input_id: Some(SOURCE_CLIP.to_string()),
+				inputs: Vec::new(),
+				values,
+			}
+		}
+
+		// 非 Plugin spec → Invalid。
+		let spec = oak_render::eval::JobSpec::Generate;
+		let req = oak_render::eval::PluginJobRequest {
+			spec: &spec,
+			src: oak_core::texture::Texture::dummy(),
+		};
+		assert!(execute_plugin_job(&req).is_err());
+
+		// 未登记实例 → Failed。
+		let spec = plugin_spec(u64::MAX, Vec::new());
+		let req = oak_render::eval::PluginJobRequest {
+			spec: &spec,
+			src: oak_core::texture::Texture::dummy(),
+		};
+		assert!(execute_plugin_job(&req).is_err());
+
+		// 登记实例 + dummy 源 → Failed。
+		let spec = plugin_spec(id, Vec::new());
+		let req = oak_render::eval::PluginJobRequest {
+			spec: &spec,
+			src: oak_core::texture::Texture::dummy(),
+		};
+		assert!(execute_plugin_job(&req).is_err());
+
+		// 登记实例 + 零尺寸（非 dummy）源 → generate_frame 失败。
+		let pod = oak_core::frame::VideoParamsPod {
+			width: 1,
+			height: 0,
+			..Default::default()
+		};
+		let mut zero = oak_core::texture::Frame::new();
+		zero.set_video_params(pod);
+		let spec = plugin_spec(id, Vec::new());
+		let req = oak_render::eval::PluginJobRequest {
+			spec: &spec,
+			src: oak_core::texture::Texture::wrap_frame(zero),
+		};
+		assert!(execute_plugin_job(&req).is_err());
+
+		// 参数值分发：PushButton/None 跳过、数值走 POD、文本走 set_ofx；
+		// 后续 render_frame 的结果不做断言（假插件没有真实渲染行为），
+		// 这里只要求各分发分支被走到。
+		let frame =
+			oak_render::eval::generate_frame(oak_core::Rational::new(0, 1), (2, 2), oak_core::PixelFormat::F32)
+				.expect("frame");
+		let spec = plugin_spec(
+			id,
+			vec![
+				("button".to_string(), NodeValue::PushButton),
+				("none".to_string(), NodeValue::None),
+				("gain".to_string(), NodeValue::Float(1.0)),
+				("title".to_string(), NodeValue::Text("hello".to_string())),
+			],
+		);
+		let req = oak_render::eval::PluginJobRequest {
+			spec: &spec,
+			src: oak_core::texture::Texture::wrap_frame(frame),
+		};
+		let _ = execute_plugin_job(&req);
+
+		unregister_instance(id);
+	}
+
+	// ---- 真实测试插件（build.rs 产物）的宿主面覆盖 ----------------------
+
+	/// 宿主全局状态串行（真实插件扫描/实例化）。
+	static HOST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+	fn fixture_bundle_dir() -> Option<std::path::PathBuf> {
+		let out = std::path::PathBuf::from(env!("OUT_DIR"));
+		let lib = out.join(if cfg!(target_os = "macos") {
+			"oak_test_plugin.dylib"
+		} else {
+			"oak_test_plugin.so"
+		});
+		if !lib.is_file() {
+			return None;
+		}
+		let platform = if cfg!(target_os = "macos") {
+			"MacOS"
+		} else if cfg!(target_os = "windows") {
+			"Win64"
+		} else {
+			"Linux-x86-64"
+		};
+		let dir = std::env::temp_dir().join(format!("oak-plugin-unit-fixture-{}", std::process::id()));
+		let bin_dir = dir
+			.join("oak-test-plugin.ofx.bundle/Contents")
+			.join(platform);
+		std::fs::create_dir_all(&bin_dir).ok()?;
+		let target = bin_dir.join(if cfg!(target_os = "windows") {
+			"plugin.dll"
+		} else {
+			"plugin"
+		});
+		if !target.exists() {
+			std::fs::copy(&lib, &target).ok()?;
+		}
+		Some(dir)
+	}
+
+	fn ensure_fixture_loaded() -> bool {
+		let Some(dir) = fixture_bundle_dir() else {
+			return false;
+		};
+		if Host::global().cache.scan_path(&dir).is_err() {
+			return false;
+		}
+		Host::global()
+			.cache
+			.find("org.oak.test-plugin")
+			.is_some()
+	}
+
+	fn with_trace<R>(f: impl FnOnce() -> R) -> R {
+		static TRACE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+		let _g = TRACE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let prev = std::env::var_os("OAK_OFX_TRACE");
+		std::env::set_var("OAK_OFX_TRACE", "1");
+		let out = f();
+		match prev {
+			Some(v) => std::env::set_var("OAK_OFX_TRACE", v),
+			None => std::env::remove_var("OAK_OFX_TRACE"),
+		}
+		out
+	}
+
+	/// duplicate_instance：注册表换新实例（真实测试插件）+ 未知句柄 None。
+	#[test]
+	fn duplicate_instance_recreates_and_unknown_handle_is_none() {
+		let _g = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		if !ensure_fixture_loaded() {
+			eprintln!("SKIP: 测试插件未构建");
+			return;
+		}
+		let inst = Host::global()
+			.create_instance("org.oak.test-plugin", Some("OfxImageEffectContextFilter"))
+			.expect("测试插件实例");
+		let handle = PluginInstanceHandle(register_instance(inst));
+		let dup = duplicate_instance(handle).expect("duplicate 应成功");
+		assert_ne!(dup.0, handle.0);
+		let dup_inst = instance_from_id(dup.0).expect("duplicate 已登记");
+		assert_eq!(dup_inst.value.plugin.identifier, "org.oak.test-plugin");
+		assert_eq!(dup_inst.value.context, "OfxImageEffectContextFilter");
+		unregister_instance(dup.0);
+		assert!(duplicate_instance(PluginInstanceHandle(u64::MAX)).is_none());
+	}
+
+	/// shared_plugin_instance：首访建实例并缓存，再访命中缓存；查无
+	/// 标识 → None。
+	#[test]
+	fn shared_plugin_instance_caches_and_misses() {
+		let _g = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		if !ensure_fixture_loaded() {
+			eprintln!("SKIP: 测试插件未构建");
+			return;
+		}
+		let first = shared_plugin_instance("org.oak.test-plugin").expect("首访建实例");
+		let second = shared_plugin_instance("org.oak.test-plugin").expect("再访命中缓存");
+		assert_eq!(first, second);
+		assert!(shared_plugin_instance("com.example.no-such-plugin").is_none());
+	}
+
+	/// 用 build.rs 产出的测试插件跑通 render_real_plugin_smoke 全路径
+	/// （含 OAK_OFX_TRACE 探针分支），不再依赖机器上装有真实插件。
+	#[test]
+	fn fixture_plugin_renders_through_the_executor() {
+		let _g = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		if !ensure_fixture_loaded() {
+			eprintln!("SKIP: 测试插件未构建");
+			return;
+		}
+		with_trace(|| render_real_plugin_smoke("org.oak.test-plugin"));
 	}
 }
