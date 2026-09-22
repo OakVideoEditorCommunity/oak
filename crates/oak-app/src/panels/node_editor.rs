@@ -944,4 +944,44 @@ mod tests {
 			);
 		}
 	}
+
+	/// Local menu routing (color labels, add-node entries, unknown ids),
+	/// the fit/zoom viewport helpers and the dock metadata.
+	#[gpui::test]
+	async fn menu_fit_zoom_and_dock_paths(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx);
+
+		cx.update(|window, app| {
+			panel.update(app, |panel, cx| {
+				// A color-label id takes the early return.
+				let color_item = (0..4096)
+					.find(|item| menu::color_label_index(*item).is_some())
+					.expect("a color label id exists");
+				panel.on_local_menu_item(color_item, cx);
+
+				// An add-node entry (the mock engine rejects the add) and an
+				// unknown id both return without panicking.
+				panel.add_menu_ids.push((
+					LOCAL_ADD_NODE_BASE + 41,
+					"oak:test-node".to_string(),
+				));
+				panel.on_local_menu_item(LOCAL_ADD_NODE_BASE + 41, cx);
+				panel.on_local_menu_item(LOCAL_ADD_NODE_BASE + 42, cx);
+				panel.on_local_menu_item(0, cx);
+
+				// Fit/zoom/viewport helpers.
+				assert!(panel.graph_bounds(cx).is_some());
+				let _ = panel.fit_viewport(window, cx);
+				panel.fit_graph(window, cx);
+				panel.zoom(1.25, window, cx);
+				panel.zoom(0.5, window, cx);
+			});
+		});
+
+		cx.update(|_window, app| {
+			assert!(!panel.read(app).title(app).is_empty());
+			let _ = panel.read(app).tab_content(app);
+			assert_eq!(panel.read(app).panel_id(), NODE_EDITOR);
+		});
+	}
 }

@@ -1407,6 +1407,58 @@ pub fn spawn_export(
 	}
 }
 
+/// The oak-worker binary for tests that drive the process backend:
+/// `$OAK_WORKER_BIN` when it names an existing file (mirroring
+/// `oak_render::procpool`'s test-side `find_real_worker`), else the
+/// sibling of the test executable under `target/<profile>/` (test
+/// binaries run from `target/<profile>/deps`, so the worker is one
+/// directory up), else the workspace `target/{debug,release}/oak-worker`.
+/// Resolving from `current_exe` keeps coverage builds working, whose
+/// target dir (`target/llvm-cov-target/...`) holds no `target/debug`
+/// worker; `None` means the worker was never built and the caller must
+/// not point the pool at a nonexistent path (the pool's resolver accepts
+/// `OAK_WORKER_BIN` on faith, so a stale value silently starves every
+/// render).
+#[cfg(test)]
+pub(crate) fn test_worker_bin() -> Option<std::path::PathBuf> {
+	fn existing(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+		path.is_file().then_some(path)
+	}
+	let suffix = format!("oak-worker{}", std::env::consts::EXE_SUFFIX);
+	// An explicit override wins, but only when it names a real file.
+	if let Some(path) = std::env::var_os("OAK_WORKER_BIN") {
+		if let Some(found) = existing(std::path::PathBuf::from(path)) {
+			return Some(found);
+		}
+	}
+	if let Ok(exe) = std::env::current_exe() {
+		if let Some(dir) = exe.parent() {
+			// `target/<profile>/deps/<test binary>`: the worker sits in
+			// `target/<profile>`; a test binary run from the profile dir
+			// itself finds it as a direct sibling.
+			if let Some(found) = existing(dir.join(&suffix)) {
+				return Some(found);
+			}
+			if let Some(found) = dir.parent().and_then(|dir| existing(dir.join(&suffix))) {
+				return Some(found);
+			}
+		}
+	}
+	// The plain workspace target dir, for the (unusual) case where the
+	// test executable lives elsewhere but the developer built the worker
+	// beforehand.
+	for profile in ["debug", "release"] {
+		let candidate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../target")
+			.join(profile)
+			.join(&suffix);
+		if let Some(found) = existing(candidate) {
+			return Some(found);
+		}
+	}
+	None
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1417,6 +1469,65 @@ mod tests {
 	/// process-global undo stack with the other app test modules.
 	fn media_lock() -> std::sync::MutexGuard<'static, ()> {
 		crate::oakui::graphops::test_lock()
+	}
+
+	/// Pins a process-global config key to its current value, restoring it
+	/// on drop (a failing assertion mid-test must not leak the override).
+	struct ConfigGuard {
+		key: &'static str,
+		prev: String,
+	}
+
+	impl ConfigGuard {
+		fn pin(key: &'static str) -> Self {
+			let prev = oak_core::configstore::ConfigStore::instance()
+				.get(None, key)
+				.unwrap_or_default();
+			Self { key, prev }
+		}
+
+		fn set_bool(&self, value: i32) {
+			oak_core::configstore::ConfigStore::instance().set_bool(None, self.key, value);
+		}
+	}
+
+	impl Drop for ConfigGuard {
+		fn drop(&mut self) {
+			oak_core::configstore::ConfigStore::instance().set(None, self.key, &self.prev);
+		}
+	}
+
+	/// Sets a process-global environment variable, restoring the previous
+	/// value on drop.
+	struct EnvGuard {
+		key: &'static str,
+		prev: Option<std::ffi::OsString>,
+	}
+
+	impl EnvGuard {
+		fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+			let prev = std::env::var_os(key);
+			std::env::set_var(key, value);
+			Self { key, prev }
+		}
+	}
+
+	impl Drop for EnvGuard {
+		fn drop(&mut self) {
+			match &self.prev {
+				Some(value) => std::env::set_var(self.key, value),
+				None => std::env::remove_var(self.key),
+			}
+		}
+	}
+
+	/// The error of a `Result` whose `Ok` type is not `Debug` (the export
+	/// params), panicking with `context` on success.
+	fn expect_err<T>(result: Result<T, String>, context: &str) -> String {
+		match result {
+			Err(err) => err,
+			Ok(_) => panic!("{context}"),
+		}
 	}
 
 	/// A project with an HD sequence carrying one clip of the generated
@@ -2324,6 +2435,52 @@ mod tests {
 			"the node-graph preview shows the angle's frame, not black (r={gr})"
 		);
 
+		// The guard arms: a cleared current source, a host position outside
+		// every angle clip and an angle clip without media all resolve to
+		// no montage media (the host clip then falls back to its own
+		// chain / is skipped).
+		let set_source = |source: i32| {
+			let mut g = graphops::lock(&project);
+			if let Some(core) = g.graph.get_mut(mc).map(|e| &mut e.core) {
+				core.set_standard_value(
+					oak_node::nodes::multicamnode::CURRENT_INPUT,
+					-1,
+					oak_node::value::NodeValue::Combo(i64::from(source)),
+				);
+			}
+		};
+		let resolve = |host_in: Rational| {
+			let g = graphops::lock(&project);
+			clip_multicam_media(&g.graph, host_clip, host_in)
+		};
+		set_source(-1);
+		assert!(
+			resolve(graphops::ts_to_rational(0, tb)).is_none(),
+			"a negative current source resolves no angle"
+		);
+		set_source(0);
+		assert!(
+			resolve(graphops::ts_to_rational(100, tb)).is_none(),
+			"a host position past the angle clip resolves nothing"
+		);
+		{
+			let mut g = graphops::lock(&project);
+			let f = g
+				.graph
+				.get_mut(footage)
+				.and_then(|e| {
+					e.behavior
+						.as_any_mut()?
+						.downcast_mut::<oak_node::footage::FootageBehavior>()
+				})
+				.expect("the angle footage");
+			f.filename.clear();
+		}
+		assert!(
+			resolve(graphops::ts_to_rational(0, tb)).is_none(),
+			"an unprobed angle clip's media is not a preview source"
+		);
+
 		oak_undo::global::clear().unwrap();
 		let _ = std::fs::remove_file(&media);
 	}
@@ -2737,6 +2894,17 @@ mod tests {
 			(640, 360),
 			"the smallest limit binds"
 		);
+		// Degenerate limit rectangles are ignored, not applied.
+		assert_eq!(
+			clamp_render_size(1920, 1080, &[(0, 100), (100, 0)]),
+			(1920, 1080),
+			"empty limit rectangles never clamp"
+		);
+		assert_eq!(
+			clamp_render_size(1920, 1080, &[(0, 100), (640, 0), (1280, 720)]),
+			(1280, 720),
+			"only the valid limit binds"
+		);
 	}
 
 	/// The proxy-clamping acceptance gate: with the global `UseProxyMedia`
@@ -2757,12 +2925,12 @@ mod tests {
 		oak_codec::testmedia::write_test_clip_solid(&proxy, 32, 32, 10, 10, [0.1, 0.1, 0.9, 1.0])
 			.expect("generate the proxy media");
 
-		// Force the global proxy switch on and restore it afterwards (the
-		// config store is process-global; the serialization lock held
-		// above is the same one the other app test modules use).
-		let store = oak_core::configstore::ConfigStore::instance();
-		let old = store.get(None, "UseProxyMedia").unwrap_or_default();
-		store.set_bool(None, "UseProxyMedia", 1);
+		// Force the global proxy switch on; the guard restores the previous
+		// value on drop (the config store is process-global; the
+		// serialization lock held above is the same one the other app test
+		// modules use).
+		let proxy_media = ConfigGuard::pin("UseProxyMedia");
+		proxy_media.set_bool(1);
 
 		let (project, seq, footage) = project_with_clip(&orig);
 		{
@@ -2826,10 +2994,866 @@ mod tests {
 			"the proxy's blue covers the frame (r={r}, b={b})"
 		);
 
-		store.set(None, "UseProxyMedia", &old);
 		oak_undo::global::clear().unwrap();
 		let _ = std::fs::remove_file(&orig);
 		let _ = std::fs::remove_file(&proxy);
 	}
+
+	/// A clip block with the default `[0, 1)` range and no media chain —
+	/// the montage walks must skip it.
+	fn bare_clip(p: &ProjectRef) -> NodeId {
+		let mut g = lock(p);
+		let (core, behavior) = oak_node::block::clip_create();
+		g.graph.add_node(core, behavior)
+	}
+
+	/// Pushes `node` onto the sequence's track-list vector (a stale /
+	/// foreign entry the walk must skip).
+	fn push_track_list(p: &ProjectRef, seq: NodeId, node: NodeId) {
+		let mut g = lock(p);
+		let entry = g.graph.get_mut(seq).expect("the sequence node");
+		entry
+			.behavior
+			.as_any_mut()
+			.and_then(|a| a.downcast_mut::<oak_node::sequence::SequenceBehavior>())
+			.expect("a sequence behavior")
+			.track_lists
+			.push(node);
+	}
+
+	/// Pushes a foreign node id into a track list's `tracks` vector.
+	fn push_track(p: &ProjectRef, list: NodeId, node: NodeId) {
+		let mut g = lock(p);
+		let entry = g.graph.get_mut(list).expect("the track list node");
+		entry
+			.behavior
+			.as_any_mut()
+			.and_then(|a| a.downcast_mut::<oak_node::track::TrackListBehavior>())
+			.expect("a track list behavior")
+			.tracks
+			.push(node);
+	}
+
+	/// Pushes a stale block id into a track's `blocks` vector.
+	fn push_block(p: &ProjectRef, track: NodeId, node: NodeId) {
+		let mut g = lock(p);
+		let entry = g.graph.get_mut(track).expect("the track node");
+		entry
+			.behavior
+			.as_any_mut()
+			.and_then(|a| a.downcast_mut::<oak_node::track::TrackBehavior>())
+			.expect("a track behavior")
+			.blocks
+			.push(node);
+	}
+
+	/// The proxy switch's remaining arms: a missing proxy file, a stream
+	/// index mismatch, an unprobed video stream, the audio naming rule and
+	/// the divider-based `proxy_resolution`.
+	#[test]
+	fn preview_media_proxy_switch_and_resolution() {
+		let _media = media_lock();
+		let proxy_media = ConfigGuard::pin("UseProxyMedia");
+		proxy_media.set_bool(1);
+
+		let proxy =
+			std::env::temp_dir().join(format!("oakapp_proxy_switch_{}.mp4", std::process::id()));
+		let proxy_audio = std::env::temp_dir().join(format!(
+			"oakapp_proxy_switch_{}.a1.mp4",
+			std::process::id()
+		));
+		std::fs::write(&proxy, b"proxy").expect("write the proxy stamp");
+		std::fs::write(&proxy_audio, b"proxy").expect("write the audio proxy stamp");
+
+		let stream = |index: i32, is_video: bool, video: Option<oak_node::value::VideoParams>| {
+			oak_node::footage::StreamInfo {
+				index,
+				is_video,
+				video,
+				audio: None,
+				duration: oak_core::Rational::new(1, 1),
+			}
+		};
+		let video = |w, h| {
+			Some(oak_node::value::VideoParams {
+				width: w,
+				height: h,
+				..Default::default()
+			})
+		};
+		let footage = |streams: Vec<oak_node::footage::StreamInfo>,
+		               proxy: &str,
+		               enabled: bool,
+		               index: i32| {
+			let mut f = oak_node::footage::FootageBehavior::new("/tmp/oakapp-src.mp4");
+			f.streams = streams;
+			f.proxy = proxy.to_string();
+			f.proxy_enabled = enabled;
+			f.proxy_video_stream_index = index;
+			f
+		};
+		let proxy_name = proxy.to_string_lossy().into_owned();
+
+		// A probed video-only footage with the ready proxy.
+		let f = footage(
+			vec![stream(0, true, video(64, 64))],
+			&proxy_name,
+			true,
+			0,
+		);
+		assert_eq!(
+			preview_footage_media(&f, true),
+			(proxy_name.clone(), 0),
+			"a ready matching proxy substitutes the original"
+		);
+
+		// The proxy file's stream index does not match the probed first
+		// video stream: no substitution.
+		let mismatch = footage(
+			vec![stream(0, true, video(64, 64))],
+			&proxy_name,
+			true,
+			3,
+		);
+		assert_eq!(
+			preview_footage_media(&mismatch, true).0,
+			mismatch.filename,
+			"a mismatched proxy stream index keeps the original"
+		);
+
+		// The global switch off, the footage flag off and a missing proxy
+		// file all keep the original.
+		let disabled = footage(
+			vec![stream(0, true, video(64, 64))],
+			&proxy_name,
+			false,
+			0,
+		);
+		assert_eq!(preview_footage_media(&disabled, true).0, disabled.filename);
+		let missing = footage(
+			vec![stream(0, true, video(64, 64))],
+			"/nonexistent/oakapp-proxy.mp4",
+			true,
+			0,
+		);
+		assert_eq!(preview_footage_media(&missing, true).0, missing.filename);
+		proxy_media.set_bool(0);
+		assert_eq!(preview_footage_media(&f, true).0, f.filename);
+		proxy_media.set_bool(1);
+
+		// An unprobed / video-less footage has no first video stream.
+		let unprobed = footage(vec![stream(0, false, None)], &proxy_name, true, 0);
+		assert_eq!(preview_footage_media(&unprobed, true).0, unprobed.filename);
+
+		// Audio: the proxy substitutes only when generated with audio.
+		let mut audio = footage(
+			vec![stream(0, false, None)],
+			&proxy_audio.to_string_lossy(),
+			true,
+			0,
+		);
+		assert_eq!(
+			preview_footage_media(&audio, false),
+			(proxy_audio.to_string_lossy().into_owned(), 1)
+		);
+		audio.proxy = proxy_name.clone();
+		assert_eq!(preview_footage_media(&audio, false).0, audio.filename);
+
+		// `proxy_resolution`: absolute params win, otherwise the probed
+		// video stream is divided (never below 2 pixels).
+		let params = |width, height, divider| oak_codec::proxymanager::ProxyParams {
+			width,
+			height,
+			divider,
+			..Default::default()
+		};
+		let mut abs = footage(vec![stream(0, true, video(64, 64))], "", false, 0);
+		abs.custom_proxy_params = Some(params(100, 50, 2));
+		assert_eq!(proxy_resolution(&abs), Some((100, 50)));
+		let mut divided = footage(vec![stream(0, true, video(64, 64))], "", false, 0);
+		divided.custom_proxy_params = Some(params(0, 0, 2));
+		assert_eq!(proxy_resolution(&divided), Some((32, 32)));
+		let mut floor = footage(vec![stream(0, true, video(4, 4))], "", false, 0);
+		floor.custom_proxy_params = Some(params(0, 0, 8));
+		assert_eq!(proxy_resolution(&floor), Some((2, 2)), "the 2px floor");
+		let mut zero = footage(vec![stream(0, true, video(64, 64))], "", false, 0);
+		zero.custom_proxy_params = Some(params(0, 0, 0));
+		assert_eq!(proxy_resolution(&zero), Some((64, 64)), "divider 0 = 1");
+		let mut no_video = footage(vec![stream(0, false, None)], "", false, 0);
+		no_video.custom_proxy_params = Some(params(0, 0, 1));
+		assert_eq!(
+			proxy_resolution(&no_video),
+			None,
+			"no probed video stream = no divider base"
+		);
+
+		let _ = std::fs::remove_file(&proxy);
+		let _ = std::fs::remove_file(&proxy_audio);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// A clip whose only footage has an empty filename (a placeholder or
+	/// an unprobed import) contributes no preview media.
+	#[test]
+	fn clip_preview_media_rejects_an_empty_footage_filename() {
+		let _media = media_lock();
+		let project = graphops::create_project();
+		let (clip, footage) = {
+			let mut g = lock(&project);
+			let (core, behavior) = oak_node::block::clip_create();
+			let clip = g.graph.add_node(core, behavior);
+			let (fcore, fbehavior) = oak_node::footage::FootageBehavior::create();
+			let footage = g.graph.add_node(fcore, fbehavior);
+			drop(g);
+			(clip, footage)
+		};
+		{
+			let mut g = lock(&project);
+			g.graph
+				.connect(
+					footage,
+					clip,
+					oak_node::block::clip_input::TEXTURE_INPUT,
+					-1,
+				)
+				.expect("wire the footage into the clip");
+		}
+		let resolved = {
+			let g = lock(&project);
+			clip_preview_media(&g.graph, clip, true)
+		};
+		assert!(
+			resolved.is_none(),
+			"an empty footage filename is not a preview source"
+		);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// The full / audio / single-track montage walks skip foreign
+	/// track-list entries, foreign tracks, stale blocks and media-less
+	/// clips, and the single-track builder honors its range guard.
+	#[test]
+	fn montage_walks_skip_stale_and_media_less_entries() {
+		let _media = media_lock();
+		oak_undo::global::clear().unwrap();
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Guard Montage");
+		let (video_track, video_list, audio_track, audio_list, tb) = {
+			let g = lock(&project);
+			let video_track = graphops::track_ids(&g.graph, seq, TrackType::Video)[0];
+			let video_list = graphops::track_behavior(&g.graph, video_track)
+				.and_then(|t| t.track_list)
+				.expect("the video track has a list");
+			let audio_track = graphops::track_ids(&g.graph, seq, TrackType::Audio)[0];
+			let audio_list = graphops::track_behavior(&g.graph, audio_track)
+				.and_then(|t| t.track_list)
+				.expect("the audio track has a list");
+			let tb = graphops::sequence_time_base(&g.graph, seq).expect("the timebase");
+			(video_track, video_list, audio_track, audio_list, tb)
+		};
+		let at = |frame: i64| graphops::ts_to_rational(frame, tb);
+		let range = TimeRange::new(at(0), at(5));
+
+		// A removed node (stale id) and a bare, media-less clip.
+		let stale = bare_clip(&project);
+		graphops::remove_node(&project, stale).expect("remove the stale block");
+		let bare = bare_clip(&project);
+		// A foreign node type used where a sequence / track is expected.
+		let foreign = bare_clip(&project);
+
+		// A foreign node id is not a sequence.
+		assert!(video_montage(&project, foreign, at(0)).is_empty());
+		assert!(audio_montage(&project, foreign, range).is_empty());
+		assert!(single_track_video_montage(&project, foreign, video_track, at(0)).is_empty());
+
+		// A foreign track-list entry is skipped.
+		push_track_list(&project, seq, foreign);
+		assert!(video_montage(&project, seq, at(0)).is_empty());
+		assert!(audio_montage(&project, seq, range).is_empty());
+
+		// A foreign track entry is skipped (including the single-track
+		// builder, where the id is "in the list" but has no behavior).
+		push_track(&project, video_list, foreign);
+		push_track(&project, audio_list, foreign);
+		assert!(video_montage(&project, seq, at(0)).is_empty());
+		assert!(audio_montage(&project, seq, range).is_empty());
+		assert!(single_track_video_montage(&project, seq, foreign, at(0)).is_empty());
+
+		// Stale block ids are skipped by every walk (the adjustment scan
+		// included).
+		push_block(&project, video_track, stale);
+		push_block(&project, audio_track, stale);
+		assert!(video_montage(&project, seq, at(0)).is_empty());
+		assert!(audio_montage(&project, seq, range).is_empty());
+		assert!(single_track_video_montage(&project, seq, video_track, at(0)).is_empty());
+
+		// A media-less clip covers the time but resolves no preview media.
+		push_block(&project, video_track, bare);
+		push_block(&project, audio_track, bare);
+		assert!(video_montage(&project, seq, at(0)).is_empty());
+		assert!(audio_montage(&project, seq, range).is_empty());
+		assert!(single_track_video_montage(&project, seq, video_track, at(0)).is_empty());
+		// The single-track walk's out-of-range guard.
+		assert!(single_track_video_montage(&project, seq, video_track, at(50)).is_empty());
+
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// `proxy_limits_at` skips foreign sequences, lists, tracks and blocks,
+	/// muted tracks and media-less clips (the sequence ticket's limit walk).
+	#[test]
+	fn proxy_limits_skip_foreign_and_media_less_entries() {
+		let _media = media_lock();
+		oak_undo::global::clear().unwrap();
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Proxy Limits");
+		let (video_track, video_list, tb) = {
+			let g = lock(&project);
+			let video_track = graphops::track_ids(&g.graph, seq, TrackType::Video)[0];
+			let video_list = graphops::track_behavior(&g.graph, video_track)
+				.and_then(|t| t.track_list)
+				.expect("the video track has a list");
+			let tb = graphops::sequence_time_base(&g.graph, seq).expect("the timebase");
+			(video_track, video_list, tb)
+		};
+		let at = |frame: i64| graphops::ts_to_rational(frame, tb);
+
+		let stale = bare_clip(&project);
+		graphops::remove_node(&project, stale).expect("remove the stale block");
+		let bare = bare_clip(&project);
+		let foreign = bare_clip(&project);
+
+		// A foreign node id is not a sequence.
+		assert!(proxy_limits_at(&project, foreign, at(0)).is_empty());
+
+		// A foreign track-list entry / track entry is skipped.
+		push_track_list(&project, seq, foreign);
+		push_track(&project, video_list, foreign);
+		assert!(proxy_limits_at(&project, seq, at(0)).is_empty());
+
+		// A muted track contributes no limit.
+		graphops::set_track_muted(&project, video_track, true).expect("mute the video track");
+		assert!(proxy_limits_at(&project, seq, at(0)).is_empty());
+		graphops::set_track_muted(&project, video_track, false).expect("unmute the video track");
+
+		// Stale and media-less blocks are skipped, and so is a block whose
+		// time range misses.
+		push_block(&project, video_track, stale);
+		push_block(&project, video_track, bare);
+		assert!(proxy_limits_at(&project, seq, at(0)).is_empty());
+		assert!(proxy_limits_at(&project, seq, at(50)).is_empty());
+
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// The single-footage ticket clamps to the footage's own ready proxy
+	/// (the source monitor's full-res fill path), and a non-footage node is
+	/// rejected.
+	#[test]
+	fn footage_frame_params_clamps_to_the_proxy_and_rejects_non_footage() {
+		let _media = media_lock();
+		oak_undo::global::clear().unwrap();
+		let proxy_media = ConfigGuard::pin("UseProxyMedia");
+		proxy_media.set_bool(1);
+
+		let orig = std::env::temp_dir().join(format!("oakapp_fp_src_{}.mp4", std::process::id()));
+		let proxy =
+			std::env::temp_dir().join(format!("oakapp_fp_proxy_{}.mp4", std::process::id()));
+		oak_codec::testmedia::write_test_clip(&orig, 64, 64, 10, 10).expect("the source media");
+		std::fs::write(&proxy, b"proxy").expect("the ready proxy stamp");
+
+		let (project, seq, footage) = project_with_clip(&orig);
+		{
+			let mut g = lock(&project);
+			let f = g
+				.graph
+				.get_mut(footage)
+				.and_then(|e| {
+					e.behavior
+						.as_any_mut()?
+						.downcast_mut::<oak_node::footage::FootageBehavior>()
+				})
+				.expect("the footage behavior");
+			f.proxy = proxy.to_string_lossy().into_owned();
+			f.proxy_enabled = true;
+			f.proxy_state = 2;
+			f.proxy_video_stream_index = 0;
+			f.custom_proxy_params = Some(oak_codec::proxymanager::ProxyParams {
+				width: 32,
+				height: 32,
+				..Default::default()
+			});
+		}
+		let tb = graphops::sequence_time_base(&lock(&project).graph, seq).unwrap();
+		let params = footage_frame_params(&project, footage, 0, tb, 64, 64, None)
+			.expect("the footage ticket params");
+		assert_eq!(
+			params.force_size,
+			Some((32, 32)),
+			"the ready proxy bounds the footage render"
+		);
+		assert_eq!(
+			params.footage.map(|(name, _)| name),
+			Some(proxy.to_string_lossy().into_owned())
+		);
+		// A non-footage node is rejected before any ticket is built.
+		let err = expect_err(
+			footage_frame_params(&project, seq, 0, tb, 64, 64, None),
+			"a sequence is not footage",
+		);
+		assert!(err.contains("not footage"));
+
+		oak_undo::global::clear().unwrap();
+		let _ = std::fs::remove_file(&orig);
+		let _ = std::fs::remove_file(&proxy);
+	}
+
+	/// `encoding_params`: the work-area and whole-sequence ranges, the
+	/// unknown-format / missing-codec / missing-video-params rejections.
+	#[test]
+	fn encoding_params_cover_ranges_and_rejections() {
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Export Params");
+		let path = std::path::Path::new("/tmp/oakapp-encoding-params.mp4");
+		let (rate_num, rate_den) = {
+			let g = lock(&project);
+			let (_, _, rate) =
+				graphops::sequence_video_params(&g.graph, seq).expect("the sequence rate");
+			(rate.numerator(), rate.denominator())
+		};
+		let frame_rational = |frames: i64| Rational::new(frames * rate_den, rate_num);
+		let pair = |r: Rational| (r.numerator() as i32, r.denominator() as i32);
+
+		// Work area: frames become sequence-rate rationals.
+		let with_workarea = encoding_params(&project, seq, 2, path, Some((10, 20)), 0)
+			.expect("the work-area params");
+		assert!(with_workarea.has_custom_range);
+		assert_eq!(
+			(
+				with_workarea.custom_range_in_num,
+				with_workarea.custom_range_in_den
+			),
+			pair(frame_rational(10))
+		);
+		assert_eq!(
+			(
+				with_workarea.custom_range_out_num,
+				with_workarea.custom_range_out_den
+			),
+			pair(frame_rational(20))
+		);
+		assert_eq!(
+			(
+				with_workarea.export_length_num,
+				with_workarea.export_length_den
+			),
+			pair(frame_rational(10))
+		);
+
+		// No work area (or a disabled / inverted one): the whole-sequence
+		// length in frames.
+		for workarea in [None, Some((20, 10)), Some((0, 0))] {
+			let params = encoding_params(&project, seq, 2, path, workarea, 250)
+				.expect("the whole-sequence params");
+			assert!(!params.has_custom_range);
+			assert_eq!(
+				(params.export_length_num, params.export_length_den),
+				pair(frame_rational(250))
+			);
+		}
+
+		// Unknown container.
+		assert!(encoding_params(&project, seq, 99, path, None, 0).is_err());
+		// Formats without a video (WAV) or without an audio codec (PNG).
+		let wav_err = expect_err(
+			encoding_params(&project, seq, 7, path, None, 0),
+			"WAV has no video codec",
+		);
+		assert!(wav_err.contains("no video codec"));
+		let png_err = expect_err(
+			encoding_params(&project, seq, 5, path, None, 0),
+			"PNG has no audio codec",
+		);
+		assert!(png_err.contains("no audio codec"));
+		// A non-sequence id has no video parameters.
+		let foreign = bare_clip(&project);
+		assert!(encoding_params(&project, foreign, 2, path, None, 0).is_err());
+
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// `encoding_params_with_settings`: the chosen-codec validation, size /
+	/// rate overrides, explicit ranges and the 10-bit pixel format.
+	#[test]
+	fn encoding_params_with_settings_cover_overrides_and_rejections() {
+		use crate::oakui::engine::ExportSettings;
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Export Settings");
+		let path = std::path::Path::new("/tmp/oakapp-encoding-settings.mp4");
+		let (rate_num, rate_den) = {
+			let g = lock(&project);
+			let (_, _, rate) =
+				graphops::sequence_video_params(&g.graph, seq).expect("the sequence rate");
+			(rate.numerator(), rate.denominator())
+		};
+
+		// Defaults: sequence size and rate.
+		let plain = encoding_params_with_settings(
+			&project,
+			seq,
+			&ExportSettings::default(),
+			path,
+			None,
+			250,
+		)
+		.expect("the default settings");
+		assert_eq!((plain.video_width, plain.video_height), (1920, 1080));
+		assert_eq!(
+			(plain.video_time_base_num, plain.video_time_base_den),
+			(rate_den as i32, rate_num as i32)
+		);
+		let whole = Rational::new(250 * rate_den, rate_num);
+		assert_eq!(
+			(plain.export_length_num, plain.export_length_den),
+			(whole.numerator() as i32, whole.denominator() as i32)
+		);
+		assert_eq!(plain.video_pixel_format, 0);
+
+		// Unknown format and unsupported codecs reject.
+		let bad_format = ExportSettings {
+			format: 99,
+			..ExportSettings::default()
+		};
+		assert!(encoding_params_with_settings(&project, seq, &bad_format, path, None, 0).is_err());
+		let bad_video = ExportSettings {
+			video_codec: 999,
+			..ExportSettings::default()
+		};
+		let err = expect_err(
+			encoding_params_with_settings(&project, seq, &bad_video, path, None, 0),
+			"the video codec must be in the container's table",
+		);
+		assert!(err.contains("not supported"), "unexpected error: {err}");
+		let bad_audio = ExportSettings {
+			audio_codec: 999,
+			..ExportSettings::default()
+		};
+		let err = expect_err(
+			encoding_params_with_settings(&project, seq, &bad_audio, path, None, 0),
+			"the audio codec must be in the container's table",
+		);
+		assert!(err.contains("audio codec"));
+
+		// Explicit size, frame rate, 10-bit depth and an explicit range.
+		let overridden = ExportSettings {
+			size: (640, 360),
+			frame_rate: 24.0,
+			bit_depth: 10,
+			range: Some((1.0, 3.0)),
+			..ExportSettings::default()
+		};
+		let params = encoding_params_with_settings(&project, seq, &overridden, path, None, 0)
+			.expect("the overridden settings");
+		assert_eq!((params.video_width, params.video_height), (640, 360));
+		assert_eq!((params.video_time_base_num, params.video_time_base_den), (1, 24));
+		assert_eq!(params.video_pixel_format, 1, "10-bit selects U10");
+		assert!(params.has_custom_range);
+		assert_eq!(
+			(params.custom_range_in_num, params.custom_range_in_den),
+			(1, 1)
+		);
+		assert_eq!(
+			(params.custom_range_out_num, params.custom_range_out_den),
+			(3, 1)
+		);
+		assert_eq!((params.export_length_num, params.export_length_den), (2, 1));
+
+		// An inverted / negative range falls back to the work area, which
+		// falls back to the whole sequence.
+		for range in [Some((3.0, 1.0)), Some((-1.0, 2.0))] {
+			let settings = ExportSettings {
+				range,
+				..ExportSettings::default()
+			};
+			let params =
+				encoding_params_with_settings(&project, seq, &settings, path, Some((10, 20)), 0)
+					.expect("the work-area fallback");
+			assert!(params.has_custom_range);
+			let expected_in = Rational::new(10 * rate_den, rate_num);
+			assert_eq!(
+				(params.custom_range_in_num, params.custom_range_in_den),
+				(expected_in.numerator() as i32, expected_in.denominator() as i32)
+			);
+			let params =
+				encoding_params_with_settings(&project, seq, &settings, path, None, 100)
+					.expect("the sequence fallback");
+			assert!(!params.has_custom_range);
+			let expected_len = Rational::new(100 * rate_den, rate_num);
+			assert_eq!(
+				(params.export_length_num, params.export_length_den),
+				(expected_len.numerator() as i32, expected_len.denominator() as i32)
+			);
+		}
+
+		// A non-sequence id has no video parameters.
+		let foreign = bare_clip(&project);
+		assert!(encoding_params_with_settings(
+			&project,
+			foreign,
+			&ExportSettings::default(),
+			path,
+			None,
+			0
+		)
+		.is_err());
+
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// A fake GPU context whose download hands back a small F32 frame, so
+	/// the non-adopted GPU display path (the explicit readback chain) runs
+	/// without a real device.
+	struct FakeGpu;
+
+	impl oak_core::backend::GpuContextLike for FakeGpu {
+		fn kind(&self) -> oak_core::backend::BackendKind {
+			oak_core::backend::BackendKind::Cpu
+		}
+		fn destroy_texture(&self, _token: u64) {}
+		fn upload(
+			&self,
+			_token: u64,
+			_frame: &oak_core::texture::Frame,
+		) -> oak_core::error::Result<()> {
+			Ok(())
+		}
+		fn download(&self, _token: u64) -> oak_core::error::Result<oak_core::texture::Frame> {
+			let mut frame = oak_core::texture::Frame {
+				width: 2,
+				height: 1,
+				channels: 4,
+				format: oak_core::PixelFormat::F32,
+				data: vec![0u8; 2 * 4 * 4],
+				..Default::default()
+			};
+			for (i, value) in [0.25f32, 0.5, 0.75, 1.0, 0.1, 0.2, 0.3, 0.4]
+				.into_iter()
+				.enumerate()
+			{
+				frame.data[i * 4..i * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+			}
+			Ok(frame)
+		}
+		fn blit(
+			&self,
+			_src: u64,
+			_dst: u64,
+			_processor: Option<&oak_core::color::ColorProcessor>,
+		) -> oak_core::error::Result<()> {
+			Ok(())
+		}
+	}
+
+	/// The `RenderedFrame` accessors and `to_display` for the CPU and
+	/// (readback) GPU variants, plus the `repack_f32_rows` guard arms.
+	#[test]
+	fn rendered_frame_variants_and_repack_guards() {
+		use std::sync::Arc;
+
+		let mut data = vec![0u8; 2 * 4 * 4];
+		for (i, value) in [0.25f32, 0.5, 0.75, 1.0, 0.1, 0.2, 0.3, 0.4]
+			.into_iter()
+			.enumerate()
+		{
+			data[i * 4..i * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+		}
+		let cpu = RenderedFrame::CpuF32 {
+			width: 2,
+			height: 1,
+			linesize: 32,
+			data: data.clone(),
+		};
+		assert_eq!(cpu.width(), 2);
+		assert_eq!(cpu.height(), 1);
+		assert_eq!(cpu.format(), PIXEL_FORMAT_F32);
+		assert!(!cpu.is_shm());
+		assert!(!cpu.is_gpu());
+		let (image, scope, samples) = cpu.to_display().expect("the CPU frame displays");
+		assert_eq!(image.as_bytes(0).map(|bytes| bytes.len()), Some(8));
+		assert_eq!(scope.luma.len(), 2);
+		assert!(samples.is_some(), "the F32 path hands the samples back");
+
+		// A GPU texture on a context that cannot present: to_display takes
+		// the explicit readback.
+		let ctx: Arc<dyn oak_core::backend::GpuContextLike> = Arc::new(FakeGpu);
+		let gpu = RenderedFrame::Gpu(oak_core::texture::Texture::gpu(
+			ctx.clone(),
+			1,
+			2,
+			1,
+			oak_core::PixelFormat::F32,
+		));
+		assert_eq!(gpu.width(), 2);
+		assert_eq!(gpu.height(), 1);
+		assert_eq!(gpu.format(), PIXEL_FORMAT_F32);
+		assert!(gpu.is_gpu());
+		assert!(!gpu.is_shm());
+		let (image, _scope, samples) = gpu.to_display().expect("the readback path displays");
+		assert_eq!(image.as_bytes(0).map(|bytes| bytes.len()), Some(8));
+		assert!(samples.is_some());
+
+		// A zero-sized texture is rejected before any readback.
+		let zero = RenderedFrame::Gpu(oak_core::texture::Texture::gpu(
+			ctx,
+			2,
+			0,
+			4,
+			oak_core::PixelFormat::F32,
+		));
+		assert_eq!(zero.width(), 0);
+		assert_eq!(zero.height(), 4);
+		assert!(zero.to_display().is_none());
+
+		// `repack_f32_rows` validates geometry and the padded buffer.
+		assert!(repack_f32_rows(0, 1, 16, &[]).is_none());
+		assert!(repack_f32_rows(1, 0, 16, &[]).is_none());
+		assert!(repack_f32_rows(1, 1, 16, &[0u8; 15]).is_none());
+		// A too-small line size is widened to the row length.
+		let padded = repack_f32_rows(1, 1, 4, &[0u8; 16]).expect("repack");
+		assert_eq!(padded.len(), 4);
+	}
+
+	/// With the worker binary missing, `RenderManager::init` fails and
+	/// `ensure_render_manager` logs the real error before degrading to
+	/// `false`. The manager global is process-wide and cannot be
+	/// re-initialized, so this runs only while it is down (otherwise the
+	/// test skips — tearing it down could break a concurrently drawing
+	/// real-engine panel).
+	#[test]
+	fn ensure_render_manager_logs_a_failed_start() {
+		let _media = media_lock();
+		if RenderManager::global().is_some() {
+			println!("SKIP: the render manager is already initialized");
+			return;
+		}
+		let prev = std::env::var_os("OAK_WORKER_BIN");
+		std::env::set_var("OAK_WORKER_BIN", "/nonexistent/oak-worker-for-test");
+		let started = ensure_render_manager();
+		match prev {
+			Some(value) => std::env::set_var("OAK_WORKER_BIN", value),
+			None => std::env::remove_var("OAK_WORKER_BIN"),
+		}
+		assert!(!started, "a missing worker binary must not report success");
+		assert!(
+			RenderManager::global().is_none(),
+			"the failed start leaves the manager down"
+		);
+	}
+
+	/// Points the render manager's worker resolution at a real oak-worker
+	/// binary (resolved via [`test_worker_bin`]: an existing
+	/// `$OAK_WORKER_BIN`, the test executable's sibling under
+	/// `target/<profile>/`, or the workspace `target/{debug,release}`),
+	/// restoring the previous environment on drop. When no worker file
+	/// exists the environment is left untouched and the pool cannot
+	/// deliver — the playback tests then take their strict/skip path.
+	/// Only used inside `media_lock` sections.
+	struct WorkerBinGuard {
+		prev: Option<String>,
+	}
+
+	impl WorkerBinGuard {
+		fn set() -> Self {
+			let prev = std::env::var("OAK_WORKER_BIN").ok();
+			match super::test_worker_bin() {
+				Some(path) => std::env::set_var("OAK_WORKER_BIN", path),
+				None => eprintln!(
+					"oak-worker binary not found (test-executable sibling, target/{{debug,release}} or OAK_WORKER_BIN); build it with `cargo build -p oak-worker` or set OAK_WORKER_BIN"
+				),
+			}
+			Self { prev }
+		}
+	}
+
+	impl Drop for WorkerBinGuard {
+		fn drop(&mut self) {
+			match &self.prev {
+				Some(p) => std::env::set_var("OAK_WORKER_BIN", p),
+				None => std::env::remove_var("OAK_WORKER_BIN"),
+			}
+		}
+	}
+
+	/// The render-manager entry points: the single-footage frame, the
+	/// multicam angle frame and the audio range (plus the invalid-timebase
+	/// guard and the debug-dispatch prints).
+	#[test]
+	fn render_entry_points_through_the_manager() {
+		let _media = media_lock();
+		let _worker = WorkerBinGuard::set();
+		assert!(
+			ensure_render_manager(),
+			"the render manager must start for this test; build oak-worker or set OAK_WORKER_BIN"
+		);
+		oak_undo::global::clear().unwrap();
+
+		let media =
+			std::env::temp_dir().join(format!("oakapp_manager_render_{}.mp4", std::process::id()));
+		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10)
+			.expect("generate the media");
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Manager Render");
+		let footage = graphops::import_footage(&project, &media).expect("import the footage");
+		graphops::add_track(&project, seq, TrackType::Video).expect("add a video track");
+		graphops::place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, 0)
+			.expect("place the video clip");
+		graphops::add_track(&project, seq, TrackType::Audio).expect("add an audio track");
+		graphops::place_footage_clip(&project, seq, footage, TrackType::Audio, 0, 0, 10, 0)
+			.expect("place the audio clip");
+		let (tb, track) = {
+			let g = lock(&project);
+			(
+				graphops::sequence_time_base(&g.graph, seq).expect("the timebase"),
+				graphops::track_ids(&g.graph, seq, TrackType::Video)[0],
+			)
+		};
+
+		// The debug prints around a synchronous submit/wait.
+		let footage_frame = {
+			let _debug = EnvGuard::set("OAK_DEBUG_DISPATCH", "1");
+			render_footage_frame(&project, footage, 0, tb, 64, 64, None)
+				.expect("the footage frame renders")
+		};
+		assert_eq!((footage_frame.width(), footage_frame.height()), (64, 64));
+		if let RenderedFrame::Shm(frame) = &footage_frame {
+			if let Some(m) = RenderManager::global() {
+				m.release_frame(frame);
+			}
+		}
+
+		// The multicam angle entry point renders the track's clip.
+		let angle_frame = render_multicam_angle_frame(&project, seq, track, 0, tb, 32, 32)
+			.expect("the angle frame renders");
+		assert_eq!((angle_frame.width(), angle_frame.height()), (32, 32));
+		if let RenderedFrame::Shm(frame) = &angle_frame {
+			if let Some(m) = RenderManager::global() {
+				m.release_frame(frame);
+			}
+		}
+
+		// Audio: the range decodes through the inline audio dispatcher.
+		let audio = render_audio_range(&project, seq, 0, 5, tb).expect("the audio range renders");
+		assert_eq!(audio.sample_rate, 48_000);
+		assert!(audio.channel_count > 0);
+		assert!(
+			audio.data.len() >= 5 * 48_000 / 25 * audio.channel_count as usize / 2,
+			"the range decoded a non-trivial number of samples ({})",
+			audio.data.len()
+		);
+		// An invalid timebase is rejected before any manager access.
+		assert!(render_audio_range(&project, seq, 0, 5, (0, 1)).is_err());
+
+		oak_undo::global::clear().unwrap();
+		let _ = std::fs::remove_file(&media);
+	}
 }
-+	}

@@ -4916,4 +4916,1745 @@ mod undo_cycle_ops_tests {
 		let _ = std::fs::remove_file(&media);
 	}
 }
- 		let _ = std::fs::remove_file(&media);
+
+#[cfg(test)]
+mod gap_coverage_tests {
+	use super::*;
+	use std::path::PathBuf;
+
+	/// A unique temp path per test tag (the tests share the process but not
+	/// the tag namespace).
+	fn temp_path(tag: &str, ext: &str) -> PathBuf {
+		std::env::temp_dir().join(format!("oak_graphops_gap_{tag}.{ext}"))
+	}
+
+	/// A decodable test clip on disk.
+	fn media_file(tag: &str) -> PathBuf {
+		let path = temp_path(tag, "mp4");
+		oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("write test media");
+		path
+	}
+
+	/// A project with one sequence and one imported footage node.
+	fn project_with_footage(tag: &str) -> (ProjectRef, NodeId, NodeId, PathBuf) {
+		let project = create_project();
+		let seq = create_sequence(&project, "Gap Seq");
+		let path = media_file(tag);
+		let footage = import_footage(&project, &path).expect("import footage");
+		(project, seq, footage, path)
+	}
+
+	fn video_track_of(project: &ProjectRef, seq: NodeId) -> NodeId {
+		let g = lock(project);
+		track_ids(&g.graph, seq, TrackType::Video)[0]
+	}
+
+	fn video_list_of(project: &ProjectRef, seq: NodeId) -> NodeId {
+		let g = lock(project);
+		track_list_of(&g.graph, seq, TrackType::Video).expect("video track list")
+	}
+
+	fn place_clip(
+		project: &ProjectRef,
+		seq: NodeId,
+		footage: NodeId,
+		in_ts: i64,
+		out_ts: i64,
+	) -> NodeId {
+		place_footage_clip(project, seq, footage, TrackType::Video, 0, in_ts, out_ts, 0)
+			.expect("place a clip")
+	}
+
+	/// A behavior that does not override `as_any` — the timeline helpers must
+	/// treat it as opaque.
+	struct OpaqueBehavior;
+	impl oak_node::node::NodeBehavior for OpaqueBehavior {
+		fn name(&self) -> &str {
+			"Opaque"
+		}
+		fn type_id(&self) -> &str {
+			"test.opaque"
+		}
+		fn duplicate(
+			&self,
+			_core: &oak_node::node::NodeCore,
+		) -> Option<Box<dyn oak_node::node::NodeBehavior>> {
+			None
+		}
+	}
+
+	fn add_opaque(project: &ProjectRef) -> NodeId {
+		let mut g = lock(project);
+		g.graph
+			.add_node(oak_node::node::NodeCore::new(), Box::new(OpaqueBehavior))
+	}
+
+	/// Load/save error paths and the round trip through the OVE serializer.
+	#[test]
+	fn project_lifecycle_round_trip_and_errors() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+
+		let missing = temp_path("missing_project", "ove");
+		let _ = std::fs::remove_file(&missing);
+		assert!(
+			load_ove(&missing).is_err(),
+			"a missing project file is rejected"
+		);
+
+		let project = create_project();
+		assert_eq!(project_name(&lock(&project)), "(untitled)");
+		let _seq = create_sequence(&project, "Round Trip");
+		let path = temp_path("round_trip", "ove");
+		save_ove(&project, &path).expect("save");
+		assert_eq!(project_name(&lock(&project)), "oak_graphops_gap_round_trip");
+		assert!(!lock(&project).is_modified(), "save clears the modified flag");
+
+		let loaded = load_ove(&path).expect("load");
+		{
+			let g = lock(&loaded);
+			assert_eq!(project_name(&g), "oak_graphops_gap_round_trip");
+			assert!(!g.is_modified(), "a loaded project starts unmodified");
+			let seqs = sequence_ids(&g);
+			assert_eq!(seqs.len(), 1, "the sequence survives the round trip");
+			assert_eq!(node_label(&g.graph, seqs[0]), "Round Trip");
+		}
+
+		// Writing over a directory fails.
+		assert!(
+			save_ove(&project, &std::env::temp_dir()).is_err(),
+			"writing to a directory path fails"
+		);
+
+		let _ = std::fs::remove_file(&path);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// A bare project (no root folder) rejects every node-creating entry.
+	#[test]
+	fn bare_project_without_root_rejects_creations() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let bare = Project::new();
+		let media = media_file("bare_root");
+		assert!(create_folder(&bare, "F").is_err());
+		assert!(create_text_footage_node(&bare).is_err());
+		assert!(import_footage(&bare, &media).is_err());
+		let _ = std::fs::remove_file(&media);
+	}
+
+	/// Missing and undecodable media are rejected before any node lands.
+	#[test]
+	fn import_footage_rejects_missing_and_corrupt_media() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let project = create_project();
+		let missing = temp_path("import_missing", "mp4");
+		let _ = std::fs::remove_file(&missing);
+		assert!(import_footage(&project, &missing).is_err());
+		let junk = temp_path("import_corrupt", "mp4");
+		std::fs::write(&junk, b"definitely not a video").unwrap();
+		assert!(
+			import_footage(&project, &junk).is_err(),
+			"the probe rejects non-media"
+		);
+		assert_eq!(footage_ids(&lock(&project)).len(), 0, "no orphan landed");
+		let _ = std::fs::remove_file(&junk);
+	}
+
+	/// `reprobe_unprobed_footage` resolves absolute and (project-file
+	/// relative) paths, skips missing files and leaves probed footage alone.
+	#[test]
+	fn reprobe_unprobed_footage_resolves_and_probes() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let media_path = media_file("reprobe");
+		let project = create_project();
+		let add_footage = |filename: &str| -> NodeId {
+			let mut g = lock(&project);
+			let (core, behavior) = FootageBehavior::create();
+			let id = g.graph.add_node(core, behavior);
+			if let Some(f) = g
+				.graph
+				.get_mut(id)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<FootageBehavior>())
+			{
+				f.filename = filename.to_string();
+			}
+			id
+		};
+
+		// No project filename yet: the relative path cannot resolve.
+		let relative = add_footage("relative_gap.mp4");
+		let absolute = add_footage(&media_path.to_string_lossy());
+		let missing = add_footage("/nonexistent/oak_gap_media.mp4");
+		reprobe_unprobed_footage(&project);
+		{
+			let g = lock(&project);
+			assert!(
+				footage_behavior(&g.graph, relative)
+					.map(|f| f.streams.is_empty())
+					.unwrap_or(false),
+				"a relative path without a project dir is left alone"
+			);
+			assert!(
+				!footage_behavior(&g.graph, absolute)
+					.map(|f| f.streams.is_empty())
+					.unwrap_or(true),
+				"an absolute path probes"
+			);
+			assert!(
+				footage_behavior(&g.graph, missing)
+					.map(|f| f.streams.is_empty())
+					.unwrap_or(false),
+				"a missing file is left unprobed"
+			);
+			assert!(footage_duration_seconds(&g.graph, missing).is_none());
+			assert!(footage_duration_seconds(&g.graph, project_root(&g)).is_none());
+			assert!(footage_duration_seconds(&g.graph, absolute).is_some());
+		}
+
+		// With a project file, a relative name resolves against its dir.
+		let project_path = temp_path("reprobe_project", "ove");
+		save_ove(&project, &project_path).expect("save project");
+		let media_name = media_path.file_name().unwrap().to_string_lossy().into_owned();
+		let relative_ok = add_footage(&media_name);
+		reprobe_unprobed_footage(&project);
+		assert!(
+			!footage_behavior(&lock(&project).graph, relative_ok)
+				.map(|f| f.streams.is_empty())
+				.unwrap_or(true),
+			"the relative path resolved against the project dir and probed"
+		);
+
+		let _ = std::fs::remove_file(&media_path);
+		let _ = std::fs::remove_file(&project_path);
+		oak_undo::global::clear().unwrap();
+	}
+
+	fn project_root(g: &Project) -> NodeId {
+		g.root
+	}
+
+	/// Marker-list and workarea handles: null handles are safe, live handles
+	/// round-trip, and the undoable setters restore their previous state.
+	#[test]
+	fn marker_and_workarea_handle_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+
+		let null = CHandle::default();
+		assert!(markers_of(&null).is_empty());
+		assert_eq!(marker_index_at(&null, Rational::new(1, 1)), None);
+		assert_eq!(workarea_state(&null), None);
+		workarea_set(
+			&null,
+			true,
+			TimeRange::new(Rational::new(0, 1), Rational::new(1, 1)),
+		);
+		let mut dead = CHandle::default();
+		release_handle(&mut dead);
+
+		let mut markers = marker_list_create();
+		assert!(markers_of(&markers).is_empty());
+		marker_add(&markers, Rational::new(2, 1), "M1", 2).expect("add marker");
+		marker_add(&markers, Rational::new(5, 1), "M2", 4).expect("add marker 2");
+		assert_eq!(markers_of(&markers).len(), 2);
+		assert_eq!(marker_index_at(&markers, Rational::new(5, 1)), Some(1));
+		assert_eq!(marker_index_at(&markers, Rational::new(9, 1)), None);
+		assert!(
+			marker_add(&markers, Rational::new(2, 1), "dup", 1).is_err(),
+			"a duplicate timestamp is rejected"
+		);
+		assert!(
+			marker_remove(&markers, Rational::new(9, 1)).is_err(),
+			"no marker at that time"
+		);
+		marker_remove(&markers, Rational::new(2, 1)).expect("remove marker");
+		assert_eq!(
+			markers_of(&markers),
+			vec![(Rational::new(5, 1), "M2".to_string(), 4)]
+		);
+		oak_undo::global::undo().unwrap();
+		assert_eq!(markers_of(&markers).len(), 2);
+		oak_undo::global::redo().unwrap();
+		assert_eq!(markers_of(&markers).len(), 1);
+
+		let mut wa = workarea_create();
+		let range = TimeRange::new(Rational::new(1, 1), Rational::new(4, 1));
+		workarea_set(&wa, true, range);
+		assert_eq!(workarea_state(&wa), Some((true, range)));
+		let new = TimeRange::new(Rational::new(2, 1), Rational::new(3, 1));
+		workarea_set_undoable(&wa, false, new, range).expect("set workarea");
+		assert_eq!(workarea_state(&wa), Some((false, new)));
+		oak_undo::global::undo().unwrap();
+		assert_eq!(workarea_state(&wa), Some((true, range)));
+		oak_undo::global::redo().unwrap();
+		assert_eq!(workarea_state(&wa), Some((false, new)));
+
+		release_handle(&mut markers);
+		release_handle(&mut wa);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// The library setters validate their arguments before touching storage,
+	/// and the list is empty (not an error) without a configured library.
+	#[test]
+	fn library_argument_validation_and_disabled_list() {
+		let _g = test_lock();
+		if !oak_storage::writethrough::storage_enabled() {
+			assert!(library_list().expect("disabled list").is_empty());
+			assert!(library().is_err(), "the library URI is unavailable");
+		}
+		assert!(library_create("   ").is_err(), "blank name rejected");
+		assert!(library_delete("").is_err(), "blank uuid rejected");
+		assert!(library_rename("", "x").is_err(), "blank uuid rejected");
+		assert!(library_rename("u", "   ").is_err(), "blank name rejected");
+		assert!(library_duplicate("").is_err(), "blank uuid rejected");
+		assert!(
+			library_export("", Path::new("out.ove")).is_err(),
+			"blank uuid rejected"
+		);
+		assert!(library_open("").is_err(), "blank uuid rejected");
+	}
+
+	/// `connect_command` / `disconnect_command` validate nodes, inputs and
+	/// existing edges; their closures connect and disconnect on redo/undo.
+	#[test]
+	fn connect_and_disconnect_commands_validate_and_undo() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("connect");
+		let clip = place_clip(&project, seq, footage, 0, 10);
+		let bogus = id_of(9_000_001).unwrap();
+		let input = oak_node::block::clip_input::TEXTURE_INPUT;
+
+		assert!(connect_command(&project, bogus, clip, input).is_err());
+		assert!(connect_command(&project, footage, bogus, input).is_err());
+		assert!(connect_command(&project, footage, clip, "no_such_input").is_err());
+		assert!(
+			connect_command(&project, clip, footage, "file_in").is_err(),
+			"the footage's file_in text input is not connectable"
+		);
+		assert!(
+			connect_command(&project, footage, clip, input).is_err(),
+			"the texture input is already connected"
+		);
+
+		let clip2 = {
+			let mut g = lock(&project);
+			create_footage_clip(
+				&mut g.graph,
+				footage,
+				Rational::new(0, 1),
+				Rational::new(10, 25),
+			)
+		};
+		let mut cmd = connect_command(&project, footage, clip2, input).expect("connect");
+		cmd.redo_now();
+		assert_eq!(
+			lock(&project).graph.connected_output(clip2, input, -1),
+			Some(footage)
+		);
+		cmd.undo_now();
+		assert_eq!(
+			lock(&project).graph.connected_output(clip2, input, -1),
+			None
+		);
+
+		assert!(disconnect_command(&project, clip2, "no_such_input").is_err());
+		lock(&project)
+			.graph
+			.connect(footage, clip2, input, -1)
+			.expect("wire it back");
+		let mut cmd = disconnect_command(&project, clip2, input).expect("disconnect");
+		cmd.redo_now();
+		assert_eq!(
+			lock(&project).graph.connected_output(clip2, input, -1),
+			None
+		);
+		cmd.undo_now();
+		assert_eq!(
+			lock(&project).graph.connected_output(clip2, input, -1),
+			Some(footage),
+			"the undo restores the captured edge"
+		);
+
+		// Constructed while nothing is connected: the undo's source is None
+		// and both directions are safe no-ops.
+		lock(&project).graph.disconnect_input(clip2, input, -1);
+		let mut cmd = disconnect_command(&project, clip2, input).expect("disconnect");
+		cmd.redo_now();
+		cmd.undo_now();
+		assert_eq!(
+			lock(&project).graph.connected_output(clip2, input, -1),
+			None
+		);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// `set_context_position_command` creates an entry on redo, removes it on
+	/// undo when it created it, and restores the previous slot otherwise.
+	#[test]
+	fn context_position_command_covers_create_update_and_remove() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("context_pos");
+		let clip = place_clip(&project, seq, footage, 0, 10);
+		let bogus = id_of(9_000_002).unwrap();
+		assert!(set_context_position_command(&project, bogus, seq, 1.0, 2.0).is_err());
+		assert!(set_context_position_command(&project, clip, bogus, 1.0, 2.0).is_err());
+
+		let positions = |p: &ProjectRef, node: NodeId| -> Vec<(NodeId, (f64, f64), bool)> {
+			lock(p)
+				.graph
+				.get(node)
+				.map(|e| e.core.context_positions.clone())
+				.unwrap_or_default()
+		};
+
+		let mut first =
+			set_context_position_command(&project, clip, seq, 5.0, 6.0).expect("first set");
+		first.redo_now();
+		assert_eq!(positions(&project, clip), vec![(seq, (5.0, 6.0), false)]);
+		first.undo_now();
+		assert!(
+			positions(&project, clip).is_empty(),
+			"the created entry is removed on undo"
+		);
+
+		let mut create = set_context_position_command(&project, clip, seq, 5.0, 6.0).unwrap();
+		create.redo_now();
+		let mut update =
+			set_context_position_command(&project, clip, seq, 30.0, 40.0).expect("update");
+		update.redo_now();
+		assert_eq!(positions(&project, clip), vec![(seq, (30.0, 40.0), false)]);
+		update.undo_now();
+		assert_eq!(
+			positions(&project, clip),
+			vec![(seq, (5.0, 6.0), false)],
+			"the previous position returns"
+		);
+
+		let _ = std::fs::remove_file(&media);
+	}
+
+	/// Borrow helpers and node queries answer `None`/empty for stale ids and
+	/// for behaviors that do not expose `as_any`.
+	#[test]
+	fn behavior_borrows_and_queries_on_missing_nodes() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let project = create_project();
+		let root = lock(&project).root;
+		let seq = create_sequence(&project, "Borrows");
+		let opaque = add_opaque(&project);
+		let bogus = id_of(9_000_003).unwrap();
+		let g = lock(&project);
+
+		assert!(is_folder(&g.graph, root));
+		assert!(!is_folder(&g.graph, seq));
+		assert!(!is_folder(&g.graph, opaque));
+		assert!(!is_folder(&g.graph, bogus));
+
+		assert!(sequence_behavior(&g.graph, root).is_none());
+		assert!(sequence_behavior(&g.graph, opaque).is_none());
+		assert!(sequence_behavior(&g.graph, seq).is_some());
+		assert!(track_list_behavior(&g.graph, bogus).is_none());
+		assert!(track_behavior(&g.graph, bogus).is_none());
+		assert!(clip_behavior(&g.graph, bogus).is_none());
+		assert!(footage_behavior(&g.graph, bogus).is_none());
+		assert!(clip_behavior(&g.graph, opaque).is_none());
+		assert!(footage_behavior(&g.graph, opaque).is_none());
+		assert_eq!(node_label(&g.graph, bogus), "");
+		assert_eq!(node_type_id(&g.graph, opaque), "test.opaque");
+		assert_eq!(node_type_id(&g.graph, bogus), "");
+		assert!(multicam_nodes(&g.graph).is_empty());
+		assert!(sequence_video_params(&g.graph, bogus).is_none());
+		assert!(sequence_time_base(&g.graph, bogus).is_none());
+		assert_eq!(sequence_length(&g.graph, bogus), Rational::new(0, 1));
+		assert_eq!(sequence_playhead(&g.graph, bogus), Rational::new(0, 1));
+		assert!(track_list_of(&g.graph, bogus, TrackType::Video).is_none());
+		assert!(track_ids(&g.graph, bogus, TrackType::Video).is_empty());
+		assert!(clip_ids(&g.graph, bogus).is_empty());
+		assert!(clip_range(&g.graph, bogus).is_none());
+		assert!(clip_track(&g.graph, bogus).is_none());
+		assert!(find_input_footage(&g.graph, bogus).is_none());
+		assert!(clip_media_filename(&g.graph, bogus).is_none());
+		assert!(block_core_of(&g.graph, opaque).is_none());
+		assert!(block_core_of(&g.graph, seq).is_none());
+		assert!(!is_timeline_clip(&g.graph, bogus));
+		assert!(!is_timeline_clip(&g.graph, opaque));
+		drop(g);
+
+		// `is_timeline_clip` filters opaque entries out of a track's blocks.
+		let track = video_track_of(&project, seq);
+		{
+			let mut g = lock(&project);
+			if let Some(t) = g
+				.graph
+				.get_mut(track)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackBehavior>())
+			{
+				t.blocks.push(opaque);
+			}
+		}
+		assert!(clip_ids(&lock(&project).graph, track).is_empty());
+
+		// The mutable core helpers reject stale and non-block nodes.
+		let bogus2 = id_of(9_000_004).unwrap();
+		let mut g = lock(&project);
+		assert!(!with_block_core_mut(&mut g.graph, bogus2, |_| {}));
+		assert!(!with_block_core_mut(&mut g.graph, opaque, |_| {}));
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// `sequence_length` skips dangling track-list / track / block references
+	/// and non-block entries instead of failing.
+	#[test]
+	fn sequence_length_skips_dangling_and_non_block_entries() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("seq_len");
+		let clip = place_clip(&project, seq, footage, 0, 10);
+		let list = video_list_of(&project, seq);
+		let track = video_track_of(&project, seq);
+		let bogus = id_of(9_000_005).unwrap();
+		let opaque = add_opaque(&project);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let expected = ts_to_rational(10, tb);
+		assert_eq!(sequence_length(&lock(&project).graph, seq), expected);
+
+		{
+			let mut g = lock(&project);
+			if let Some(s) = g
+				.graph
+				.get_mut(seq)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<SequenceBehavior>())
+			{
+				s.track_lists.push(bogus);
+			}
+			if let Some(l) = g
+				.graph
+				.get_mut(list)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackListBehavior>())
+			{
+				l.tracks.push(bogus);
+			}
+			if let Some(t) = g
+				.graph
+				.get_mut(track)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackBehavior>())
+			{
+				t.blocks.push(bogus);
+				t.blocks.push(opaque);
+			}
+		}
+		let g = lock(&project);
+		assert_eq!(sequence_length(&g.graph, seq), expected);
+		assert_eq!(
+			clip_range(&g.graph, clip),
+			Some((Rational::new(0, 1), expected, Rational::new(0, 1)))
+		);
+		drop(g);
+		let _ = std::fs::remove_file(&media);
+	}
+
+	/// The mutable block-core helper reaches every block kind and rejects
+	/// non-block nodes.
+	#[test]
+	fn block_core_mut_covers_gap_transition_and_adjustment() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("block_cores");
+		let a = place_clip(&project, seq, footage, 0, 10);
+		let b = place_clip(&project, seq, footage, 10, 20);
+		delete_clip(&project, a).expect("delete leaves a gap");
+		let track = video_track_of(&project, seq);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let is_gap = |g: &Graph, id: NodeId| {
+			g.get(id)
+				.and_then(|e| e.behavior.as_any())
+				.map(|a| a.is::<oak_node::block::GapBlockBehavior>())
+				.unwrap_or(false)
+		};
+		let gap = {
+			let g = lock(&project);
+			track_behavior(&g.graph, track)
+				.map(|t| t.blocks.clone())
+				.unwrap_or_default()
+				.into_iter()
+				.find(|&block| is_gap(&g.graph, block))
+		}
+		.expect("a gap block replaced the deleted clip");
+		let c = place_clip(&project, seq, footage, 20, 30);
+		let transition =
+			add_transition_at_seam(&project, b, c, ts_to_rational(2, tb)).expect("transition");
+		let adj = create_adjustment_layer(&project, seq, track, 40, 60).expect("adjustment");
+		{
+			let mut g = lock(&project);
+			assert!(with_block_core_mut(&mut g.graph, gap, |core| core.speed = 1.25));
+			assert!(with_block_core_mut(&mut g.graph, transition, |core| {
+				core.speed = 1.5
+			}));
+			assert!(with_block_core_mut(&mut g.graph, adj, |core| core.speed = 1.75));
+			assert!(!with_block_core_mut(
+				&mut g.graph,
+				id_of(9_000_006).unwrap(),
+				|_| {}
+			));
+			assert!(!with_block_core_mut(&mut g.graph, seq, |_| {}));
+			assert_eq!(block_core_of(&g.graph, gap).map(|c| c.speed), Some(1.25));
+			assert_eq!(
+				block_core_of(&g.graph, transition).map(|c| c.speed),
+				Some(1.5)
+			);
+			assert_eq!(block_core_of(&g.graph, adj).map(|c| c.speed), Some(1.75));
+		}
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// Track-list find-or-create, track setters and track removal.
+	#[test]
+	fn track_list_creation_and_track_setter_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let project = create_project();
+		let bogus = id_of(9_000_007).unwrap();
+		assert!(
+			find_or_create_track_list(&project, bogus, TrackType::Video).is_none(),
+			"a bogus sequence cannot own a list"
+		);
+		let seq = create_sequence(&project, "Lists");
+		let list = find_or_create_track_list(&project, seq, TrackType::Video).expect("the list");
+		assert_eq!(
+			find_or_create_track_list(&project, seq, TrackType::Video),
+			Some(list),
+			"an existing list is reused"
+		);
+		assert!(
+			find_or_create_track_list(&project, seq, TrackType::Subtitle).is_some(),
+			"a new kind creates its list"
+		);
+		assert!(track_ids(&lock(&project).graph, seq, TrackType::Subtitle).is_empty());
+		assert!(add_track(&project, bogus, TrackType::Video).is_err());
+
+		let track = video_track_of(&project, seq);
+		let initial_height = track_height(&project, track).expect("a live track");
+		set_track_height(&project, track, -5.0);
+		set_track_height(&project, track, 0.0);
+		assert_eq!(
+			track_height(&project, track),
+			Some(initial_height),
+			"non-positive heights are ignored"
+		);
+		set_track_height(&project, track, 4.5);
+		assert_eq!(track_height(&project, track), Some(4.5));
+		set_track_height(&project, bogus, 4.5);
+		assert_eq!(track_height(&project, bogus), None);
+		assert_eq!(track_muted(&project, bogus), None);
+		assert_eq!(track_locked(&project, bogus), None);
+
+		let before = track_ids(&lock(&project).graph, seq, TrackType::Video).len();
+		remove_track(&project, track).expect("remove track");
+		assert_eq!(
+			track_ids(&lock(&project).graph, seq, TrackType::Video).len(),
+			before - 1
+		);
+		oak_undo::global::undo().unwrap();
+		assert_eq!(
+			track_ids(&lock(&project).graph, seq, TrackType::Video).len(),
+			before
+		);
+		assert!(lock(&project).graph.is_valid(track));
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// Clip placement validates ranges, kinds, footage, track indices and the
+	/// missing track list; a label-less footage falls back to its filename.
+	#[test]
+	fn clip_placement_validation_and_footage_label_fallback() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("clip_place");
+		let bogus = id_of(9_000_008).unwrap();
+		let input = oak_node::block::clip_input::TEXTURE_INPUT;
+		assert!(place_footage_clip(&project, seq, footage, TrackType::Video, 0, -1, 10, 0).is_err());
+		assert!(place_footage_clip(&project, seq, footage, TrackType::Video, 0, 10, 10, 0).is_err());
+		assert!(place_footage_clip(&project, seq, footage, TrackType::Video, 0, 0, 10, -2).is_err());
+		assert!(
+			place_footage_clip(&project, seq, footage, TrackType::Subtitle, 0, 0, 10, 0).is_err()
+		);
+		assert!(place_footage_clip(&project, seq, bogus, TrackType::Video, 0, 0, 10, 0).is_err());
+		assert!(
+			place_footage_clip(&project, seq, footage, TrackType::Video, 99, 0, 10, 0).is_err(),
+			"the track index must exist"
+		);
+		assert!(
+			place_footage_clip(&project, bogus, footage, TrackType::Video, 0, 0, 10, 0).is_err(),
+			"the sequence needs a valid frame rate"
+		);
+		assert!(
+			place_footage_clips_linked(
+				&project,
+				seq,
+				footage,
+				&[(TrackType::Video, 0)],
+				0,
+				10,
+				0
+			)
+			.is_err(),
+			"a linked drop needs at least two targets"
+		);
+		assert!(
+			place_footage_clips_linked(
+				&project,
+				seq,
+				bogus,
+				&[(TrackType::Video, 0), (TrackType::Audio, 0)],
+				0,
+				10,
+				0
+			)
+			.is_err()
+		);
+		assert!(
+			place_footage_clips_linked(
+				&project,
+				seq,
+				footage,
+				&[(TrackType::Video, 0), (TrackType::Subtitle, 0)],
+				0,
+				10,
+				0
+			)
+			.is_err(),
+			"a kind without a track list is rejected"
+		);
+
+		lock(&project)
+			.graph
+			.get_mut(footage)
+			.expect("the footage")
+			.core
+			.label
+			.clear();
+		let clip = place_clip(&project, seq, footage, 0, 10);
+		let expected_name = media.file_name().unwrap().to_string_lossy().into_owned();
+		{
+			let g = lock(&project);
+			let tb = sequence_time_base(&g.graph, seq).expect("time base");
+			assert_eq!(node_label(&g.graph, clip), expected_name);
+			assert_eq!(g.graph.connected_output(clip, input, -1), Some(footage));
+			assert_eq!(
+				clip_range(&g.graph, clip),
+				Some((Rational::new(0, 1), ts_to_rational(10, tb), Rational::new(0, 1)))
+			);
+			assert_eq!(
+				clip_media_filename(&g.graph, clip).as_deref(),
+				Some(media.to_string_lossy().as_ref())
+			);
+		}
+
+		// Removing the video list rejects later placements.
+		let list = video_list_of(&project, seq);
+		{
+			let mut g = lock(&project);
+			if let Some(s) = g
+				.graph
+				.get_mut(seq)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<SequenceBehavior>())
+			{
+				s.track_lists.retain(|&l| l != list);
+			}
+		}
+		assert!(
+			place_footage_clip(&project, seq, footage, TrackType::Video, 0, 20, 30, 0).is_err(),
+			"no video track list rejects the placement"
+		);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// Nested-sequence and generator clip placement, including their
+	/// validation errors.
+	#[test]
+	fn nested_and_generator_clip_placement_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, host, footage, media) = project_with_footage("nested");
+		let source = create_sequence(&project, "Source Seq");
+		let text = create_text_footage_node(&project).expect("text node");
+		let bogus = id_of(9_000_009).unwrap();
+		let input = oak_node::block::clip_input::TEXTURE_INPUT;
+
+		assert!(place_nested_sequence_clip(&project, host, source, 0, -1, 10).is_err());
+		assert!(place_nested_sequence_clip(&project, host, source, 0, 10, 10).is_err());
+		assert!(place_nested_sequence_clip(&project, host, bogus, 0, 0, 10).is_err());
+		assert!(place_nested_sequence_clip(&project, host, source, 9, 0, 10).is_err());
+		let nested =
+			place_nested_sequence_clip(&project, host, source, 0, 0, 25).expect("nested clip");
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, host).expect("time base")
+		};
+		{
+			let g = lock(&project);
+			assert!(node_label(&g.graph, nested).contains("序列"));
+			assert_eq!(g.graph.connected_output(nested, input, -1), Some(source));
+			assert_eq!(
+				clip_range(&g.graph, nested).map(|r| r.1),
+				Some(ts_to_rational(25, tb))
+			);
+		}
+
+		assert!(place_generator_clip(&project, host, text, 0, 5, 5).is_err());
+		assert!(place_generator_clip(&project, host, bogus, 0, 0, 10).is_err());
+		assert!(place_generator_clip(&project, host, text, 9, 0, 10).is_err());
+		let generator =
+			place_generator_clip(&project, host, text, 0, 30, 55).expect("generator clip");
+		{
+			let g = lock(&project);
+			assert_eq!(g.graph.connected_output(generator, input, -1), Some(text));
+			assert_eq!(
+				clip_range(&g.graph, generator).map(|r| r.1),
+				Some(ts_to_rational(55, tb))
+			);
+		}
+		assert!(
+			place_text_clip(&project, host, bogus, 0, 0, 10).is_err(),
+			"a stale text id is rejected"
+		);
+
+		let _ = footage;
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	fn set_clip_track(project: &ProjectRef, clip: NodeId, track: Option<NodeId>) {
+		let mut g = lock(project);
+		if let Some(c) = g
+			.graph
+			.get_mut(clip)
+			.and_then(|e| e.behavior.as_any_mut())
+			.and_then(|a| a.downcast_mut::<ClipBlockBehavior>())
+		{
+			c.core.track = track;
+		}
+	}
+
+	fn set_block_track(project: &ProjectRef, block: NodeId, track: Option<NodeId>) {
+		let mut g = lock(project);
+		with_block_core_mut(&mut g.graph, block, |core| core.track = track);
+	}
+
+	fn set_track_list(project: &ProjectRef, track: NodeId, list: Option<NodeId>) {
+		let mut g = lock(project);
+		if let Some(t) = g
+			.graph
+			.get_mut(track)
+			.and_then(|e| e.behavior.as_any_mut())
+			.and_then(|a| a.downcast_mut::<TrackBehavior>())
+		{
+			t.track_list = list;
+		}
+	}
+
+	/// `copy_clips` skips non-clips, stale ids, trackless clips, non-track
+	/// owners and listless tracks; `paste_clips` validates its arguments and
+	/// installs the pasted group's links.
+	#[test]
+	fn copy_and_paste_cover_skip_and_error_branches() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("copy_paste");
+		let dropped = place_footage_clips_linked(
+			&project,
+			seq,
+			footage,
+			&[(TrackType::Video, 0), (TrackType::Audio, 0)],
+			0,
+			10,
+			0,
+		)
+		.expect("linked drop");
+		let (video, audio) = (dropped[0], dropped[1]);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+
+		// The clipboard captures the clip's speed.
+		{
+			let mut g = lock(&project);
+			if let Some(c) = g
+				.graph
+				.get_mut(video)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<ClipBlockBehavior>())
+			{
+				c.core.speed = 2.0;
+			}
+		}
+		let track = video_track_of(&project, seq);
+		let adj = create_adjustment_layer(&project, seq, track, 50, 60).expect("adjustment");
+		let bogus = id_of(9_000_010).unwrap();
+		let items = copy_clips(&project, &[adj, bogus, video, audio]);
+		assert_eq!(items.len(), 2, "only the two real clips are captured");
+		assert!(
+			items.iter().any(|i| i.speed == 2.0 && i.kind == TrackType::Video),
+			"the speed travels with the clipboard clip"
+		);
+
+		// A trackless clip is skipped.
+		let audio_track = {
+			let g = lock(&project);
+			clip_track(&g.graph, audio).expect("the audio track")
+		};
+		oak_timeline::util::track_ripple_remove_block(
+			&node_ref(&project, audio_track),
+			&node_ref(&project, audio),
+		);
+		assert!(
+			copy_clips(&project, &[audio]).is_empty(),
+			"a trackless clip is skipped"
+		);
+
+		// A clip whose owner is not a track is skipped.
+		let folder = create_folder(&project, "Fake Track").expect("folder");
+		set_clip_track(&project, video, Some(folder));
+		assert!(
+			copy_clips(&project, &[video]).is_empty(),
+			"a non-track owner is skipped"
+		);
+		set_clip_track(&project, video, Some(track));
+
+		// A track without a list, and a dangling list reference, are skipped.
+		set_track_list(&project, track, None);
+		assert!(
+			copy_clips(&project, &[video]).is_empty(),
+			"a listless track is skipped"
+		);
+		set_track_list(&project, track, Some(bogus));
+		assert!(
+			copy_clips(&project, &[video]).is_empty(),
+			"a dangling list is skipped"
+		);
+		set_track_list(&project, track, Some(video_list_of(&project, seq)));
+
+		// paste argument errors.
+		assert!(paste_clips(&project, seq, &[], 0).is_err());
+		let zero = create_sequence_with_params(
+			&project,
+			"Zero Paste",
+			Some((10, 10, Rational::new(0, 1), false)),
+		);
+		assert!(
+			paste_clips(&project, zero, &items, 0).is_err(),
+			"a sequence without a valid frame rate is rejected"
+		);
+		let mut subtitle = items[0].clone();
+		subtitle.kind = TrackType::Subtitle;
+		assert!(
+			paste_clips(&project, seq, &[subtitle], 0).is_err(),
+			"no subtitle track list"
+		);
+		let list = video_list_of(&project, seq);
+		let saved_tracks = {
+			let mut g = lock(&project);
+			let l = g
+				.graph
+				.get_mut(list)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackListBehavior>())
+				.expect("list behavior");
+			let saved = l.tracks.clone();
+			l.tracks.clear();
+			saved
+		};
+		let mut video_item = items[0].clone();
+		video_item.kind = TrackType::Video;
+		assert!(
+			paste_clips(&project, seq, &[video_item], 0).is_err(),
+			"no track of the clip's kind to paste onto"
+		);
+		{
+			let mut g = lock(&project);
+			if let Some(l) = g
+				.graph
+				.get_mut(list)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackListBehavior>())
+			{
+				l.tracks = saved_tracks;
+			}
+		}
+
+		// A stale footage id fails the connect step.
+		let mut bad = items[0].clone();
+		bad.footage = bogus;
+		assert!(paste_clips(&project, seq, &[bad], 0).is_err());
+
+		// Success: the group is linked, the speed survives, and an
+		// out-of-range track index clamps.
+		let mut clamped = items[0].clone();
+		clamped.track_index = 99;
+		let pasted =
+			paste_clips(&project, seq, &[clamped, items[1].clone()], 100).expect("paste");
+		assert_eq!(pasted.len(), 2);
+		{
+			let g = lock(&project);
+			assert!(
+				g.graph.links_of(pasted[0]).contains(&pasted[1]),
+				"the pasted group is linked"
+			);
+			assert_eq!(
+				clip_behavior(&g.graph, pasted[0]).map(|c| c.core.speed),
+				Some(2.0)
+			);
+			assert_eq!(
+				rational_to_ts(clip_range(&g.graph, pasted[0]).unwrap().0, tb),
+				100,
+				"the paste lands at the playhead"
+			);
+			let video_tracks = track_ids(&g.graph, seq, TrackType::Video);
+			assert_eq!(
+				clip_track(&g.graph, pasted[0]),
+				Some(*video_tracks.last().unwrap()),
+				"the out-of-range track index clamps to the last track"
+			);
+		}
+		oak_undo::global::undo().unwrap();
+		assert!(!lock(&project).graph.are_linked(pasted[0], pasted[1]));
+		oak_undo::global::redo().unwrap();
+		assert!(lock(&project).graph.are_linked(pasted[0], pasted[1]));
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// Split / split-preserving-links, trim, ripple trim, roll, slide, slip
+	/// and the same- and cross-track moves cover both their validation errors
+	/// and their no-op clamps.
+	#[test]
+	fn split_trim_ripple_roll_slide_slip_and_move_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("edit_ops");
+		let track = video_track_of(&project, seq);
+		let a = place_clip(&project, seq, footage, 0, 10);
+		let b = place_clip(&project, seq, footage, 10, 20);
+		let c = place_clip(&project, seq, footage, 20, 30);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let bogus = id_of(9_000_011).unwrap();
+
+		// split: stale / edge frames / success.
+		assert!(split_clip(&project, bogus, 5).is_err());
+		assert!(split_clip(&project, a, 0).is_err());
+		assert!(split_clip(&project, a, 10).is_err());
+		split_clip(&project, a, 5).expect("split");
+		assert_eq!(clip_ids(&lock(&project).graph, track).len(), 4);
+		oak_undo::global::undo().unwrap();
+		assert_eq!(clip_ids(&lock(&project).graph, track).len(), 3);
+
+		// split preserving links: empty input is a no-op, a linked pair
+		// splits as one row.
+		assert!(split_clips_preserving_links(&project, &[], 5).is_ok());
+		let pair = place_footage_clips_linked(
+			&project,
+			seq,
+			footage,
+			&[(TrackType::Video, 0), (TrackType::Audio, 0)],
+			40,
+			50,
+			0,
+		)
+		.expect("linked pair");
+		split_clips_preserving_links(&project, &pair, 45).expect("split the pair");
+		oak_undo::global::undo().unwrap();
+
+		// trim: invalid, unchanged, both ends, in-only and out-only.
+		assert!(trim_clip(&project, a, -1, 5).is_err());
+		assert!(trim_clip(&project, a, 5, 5).is_err());
+		assert!(trim_clip(&project, bogus, 0, 5).is_err());
+		trim_clip(&project, a, 0, 10).expect("unchanged trim");
+		trim_clip(&project, a, 2, 8).expect("trim both ends");
+		assert_eq!(
+			clip_range(&lock(&project).graph, a),
+			Some((
+				ts_to_rational(2, tb),
+				ts_to_rational(8, tb),
+				ts_to_rational(2, tb),
+			)),
+			"the trim-in shifts the media in-point with the edge"
+		);
+		oak_undo::global::undo().unwrap();
+		assert_eq!(
+			clip_range(&lock(&project).graph, a),
+			Some((Rational::new(0, 1), ts_to_rational(10, tb), Rational::new(0, 1)))
+		);
+		trim_clip(&project, a, 2, 10).expect("in-only trim");
+		oak_undo::global::undo().unwrap();
+		trim_clip(&project, a, 0, 8).expect("out-only trim");
+		oak_undo::global::undo().unwrap();
+
+		// ripple trim: null delta, trim-in (tail follows right), trim-out
+		// (tail follows left).
+		assert!(ripple_trim_clip(&project, bogus, true, 5).is_err());
+		ripple_trim_clip(&project, b, true, 10).expect("null delta");
+		ripple_trim_clip(&project, b, true, 12).expect("ripple in");
+		assert_eq!(
+			clip_range(&lock(&project).graph, b).unwrap().0,
+			ts_to_rational(12, tb)
+		);
+		assert_eq!(
+			clip_range(&lock(&project).graph, c).unwrap().0,
+			ts_to_rational(22, tb),
+			"the tail shifted right"
+		);
+		oak_undo::global::undo().unwrap();
+		ripple_trim_clip(&project, b, false, 18).expect("ripple out");
+		assert_eq!(
+			clip_range(&lock(&project).graph, b).unwrap().1,
+			ts_to_rational(18, tb)
+		);
+		assert_eq!(
+			clip_range(&lock(&project).graph, c).unwrap().0,
+			ts_to_rational(18, tb),
+			"the tail followed the out edge"
+		);
+		oak_undo::global::undo().unwrap();
+
+		// roll edit: non-clip, non-adjacent, escaping and unmoved boundaries,
+		// then the real roll.
+		assert!(roll_edit(&project, track, footage, b, 15).is_err());
+		assert!(roll_edit(&project, track, a, c, 15).is_err());
+		assert!(roll_edit(&project, track, a, b, 0).is_err());
+		assert!(roll_edit(&project, track, a, b, 10).is_ok(), "unmoved boundary");
+		roll_edit(&project, track, a, b, 12).expect("roll");
+		{
+			// NOTE: the module's TrimOut roll mapping anchors the left clip's
+			// OUT (its IN moves) and the follower's IN (its OUT moves); the
+			// shared seam itself does not move. Assert the actual outcome so
+			// a future semantic fix has to update this expectation
+			// deliberately (review §3.1 of test-coverage-90-80-review.md).
+			let g = lock(&project);
+			assert_eq!(
+				clip_range(&g.graph, a).unwrap(),
+				(
+					ts_to_rational(-2, tb),
+					ts_to_rational(10, tb),
+					ts_to_rational(-2, tb)
+				)
+			);
+			assert_eq!(clip_range(&g.graph, b).unwrap().1, ts_to_rational(18, tb));
+		}
+		oak_undo::global::undo().unwrap();
+
+		// slide: unmoved clip, right into the neighbor, over a collapsing
+		// left neighbor, and onto the right neighbor without trimming it.
+		assert!(slide_clip(&project, bogus, 5).is_err());
+		slide_clip(&project, b, 10).expect("unmoved slide");
+		slide_clip(&project, b, 15).expect("slide right");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_range(&g.graph, b).unwrap().0, ts_to_rational(15, tb));
+			assert_eq!(clip_range(&g.graph, a).unwrap().1, ts_to_rational(15, tb));
+			assert_eq!(clip_range(&g.graph, c).unwrap().0, ts_to_rational(25, tb));
+		}
+		oak_undo::global::undo().unwrap();
+		slide_clip(&project, b, 0).expect("slide onto zero");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_range(&g.graph, b).unwrap().0, Rational::new(0, 1));
+			assert_eq!(
+				clip_range(&g.graph, a).unwrap().1,
+				ts_to_rational(10, tb),
+				"the collapsing left neighbor is left alone"
+			);
+		}
+		oak_undo::global::undo().unwrap();
+		slide_clip(&project, b, 20).expect("slide onto the right neighbor");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_range(&g.graph, b).unwrap().0, ts_to_rational(20, tb));
+			assert_eq!(
+				clip_range(&g.graph, c).unwrap().0,
+				ts_to_rational(20, tb),
+				"the right neighbor keeps its length"
+			);
+		}
+		oak_undo::global::undo().unwrap();
+
+		// slip: a negative request clamps to the old media in (a no-op),
+		// otherwise only the media in-point moves.
+		assert!(slip_clip(&project, bogus, 5).is_err());
+		slip_clip(&project, b, -5).expect("clamped slip is a no-op");
+		slip_clip(&project, b, 7).expect("slip");
+		{
+			let g = lock(&project);
+			let (in_r, _, media_in) = clip_range(&g.graph, b).expect("b is a clip");
+			assert_eq!(media_in, ts_to_rational(7, tb));
+			assert_eq!(in_r, ts_to_rational(10, tb), "the range stays put");
+		}
+		oak_undo::global::undo().unwrap();
+
+		// move: stale id, negative clamp, real move.
+		assert!(move_clip(&project, bogus, 3).is_err());
+		move_clip(&project, b, -50).expect("move clamps to zero");
+		assert_eq!(
+			clip_range(&lock(&project).graph, b).unwrap().0,
+			Rational::new(0, 1)
+		);
+		oak_undo::global::undo().unwrap();
+		move_clip(&project, b, 40).expect("move");
+		assert_eq!(
+			clip_range(&lock(&project).graph, b).unwrap().0,
+			ts_to_rational(40, tb)
+		);
+		oak_undo::global::undo().unwrap();
+
+		// move to track: stale clip, destination without a list, trackless
+		// clip, then the cross-track move and its undo.
+		let index = add_track(&project, seq, TrackType::Video).expect("third video track");
+		let track2 = {
+			let g = lock(&project);
+			track_ids(&g.graph, seq, TrackType::Video)[index]
+		};
+		let folder = create_folder(&project, "Dest Folder").expect("folder");
+		assert!(move_clip_to_track(&project, bogus, track2, 0).is_err());
+		assert!(move_clip_to_track(&project, b, folder, 0).is_err());
+		let d = place_clip(&project, seq, footage, 60, 70);
+		let d_track = {
+			let g = lock(&project);
+			clip_track(&g.graph, d).expect("d on a track")
+		};
+		oak_timeline::util::track_ripple_remove_block(
+			&node_ref(&project, d_track),
+			&node_ref(&project, d),
+		);
+		assert!(move_clip_to_track(&project, d, track2, 0).is_err());
+		move_clip_to_track(&project, b, track2, 30).expect("cross-track move");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_track(&g.graph, b), Some(track2));
+			assert_eq!(clip_range(&g.graph, b).unwrap().0, ts_to_rational(30, tb));
+		}
+		oak_undo::global::undo().unwrap();
+
+		// move with links: group to another track, the group-wide clamp at
+		// zero, and ignoring self / stale / off-track linked ids.
+		let pair = place_footage_clips_linked(
+			&project,
+			seq,
+			footage,
+			&[(TrackType::Video, 0), (TrackType::Audio, 0)],
+			80,
+			90,
+			0,
+		)
+		.expect("linked pair");
+		let (v2, a2) = (pair[0], pair[1]);
+		move_clip_with_links(&project, v2, Some(track2), 100, &[a2]).expect("group move");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_track(&g.graph, v2), Some(track2));
+			assert_eq!(clip_range(&g.graph, v2).unwrap().0, ts_to_rational(100, tb));
+			assert_eq!(clip_range(&g.graph, a2).unwrap().0, ts_to_rational(100, tb));
+		}
+		oak_undo::global::undo().unwrap();
+		move_clip_with_links(&project, v2, None, -50, &[a2]).expect("clamped group move");
+		{
+			let g = lock(&project);
+			assert_eq!(clip_range(&g.graph, v2).unwrap().0, Rational::new(0, 1));
+			assert_eq!(clip_range(&g.graph, a2).unwrap().0, Rational::new(0, 1));
+		}
+		oak_undo::global::undo().unwrap();
+		move_clip_with_links(&project, v2, None, 20, &[v2, bogus, d])
+			.expect("self, stale and off-track linked ids are ignored");
+		oak_undo::global::undo().unwrap();
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// The transition seam/edge commands and the default-transition action
+	/// cover their whole validation matrix plus the wedge clamp.
+	#[test]
+	fn transition_error_matrix_and_edge_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("transitions");
+		let track = video_track_of(&project, seq);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let half = ts_to_rational(2, tb);
+		let bogus = id_of(9_000_012).unwrap();
+		let a = place_clip(&project, seq, footage, 0, 10);
+		let b = place_clip(&project, seq, footage, 10, 20);
+
+		// The seam command creates, undoes and redoes.
+		let t = add_transition_at_seam(&project, a, b, half).expect("seam transition");
+		assert_eq!(transition_of_clip(&lock(&project).graph, b, true), Some(t));
+		oak_undo::global::undo().unwrap();
+		assert!(transition_of_clip(&lock(&project).graph, b, true).is_none());
+		oak_undo::global::redo().unwrap();
+		assert_eq!(transition_of_clip(&lock(&project).graph, b, true), Some(t));
+		assert!(
+			add_transition_at_seam(&project, a, b, half).is_err(),
+			"the seam already carries a transition"
+		);
+
+		// Validation errors: length, non-clips, non-contiguous, off-track
+		// outgoing clip, mixed tracks and a track that is not a track.
+		assert!(add_transition_at_seam(&project, a, b, Rational::new(0, 1)).is_err());
+		assert!(add_transition_at_seam(&project, footage, b, half).is_err());
+		assert!(add_transition_at_seam(&project, a, footage, half).is_err());
+		let c = place_clip(&project, seq, footage, 100, 110);
+		let d = place_clip(&project, seq, footage, 200, 210);
+		assert!(
+			add_transition_at_seam(&project, c, d, half).is_err(),
+			"the clips are not contiguous"
+		);
+		let e = place_clip(&project, seq, footage, 300, 310);
+		let f = place_clip(&project, seq, footage, 310, 320);
+		oak_timeline::util::track_ripple_remove_block(
+			&node_ref(&project, track),
+			&node_ref(&project, e),
+		);
+		assert!(
+			add_transition_at_seam(&project, e, f, half).is_err(),
+			"the outgoing clip is off-track"
+		);
+		let index = add_track(&project, seq, TrackType::Video).expect("third video track");
+		let track2 = {
+			let g = lock(&project);
+			track_ids(&g.graph, seq, TrackType::Video)[index]
+		};
+		let g1 = place_clip(&project, seq, footage, 400, 410);
+		let h = place_footage_clip(&project, seq, footage, TrackType::Video, index, 400, 410, 0)
+			.expect("clip on the second track");
+		assert!(
+			add_transition_at_seam(&project, g1, h, half).is_err(),
+			"the clips are on different tracks"
+		);
+		let folder = create_folder(&project, "Not A Track").expect("folder");
+		set_block_track(&project, g1, Some(folder));
+		set_block_track(&project, h, Some(folder));
+		assert!(
+			add_transition_at_seam(&project, g1, h, half).is_err(),
+			"the named track is not in the project"
+		);
+
+		// Non-adjacent blocks with touching ranges.
+		let i = place_clip(&project, seq, footage, 500, 510);
+		let j = place_clip(&project, seq, footage, 510, 520);
+		let opaque = add_opaque(&project);
+		{
+			let mut g = lock(&project);
+			if let Some(t) = g
+				.graph
+				.get_mut(track)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackBehavior>())
+			{
+				let position = t
+					.blocks
+					.iter()
+					.position(|&block| block == i)
+					.expect("i on the track");
+				t.blocks.insert(position + 1, opaque);
+			}
+		}
+		assert!(
+			add_transition_at_seam(&project, i, j, half).is_err(),
+			"the clips are not adjacent on the track"
+		);
+
+		// Edge transitions: length, non-clip, stale, off-track, a clip that
+		// names a track it is not on, and an already-transitioned edge.
+		assert!(add_transition_at_edge(&project, a, true, Rational::new(0, 1)).is_err());
+		assert!(add_transition_at_edge(&project, footage, true, half).is_err());
+		assert!(add_transition_at_edge(&project, bogus, true, half).is_err());
+		assert!(add_transition_at_edge(&project, e, true, half).is_err());
+		set_block_track(&project, i, Some(track2));
+		assert!(add_transition_at_edge(&project, i, true, half).is_err());
+		set_block_track(&project, i, Some(track));
+		assert!(add_transition_at_edge(&project, b, true, half).is_err());
+
+		// A lone clip takes a head and a tail transition; the length clamp
+		// bottoms out at one frame, and the wedge map reports both sides.
+		let lone = place_clip(&project, seq, footage, 600, 610);
+		let head = add_transition_at_edge(&project, lone, true, half).expect("head transition");
+		assert_eq!(transition_of_clip(&lock(&project).graph, lone, true), Some(head));
+		assert!(add_transition_at_edge(&project, lone, true, half).is_err());
+		let tail = add_transition_at_edge(&project, lone, false, half).expect("tail transition");
+		assert_eq!(transition_of_clip(&lock(&project).graph, lone, false), Some(tail));
+		let frame = ts_to_rational(1, tb);
+		let applied = set_transition_length(&project, lone, true, frame, Rational::new(0, 1))
+			.expect("clamp to one frame");
+		assert_eq!(applied, frame);
+		assert!(set_transition_length(&project, bogus, true, frame, half).is_err());
+		assert!(clip_transition_widths(&lock(&project).graph, bogus).is_empty());
+		{
+			let g = lock(&project);
+			let widths = clip_transition_widths(&g.graph, track);
+			let lone_widths = widths.get(&lone).expect("lone clip widths");
+			assert!(lone_widths.0.is_some(), "the head wedge");
+			assert!(lone_widths.1.is_some(), "the tail wedge");
+		}
+
+		// The default-transition batch skips everything it cannot use.
+		assert!(
+			add_default_transition(&project, bogus, &[lone], half).is_err(),
+			"the sequence is not in the project"
+		);
+		let opaque2 = add_opaque(&project);
+		assert!(
+			add_default_transition(&project, seq, &[opaque2, footage], half).is_err(),
+			"opaque and trackless entries contribute nothing"
+		);
+		let other = create_sequence(&project, "Other Seq");
+		let other_clip = place_clip(&project, other, footage, 0, 10);
+		assert!(
+			add_default_transition(&project, seq, &[other_clip], half).is_err(),
+			"a clip of another sequence is ignored"
+		);
+		let lone2 = place_clip(&project, seq, footage, 700, 710);
+		let lone2_track = {
+			let g = lock(&project);
+			clip_track(&g.graph, lone2).expect("lone2 on a track")
+		};
+		let saved_list = {
+			let g = lock(&project);
+			track_behavior(&g.graph, lone2_track).and_then(|t| t.track_list)
+		};
+		set_track_list(&project, lone2_track, None);
+		assert!(
+			add_default_transition(&project, seq, &[lone2], half).is_err(),
+			"a listless track is skipped"
+		);
+		set_track_list(&project, lone2_track, saved_list);
+		{
+			let mut g = lock(&project);
+			if let Some(t) = g
+				.graph
+				.get_mut(lone2_track)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackBehavior>())
+			{
+				t.blocks.retain(|&block| block != lone2);
+			}
+		}
+		assert!(
+			add_default_transition(&project, seq, &[lone2], half).is_err(),
+			"a clip missing from its track is skipped"
+		);
+		let adj = create_adjustment_layer(&project, seq, track, 800, 820).expect("adjustment");
+		assert!(
+			add_default_transition(&project, seq, &[adj], half).is_err(),
+			"an adjustment layer is not a clip"
+		);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// `remove_node` is undoable and an empty multi command leaves no row.
+	#[test]
+	fn remove_node_and_empty_multi_command_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("remove_node");
+		let _a = place_clip(&project, seq, footage, 0, 10);
+		let b = place_clip(&project, seq, footage, 10, 20);
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let before = oak_undo::global::count().unwrap();
+		push_multi_command(Vec::new(), "Empty Multi").expect("an empty multi is a no-op");
+		assert_eq!(oak_undo::global::count().unwrap(), before, "no empty row");
+
+		remove_node(&project, b).expect("remove node");
+		assert!(!lock(&project).graph.is_valid(b));
+		oak_undo::global::undo().unwrap();
+		assert!(lock(&project).graph.is_valid(b));
+		assert_eq!(
+			clip_range(&lock(&project).graph, b).unwrap().0,
+			ts_to_rational(10, tb)
+		);
+		oak_undo::global::redo().unwrap();
+		assert!(!lock(&project).graph.is_valid(b));
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// Rational <-> timestamp conversion: rounding, invalid timebases and
+	/// the null sentinel.
+	#[test]
+	fn timestamp_conversion_edge_cases() {
+		let _g = test_lock();
+		// Round half away from zero.
+		assert_eq!(rational_to_ts(Rational::new(-1, 2), (1, 1)), -1);
+		assert_eq!(rational_to_ts(Rational::new(-1, 3), (1, 1)), 0);
+		assert_eq!(rational_to_ts(Rational::new(1, 2), (1, 1)), 1);
+		assert_eq!(rational_to_ts(Rational::new(1, 3), (1, 1)), 0);
+		// Degenerate timebases and the null rational answer zero.
+		assert_eq!(rational_to_ts(Rational::new(1, 2), (0, 1)), 0);
+		assert_eq!(rational_to_ts(Rational::new(1, 2), (1, 0)), 0);
+		assert_eq!(rational_to_ts(Rational::NULL, (1, 1)), 0);
+		// Timestamp -> reduced rational.
+		assert_eq!(ts_to_rational(2, (1, 25)), Rational::new(2, 25));
+		assert_eq!(ts_to_rational(0, (1001, 30000)), Rational::new(0, 1));
+		assert_eq!(
+			ts_to_rational(30000, (1001, 30000)),
+			Rational::new(1001, 1)
+		);
+		// Whole-frame round trips are exact.
+		let tb = (1001, 30000);
+		for frame in [0i64, 1, 7, 300, -5] {
+			assert_eq!(rational_to_ts(ts_to_rational(frame, tb), tb), frame);
+		}
+		// The identity -> NodeId bridge rejects the sentinel.
+		assert!(id_of(999_999).is_some());
+		assert!(id_of(NodeId::INVALID.identity()).is_none());
+	}
+
+	/// `find_input_footage` terminates on a cyclic input graph.
+	#[test]
+	fn find_input_footage_handles_cycles() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("cycle");
+		let _ = seq;
+		// A source whose output feeds TWO inputs of one node: the BFS meets
+		// the source twice in the next frontier, and the second visit takes
+		// the already-visited bail-out.
+		let (source, keymix) = {
+			let mut g = lock(&project);
+			let source = create_footage_clip(
+				&mut g.graph,
+				footage,
+				Rational::new(0, 1),
+				Rational::new(1, 1),
+			);
+			let (core, behavior) = oak_node::factory::Factory::global()
+				.create_any("org.olivevideoeditor.Olive.keymix")
+				.expect("keymix is registered");
+			let keymix = g.graph.add_node(core, behavior);
+			(source, keymix)
+		};
+		lock(&project)
+			.graph
+			.connect(source, keymix, "tex_in", -1)
+			.expect("source -> tex_in");
+		lock(&project)
+			.graph
+			.connect(source, keymix, "mask_in", -1)
+			.expect("source -> mask_in");
+		assert!(find_input_footage(&lock(&project).graph, keymix).is_none());
+		let _ = std::fs::remove_file(&media);
+	}
+
+	/// `set_clips_linked` links and unlinks the set as one undoable row and
+	/// ignores a set with fewer than two blocks.
+	#[test]
+	fn set_clips_linked_links_and_unlinks_the_set() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("set_links");
+		let a = place_clip(&project, seq, footage, 0, 10);
+		let b = place_clip(&project, seq, footage, 10, 20);
+		let before = oak_undo::global::count().unwrap();
+		set_clips_linked(&project, &[a], true).expect("a single block is a no-op");
+		assert_eq!(oak_undo::global::count().unwrap(), before);
+
+		set_clips_linked(&project, &[a, b], true).expect("link the pair");
+		assert!(lock(&project).graph.are_linked(a, b));
+		oak_undo::global::undo().unwrap();
+		assert!(!lock(&project).graph.are_linked(a, b));
+		oak_undo::global::redo().unwrap();
+		assert!(lock(&project).graph.are_linked(a, b));
+
+		set_clips_linked(&project, &[a, b], false).expect("unlink the pair");
+		assert!(!lock(&project).graph.are_linked(a, b));
+		oak_undo::global::undo().unwrap();
+		assert!(
+			lock(&project).graph.are_linked(a, b),
+			"the undo restores the prior topology"
+		);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+
+	/// A relative OVE path is resolved against the working directory and
+	/// recorded absolute.
+	#[test]
+	fn load_ove_resolves_relative_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let project = create_project();
+		let _ = create_sequence(&project, "Relative");
+		let name = "oak_graphops_gap_relative_load.ove";
+		let absolute = std::env::current_dir()
+			.expect("the test cwd")
+			.join(name);
+		save_ove(&project, &absolute).expect("save");
+		let loaded = load_ove(Path::new(name)).expect("relative load");
+		{
+			let g = lock(&loaded);
+			assert_eq!(sequence_ids(&g).len(), 1);
+			assert!(
+				Path::new(g.filename()).is_absolute(),
+				"the filename is normalized to an absolute path"
+			);
+		}
+		let _ = std::fs::remove_file(&absolute);
+	}
+
+	/// Remaining query/setter paths: playhead, sequence-parameter rejection
+	/// and the empty video-stream push, plus the listless/off-track edits.
+	#[test]
+	fn sequence_and_move_misc_paths() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("misc_paths");
+		let clip = place_clip(&project, seq, footage, 0, 10);
+		let track = video_track_of(&project, seq);
+		let list = video_list_of(&project, seq);
+		let bogus = id_of(9_000_020).unwrap();
+
+		// Playhead get/set.
+		assert_eq!(
+			sequence_playhead(&lock(&project).graph, seq),
+			Rational::new(0, 1)
+		);
+		sequence_set_playhead(&project, seq, Rational::new(3, 2));
+		assert_eq!(
+			sequence_playhead(&lock(&project).graph, seq),
+			Rational::new(3, 2)
+		);
+		sequence_set_playhead(&project, bogus, Rational::new(1, 1));
+
+		// Sequence parameters: stale id and non-sequence entries are
+		// rejected.
+		assert!(set_sequence_parameters(
+			&project,
+			bogus,
+			"x",
+			1,
+			1,
+			Rational::new(1, 1),
+			false
+		)
+		.is_err());
+		let folder = create_folder(&project, "Not A Sequence").expect("folder");
+		assert!(set_sequence_parameters(
+			&project,
+			folder,
+			"x",
+			1,
+			1,
+			Rational::new(1, 1),
+			false
+		)
+		.is_err());
+		// An empty video-stream list takes the push branch.
+		{
+			let mut g = lock(&project);
+			if let Some(s) = g
+				.graph
+				.get_mut(seq)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<SequenceBehavior>())
+			{
+				s.video_params.clear();
+			}
+		}
+		set_sequence_parameters(
+			&project,
+			seq,
+			"Recreated",
+			640,
+			360,
+			Rational::new(24, 1),
+			true,
+		)
+		.expect("set parameters on an empty stream list");
+		assert_eq!(
+			sequence_video_params(&lock(&project).graph, seq),
+			Some((640, 360, Rational::new(24, 1)))
+		);
+
+		// A clip on a listless track cannot move.
+		let saved_list = {
+			let g = lock(&project);
+			track_behavior(&g.graph, track).and_then(|t| t.track_list)
+		};
+		set_track_list(&project, track, None);
+		assert!(move_clip(&project, clip, 20).is_err());
+		set_track_list(&project, track, saved_list);
+		move_clip(&project, clip, 20).expect("the restored list moves again");
+		oak_undo::global::undo().unwrap();
+
+		// A trackless clip cannot be the moved anchor of a linked group.
+		oak_timeline::util::track_ripple_remove_block(
+			&node_ref(&project, track),
+			&node_ref(&project, clip),
+		);
+		assert!(move_clip_with_links(&project, clip, None, 5, &[]).is_err());
+
+		// The clipboard falls back to 25fps when the track list has no
+		// sequence.
+		let b = place_clip(&project, seq, footage, 30, 40);
+		{
+			let mut g = lock(&project);
+			if let Some(l) = g
+				.graph
+				.get_mut(list)
+				.and_then(|e| e.behavior.as_any_mut())
+				.and_then(|a| a.downcast_mut::<TrackListBehavior>())
+			{
+				l.sequence = None;
+			}
+		}
+		let items = copy_clips(&project, &[b]);
+		assert_eq!(items.len(), 1, "the fallback timebase still copies");
+		let in_r = clip_range(&lock(&project).graph, b)
+			.expect("b is a clip")
+			.0;
+		assert_eq!(
+			items[0].start_ts,
+			(in_r.numerator() * 25) / in_r.denominator(),
+			"the fallback treats the rational as 25fps seconds"
+		);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
+}

@@ -4438,19 +4438,44 @@ mod tests {
 		);
 
 		// Step the cache-ahead spin box once (8 frames): 120 → 128 lands in
-		// the config the playback pre-render window reads.
+		// the config the playback pre-render window reads. The spin box sits
+		// at the row's right edge; clicking the row center can land on the
+		// (non-focusable) label, so target the control itself and allow a
+		// bounded re-focus retry — under a loaded parallel suite the first
+		// stroke can be dropped before the focus hand-off lands (observed as
+		// the config staying at 120). A stroke that *does* land always steps
+		// exactly 8; an overshoot (136) fails loudly instead of passing.
 		let ahead = cx
 			.debug_bounds("preferences-cache-ahead")
 			.expect("the cache-ahead row is rendered");
-		cx.simulate_click(ahead.center(), gpui::Modifiers::none());
-		cx.run_until_parked();
-		cx.dispatch_keystroke(window.into(), gpui::Keystroke::parse("up").unwrap());
-		cx.run_until_parked();
-		assert_eq!(
-			crate::oakui::real::config_get_int("PlaybackPreRenderFrames", 120),
-			128,
-			"the cache-ahead spin box writes its stepped value to the config"
+		let spin_point = gpui::Point::new(
+			ahead.origin.x + ahead.size.width - px(24.0),
+			ahead.origin.y + ahead.size.height * 0.5,
 		);
+		let mut attempts = 0usize;
+		loop {
+			attempts += 1;
+			cx.simulate_click(spin_point, gpui::Modifiers::none());
+			// Flush the focus effect and draw one frame before the key
+			// dispatch.
+			cx.run_until_parked();
+			cx.update_window(window.into(), |_root, window, cx| {
+				window.draw(cx).clear();
+			})
+			.expect("window is still open");
+			cx.run_until_parked();
+			cx.dispatch_keystroke(window.into(), gpui::Keystroke::parse("up").unwrap());
+			cx.run_until_parked();
+			let value = crate::oakui::real::config_get_int("PlaybackPreRenderFrames", 120);
+			if value == 128 {
+				break;
+			}
+			assert_eq!(
+				value, 120,
+				"a delivered stroke steps exactly once (attempt {attempts})"
+			);
+			assert!(attempts < 5, "the spin box never received the key");
+		}
 
 		// Re-select the storage backend: PostgreSQL (the combo starts on
 		// SQLite; with the popup closed the arrow keys drive the selection).
@@ -5927,5 +5952,2863 @@ mod tests {
 			vec![(uuid, PathBuf::from("/library/先导片.otio"))],
 			"the picked path routes to the engine's library export"
 		);
+	}
+
+	// -------------------------------------------------------------------
+	// Coverage sweep: menus, modals, registry and shell plumbing
+	// -------------------------------------------------------------------
+
+	/// Fetches one menu item's checkmark from a built menu bar (recursing
+	/// into submenus; a submenu's item wins over a parent with the same id,
+	/// which is how the theme / add-tool groups are built).
+	fn menu_checked(entries: &[MenuBarEntry], id: usize) -> Option<bool> {
+		fn walk(menu: &Menu, id: usize) -> Option<bool> {
+			for item in &menu.items {
+				if let Some(submenu) = &item.submenu {
+					if let Some(checked) = walk(submenu, id) {
+						return Some(checked);
+					}
+				}
+				if item.id == id && item.checked.is_some() {
+					return item.checked;
+				}
+			}
+			None
+		}
+		entries.iter().find_map(|entry| walk(&entry.menu, id))
+	}
+
+	/// The shell-method signature the modal sweeps call through.
+	type AppFn = fn(&mut OakApp<MockEngine>, &mut Context<OakApp<MockEngine>>);
+
+	/// Pins a process-global config key to its current value, restoring it
+	/// on drop (config writes leak across tests otherwise).
+	struct ConfigGuard(&'static str, String);
+
+	impl ConfigGuard {
+		fn pin(key: &'static str) -> Self {
+			Self(key, crate::oakui::real::config_get_string(key))
+		}
+	}
+
+	impl Drop for ConfigGuard {
+		fn drop(&mut self) {
+			crate::oakui::real::config_set_string(self.0, &self.1);
+		}
+	}
+
+	/// Every dynamic flag in [`MenuState`] drives exactly the menu item the
+	/// shell's rebuild path toggles: theme (both directions), the 13 tools,
+	/// snapping, loop playback, show-all, full-screen, proxy media, and the
+	/// 窗口 panel checkmarks.
+	#[test]
+	fn menu_checkmarks_follow_every_dynamic_state_flag() {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		crate::i18n::set_language_code("en-US");
+
+		// Theme: dark and light are two checked-exclusive items in the
+		// 视图 submenu.
+		let mut state = MenuState::new(true);
+		assert_eq!(
+			menu_checked(&make_menus(state), ActionId::ThemeDark.menu_id()),
+			Some(true)
+		);
+		assert_eq!(
+			menu_checked(&make_menus(state), ActionId::ThemeLight.menu_id()),
+			Some(false)
+		);
+		state.dark = false;
+		let menus = make_menus(state);
+		assert_eq!(
+			menu_checked(&menus, ActionId::ThemeDark.menu_id()),
+			Some(false)
+		);
+		assert_eq!(
+			menu_checked(&menus, ActionId::ThemeLight.menu_id()),
+			Some(true)
+		);
+
+		// The mutually exclusive tool group: exactly the active tool is
+		// checked.
+		let tools = [
+			Tool::Pointer,
+			Tool::TrackSelect,
+			Tool::Edit,
+			Tool::Ripple,
+			Tool::Rolling,
+			Tool::Razor,
+			Tool::Slip,
+			Tool::Slide,
+			Tool::Hand,
+			Tool::Zoom,
+			Tool::Transition,
+			Tool::Add,
+			Tool::Record,
+		];
+		for active in tools {
+			let mut state = MenuState::new(true);
+			state.active_tool = active;
+			let menus = make_menus(state);
+			for tool in tools {
+				assert_eq!(
+					menu_checked(&menus, tool.action().menu_id()),
+					Some(tool == active),
+					"tool checkmark follows the active tool"
+				);
+			}
+		}
+
+		// Boolean placeholders / registry state, both directions.
+		let mut state = MenuState::new(true);
+		state.snapping = false;
+		state.loop_playback = true;
+		state.show_all = true;
+		state.full_screen = true;
+		state.use_proxy_media = false;
+		let menus = make_menus(state);
+		assert_eq!(menu_checked(&menus, ActionId::Snapping.menu_id()), Some(false));
+		assert_eq!(menu_checked(&menus, ActionId::Loop.menu_id()), Some(true));
+		assert_eq!(
+			menu_checked(&menus, ActionId::ToggleShowAll.menu_id()),
+			Some(true)
+		);
+		assert_eq!(
+			menu_checked(&menus, ActionId::FullScreen.menu_id()),
+			Some(true)
+		);
+		assert_eq!(
+			menu_checked(&menus, ActionId::UseProxyMedia.menu_id()),
+			Some(false)
+		);
+		state.snapping = true;
+		state.loop_playback = false;
+		state.show_all = false;
+		state.full_screen = false;
+		state.use_proxy_media = true;
+		let menus = make_menus(state);
+		assert_eq!(menu_checked(&menus, ActionId::Snapping.menu_id()), Some(true));
+		assert_eq!(menu_checked(&menus, ActionId::Loop.menu_id()), Some(false));
+		assert_eq!(
+			menu_checked(&menus, ActionId::ToggleShowAll.menu_id()),
+			Some(false)
+		);
+		assert_eq!(
+			menu_checked(&menus, ActionId::FullScreen.menu_id()),
+			Some(false)
+		);
+		assert_eq!(
+			menu_checked(&menus, ActionId::UseProxyMedia.menu_id()),
+			Some(true)
+		);
+
+		// 窗口: no visible panel → every panel unchecked; all bits → every
+		// panel checked.
+		let mut state = MenuState::new(true);
+		state.open_panels = 0;
+		let menus = make_menus(state);
+		for (_, action) in WINDOW_PANELS {
+			assert_eq!(menu_checked(&menus, action.menu_id()), Some(false));
+		}
+		state.open_panels = u16::MAX;
+		let menus = make_menus(state);
+		for (_, action) in WINDOW_PANELS {
+			assert_eq!(menu_checked(&menus, action.menu_id()), Some(true));
+		}
+	}
+
+	/// The panel registry round-trips every panel key through
+	/// [`AppPanelRegistry::panel_key`] / [`build_panel`], including the
+	/// unknown id / key fallbacks.
+	#[gpui::test]
+	async fn panel_registry_keys_and_builders_round_trip(cx: &mut TestAppContext) {
+		use gpui::dock::PanelRegistry as _;
+
+		let (window, root) = mock_shell(cx);
+		let (engine, source_clock, program_clock) = cx.read(|app| {
+			let root = root.read(app);
+			let engine = root.engine.clone();
+			let source_clock = engine.read(app).source_clock().clone();
+			(engine, source_clock, root.program_clock.clone())
+		});
+
+		cx.update_window(window.into(), move |_root, window, app| {
+			let registry = AppPanelRegistry {
+				engine,
+				source_clock,
+				program_clock,
+			};
+			let keys = [
+				(PROJECT, "project"),
+				(SOURCE_VIEWER, "source-viewer"),
+				(PROGRAM_VIEWER, "program-viewer"),
+				(NODE_EDITOR, "node-editor"),
+				(INSPECTOR, "inspector"),
+				(HISTORY, "history"),
+				(TIMELINE, "timeline"),
+				(EFFECT_LIBRARY, "effect-library"),
+				(MULTICAM, "multicam"),
+			];
+			for (id, key) in keys {
+				assert_eq!(registry.panel_key(id).as_deref(), Some(key));
+			}
+			// The unknown-panel fallback (a PanelId outside the nine).
+			assert!(registry.panel_key(gpui::dock::PanelId::new(250)).is_none());
+
+			for (_, key) in keys {
+				assert!(
+					registry.build_panel(key, window, app).is_some(),
+					"panel {key} rebuilds from its key"
+				);
+			}
+			assert!(
+				registry.build_panel("not-a-panel", window, app).is_none(),
+				"an unknown key builds nothing"
+			);
+		})
+		.expect("window is still open");
+	}
+
+	/// Every dialog the shell can put on screen opens through its shell
+	/// entry point and reports itself through `ModalState::modal_entity`
+	/// (which `Render` layers).
+	#[gpui::test]
+	async fn every_shell_modal_opens_and_reports_its_entity(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (window, root) = mock_shell(cx);
+
+		let has_modal = |cx: &TestAppContext| -> bool {
+			cx.read(|app| root.read(app).modal.modal_entity().is_some())
+		};
+		let close = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+			cx.run_until_parked();
+			assert!(
+				!cx.read(|app| root.read(app).modal.modal_entity().is_some()),
+				"close_modal clears the layering entity"
+			);
+		};
+		let run = |cx: &mut TestAppContext, f: AppFn| {
+			cx.update(|app| root.update(app, f));
+			cx.run_until_parked();
+		};
+
+		// Preferences and the action search build through the deferred path.
+		run(cx, |app, cx| app.open_preferences(cx));
+		assert!(has_modal(cx), "preferences modal");
+		close(cx);
+
+		run(cx, |app, cx| app.open_action_search(cx));
+		assert!(has_modal(cx), "action search modal");
+		close(cx);
+
+		// File menu:
+		run(cx, |app, cx| app.open_new_project(cx));
+		assert!(has_modal(cx), "new project modal");
+		close(cx);
+		run(cx, |app, cx| app.open_new_sequence(cx));
+		assert!(has_modal(cx), "new sequence modal");
+		close(cx);
+		run(cx, |app, cx| app.open_export_project_dfd(cx));
+		assert!(has_modal(cx), "export project modal");
+		close(cx);
+		run(cx, |app, cx| app.open_save_as(cx));
+		assert!(has_modal(cx), "save-as modal");
+		close(cx);
+		run(cx, |app, cx| app.open_entry_rename(3, cx));
+		assert!(has_modal(cx), "entry rename modal");
+		close(cx);
+		run(cx, |app, cx| app.open_sequence_properties(4, cx));
+		assert!(has_modal(cx), "sequence properties modal");
+		close(cx);
+		run(cx, |app, cx| app.open_export_dialog(None, cx));
+		assert!(has_modal(cx), "export dialog");
+		close(cx);
+		run(cx, |app, cx| app.open_project_properties(cx));
+		assert!(has_modal(cx), "project properties modal");
+		close(cx);
+
+		// Tools / Help:
+		run(cx, |app, cx| app.open_proxy_dialog(cx));
+		assert!(has_modal(cx), "proxy modal");
+		close(cx);
+		run(cx, |app, cx| app.open_multicam_wizard(cx));
+		assert!(has_modal(cx), "multicam wizard modal");
+		close(cx);
+		run(cx, |app, cx| app.open_about(cx));
+		assert!(has_modal(cx), "about modal");
+		close(cx);
+
+		// Project manager and its sub-dialogs.
+		run(cx, |app, cx| app.show_project_manager(cx));
+		assert!(has_modal(cx), "manager modal");
+		run(cx, |app, cx| app.open_manager_rename("mock-1".into(), cx));
+		assert!(has_modal(cx), "manager rename modal");
+		close(cx);
+		run(cx, |app, cx| app.open_manager_delete("mock-1".into(), cx));
+		assert!(has_modal(cx), "manager delete modal");
+		close(cx);
+
+		// The drop-onto-empty-timeline choice, then the progress dialog
+		// (started from the export dialog's OK).
+		run(cx, |app, cx| {
+			app.on_footage_drop_needs_sequence(
+				FootageDropNeedsSequence {
+					footage_id: 3,
+					track_kind: gpui::timeline::TrackKind::Video,
+					track_index: 0,
+					time: Frame(0),
+				},
+				cx,
+			)
+		});
+		assert!(has_modal(cx), "drop-sequence choice modal");
+		close(cx);
+
+		run(cx, |app, cx| app.open_export_dialog(None, cx));
+		run(cx, |app, cx| {
+			app.on_modal(
+				&ModalEvent::ButtonClicked {
+					control: modal_ids::EXPORT,
+					button: 0,
+				},
+				cx,
+			)
+		});
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Progress { .. })),
+			"OK starts the export and swaps in the progress modal"
+		);
+		close(cx);
+
+		// The shell still renders with a modal layered.
+		cx.update_window(window.into(), |_root, window, cx| {
+			window.draw(cx).clear();
+		})
+		.expect("window is still open");
+	}
+
+	/// The OFX plugin-progress channel drives the shell's progress modal:
+	/// the first event opens it, later events move the bar, a completion
+	/// fraction dismisses it, and events that arrive while another modal is
+	/// up never hijack the screen.
+	#[gpui::test]
+	async fn plugin_progress_channel_drives_the_progress_modal(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		// The shell's tick loop drains its receiver: swap in a channel the
+		// test drives deterministically.
+		let (tx, rx) = mpsc::channel::<crate::oakui::ofx::PluginProgressEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.plugin_progress_rx = Mutex::new(rx);
+			})
+		});
+
+		let tick = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+			cx.run_until_parked();
+		};
+		let event = |fraction: f64| crate::oakui::ofx::PluginProgressEvent {
+			label: "OakOFX Render".into(),
+			message: format!("frame {:.2}", fraction * 10.0),
+			fraction,
+		};
+
+		// An empty drain is a no-op.
+		tick(cx);
+
+		// The first event opens the progress dialog.
+		tx.send(event(0.25)).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| root.read(app).plugin_progress_open));
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::Progress { .. }
+		)));
+
+		// A later event only updates the bar (the dialog stays up).
+		tx.send(event(0.75)).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| root.read(app).plugin_progress_open));
+
+		// Cancel through the dialog's secondary button: the flag drops and
+		// the modal closes.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::PLUGIN_PROGRESS,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		assert!(!cx.read(|app| root.read(app).plugin_progress_open));
+
+		// While another modal is up, plugin events never replace it.
+		cx.update(|app| root.update(app, |app, cx| app.open_preferences(cx)));
+		cx.run_until_parked();
+		tx.send(event(0.5)).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::Preferences { .. }
+		)));
+		assert!(!cx.read(|app| root.read(app).plugin_progress_open));
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// A completion fraction (1.0) closes a dialog the channel opened.
+		tx.send(event(0.1)).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| root.read(app).plugin_progress_open));
+		tx.send(event(1.0)).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		assert!(!cx.read(|app| root.read(app).plugin_progress_open));
+	}
+
+	/// The export session's event channel drives the progress dialog end to
+	/// end: `Started` is ignored, `Progress` moves the bar, `Finished`
+	/// closes the dialog (both outcomes), and Cancel / Escape run the
+	/// session's cancel handle. `begin_export`'s guards (empty path, no
+	/// sequence) are covered too.
+	#[gpui::test]
+	async fn export_progress_events_drive_the_progress_modal(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let open_export = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.open_export_dialog(None, cx)));
+			cx.run_until_parked();
+		};
+		let click_export_ok = |cx: &mut TestAppContext| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.on_modal(
+						&ModalEvent::ButtonClicked {
+							control: modal_ids::EXPORT,
+							button: 0,
+						},
+						cx,
+					)
+				})
+			});
+			cx.run_until_parked();
+		};
+		// Guards first: an export dialog with an empty path does not start.
+		open_export(cx);
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::Export { content, .. } => content.clone(),
+			_ => panic!("the export dialog should be open"),
+		});
+		cx.update(|app| content.update(app, |content, cx| content.set_path("", cx)));
+		click_export_ok(cx);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Export { .. })),
+			"an empty output path keeps the settings dialog open"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// A path without an extension gets the format's extension appended
+		// before the export starts.
+		open_export(cx);
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::Export { content, .. } => content.clone(),
+			_ => panic!("the export dialog should be open"),
+		});
+		cx.update(|app| content.update(app, |content, cx| content.set_path("/tmp/oak-export", cx)));
+		click_export_ok(cx);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Progress { .. })),
+			"an extension-less path starts the export too"
+		);
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::EXPORT_PROGRESS,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// The real flow: OK starts the mock export and swaps in progress.
+		open_export(cx);
+		click_export_ok(cx);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Progress { .. })));
+		assert!(cx.read(|app| root.read(app).export.is_some()));
+
+		// Replace the live session with a synthetic, test-driven one.
+		let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let (tx, rx) = mpsc::channel::<crate::oakui::ExportEvent>();
+		let cancelled_for_session = cancelled.clone();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.export = Some(ExportRun {
+					session: ExportSession {
+						events: rx,
+						cancel: Box::new(move || {
+							cancelled_for_session
+								.store(true, std::sync::atomic::Ordering::SeqCst)
+						}),
+					},
+				});
+			})
+		});
+
+		let tick = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+			cx.run_until_parked();
+		};
+
+		// Empty drain is a no-op; Started is ignored; Progress moves the
+		// bar without closing.
+		tick(cx);
+		tx.send(crate::oakui::ExportEvent::Started).unwrap();
+		tx.send(crate::oakui::ExportEvent::Progress(0.4)).unwrap();
+		tick(cx);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Progress { .. })),
+			"progress keeps the dialog open"
+		);
+		assert!(cx.read(|app| root.read(app).export.is_some()));
+
+		// The Cancel button runs the session's cancel handle.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::EXPORT_PROGRESS,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(
+			cancelled.load(std::sync::atomic::Ordering::SeqCst),
+			"the progress dialog's Cancel runs the session cancel"
+		);
+
+		// A failed finish closes the dialog and drops the session.
+		tx.send(crate::oakui::ExportEvent::Finished(
+			false,
+			"boom".into(),
+		))
+		.unwrap();
+		tick(cx);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		assert!(!cx.read(|app| root.read(app).export.is_some()));
+
+		// The success path: reopen, replace the session, finish ok.
+		open_export(cx);
+		click_export_ok(cx);
+		let (tx_ok, rx_ok) = mpsc::channel::<crate::oakui::ExportEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.export = Some(ExportRun {
+					session: ExportSession {
+						events: rx_ok,
+						cancel: Box::new(|| {}),
+					},
+				});
+			})
+		});
+		tx_ok.send(crate::oakui::ExportEvent::Finished(true, String::new())).unwrap();
+		tick(cx);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		assert!(!cx.read(|app| root.read(app).export.is_some()));
+
+		// Escape on the progress dialog cancels and closes.
+		open_export(cx);
+		click_export_ok(cx);
+		let escaped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let escaped_for_session = escaped.clone();
+		let (_tx_escape, rx_escape) = mpsc::channel::<crate::oakui::ExportEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.export = Some(ExportRun {
+					session: ExportSession {
+						events: rx_escape,
+						cancel: Box::new(move || {
+							escaped_for_session.store(true, std::sync::atomic::Ordering::SeqCst)
+						}),
+					},
+				});
+			})
+		});
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::EXPORT_PROGRESS,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(
+			escaped.load(std::sync::atomic::Ordering::SeqCst),
+			"Escape runs the session cancel"
+		);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// The settings dialog's Cancel button just closes; Escape (a
+		// dismissed modal) falls through the catch-all close.
+		open_export(cx);
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::EXPORT,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// A project with no sequences reports instead of opening the
+		// dialog: empty the selection's sequence list.
+		open_export(cx);
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::Export { content, .. } => content.clone(),
+			_ => panic!("the export dialog should be open"),
+		});
+		cx.update(|app| content.update(app, |content, cx| content.set_sequences(Vec::new(), None, cx)));
+		click_export_ok(cx);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Export { .. })),
+			"a dialog without a selected sequence does not start an export"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+	}
+
+	/// The shell's global action handler: every wired arm runs, the state
+	/// each handler touches actually moves, and the placeholders / unknown
+	/// actions fall through harmlessly.
+	#[gpui::test]
+	async fn global_action_dispatch_runs_every_handler_arm(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (window, root) = mock_shell(cx);
+
+		let dispatch = |cx: &mut TestAppContext, action: ActionId| {
+			cx.update(|app| root.update(app, |app, cx| app.dispatch_action_id(action, cx)));
+			cx.run_until_parked();
+		};
+		let close_modal = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+			cx.run_until_parked();
+		};
+		let playing = |cx: &TestAppContext| {
+			cx.read(|app| root.read(app).program_clock.read(app).is_playing())
+		};
+		let frame = |cx: &TestAppContext| {
+			cx.read(|app| root.read(app).program_clock.read(app).current_frame())
+		};
+		let workarea =
+			|cx: &TestAppContext| cx.read(|app| root.read(app).engine.read(app).workarea());
+		let track_count =
+			|cx: &TestAppContext| cx.read(|app| root.read(app).engine.read(app).track_count());
+
+		// --- edit / history -----------------------------------------------
+		dispatch(cx, ActionId::Undo);
+		dispatch(cx, ActionId::Redo);
+		let (undo, redo) = cx.read(|app| root.read(app).engine.read(app).undo_redo_calls());
+		assert!(undo >= 1 && redo >= 1, "undo/redo reached the engine");
+		dispatch(cx, ActionId::Delete);
+		dispatch(cx, ActionId::RippleDelete);
+		dispatch(cx, ActionId::SplitAtPlayhead);
+		dispatch(cx, ActionId::SelectAll);
+		// SetWorkArea over a non-empty selection takes the selected clips'
+		// bounding range.
+		dispatch(cx, ActionId::SetWorkArea);
+		assert!(workarea(cx).is_some(), "a selection sets the work area");
+		// Delete with a selection reaches the engine per clip.
+		dispatch(cx, ActionId::Delete);
+		dispatch(cx, ActionId::DeselectAll);
+
+		// --- transport -----------------------------------------------------
+		dispatch(cx, ActionId::NextFrame);
+		assert_eq!(frame(cx), Frame(1));
+		dispatch(cx, ActionId::PrevFrame);
+		assert_eq!(frame(cx), Frame(0));
+		dispatch(cx, ActionId::ShuttleRight);
+		assert!(playing(cx), "shuttle right plays");
+		dispatch(cx, ActionId::ShuttleStop);
+		assert!(!playing(cx), "shuttle stop pauses");
+		dispatch(cx, ActionId::ShuttleLeft);
+		dispatch(cx, ActionId::PlayPause);
+		assert!(playing(cx));
+		dispatch(cx, ActionId::PlayPause);
+		assert!(!playing(cx));
+		dispatch(cx, ActionId::GoToEnd);
+		let end = frame(cx);
+		assert!(end.0 > 0, "goto end seeks past zero");
+		dispatch(cx, ActionId::GoToStart);
+		assert_eq!(frame(cx), Frame(0));
+
+		// --- in / out points ------------------------------------------------
+		for _ in 0..5 {
+			dispatch(cx, ActionId::NextFrame);
+		}
+		dispatch(cx, ActionId::SetInPoint);
+		assert_eq!(workarea(cx).map(|(start, _)| start), Some(Frame(5)));
+		dispatch(cx, ActionId::GoToIn);
+		assert_eq!(frame(cx), Frame(5));
+		for _ in 0..3 {
+			dispatch(cx, ActionId::NextFrame);
+		}
+		dispatch(cx, ActionId::SetOutPoint);
+		let area = workarea(cx).expect("out point set");
+		assert_eq!(area.1, Frame(8), "out point lands at the playhead");
+		dispatch(cx, ActionId::GoToOut);
+		assert_eq!(frame(cx), Frame(8));
+		dispatch(cx, ActionId::PlayInToOut);
+		assert_eq!(frame(cx), Frame(5), "play-in-to-out seeks the in point first");
+		assert!(playing(cx));
+		dispatch(cx, ActionId::ShuttleStop);
+
+		// An empty range is ignored (the guard), and the no-workarea
+		// fallbacks are covered by the second pass.
+		dispatch(cx, ActionId::ClearInOut);
+		assert!(workarea(cx).is_none());
+		dispatch(cx, ActionId::GoToStart);
+		dispatch(cx, ActionId::SetOutPoint);
+		assert!(workarea(cx).is_none(), "an empty out range is ignored");
+		dispatch(cx, ActionId::GoToIn);
+		dispatch(cx, ActionId::GoToOut);
+		dispatch(cx, ActionId::PlayInToOut);
+		dispatch(cx, ActionId::ShuttleStop);
+
+		// --- markers --------------------------------------------------------
+		dispatch(cx, ActionId::GoToStart);
+		dispatch(cx, ActionId::Marker);
+		assert!(
+			cx.read(|app| root
+				.read(app)
+				.engine
+				.read(app)
+				.markers()
+				.iter()
+				.any(|marker| marker.frame == Frame(0))),
+			"marker added at the playhead"
+		);
+		dispatch(cx, ActionId::RemoveMarker);
+		assert!(
+			cx.read(|app| root.read(app).engine.read(app).markers().is_empty()),
+			"marker removed at the playhead"
+		);
+
+		// --- sequence -------------------------------------------------------
+		let before = track_count(cx);
+		dispatch(cx, ActionId::AddVideoTrack);
+		dispatch(cx, ActionId::AddAudioTrack);
+		assert_eq!(track_count(cx), before + 2);
+		dispatch(cx, ActionId::RemoveTrack);
+		assert_eq!(
+			track_count(cx),
+			before + 2,
+			"remove with no selected track is a no-op"
+		);
+		dispatch(cx, ActionId::SetWorkArea);
+		assert!(workarea(cx).is_some(), "set work area commits at the playhead");
+
+		// --- view -----------------------------------------------------------
+		let zoom = |cx: &TestAppContext| {
+			cx.read(|app| root.read(app).timeline.read(app).state.zoom)
+		};
+		let zoom_before = zoom(cx);
+		dispatch(cx, ActionId::ZoomIn);
+		assert!(zoom(cx) > zoom_before);
+		dispatch(cx, ActionId::ZoomOut);
+		let height = |cx: &TestAppContext| {
+			cx.read(|app| {
+				root.read(app)
+					.engine
+					.read(app)
+					.track(0)
+					.map(|track| f32::from(track.height()))
+					.unwrap_or_default()
+			})
+		};
+		let height_before = height(cx);
+		dispatch(cx, ActionId::IncreaseTrackHeight);
+		assert_eq!(height(cx), height_before + 8.0);
+		dispatch(cx, ActionId::DecreaseTrackHeight);
+		assert_eq!(height(cx), height_before);
+		dispatch(cx, ActionId::ToggleShowAll);
+		assert!(cx.read(|app| root.read(app).show_all));
+		dispatch(cx, ActionId::ToggleShowAll);
+		assert!(!cx.read(|app| root.read(app).show_all));
+		dispatch(cx, ActionId::Loop);
+		assert!(cx.read(|app| root.read(app).loop_playback));
+		dispatch(cx, ActionId::Loop);
+		assert!(!cx.read(|app| root.read(app).loop_playback));
+
+		// The theme handlers persist through the config store: pin and
+		// restore the key.
+		let _theme = ConfigGuard::pin(crate::oakui::real::CONFIG_KEY_THEME);
+		dispatch(cx, ActionId::ThemeLight);
+		assert!(!cx.read(|app| root.read(app).dark));
+		dispatch(cx, ActionId::ThemeDark);
+		assert!(cx.read(|app| root.read(app).dark));
+
+		// --- tools ----------------------------------------------------------
+		dispatch(cx, ActionId::Snapping);
+		dispatch(cx, ActionId::Snapping);
+		for tool in [
+			Tool::Pointer,
+			Tool::TrackSelect,
+			Tool::Edit,
+			Tool::Ripple,
+			Tool::Rolling,
+			Tool::Razor,
+			Tool::Slip,
+			Tool::Slide,
+			Tool::Hand,
+			Tool::Zoom,
+			Tool::Transition,
+			Tool::Add,
+			Tool::Record,
+		] {
+			dispatch(cx, tool.action());
+			assert_eq!(cx.read(|app| root.read(app).active_tool), tool);
+		}
+		let proxy_before = cx.read(|app| root.read(app).engine.read(app).use_proxy_media());
+		dispatch(cx, ActionId::UseProxyMedia);
+		assert_ne!(
+			cx.read(|app| root.read(app).engine.read(app).use_proxy_media()),
+			proxy_before
+		);
+		dispatch(cx, ActionId::UseProxyMedia);
+
+		// --- window panels --------------------------------------------------
+		for (panel, action) in WINDOW_PANELS {
+			let visible =
+				cx.read(|app| root.read(app).dock.read(app).is_panel_visible(panel));
+			dispatch(cx, action);
+			assert_ne!(
+				cx.read(|app| root.read(app).dock.read(app).is_panel_visible(panel)),
+				visible,
+				"the window action toggles the panel"
+			);
+			dispatch(cx, action);
+			assert_eq!(
+				cx.read(|app| root.read(app).dock.read(app).is_panel_visible(panel)),
+				visible,
+				"a second click restores the panel"
+			);
+		}
+		dispatch(cx, ActionId::ResetDefaultLayout);
+
+		// --- placeholders / uninplemented fall-throughs ---------------------
+		for action in [
+			ActionId::Cut,
+			ActionId::Copy,
+			ActionId::Paste,
+			ActionId::NudgeLeft,
+			ActionId::GoToPrevCut,
+			ActionId::GoToNextCut,
+			ActionId::MaximizePanel,
+			ActionId::SequenceSettings,
+			ActionId::FullScreenViewer,
+			ActionId::ClearOpenRecent,
+			ActionId::Revert,
+			ActionId::MulticamSwitch1,
+			ActionId::MulticamSwitchNoSplit9,
+			ActionId::AddEmpty,
+		] {
+			dispatch(cx, action);
+		}
+		// The mock has no project folder support: the engine error is
+		// logged, the shell keeps running.
+		dispatch(cx, ActionId::NewFolder);
+		dispatch(cx, ActionId::CloseProject);
+
+		// --- modal-opening actions ------------------------------------------
+		for action in [
+			ActionId::ProjectProperties,
+			ActionId::ProxySettings,
+			ActionId::MulticamWizard,
+			ActionId::Preferences,
+			ActionId::ActionSearch,
+			ActionId::About,
+			ActionId::NewProject,
+			ActionId::NewSequence,
+			ActionId::Export,
+			ActionId::SaveProject,
+			ActionId::SaveProjectAs,
+		] {
+			dispatch(cx, action);
+			assert!(
+				cx.read(|app| root.read(app).modal.modal_entity().is_some()),
+				"{action:?} opens a modal"
+			);
+			close_modal(cx);
+		}
+
+		// The path pickers: Import allows multiple files and no extension
+		// filter, Open is single-file with the project extensions.
+		dispatch(cx, ActionId::Import);
+		assert!(cx.did_prompt_for_paths());
+		cx.simulate_path_prompt_response(|options| {
+			assert!(options.multiple, "import allows multiple files");
+			assert!(options.allowed_extensions.is_empty());
+			None
+		});
+		cx.run_until_parked();
+		dispatch(cx, ActionId::OpenProject);
+		assert!(cx.did_prompt_for_paths());
+		cx.simulate_path_prompt_response(|options| {
+			assert!(!options.multiple, "open is single-file");
+			assert_eq!(
+				options.allowed_extensions,
+				vec![
+					"ove".to_string(),
+					"ovexml".to_string(),
+					"otio".to_string(),
+					"fcpxml".to_string()
+				]
+			);
+			None
+		});
+		cx.run_until_parked();
+
+		// The manager entries share the manager modal.
+		for action in [ActionId::OpenFromLibrary, ActionId::ProjectManager] {
+			dispatch(cx, action);
+			assert!(cx.read(|app| matches!(
+				root.read(app).modal,
+				ModalState::Manager { .. }
+			)));
+			close_modal(cx);
+		}
+
+		// Full screen: toggles the real window state and the checkmark.
+		dispatch(cx, ActionId::FullScreen);
+		assert!(cx.read(|app| root.read(app).full_screen));
+		dispatch(cx, ActionId::FullScreen);
+		assert!(!cx.read(|app| root.read(app).full_screen));
+
+		// A draw with the shell still live must not panic.
+		cx.update_window(window.into(), |_root, window, cx| {
+			window.draw(cx).clear();
+		})
+		.expect("window is still open");
+	}
+
+	/// Focused-panel routing: the panel the dock reports last gets the
+	/// command first, the transport panels handle their commands, every
+	/// other panel declines (the shell's global handler runs), and an id
+	/// outside the nine declines straight away.
+	#[gpui::test]
+	async fn focused_panel_routing_reaches_every_panel(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let focus = |cx: &mut TestAppContext, id: PanelId| {
+			cx.update(|app| root.update(app, |app, _cx| app.focused_panel = Some(id)));
+		};
+		let handles = |cx: &mut TestAppContext, action: ActionId| -> bool {
+			cx.update(|app| {
+				root.update(app, |app, cx| app.dispatch_to_focused_panel(action, cx))
+			})
+		};
+		let pause = |cx: &mut TestAppContext| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.engine
+						.update(cx, |engine, cx| engine.pause(Monitor::Program, cx));
+				})
+			});
+		};
+
+		// No focused panel yet: every command falls through.
+		assert!(!handles(cx, ActionId::PlayPause));
+		assert!(!handles(cx, ActionId::MulticamSwitch1));
+
+		for (id, handles_transport) in [
+			(PROJECT, false),
+			(SOURCE_VIEWER, true),
+			(PROGRAM_VIEWER, true),
+			(NODE_EDITOR, false),
+			(INSPECTOR, false),
+			(HISTORY, false),
+			(TIMELINE, true),
+			(EFFECT_LIBRARY, false),
+			(MULTICAM, false),
+		] {
+			focus(cx, id);
+			assert_eq!(cx.read(|app| root.read(app).focused_panel), Some(id));
+			assert_eq!(
+				handles(cx, ActionId::PlayPause),
+				handles_transport,
+				"PlayPause handling for panel {}",
+				id.raw()
+			);
+			pause(cx);
+		}
+
+		// The timeline handles the editing commands the others decline.
+		focus(cx, TIMELINE);
+		assert!(handles(cx, ActionId::SelectAll));
+		assert!(handles(cx, ActionId::DeselectAll));
+		focus(cx, PROJECT);
+		assert!(!handles(cx, ActionId::SelectAll));
+
+		// The multicam panel handles the source-switch hotkeys; the
+		// timeline declines them (the shell's fall-through no-op).
+		focus(cx, MULTICAM);
+		assert!(handles(cx, ActionId::MulticamSwitch1));
+		assert!(handles(cx, ActionId::MulticamSwitchNoSplit9));
+		focus(cx, TIMELINE);
+		assert!(!handles(cx, ActionId::MulticamSwitch1));
+
+		// An id outside the nine panel ids declines.
+		focus(cx, PanelId::new(250));
+		assert!(!handles(cx, ActionId::PlayPause));
+	}
+
+	/// The shell's subscriptions: a menu-bar trigger routes through
+	/// `on_menu`, the timeline's selection event reaches the engine, the
+	/// project explorer's requests open their dialogs / call the engine,
+	/// the viewer panels' events drive the work area and full screen, and a
+	/// project panel's context-menu trigger points the focused-panel routing
+	/// at that panel before dispatching.
+	#[gpui::test]
+	async fn shell_subscriptions_route_panel_events(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let close_modal = |cx: &mut TestAppContext| {
+			cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+			cx.run_until_parked();
+		};
+		let step_to = |cx: &mut TestAppContext, frame: i64| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.engine.update(cx, |engine, cx| {
+						engine.request_frame(Monitor::Program, Frame(frame), cx)
+					});
+				})
+			});
+			cx.run_until_parked();
+		};
+
+		// The menu bar's own Triggered event routes through the shell's
+		// `on_menu` (the same path a click takes).
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let menu_bar = app.menu_bar.clone();
+				menu_bar.update(cx, |_bar, cx| {
+					cx.emit(MenuBarEvent::Triggered {
+						control: 1,
+						item: menu_ids::FOCUS_HISTORY,
+						label: "窗口".into(),
+					});
+				});
+			});
+		});
+		cx.run_until_parked();
+		assert!(
+			!cx.read(|app| root.read(app).dock.read(app).is_docked(HISTORY)),
+			"the menu-bar trigger toggled the history panel"
+		);
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_menu(menu_ids::FOCUS_HISTORY, cx);
+			})
+		});
+		cx.run_until_parked();
+
+		// The timeline's SelectionChanged forwards the widget selection to
+		// the engine and applies the event.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let timeline = app.timeline.clone();
+				timeline.update(cx, |view, cx| {
+					view.state.select_range([ClipId(1)]);
+					cx.emit(TimelineEvent::SelectionChanged);
+				});
+			});
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| root.read(app).timeline.read(app).state.is_selected(ClipId(1))),
+			"the selection survives the event round trip"
+		);
+
+		// Project explorer requests.
+		let project = cx.read(|app| root.read(app).panels.project.clone());
+		// Delete goes straight to the engine.
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::DeleteRequested(3))
+			});
+		});
+		cx.run_until_parked();
+		// Rename opens the rename prompt for the entry.
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::RenameRequested(3))
+			});
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			&root.read(app).modal,
+			ModalState::EntryRename { entry_id: 3, .. }
+		)));
+		close_modal(cx);
+		// A sequence's properties dialog.
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::SequencePropertiesRequested(4))
+			});
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::SequenceProperties { .. }
+		)));
+		close_modal(cx);
+		// Export-sequence opens the export dialog with that entry picked.
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::ExportSequenceRequested(4))
+			});
+		});
+		cx.run_until_parked();
+		let selected = cx.read(|app| match &root.read(app).modal {
+			ModalState::Export { content, .. } => content.read(app).selected_sequence(app),
+			_ => None,
+		});
+		assert_eq!(selected, Some(4));
+		close_modal(cx);
+		// New sequence opens the seeded dialog.
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::NewSequenceRequested)
+			});
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::NewSequence { .. }
+		)));
+		close_modal(cx);
+		// Add text footage calls the engine.
+		let text_before = cx.read(|app| root.read(app).engine.read(app).text_footages().len());
+		cx.update(|app| {
+			project.update(app, |_panel, cx| {
+				cx.emit(crate::panels::project_explorer::NewTextFootageRequested)
+			});
+		});
+		cx.run_until_parked();
+		assert_eq!(
+			cx.read(|app| root.read(app).engine.read(app).text_footages().len()),
+			text_before + 1
+		);
+
+		// The viewer panels' shell-level events act on the shared work area
+		// (both monitors) and the window's full screen.
+		let workarea =
+			|cx: &TestAppContext| cx.read(|app| root.read(app).engine.read(app).workarea());
+		{
+			let source_viewer = cx.read(|app| root.read(app).panels.source_viewer.clone());
+			step_to(cx, 5);
+			cx.update(|app| {
+				source_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::SetInPoint)
+				})
+			});
+			cx.run_until_parked();
+			assert_eq!(workarea(cx).map(|(start, _)| start), Some(Frame(5)));
+			step_to(cx, 9);
+			cx.update(|app| {
+				source_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::SetOutPoint)
+				})
+			});
+			cx.run_until_parked();
+			assert_eq!(workarea(cx).map(|(_, end)| end), Some(Frame(9)));
+			cx.update(|app| {
+				source_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::ClearRange)
+				})
+			});
+			cx.run_until_parked();
+			assert!(workarea(cx).is_none(), "ClearRange clears the work area");
+			cx.update(|app| {
+				source_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::FullScreenRequested)
+				})
+			});
+			cx.run_until_parked();
+			// Toggle back so the window state stays neutral.
+			cx.update(|app| root.update(app, |app, cx| app.toggle_full_screen(cx)));
+			cx.run_until_parked();
+		}
+		{
+			let program_viewer = cx.read(|app| root.read(app).panels.program_viewer.clone());
+			step_to(cx, 7);
+			cx.update(|app| {
+				program_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::SetInPoint)
+				})
+			});
+			cx.run_until_parked();
+			assert_eq!(workarea(cx).map(|(start, _)| start), Some(Frame(7)));
+			cx.update(|app| {
+				program_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::ClearRange)
+				})
+			});
+			cx.run_until_parked();
+			cx.update(|app| {
+				program_viewer.update(app, |_panel, cx| {
+					cx.emit(menu::ViewerPanelEvent::FullScreenRequested)
+				})
+			});
+			cx.run_until_parked();
+			cx.update(|app| root.update(app, |app, cx| app.toggle_full_screen(cx)));
+			cx.run_until_parked();
+		}
+
+		// A context-menu trigger points the focused-panel target at the
+		// panel that was right-clicked, then dispatches like a menu click.
+		assert!(cx.read(|app| root.read(app).dock.read(app).is_docked(INSPECTOR)));
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let project = app.panels.project.clone();
+				project.update(cx, |_panel, cx| {
+					cx.emit(menu::ContextMenuTriggered {
+						item: menu_ids::FOCUS_INSPECTOR,
+					});
+				});
+			});
+		});
+		cx.run_until_parked();
+		assert_eq!(
+			cx.read(|app| root.read(app).focused_panel),
+			Some(PROJECT),
+			"the right-clicked panel becomes the routing target"
+		);
+		assert!(
+			!cx.read(|app| root.read(app).dock.read(app).is_docked(INSPECTOR)),
+			"the triggered item dispatched through the menu path"
+		);
+	}
+
+	/// `on_menu` special-cases the dynamic language items (index-based,
+	/// switching the UI language live) and logs unknown ids without
+	/// dispatching anything.
+	#[gpui::test]
+	async fn on_menu_switches_language_and_ignores_unknown_ids(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let languages = crate::i18n::available_languages();
+		assert!(languages.len() >= 2, "the test ships at least two packs");
+		let first = languages[0].clone();
+
+		// A valid language item index switches the language and rebuilds
+		// the menu bar in the new language.
+		let menu_before = cx.read(|app| root.read(app).menu_bar.entity_id());
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_menu(menu::LANG_ITEM_BASE, cx))
+		});
+		cx.run_until_parked();
+		assert_eq!(crate::i18n::language_code(), first);
+		assert_ne!(
+			cx.read(|app| root.read(app).menu_bar.entity_id()),
+			menu_before,
+			"the language switch rebuilds the menu bar"
+		);
+
+		// An index past the discovered packs returns early without
+		// switching (still inside the language range).
+		let current = crate::i18n::language_code();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_menu(menu::LANG_ITEM_BASE + languages.len() + 4, cx)
+			})
+		});
+		cx.run_until_parked();
+		assert_eq!(crate::i18n::language_code(), current);
+
+		// Unknown ids (outside the language range, and the hidden menu id
+		// the multicam hotkeys use) are logged and ignored.
+		let menu_before = cx.read(|app| root.read(app).menu_bar.entity_id());
+		for id in [usize::MAX, crate::actions::HIDDEN_MENU_ID, 5_000] {
+			cx.update(|app| root.update(app, |app, cx| app.on_menu(id, cx)));
+			cx.run_until_parked();
+		}
+		assert_eq!(
+			cx.read(|app| root.read(app).menu_bar.entity_id()),
+			menu_before,
+			"unknown menu ids do not rebuild the menu bar"
+		);
+
+		crate::i18n::set_language_code("en-US");
+	}
+
+	/// `on_file_paths` routes every [`FileAction`] through the engine: open
+	/// / import (multiple, empty, and manager import) / project export /
+	/// export-to-file, including the early-return guards and the manager
+	/// error path.
+	#[gpui::test]
+	async fn on_file_paths_routes_every_file_action(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let paths = |cx: &mut TestAppContext, action: FileAction, picked: Vec<PathBuf>| {
+			cx.update(|app| {
+				root.update(app, |app, cx| app.on_file_paths(action, picked, cx))
+			});
+			cx.run_until_parked();
+		};
+		let imported =
+			|cx: &TestAppContext| cx.read(|app| root.read(app).engine.read(app).imported_footage().to_vec());
+
+		// Import: every picked path lands in the engine; an empty list is a
+		// silent no-op.
+		paths(
+			cx,
+			FileAction::ImportFootage,
+			vec![PathBuf::from("/media/a.mov"), PathBuf::from("/media/b.wav")],
+		);
+		assert_eq!(imported(cx).len(), 2);
+		paths(cx, FileAction::ImportFootage, Vec::new());
+		assert_eq!(imported(cx).len(), 2);
+
+		// Open: the first path becomes the project; an empty list no-ops.
+		paths(cx, FileAction::Open, vec![PathBuf::from("/projects/opened.ove")]);
+		let name = cx.read(|app| {
+			root.read(app)
+				.engine
+				.read(app)
+				.project()
+				.map(|project| project.name.clone())
+				.unwrap_or_default()
+		});
+		assert_eq!(name, "opened");
+		paths(cx, FileAction::Open, Vec::new());
+
+		// Export to file: routed to the engine (the mock logs it).
+		paths(
+			cx,
+			FileAction::ExportProjectFile,
+			vec![PathBuf::from("/projects/out.ove")],
+		);
+		paths(cx, FileAction::ExportProjectFile, Vec::new());
+
+		// Manager import: a valid path reloads the manager list; a path
+		// with no file stem fails and stays in the manager; an empty list
+		// returns early.
+		let content = open_manager(cx, &root);
+		let before = manager_rows(cx, &content).len();
+		paths(cx, FileAction::ImportProject, vec![PathBuf::from("/library/新片.ove")]);
+		assert_eq!(manager_rows(cx, &content).len(), before + 1);
+		paths(cx, FileAction::ImportProject, vec![PathBuf::from("/")]);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })),
+			"a failed import keeps the manager open"
+		);
+		paths(cx, FileAction::ImportProject, Vec::new());
+
+		// Manager export: missing pending row / missing path are early
+		// returns; a known row records the export; an unknown row reports
+		// in the manager's status (the manager stays open).
+		paths(cx, FileAction::ExportProject, vec![PathBuf::from("/library/row.ove")]);
+		cx.update(|app| {
+			root.update(app, |app, _cx| app.pending_export = Some("missing".into()))
+		});
+		paths(cx, FileAction::ExportProject, Vec::new());
+		cx.update(|app| {
+			root.update(app, |app, _cx| app.pending_export = Some("missing".into()))
+		});
+		paths(cx, FileAction::ExportProject, vec![PathBuf::from("/library/bad.ove")]);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+		let row_uuid = manager_rows(cx, &content)[0].uuid.clone();
+		cx.update(|app| {
+			root.update(app, |app, _cx| app.pending_export = Some(row_uuid.clone()))
+		});
+		paths(cx, FileAction::ExportProject, vec![PathBuf::from("/library/good.ove")]);
+		let exported = cx.read(|app| root.read(app).engine.read(app).library_exported().to_vec());
+		assert_eq!(
+			exported,
+			vec![(row_uuid, PathBuf::from("/library/good.ove"))]
+		);
+
+		// The generic file dialog ignores the manager's export action (its
+		// prompt path lives in `open_manager_export`).
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.open_file_dialog(FileAction::ExportProject, cx)
+			})
+		});
+		cx.run_until_parked();
+		assert!(!cx.did_prompt_for_new_path());
+	}
+
+	/// The manager's error / back-out paths: an invalid uuid keeps the
+	/// manager open with a status line (open / duplicate), the rename and
+	/// delete confirmations return to the manager on both confirm and
+	/// cancel, and the manager helpers are no-ops without a manager.
+	#[gpui::test]
+	async fn manager_error_paths_and_back_navigation(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+		use crate::manager::ManagerEvent;
+
+		let content = open_manager(cx, &root);
+
+		// Re-entrant open just reloads the list.
+		cx.update(|app| root.update(app, |app, cx| app.show_project_manager(cx)));
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Opening an unknown row fails and keeps the manager.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Open("no-such-row".into()), cx)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Duplicating an unknown row fails the same way.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Duplicate("no-such-row".into()), cx)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Rename: the prompt is prefilled with the selected row's name;
+		// an empty value backs out without an engine call.
+		let uuid = manager_rows(cx, &content)[0].uuid.clone();
+		cx.update(|app| content.update(app, |manager, cx| manager.select(&uuid, cx)));
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Rename(uuid.clone()), cx)
+			})
+		});
+		cx.run_until_parked();
+		let prompt = cx.read(|app| match &root.read(app).modal {
+			ModalState::ManagerRename {
+				content,
+				uuid: prompt_uuid,
+				..
+			} => {
+				assert_eq!(prompt_uuid, &uuid);
+				content.clone()
+			}
+			_ => panic!("the rename prompt should be open"),
+		});
+		assert_eq!(
+			cx.read(|app| prompt.read(app).value(app).to_string()),
+			manager_rows(cx, &content)[0].name,
+			"the prompt is prefilled with the selected name"
+		);
+		cx.update(|app| prompt.update(app, |prompt, cx| prompt.set_value("", cx)));
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::MANAGER_RENAME,
+						button: 0,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Rename of an unknown uuid: the error backs out to the manager.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Rename("no-such-row".into()), cx)
+			})
+		});
+		cx.run_until_parked();
+		let prompt = cx.read(|app| match &root.read(app).modal {
+			ModalState::ManagerRename { content, .. } => content.clone(),
+			_ => panic!("the rename prompt should be open"),
+		});
+		cx.update(|app| prompt.update(app, |prompt, cx| prompt.set_value("改", cx)));
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::MANAGER_RENAME,
+						button: 0,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Cancelling the rename prompt returns to the manager.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Rename(uuid.clone()), cx)
+			})
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::MANAGER_RENAME,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Delete of an unknown uuid reports and backs out.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Delete("no-such-row".into()), cx)
+			})
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::MANAGER_DELETE,
+						button: 0,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// Cancelling the delete confirmation also returns to the manager.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_manager_event(&ManagerEvent::Delete(uuid.clone()), cx)
+			})
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::MANAGER_DELETE,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+
+		// With no manager, the helpers are silent no-ops.
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+		cx.update(|app| root.update(app, |app, cx| app.manager_status("orphan".into(), cx)));
+		cx.update(|app| root.update(app, |app, cx| app.reload_manager(cx)));
+		assert!(cx.read(|app| root.read(app).manager_selected_name(app)).is_none());
+	}
+
+	/// The preferences dialog's events reach the shell: theme changes apply,
+	/// language / shortcut changes rebuild the menu bar, display-color
+	/// changes re-tag the windows, and closing commits the dialog's text
+	/// fields.
+	#[gpui::test]
+	async fn preferences_events_reach_the_shell(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _theme = ConfigGuard::pin(crate::oakui::real::CONFIG_KEY_THEME);
+		let (_window, root) = mock_shell(cx);
+		crate::actions::reset_all_custom_shortcuts();
+
+		cx.update(|app| root.update(app, |app, cx| app.open_preferences(cx)));
+		cx.run_until_parked();
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::Preferences { content, .. } => content.clone(),
+			_ => panic!("the preferences modal should be open"),
+		});
+
+		// ThemeChanged applies the theme immediately.
+		cx.update(|app| {
+			content.update(app, |_content, cx| {
+				cx.emit(crate::dialogs::PreferencesEvent::ThemeChanged(false))
+			})
+		});
+		cx.run_until_parked();
+		assert!(!cx.read(|app| root.read(app).dark));
+		cx.update(|app| {
+			content.update(app, |_content, cx| {
+				cx.emit(crate::dialogs::PreferencesEvent::ThemeChanged(true))
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| root.read(app).dark));
+
+		// LanguageChanged rebuilds the menu bar.
+		let menu_before = cx.read(|app| root.read(app).menu_bar.entity_id());
+		cx.update(|app| {
+			content.update(app, |_content, cx| {
+				cx.emit(crate::dialogs::PreferencesEvent::LanguageChanged)
+			})
+		});
+		cx.run_until_parked();
+		assert_ne!(
+			cx.read(|app| root.read(app).menu_bar.entity_id()),
+			menu_before
+		);
+
+		// ShortcutsChanged re-binds the key map and rebuilds the menu bar.
+		crate::actions::set_custom_shortcut("snapping", vec!["f5".to_string()]);
+		let menu_before = cx.read(|app| root.read(app).menu_bar.entity_id());
+		cx.update(|app| {
+			content.update(app, |_content, cx| {
+				cx.emit(crate::dialogs::PreferencesEvent::ShortcutsChanged)
+			})
+		});
+		cx.run_until_parked();
+		assert_ne!(
+			cx.read(|app| root.read(app).menu_bar.entity_id()),
+			menu_before
+		);
+		assert_eq!(
+			crate::actions::effective_keys(ActionId::Snapping.entry()),
+			vec!["f5".to_string()],
+			"the override stays live through the rebind"
+		);
+		crate::actions::reset_all_custom_shortcuts();
+
+		// DisplayColorChanged re-declares the policy on every window.
+		cx.update(|app| {
+			content.update(app, |_content, cx| {
+				cx.emit(crate::dialogs::PreferencesEvent::DisplayColorChanged)
+			})
+		});
+		cx.run_until_parked();
+
+		// The primary button commits + closes; the dismissed event does the
+		// same through the other route.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::PREFERENCES,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		cx.update(|app| root.update(app, |app, cx| app.open_preferences(cx)));
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::PREFERENCES,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+	}
+
+	/// The drop-onto-empty-timeline flow: the choice dialog pauses the drop,
+	/// "use footage params" resumes it through the engine, the manual path
+	/// re-stashes it behind the new-sequence dialog, and cancel / Escape
+	/// abandon it. A drop arriving while another modal is up goes straight
+	/// to the engine's probe path.
+	#[gpui::test]
+	async fn drop_sequence_choice_routes_the_paused_drop(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+		let drop = FootageDropNeedsSequence {
+			footage_id: 3,
+			track_kind: gpui::timeline::TrackKind::Video,
+			track_index: 0,
+			time: Frame(10),
+		};
+		let drops = |cx: &TestAppContext| {
+			cx.read(|app| root.read(app).engine.read(app).footage_drops().len())
+		};
+		let pending =
+			|cx: &TestAppContext| cx.read(|app| root.read(app).pending_drop.is_some());
+
+		// A modal is already up: the drop resumes through the probe path
+		// without a choice dialog.
+		cx.update(|app| root.update(app, |app, cx| app.open_preferences(cx)));
+		cx.run_until_parked();
+		let before = drops(cx);
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+		});
+		cx.run_until_parked();
+		assert_eq!(drops(cx), before + 1);
+		assert!(!pending(cx));
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// No modal: the choice dialog pauses the drop.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::DropSequenceChoice { .. }
+		)));
+		assert!(pending(cx));
+
+		// "Use footage params": the drop reaches the engine and closes.
+		let before = drops(cx);
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::DROP_SEQUENCE_CHOICE,
+						button: 0,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert_eq!(drops(cx), before + 1);
+		assert!(!pending(cx));
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// "Specify manually": the new-sequence dialog opens with the drop
+		// still paused.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::DROP_SEQUENCE_CHOICE,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::NewSequence { .. }
+		)));
+		assert!(pending(cx));
+
+		// Cancelling the manual dialog abandons the drop.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::NEW_SEQUENCE,
+						button: 1,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(!pending(cx));
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// The choice dialog's cancel button abandons the drop too.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::DROP_SEQUENCE_CHOICE,
+						button: 2,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(!pending(cx));
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// Escape on the choice dialog abandons the paused drop as well.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::DROP_SEQUENCE_CHOICE,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(!pending(cx));
+
+		// Resolving with no paused drop just closes; resuming with none is
+		// a no-op.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.resolve_drop_sequence_choice(DropSequenceChoice::UseFootageParams, cx)
+			})
+		});
+		cx.update(|app| root.update(app, |app, cx| app.resume_pending_drop(cx)));
+
+		// Escape from the manual new-sequence dialog (or the choice dialog)
+		// abandons a paused drop.
+		cx.update(|app| {
+			root.update(app, |app, _cx| app.pending_drop = Some(drop))
+		});
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::NEW_SEQUENCE,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(!pending(cx));
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+	}
+
+	/// Every guarded dialog opener declines while another modal is up: the
+	/// preferences modal stays the only modal through the whole sweep.
+	#[gpui::test]
+	async fn modal_openers_are_guarded_while_a_modal_is_up(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		cx.update(|app| root.update(app, |app, cx| app.open_preferences(cx)));
+		cx.run_until_parked();
+		let preferences_still_up = |cx: &TestAppContext| {
+			cx.read(|app| matches!(root.read(app).modal, ModalState::Preferences { .. }))
+		};
+		assert!(preferences_still_up(cx));
+
+		let openers: [AppFn; 12] = [
+			|app, cx| app.open_new_project(cx),
+			|app, cx| app.open_new_sequence(cx),
+			|app, cx| app.open_about(cx),
+			|app, cx| app.open_proxy_dialog(cx),
+			|app, cx| app.open_project_properties(cx),
+			|app, cx| app.open_multicam_wizard(cx),
+			|app, cx| app.open_export_project_dfd(cx),
+			|app, cx| app.open_save_as(cx),
+			|app, cx| app.open_action_search(cx),
+			|app, cx| app.open_sequence_properties(4, cx),
+			|app, cx| app.open_entry_rename(3, cx),
+			|app, cx| app.open_new_sequence(cx),
+		];
+		for opener in openers {
+			cx.update(|app| root.update(app, opener));
+			cx.run_until_parked();
+			assert!(
+				preferences_still_up(cx),
+				"a guarded opener must not replace the open modal"
+			);
+		}
+
+		// Escape closes preferences and the guards lift.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::Dismissed {
+						control: modal_ids::PREFERENCES,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+	}
+
+	/// 窗口 → panel while the panel is torn off closes its floating window
+	/// for good; a second click re-opens it at its recorded position, and
+	/// unknown panel ids are silent no-ops through every toggle path.
+	#[gpui::test]
+	async fn window_toggle_closes_floating_panels_and_ignores_unknown_ids(
+		cx: &mut TestAppContext,
+	) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		// Tear the timeline off into its own window.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let dock = app.dock.clone();
+				dock.update(cx, |dock, cx| {
+					assert!(dock.float_panel(TIMELINE, cx));
+				});
+			})
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| root.read(app).dock.read(app).is_floating(TIMELINE)),
+			"the timeline is floating"
+		);
+
+		// The 窗口 item closes the floating window for good.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_menu(menu_ids::FOCUS_TIMELINE, cx))
+		});
+		cx.run_until_parked();
+		assert!(
+			!cx.read(|app| root.read(app).dock.read(app).is_panel_visible(TIMELINE)),
+			"the floating timeline is closed"
+		);
+
+		// A second click re-opens it at its last known position.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_menu(menu_ids::FOCUS_TIMELINE, cx))
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| root.read(app).dock.read(app).is_panel_visible(TIMELINE)),
+			"the timeline comes back"
+		);
+
+		// Unknown ids through every path: reopen, toggle, and the direct
+		// dispatch.
+		cx.update(|app| {
+			root.update(app, |app, cx| app.reopen_panel(PanelId::new(250), cx))
+		});
+		cx.update(|app| {
+			root.update(app, |app, cx| app.toggle_panel(PanelId::new(250), cx))
+		});
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.dispatch_action_id(ActionId::FocusMulticam, cx)
+			})
+		});
+		cx.run_until_parked();
+	}
+
+	/// The modal event router's remaining button / dismissed arms: proxy
+	/// generate/delete/close, the multicam wizard's create (rejected and
+	/// accepted), about / project-properties / rename cancellations, the
+	/// new-project and save-as commits, and the project-file export prompt.
+	#[gpui::test]
+	async fn modal_events_route_buttons_and_dismissals(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let click = |cx: &mut TestAppContext, control: usize, button: usize| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.on_modal(&ModalEvent::ButtonClicked { control, button }, cx)
+				})
+			});
+			cx.run_until_parked();
+		};
+		let dismiss = |cx: &mut TestAppContext, control: usize| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.on_modal(&ModalEvent::Dismissed { control }, cx)
+				})
+			});
+			cx.run_until_parked();
+		};
+		let is_modal = |cx: &TestAppContext, f: fn(&ModalState<MockEngine>) -> bool| {
+			cx.read(|app| f(&root.read(app).modal))
+		};
+
+		// --- proxy dialog: generate, delete, then the Close apply path -----
+		cx.update(|app| root.update(app, |app, cx| app.open_proxy_dialog(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::PROXY, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::Proxy { .. })));
+		click(cx, modal_ids::PROXY, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::Proxy { .. })));
+		click(cx, modal_ids::PROXY, 2);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		// And Escape closes without applying.
+		cx.update(|app| root.update(app, |app, cx| app.open_proxy_dialog(cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::PROXY);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- about: OK and the catch-all dismissal --------------------------
+		cx.update(|app| root.update(app, |app, cx| app.open_about(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::ABOUT, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_about(cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::ABOUT);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- multicam wizard -------------------------------------------------
+		cx.update(|app| root.update(app, |app, cx| app.open_multicam_wizard(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::MULTICAM_WIZARD, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		// One angle is below the two-angle minimum: the create is rejected
+		// and the dialog stays up.
+		cx.update(|app| root.update(app, |app, cx| app.open_multicam_wizard(cx)));
+		cx.run_until_parked();
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::MulticamWizard { content, .. } => content.clone(),
+			_ => panic!("the wizard should be open"),
+		});
+		cx.update(|app| content.update(app, |content, cx| content.toggle_row(0, cx)));
+		click(cx, modal_ids::MULTICAM_WIZARD, 0);
+		assert!(
+			is_modal(cx, |m| matches!(m, ModalState::MulticamWizard { .. })),
+			"a single-angle create keeps the wizard open"
+		);
+		// Two angles: the sync + create succeed and the wizard closes.
+		cx.update(|app| content.update(app, |content, cx| content.toggle_row(1, cx)));
+		click(cx, modal_ids::MULTICAM_WIZARD, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- project properties: Cancel and Escape leave without applying ---
+		cx.update(|app| root.update(app, |app, cx| app.open_project_properties(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::PROJECT_PROPERTIES, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_project_properties(cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::PROJECT_PROPERTIES);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- entry rename: OK applies, Cancel and Escape close --------------
+		cx.update(|app| root.update(app, |app, cx| app.open_entry_rename(3, cx)));
+		cx.run_until_parked();
+		// (RenameContent's field has no public setter; OK applies the
+		// prefilled name.)
+		click(cx, modal_ids::RENAME, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_entry_rename(3, cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::RENAME, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_entry_rename(3, cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::RENAME);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- sequence properties: a rejected commit keeps the dialog open ---
+		cx.update(|app| root.update(app, |app, cx| app.open_sequence_properties(4, cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::SEQUENCE_PROPERTIES, 0);
+		assert!(
+			is_modal(cx, |m| matches!(m, ModalState::SequenceProperties { .. })),
+			"the mock engine rejects the commit, so the dialog stays"
+		);
+		click(cx, modal_ids::SEQUENCE_PROPERTIES, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_sequence_properties(4, cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::SEQUENCE_PROPERTIES);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- new project: Cancel leaves the library alone, OK creates ------
+		let rows_before =
+			cx.read(|app| root.read(app).engine.read(app).library_projects().unwrap().len());
+		cx.update(|app| root.update(app, |app, cx| app.open_new_project(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::NEW_PROJECT, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		assert_eq!(
+			cx.read(|app| root.read(app).engine.read(app).library_projects().unwrap().len()),
+			rows_before
+		);
+		cx.update(|app| root.update(app, |app, cx| app.open_new_project(cx)));
+		cx.run_until_parked();
+		let content = cx.read(|app| match &root.read(app).modal {
+			ModalState::NewProject { content, .. } => content.clone(),
+			_ => panic!("the new-project dialog should be open"),
+		});
+		let name = cx.read(|app| content.read(app).name(app).to_string());
+		click(cx, modal_ids::NEW_PROJECT, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		assert_eq!(
+			cx.read(|app| root.read(app).engine.read(app).library_projects().unwrap().len()),
+			rows_before + 1,
+			"OK creates the library row"
+		);
+		assert_eq!(
+			cx.read(|app| root
+				.read(app)
+				.engine
+				.read(app)
+				.project()
+				.map(|project| project.name.clone())
+				.unwrap_or_default()),
+			name,
+			"the created project is open"
+		);
+
+		// --- save as: OK commits (the mock rejects but the dialog closes) ---
+		cx.update(|app| root.update(app, |app, cx| app.open_save_as(cx)));
+		cx.run_until_parked();
+		// (RenameContent's field has no public setter; OK applies the
+		// prefilled "<name> Copy" value.)
+		click(cx, modal_ids::SAVE_AS, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_save_as(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::SAVE_AS, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- export project file: Cancel, Escape, and the system save path -
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_file_paths(FileAction::Open, vec![PathBuf::from("/projects/seq.ove")], cx)
+			})
+		});
+		cx.run_until_parked();
+		cx.update(|app| root.update(app, |app, cx| app.open_export_project_dfd(cx)));
+		cx.run_until_parked();
+		assert_eq!(
+			cx.read(|app| root.read(app).export_suggested_name.clone()),
+			"seq"
+		);
+		click(cx, modal_ids::EXPORT_PROJECT_DFD, 1);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_export_project_dfd(cx)));
+		cx.run_until_parked();
+		dismiss(cx, modal_ids::EXPORT_PROJECT_DFD);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_export_project_dfd(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::EXPORT_PROJECT_DFD, 0);
+		assert!(
+			cx.did_prompt_for_new_path(),
+			"OK asks the system for the output path"
+		);
+		cx.simulate_new_path_selection(|_directory| Some(PathBuf::from("/projects/export.otio")));
+		cx.run_until_parked();
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+
+		// --- manager close button / unknown control id ----------------------
+		cx.update(|app| root.update(app, |app, cx| app.show_project_manager(cx)));
+		cx.run_until_parked();
+		click(cx, modal_ids::MANAGER, 0);
+		assert!(is_modal(cx, |m| matches!(m, ModalState::None)));
+		cx.update(|app| root.update(app, |app, cx| app.open_about(cx)));
+		cx.run_until_parked();
+		click(cx, 9_999, 0);
+		assert!(
+			is_modal(cx, |m| matches!(m, ModalState::About { .. })),
+			"an unknown control id is ignored"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+	}
+
+	/// A shell started with a CLI project path and the persisted light theme:
+	/// `OakApp::new` takes the light branch, opens the path, and one tick
+	/// drives the whole animation-frame body.
+	#[gpui::test]
+	async fn app_starts_with_an_initial_path_and_the_light_theme(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _theme = ConfigGuard::pin(crate::oakui::real::CONFIG_KEY_THEME);
+		crate::oakui::real::set_theme_dark(false);
+
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(1600.0), px(900.0)), |window, cx| {
+			OakApp::<MockEngine>::new(window, Some(PathBuf::from("/projects/oak-cli.ove")), cx)
+		});
+		cx.run_until_parked();
+		let root = window.root(cx).expect("app root");
+
+		assert!(
+			!cx.read(|app| root.read(app).dark),
+			"the persisted light theme wins"
+		);
+		let name = cx.read(|app| {
+			root.read(app)
+				.engine
+				.read(app)
+				.project()
+				.map(|project| project.name.clone())
+				.unwrap_or_default()
+		});
+		assert_eq!(name, "oak-cli", "the CLI-provided path was opened");
+
+		// One tick: engine advance, playhead sync, work-area mirror, meter,
+		// export + plugin drains, repaint.
+		let before = cx.read(|app| root.read(app).program_clock.read(app).current_frame());
+		cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+		cx.run_until_parked();
+		let after = cx.read(|app| root.read(app).program_clock.read(app).current_frame());
+		assert_eq!(before, after, "a paused clock does not move on tick");
+
+		// Let the spawned 60Hz loop fire once: the timer body (monitor poll
+		// + tick) runs on the simulated clock.
+		cx.executor().advance_clock(Duration::from_millis(40));
+		cx.run_until_parked();
+		assert_eq!(
+			cx.read(|app| root.read(app).program_clock.read(app).current_frame()),
+			after,
+			"the tick-loop body ran without moving a paused clock"
+		);
+
+		// Restore the process-global theme colors for the other tests.
+		cx.update(|app| root.update(app, |app, cx| app.apply_dark(true, cx)));
+		cx.run_until_parked();
+	}
+
+	/// Clicking a track header selects the track, so 序列 → 删除轨道 removes
+	/// exactly that track through the engine.
+	#[gpui::test]
+	async fn removing_a_selected_track_deletes_it(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (window, root) = mock_shell(cx);
+		let mut vcx = VisualTestContext::from_window(window.into(), cx);
+
+		// The track headers column starts at the timeline body's left edge;
+		// the first track row sits below the ruler (same geometry the
+		// footage-drag test uses).
+		let canvas = vcx
+			.debug_bounds("timeline-canvas")
+			.expect("timeline body rendered");
+		let header = gpui::point(
+			canvas.left() + px(gpui::timeline::HEADER_WIDTH / 2.0),
+			canvas.top() + px(gpui::timeline::RULER_HEIGHT + 20.0),
+		);
+		vcx.simulate_click(header, gpui::Modifiers::none());
+		drop(vcx);
+		cx.run_until_parked();
+
+		assert!(
+			cx.read(|app| !root.read(app).timeline.read(app).selected_tracks().is_empty()),
+			"the click selected the track"
+		);
+		let before = cx.read(|app| root.read(app).engine.read(app).track_count());
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.dispatch_action_id(ActionId::RemoveTrack, cx)
+			})
+		});
+		cx.run_until_parked();
+		assert_eq!(
+			cx.read(|app| root.read(app).engine.read(app).track_count()),
+			before - 1,
+			"the selected track is removed"
+		);
+	}
+
+	/// `build_root` constructs the shell entity for the selected backend and
+	/// opens a CLI-provided path.
+	#[gpui::test]
+	async fn build_root_constructs_the_shell(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, _shell) = mock_shell(cx);
+		let built = cx
+			.update_window(_window.into(), |_root, window, app| {
+				build_root::<MockEngine>(window, Some(PathBuf::from("/projects/built.ove")), app)
+			})
+			.expect("window is still open");
+		cx.run_until_parked();
+		let name = cx.read(|app| {
+			built
+				.read(app)
+				.engine
+				.read(app)
+				.project()
+				.map(|project| project.name.clone())
+				.unwrap_or_default()
+		});
+		assert_eq!(name, "built", "the built shell opened its initial path");
+	}
+
+	/// The argument parser's help / unknown-flag handling: `--help` / `-h`
+	/// are skipped, later positionals are logged and ignored, and the
+	/// `OAK_ENGINE` override matches case-insensitively.
+	#[test]
+	fn app_args_help_and_unknown_flags() {
+		let parse = |argv: &[&str], env: Option<&str>| {
+			AppArgs::parse_args(argv.iter().map(std::ffi::OsString::from), env)
+		};
+
+		let a = parse(&["--help", "/tmp/h.ove", "--mock", "--bogus"], None);
+		assert_eq!(a.project, Some(PathBuf::from("/tmp/h.ove")));
+		assert!(a.mock, "--mock wins even after --help");
+		assert!(a.project.as_ref().unwrap().to_string_lossy().contains("h.ove"));
+
+		let b = parse(&["-h", "/tmp/h.ove"], None);
+		assert_eq!(b.project, Some(PathBuf::from("/tmp/h.ove")));
+		assert!(!b.mock);
+
+		let c = parse(&[], Some("MoCk"));
+		assert!(c.mock, "the env override is case-insensitive");
+		assert!(c.project.is_none());
+	}
+
+	/// `from_env` reads the process arguments (the test binary's own argv
+	/// carries no `--help`, or the harness would not run this test).
+	#[test]
+	fn app_args_from_env_is_safe_without_flags() {
+		let args = AppArgs::from_env();
+		// `--mock` may or may not be present depending on the harness — the
+		// call must simply parse without exiting.
+		let _ = args.project;
+	}
+
+	/// The subscriptions that only exist after a rebuild / on a panel
+	/// entity: the rebuilt menu bar's trigger, the timeline's
+	/// footage-drop-needs-sequence request, and the manager content's
+	/// request events.
+	#[gpui::test]
+	async fn rebuilt_subscriptions_route_their_events(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		// Rebuild the menu bar (a fresh entity with a fresh subscription)
+		// and fire its Triggered event: the item routes through on_menu.
+		cx.update(|app| root.update(app, |app, cx| app.rebuild_menu_bar(cx)));
+		cx.run_until_parked();
+		assert!(cx.read(|app| root.read(app).dock.read(app).is_docked(HISTORY)));
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let menu_bar = app.menu_bar.clone();
+				menu_bar.update(cx, |_bar, cx| {
+					cx.emit(MenuBarEvent::Triggered {
+						control: 1,
+						item: menu_ids::FOCUS_HISTORY,
+						label: "窗口".into(),
+					});
+				});
+			});
+		});
+		cx.run_until_parked();
+		assert!(
+			!cx.read(|app| root.read(app).dock.read(app).is_docked(HISTORY)),
+			"the rebuilt menu bar's trigger reaches on_menu"
+		);
+
+		// The timeline panel's footage-drop request pauses the drop behind
+		// the choice dialog.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				let timeline = app.panels.timeline.clone();
+				timeline.update(cx, |_panel, cx| {
+					cx.emit(FootageDropNeedsSequence {
+						footage_id: 3,
+						track_kind: gpui::timeline::TrackKind::Video,
+						track_index: 0,
+						time: Frame(0),
+					});
+				});
+			});
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(
+			root.read(app).modal,
+			ModalState::DropSequenceChoice { .. }
+		)));
+		assert!(cx.read(|app| root.read(app).pending_drop.is_some()));
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// The manager content emits its requests: Create routes through the
+		// shell subscription and closes the dialog.
+		let content = open_manager(cx, &root);
+		let before = manager_rows(cx, &content).len();
+		cx.update(|app| {
+			content.update(app, |_manager, cx| {
+				cx.emit(crate::manager::ManagerEvent::Create)
+			});
+		});
+		cx.run_until_parked();
+		let rows = cx.read(|app| root.read(app).engine.read(app).library_projects().unwrap());
+		assert_eq!(rows.len(), before + 1, "the manager's Create reached the engine");
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+	}
+
+	/// Every `on_modal` arm whose modal state does not match is inert (a
+	/// click on a control with no dialog, a direct confirmation call, an
+	/// unknown control id), and a dismissed manager sub-dialog with no
+	/// manager falls back to opening it.
+	#[gpui::test]
+	async fn on_modal_state_mismatches_are_inert(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let click = |cx: &mut TestAppContext, control: usize, button: usize| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.on_modal(&ModalEvent::ButtonClicked { control, button }, cx)
+				})
+			});
+			cx.run_until_parked();
+		};
+		let dismiss = |cx: &mut TestAppContext, control: usize| {
+			cx.update(|app| {
+				root.update(app, |app, cx| {
+					app.on_modal(&ModalEvent::Dismissed { control }, cx)
+				})
+			});
+			cx.run_until_parked();
+		};
+		let none = |cx: &TestAppContext| cx.read(|app| matches!(root.read(app).modal, ModalState::None));
+
+		for (control, button) in [
+			(modal_ids::EXPORT, 0),
+			(modal_ids::EXPORT_PROGRESS, 1),
+			(modal_ids::PLUGIN_PROGRESS, 1),
+			(modal_ids::PREFERENCES, 0),
+			(modal_ids::MANAGER, 0),
+			(modal_ids::MANAGER_RENAME, 0),
+			(modal_ids::MANAGER_DELETE, 0),
+			(modal_ids::PROXY, 0),
+			(modal_ids::PROJECT_PROPERTIES, 0),
+			(modal_ids::NEW_SEQUENCE, 0),
+			(modal_ids::MULTICAM_WIZARD, 0),
+			(modal_ids::RENAME, 0),
+			(modal_ids::EXPORT_PROJECT_DFD, 1),
+			(modal_ids::NEW_PROJECT, 0),
+			(modal_ids::SAVE_AS, 0),
+			(modal_ids::SEQUENCE_PROPERTIES, 0),
+			(9_999, 0),
+		] {
+			click(cx, control, button);
+			assert!(none(cx), "control {control} is inert without its modal");
+		}
+
+		// The direct confirmation helpers guard on the modal state too.
+		cx.update(|app| root.update(app, |app, cx| app.confirm_manager_rename(cx)));
+		cx.update(|app| root.update(app, |app, cx| app.confirm_manager_delete(cx)));
+		assert!(none(cx));
+
+		// Dismissing a manager sub-dialog with no manager opens it.
+		dismiss(cx, modal_ids::MANAGER_RENAME);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+		dismiss(cx, modal_ids::MANAGER_DELETE);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::Manager { .. })));
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+	}
+
+	/// The export and plugin progress drains when their dialogs are not the
+	/// current modal: progress events update nothing and no dialog opens,
+	/// completion still clears the state.
+	#[gpui::test]
+	async fn progress_drains_without_their_dialogs(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		// A synthetic export session whose Progress arrives with no
+		// progress dialog: the event is drained, the session stays.
+		let (tx, rx) = mpsc::channel::<crate::oakui::ExportEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.export = Some(ExportRun {
+					session: ExportSession {
+						events: rx,
+						cancel: Box::new(|| {}),
+					},
+				});
+			});
+		});
+		tx.send(crate::oakui::ExportEvent::Progress(0.5)).unwrap();
+		cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+		cx.run_until_parked();
+		assert!(cx.read(|app| root.read(app).export.is_some()));
+		tx.send(crate::oakui::ExportEvent::Finished(true, String::new()))
+			.unwrap();
+		cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+		cx.run_until_parked();
+		assert!(cx.read(|app| root.read(app).export.is_none()));
+
+		// Plugin progress with the open flag set but no progress modal: the
+		// fraction updates nothing, no dialog is opened; completion clears
+		// the orphaned flag.
+		let (ptx, prx) = mpsc::channel::<crate::oakui::ofx::PluginProgressEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.plugin_progress_rx = Mutex::new(prx);
+				app.plugin_progress_open = true;
+			});
+		});
+		let event = |fraction: f64| crate::oakui::ofx::PluginProgressEvent {
+			label: "OakOFX Render".into(),
+			message: "frame".into(),
+			fraction,
+		};
+		ptx.send(event(0.4)).unwrap();
+		cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+		cx.run_until_parked();
+		assert!(cx.read(|app| root.read(app).plugin_progress_open));
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		ptx.send(event(1.0)).unwrap();
+		cx.update(|app| root.update(app, |app, cx| app.tick(cx)));
+		cx.run_until_parked();
+		assert!(!cx.read(|app| root.read(app).plugin_progress_open));
+	}
+
+	/// Selection-derived work area bounds, the unknown panel's default dock
+	/// target, the save-as name's extension strip and the export path
+	/// fallback for a nameless sequence.
+	#[gpui::test]
+	async fn selection_bounds_save_as_and_export_defaults(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		// Select every clip: the work-area range is their bounding span.
+		cx.update(|app| root.update(app, |app, cx| app.select_all_clips(cx)));
+		cx.run_until_parked();
+		let range = cx.read(|app| root.read(app).selection_workarea_range(app));
+		assert_eq!(range.0, Frame(0));
+		assert_eq!(range.1, Frame(600), "the longest demo clip ends at 600");
+		// Nothing selected: one frame at the playhead.
+		cx.update(|app| root.update(app, |app, cx| app.deselect_all_clips(cx)));
+		cx.run_until_parked();
+		let range = cx.read(|app| root.read(app).selection_workarea_range(app));
+		assert_eq!(range, (Frame(0), Frame(1)));
+
+		// An unknown panel id falls back to the project bin's center.
+		let target = default_dock_target(PanelId::new(250)).expect("fallback target");
+		assert_eq!(target.panel, Some(PROJECT));
+		assert_eq!(target.zone, DropZone::Center);
+
+		// Save-as strips a dotted project name before appending Copy.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.engine.update(cx, |engine, cx| {
+					let _ = engine.library_create_project("dotted.name", cx);
+				});
+			});
+		});
+		cx.update(|app| root.update(app, |app, cx| app.open_save_as(cx)));
+		cx.run_until_parked();
+		let name = cx.read(|app| match &root.read(app).modal {
+			ModalState::SaveAs { content, .. } => content.read(app).value(app).to_string(),
+			_ => panic!("the save-as modal should be open"),
+		});
+		assert_eq!(name, "dotted Copy");
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// A nameless sequence entry falls back to the project name for the
+		// default output path (the created project has no path, so the
+		// directory is ".").
+		let path = cx.read(|app| {
+			root.read(app)
+				.default_export_path(app, &[(99, SharedString::from(""))], Some(99))
+		});
+		assert!(path.ends_with(".mp4"), "the default path carries the format: {path}");
+		assert!(
+			path.contains("dotted.name"),
+			"the project name is the fallback: {path}"
+		);
+	}
+
+	/// The project-file export prompt inside `open_file_dialog` (its own
+	/// branch, separate from the export-project dialog): the system save
+	/// path resolves into `on_file_paths` → the engine's export.
+	#[gpui::test]
+	async fn open_file_dialog_exports_the_project_file(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.open_file_dialog(FileAction::ExportProjectFile, cx)
+			});
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.did_prompt_for_new_path(),
+			"the export-project-file action asks for a path"
+		);
+		cx.simulate_new_path_selection(|directory| Some(directory.join("oak-export.ove")));
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+	}
+
+	/// A modal opener called from inside a window update defers its build
+	/// (the nested `update_window` would fail); the deferred half installs
+	/// the dialog on the next update.
+	#[gpui::test]
+	async fn nested_modal_open_defers_to_the_app_update(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (window, root) = mock_shell(cx);
+
+		cx.update_window(window.into(), |_view, _window, app| {
+			root.update(app, |app, cx| app.open_about(cx));
+		})
+		.expect("window is still open");
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::About { .. })),
+			"the nested open deferred and then landed"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+	}
+
+	/// The new-sequence dialog's OK path (the mock has no create command,
+	/// so the error keeps the dialog open) and its Cancel path (which also
+	/// abandons a paused drop).
+	#[gpui::test]
+	async fn new_sequence_modal_commit_and_cancel(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		cx.update(|app| root.update(app, |app, cx| app.open_new_sequence(cx)));
+		cx.run_until_parked();
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::NEW_SEQUENCE,
+						button: 0,
+					},
+					cx,
+				)
+			});
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::NewSequence { .. })),
+			"the mock rejects the create, so the dialog stays"
+		);
+
+		// Cancel abandons a paused drop and closes.
+		cx.update(|app| {
+			root.update(app, |app, _cx| {
+				app.pending_drop = Some(FootageDropNeedsSequence {
+					footage_id: 3,
+					track_kind: gpui::timeline::TrackKind::Video,
+					track_index: 0,
+					time: Frame(0),
+				});
+			});
+		});
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::NEW_SEQUENCE,
+						button: 1,
+					},
+					cx,
+				)
+			});
+		});
+		cx.run_until_parked();
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		assert!(cx.read(|app| root.read(app).pending_drop.is_none()));
+	}
+
+	/// The app's tick loop runs on the simulated clock: advancing it lets
+	/// the spawned 60 Hz body drain the plugin-progress channel.
+	#[gpui::test]
+	async fn tick_loop_body_drains_the_plugin_channel(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+
+		let (tx, rx) = mpsc::channel::<crate::oakui::ofx::PluginProgressEvent>();
+		cx.update(|app| {
+			root.update(app, |app, _cx| app.plugin_progress_rx = Mutex::new(rx));
+		});
+		tx.send(crate::oakui::ofx::PluginProgressEvent {
+			label: "OakOFX Render".into(),
+			message: "frame".into(),
+			fraction: 0.25,
+		})
+		.unwrap();
+		cx.executor().advance_clock(Duration::from_millis(40));
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| root.read(app).plugin_progress_open),
+			"the timer body ran the shell's tick"
+		);
+	}
+
+	/// The Exit action reaches the platform's quit hook without panicking.
+	#[gpui::test]
+	async fn exit_action_quits(cx: &mut TestAppContext) {
+		let _guard = crate::actions::shortcuts_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let (_window, root) = mock_shell(cx);
+		cx.update(|app| {
+			root.update(app, |app, cx| app.dispatch_action_id(ActionId::Exit, cx))
+		});
+		cx.run_until_parked();
 	}
 }

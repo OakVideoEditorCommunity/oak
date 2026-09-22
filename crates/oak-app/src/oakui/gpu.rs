@@ -274,4 +274,87 @@ pub fn register_texture(
 		},
 	);
 }
- 		},
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Malformed uploads are rejected before any GPU context is touched
+	/// (review §10.2: the validation arms of the M5 display path had no
+	/// tests at all).
+	#[test]
+	fn rgba16f_upload_rejects_malformed_arguments() {
+		// Zero dimensions.
+		assert!(upload_rgba16f(0, 1, &[]).is_none());
+		assert!(upload_rgba16f(1, 0, &[]).is_none());
+		// Wrong sample counts: short, long and empty for a 2x1 frame.
+		assert!(upload_rgba16f(2, 1, &[]).is_none());
+		assert!(upload_rgba16f(2, 1, &[0.0; 7]).is_none());
+		assert!(upload_rgba16f(2, 1, &[0.0; 9]).is_none());
+		// Valid arguments without a registered window context decline
+		// cleanly (the boolean is context-dependent, so only the
+		// no-panic contract is asserted here).
+		let _ = upload_rgba16f(2, 1, &[0.0; 8]);
+	}
+
+	/// The half-float packer clamps to [0, 1], writes little-endian f16
+	/// values and pads rows to the 256-byte copy pitch the upload needs.
+	#[test]
+	fn rgba16f_pack_clamps_pins_values_and_pads_rows() {
+		let samples = [1.0, 0.5, 0.0, 1.0, -1.0, 2.0, 0.25, 0.5];
+		let (bytes, pitch) = super::super::frames::f32_rgba_to_16f_bytes(2, 1, &samples)
+			.expect("valid samples");
+		assert_eq!(pitch, 256, "rows are 256-byte aligned for write_texture");
+		assert_eq!(bytes.len(), 256);
+		let word = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+		assert_eq!(word(0), half::f16::from_f32(1.0).to_bits());
+		assert_eq!(word(2), half::f16::from_f32(0.5).to_bits());
+		assert_eq!(word(4), half::f16::from_f32(0.0).to_bits());
+		assert_eq!(word(6), half::f16::from_f32(1.0).to_bits());
+		// Clamping: -1 → 0, 2 → 1.
+		assert_eq!(word(8), half::f16::from_f32(0.0).to_bits());
+		assert_eq!(word(10), half::f16::from_f32(1.0).to_bits());
+		assert_eq!(word(12), half::f16::from_f32(0.25).to_bits());
+		assert_eq!(word(14), half::f16::from_f32(0.5).to_bits());
+		// Wrong sample counts decline.
+		assert!(super::super::frames::f32_rgba_to_16f_bytes(2, 1, &[0.0; 7]).is_none());
+	}
+
+	/// The display LUT covers the configured grid with finite, deterministic
+	/// data (the CPU reference is the GPU path's ground truth).
+	#[test]
+	fn display_lut_grid_is_complete_finite_and_deterministic() {
+		let _lock = crate::oakui::graphops::test_lock();
+		let key = display_lut_key();
+		let lut = build_display_lut();
+		assert_eq!(lut.edge, oak_core::lut::Lut3d::DISPLAY_EDGE);
+		let n = (lut.edge as usize).pow(3);
+		assert_eq!(lut.data.len(), n * 3, "three channels per grid point");
+		assert!(
+			lut.data.iter().all(|v| v.is_finite()),
+			"the LUT contains only finite samples"
+		);
+		assert!(
+			lut.data.iter().any(|v| *v != 0.0),
+			"the LUT is not an all-zero placeholder"
+		);
+		if display_lut_key() == key {
+			let again = build_display_lut();
+			assert_eq!(lut.data, again.data, "the build is deterministic");
+		}
+	}
+
+	/// The cache key follows the display-color generation and the project
+	/// color settings.
+	#[test]
+	fn display_lut_key_tracks_color_settings() {
+		let _lock = crate::oakui::graphops::test_lock();
+		let key = display_lut_key();
+		assert!(
+			key.starts_with(&crate::oakui::displaycolor::generation().to_string()),
+			"the generation is the first key component: {key}"
+		);
+		assert!(key.contains(&format!("{:?}", oak_core::color::pipeline_working_space())));
+		assert!(key.contains(&format!("{:?}", oak_core::color::pipeline_output_spec())));
+	}
+}

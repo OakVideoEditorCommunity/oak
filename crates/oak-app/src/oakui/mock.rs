@@ -4057,4 +4057,768 @@ mod tests {
 			);
 		});
 	}
+
+	// ---- settings / proxy / sync / multicam paths ------------------------
+
+	use crate::oakui::engine::ProxyMediaState;
+
+	/// Settings round trips: proxy toggle, OCIO config validation and the
+	/// cache-location clamp/trim rules.
+	#[gpui::test]
+	async fn settings_and_cache_location_round_trip(cx: &mut TestAppContext) {
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				let use_proxy = e.use_proxy_media();
+				e.set_use_proxy_media(!use_proxy, cx);
+				assert_eq!(e.use_proxy_media(), !use_proxy);
+
+				// An empty path clears the override; a bogus path is
+				// rejected like the real engine's OCIO validation.
+				assert!(e.set_project_ocio_config(String::new(), cx).is_ok());
+				assert_eq!(e.project_ocio_config(), "");
+				assert!(e
+					.set_project_ocio_config("/definitely/not/a/config".into(), cx)
+					.is_err());
+
+				// Setting 2 keeps the trimmed custom path; other settings
+				// clear it, and out-of-range codes clamp to 0..=2.
+				e.set_project_cache_location(2, "  /tmp/oak-cache  ".into(), cx);
+				assert_eq!(e.project_cache_location(), (2, "/tmp/oak-cache".to_string()));
+				// 9 clamps to 2 (custom) and keeps the trimmed path...
+				e.set_project_cache_location(9, "  /ignored  ".into(), cx);
+				assert_eq!(e.project_cache_location(), (2, "/ignored".to_string()));
+				// ...while a negative code clamps to 0 and clears it.
+				e.set_project_cache_location(-5, "/ignored".into(), cx);
+				assert_eq!(e.project_cache_location(), (0, String::new()));
+			});
+		});
+	}
+
+	/// Proxy rows/states/generation/deletion and the custom-parameter
+	/// storage paths.
+	#[gpui::test]
+	async fn proxy_paths(cx: &mut TestAppContext) {
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				let rows = e.proxy_rows();
+				assert!(!rows.is_empty(), "the demo library lists footage");
+				let video = rows
+					.iter()
+					.find(|row| row.can_generate)
+					.cloned()
+					.expect("a video row");
+				let audio = rows.iter().find(|row| !row.can_generate).cloned();
+
+				assert_eq!(e.proxy_state(u64::MAX), None);
+				assert!(e.proxy_generate(u64::MAX, cx).is_err());
+				assert!(e.proxy_row(u64::MAX).is_none());
+				if let Some(audio) = &audio {
+					assert!(
+						e.proxy_generate(audio.id, cx).is_err(),
+						"audio-only footage cannot generate a proxy"
+					);
+				}
+
+				// Generate → ready/enabled, then flip and delete.
+				assert_eq!(e.proxy_state(video.id), Some(ProxyMediaState::Missing));
+				e.proxy_generate(video.id, cx).expect("proxy generates");
+				assert_eq!(e.proxy_state(video.id), Some(ProxyMediaState::Ready));
+				let row = e.proxy_row(video.id).expect("the row reflects the state");
+				assert!(row.has_proxy && row.enabled);
+
+				let params = crate::oakui::engine::ProxyParamsUi {
+					width: 320,
+					height: 180,
+					divider: 1,
+					crf: 18,
+					preset: "veryfast".into(),
+					include_audio: true,
+				};
+				e.proxy_set_custom_params(video.id, params.clone(), cx);
+				assert_eq!(e.proxy_custom_params(video.id), Some(params));
+				assert!(e.proxy_row(video.id).unwrap().has_custom);
+				e.proxy_clear_custom_params(video.id, cx);
+				assert_eq!(e.proxy_custom_params(video.id), None);
+				assert!(!e.proxy_row(video.id).unwrap().has_custom);
+
+				e.proxy_set_enabled(video.id, false, cx);
+				assert!(!e.proxy_row(video.id).unwrap().enabled);
+				e.proxy_reveal(video.id);
+
+				e.proxy_delete(video.id, cx);
+				assert_eq!(e.proxy_state(video.id), Some(ProxyMediaState::Missing));
+			});
+		});
+	}
+
+	/// Project lifecycle mutators, generator/footage drops, text footage,
+	/// the work area and every effect-stack event arm.
+	#[gpui::test]
+	async fn engine_mutator_and_effect_event_paths(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				// Project lifecycle.
+				e.new_project(cx);
+				assert!(e
+					.open_project_path(std::path::PathBuf::from("/tmp/demo.ove"), cx)
+					.is_ok());
+				assert_eq!(e.project.path, std::path::PathBuf::from("/tmp/demo.ove"));
+				assert!(e
+					.import_footage(std::path::PathBuf::from("/tmp/clip.mp4"), cx)
+					.is_ok());
+				assert!(e.imported_footage.iter().any(|p| p.ends_with("clip.mp4")));
+
+				let text = e.create_text_footage(cx).expect("text footage");
+				assert!(e.text_footages.contains(&text));
+
+				// Work area preview + clear.
+				e.set_workarea_preview(Frame(1), Frame(9), cx);
+				assert_eq!(e.workarea(), Some((Frame(1), Frame(9))));
+				e.clear_workarea(cx);
+				assert_eq!(e.workarea(), None);
+
+				// Generator drop: the label resolves through the effect
+				// table and an out-of-range track auto-selects video.
+				let generator = crate::oakui::effectchain::addable_effects()
+					.into_iter()
+					.next()
+					.expect("an addable generator");
+				e.drop_generator_clip(&generator.type_id, usize::MAX, Frame(3), cx)
+					.expect("auto-selects a video track");
+				assert!(e
+					.tracks
+					.iter()
+					.any(|t| t.kind == TrackKind::Video && !t.clips.is_empty()));
+				assert!(e.drop_transition_at("x", 0, Frame(0), cx).is_ok());
+
+				// Footage drops: an unknown id is a no-op; audio footage
+				// auto-selects an audio track even when pointed at video.
+				let rows = e.proxy_rows();
+				let video = rows
+					.iter()
+					.find(|row| row.can_generate)
+					.cloned()
+					.expect("a video entry");
+				let audio = rows.iter().find(|row| !row.can_generate).cloned();
+				e.drop_footage(u64::MAX, TrackKind::Video, 0, Frame(0), cx);
+				e.drop_footage(video.id, TrackKind::Video, usize::MAX, Frame(0), cx);
+				if let Some(audio) = audio {
+					e.drop_footage(audio.id, TrackKind::Video, 0, Frame(0), cx);
+				}
+
+				// Effect-stack events.
+				let before = e.effects.len();
+				e.apply_effect_event(
+					&EffectStackEvent::AddRequested { index: usize::MAX },
+					cx,
+				);
+				assert_eq!(e.effects.len(), before + 1);
+				let id = e.effects.last().unwrap().id;
+				e.apply_effect_event(
+					&EffectStackEvent::AddTypeRequested {
+						index: 0,
+						type_id: "Invert".into(),
+					},
+					cx,
+				);
+				assert_eq!(e.effects.first().unwrap().title, "Invert");
+
+				e.apply_effect_event(
+					&EffectStackEvent::EnableToggled {
+						effect: id,
+						enabled: false,
+					},
+					cx,
+				);
+				assert!(!e.effects.last().unwrap().enabled);
+				// Unknown ids are ignored.
+				e.apply_effect_event(
+					&EffectStackEvent::EnableToggled {
+						effect: EffectId(9999),
+						enabled: true,
+					},
+					cx,
+				);
+				e.apply_effect_event(
+					&EffectStackEvent::ExpansionToggled {
+						effect: id,
+						expanded: true,
+					},
+					cx,
+				);
+				assert!(e.effects.last().unwrap().expanded);
+				e.apply_effect_event(
+					&EffectStackEvent::ExpansionToggled {
+						effect: EffectId(9999),
+						expanded: false,
+					},
+					cx,
+				);
+
+				e.apply_effect_event(&EffectStackEvent::CardSelected { effect: id }, cx);
+				e.apply_effect_event(
+					&EffectStackEvent::ReorderRequested {
+						effect: id,
+						new_index: usize::MAX,
+					},
+					cx,
+				);
+				assert_eq!(e.effects.last().unwrap().id, id);
+				e.apply_effect_event(
+					&EffectStackEvent::ReorderRequested {
+						effect: EffectId(9999),
+						new_index: 0,
+					},
+					cx,
+				);
+				e.apply_effect_event(
+					&EffectStackEvent::ContextMenuRequested {
+						effect: id,
+						position: gpui::Point::new(px(0.0), px(0.0)),
+					},
+					cx,
+				);
+				e.apply_effect_event(&EffectStackEvent::ParameterChanged { effect: id }, cx);
+				// Unknown ids are ignored; a known removable card goes.
+				e.apply_effect_event(&EffectStackEvent::RemoveRequested(EffectId(9999)), cx);
+				e.apply_effect_event(&EffectStackEvent::RemoveRequested(id), cx);
+			});
+		});
+	}
+
+	/// Sync eligibility/commands, clip→footage mapping, the multicam
+	/// surface and the demo's unsupported default transition.
+	#[gpui::test]
+	async fn sync_and_multicam_paths(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				let clips: Vec<ClipId> = e
+					.track(0)
+					.map(|track| track.clips().iter().map(|clip| clip.id()).collect())
+					.unwrap_or_default();
+				let eligibility = e.sync_eligibility(&clips);
+				assert!(eligibility.source_time <= clips.len());
+				e.sync_clips_by_source_time(clips.clone(), cx);
+				e.sync_clips_by_waveform(clips.clone(), false, cx);
+				e.sync_clips_by_waveform(clips.clone(), true, cx);
+				let entries = e.clip_footage_entries(&clips);
+				assert!(entries.len() <= clips.len());
+
+				if let Some(state) = e.multicam_state() {
+					assert!(state.source_count >= 1);
+					let _ = e.multicam_angle_frame(0, cx);
+					let _ = e.multicam_angle_frame(-1, cx);
+					assert!(e.multicam_eligible(&clips));
+					assert!(e.multicam_enabled_on_selection(&clips));
+					e.multicam_switch_to(0, false, cx);
+					e.multicam_switch_to(99, false, cx);
+					e.multicam_switch_to(-1, true, cx);
+					e.multicam_enable_selected(vec![], true, cx);
+					e.multicam_enable_selected(vec![], false, cx);
+				}
+				assert!(e.add_default_transition(vec![], cx).is_err());
+			});
+		});
+	}
+
+	/// The node editor's ignored events, background click, unmapped
+	/// selections and the selection helpers.
+	#[gpui::test]
+	async fn node_graph_ignored_events_selection_and_reach_cycles(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				// Fire-and-forget events: preview, viewport, context menu.
+				e.apply_node_graph_event(
+					&NodeGraphEvent::NodeMovePreview {
+						nodes: vec![NodeId(5)],
+						delta: point(px(4.0), px(4.0)),
+					},
+					cx,
+				);
+				e.apply_node_graph_event(
+					&NodeGraphEvent::ViewChanged {
+						offset: point(px(10.0), px(10.0)),
+						zoom: 1.5,
+					},
+					cx,
+				);
+				e.apply_node_graph_event(
+					&NodeGraphEvent::NodeContextMenuRequested {
+						node: NodeId(5),
+						position: point(px(0.0), px(0.0)),
+					},
+					cx,
+				);
+				// A background click is logged and ignored.
+				e.apply_node_graph_event(
+					&NodeGraphEvent::BackgroundClicked {
+						position: point(px(3.0), px(3.0)),
+					},
+					cx,
+				);
+
+				// Selection helpers: no selection, then a node with no
+				// matching effect card (NodeId 0 has no 第一稿.mp4 card).
+				assert!(e.selected_node_ids().is_empty());
+				assert_eq!(e.selected_effect(), None);
+				assert_eq!(e.selected_graph_node(), None);
+				e.apply_node_graph_event(
+					&NodeGraphEvent::SelectionChanged {
+						nodes: BTreeSet::from([NodeId(0)]),
+					},
+					cx,
+				);
+				assert_eq!(e.selected_node_ids(), &BTreeSet::from([NodeId(0)]));
+				assert_eq!(e.selected_graph_node(), Some(0));
+				assert_eq!(e.selected_effect(), None, "no card shares the title");
+
+				// Two selected nodes have no single effect target.
+				e.apply_node_graph_event(
+					&NodeGraphEvent::SelectionChanged {
+						nodes: BTreeSet::from([NodeId(2), NodeId(3)]),
+					},
+					cx,
+				);
+				assert_eq!(e.selected_effect(), None);
+				assert_eq!(e.selected_graph_node(), None);
+				e.apply_node_graph_event(
+					&NodeGraphEvent::SelectionChanged {
+						nodes: BTreeSet::from([NodeId(2)]),
+					},
+					cx,
+				);
+				assert_eq!(e.selected_effect(), Some(EffectId(1)), "变换 card");
+
+				// An invalid connection is rejected without touching the
+				// edge list.
+				let before = e.edges.len();
+				e.apply_node_graph_event(
+					&NodeGraphEvent::ConnectionRequested {
+						from: PortId(999),
+						to: PortId(20),
+					},
+					cx,
+				);
+				assert_eq!(e.edges.len(), before, "unknown port rejected");
+
+				// Reachability: a manually-added back edge makes the DFS
+				// revisit a node (the visited guard).
+				e.edges.push(MockEdge {
+					id: EdgeId(99),
+					from_node: NodeId(5),
+					from_port: PortId(50),
+					to_node: NodeId(2),
+					to_port: PortId(20),
+				});
+				assert!(!e.reaches(NodeId(0), NodeId(7)), "no path into the sink");
+				assert!(e.reaches(NodeId(0), NodeId(2)));
+			});
+		});
+	}
+
+	/// Every timeline edit event the widget can emit applies to the mock
+	/// model: playhead, both trim edges, split, ripple trim, roll (valid and
+	/// rejected), slide, slip, moves, track height and toggles.
+	#[gpui::test]
+	async fn timeline_edit_events_apply_to_the_mock_model(cx: &mut TestAppContext) {
+		use gpui::timeline::TrackHeaderEvent;
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			let clip = |app: &App, track: usize, id: u64| -> Option<MockClip> {
+				engine
+					.read(app)
+					.track(track)?
+					.clips()
+					.iter()
+					.find(|c| c.id() == ClipId(id))
+					.cloned()
+			};
+
+			// PlayheadChanged: an equal frame is a no-op, a new one seeks.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(&TimelineEvent::PlayheadChanged(Frame(0)), cx);
+				assert_eq!(e.clock_frame(Monitor::Program, cx), Frame(0));
+				e.apply_timeline_event(&TimelineEvent::PlayheadChanged(Frame(77)), cx);
+				assert_eq!(e.clock_frame(Monitor::Program, cx), Frame(77));
+
+				// Trim the END edge of B-roll (id 12, 240–600).
+				e.apply_timeline_event(
+					&TimelineEvent::ClipTrimRequested {
+						clip: ClipId(12),
+						edge: TrimEdge::End,
+						new_frame: Frame(700),
+					},
+					cx,
+				);
+			});
+			assert_eq!(
+				clip(app, 1, 12).expect("B-roll").range(),
+				FrameRange::new(Frame(240), Frame(700))
+			);
+
+			// Ripple-trim 开场 (id 11) in by 20: the following B-roll shifts
+			// with the edge.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRippleTrimRequested {
+						clip: ClipId(11),
+						edge: TrimEdge::Start,
+						new_frame: Frame(20),
+					},
+					cx,
+				);
+			});
+			let clip11 = clip(app, 1, 11).expect("开场");
+			assert_eq!(clip11.range().start, Frame(20));
+			assert_eq!(clip11.media_in(), Frame(20), "media-in follows");
+			assert_eq!(
+				clip(app, 1, 12).expect("B-roll").range(),
+				FrameRange::new(Frame(260), Frame(720)),
+				"the later clip rippled with the edge"
+			);
+
+			// Ripple-trim the B-roll's end out to 800: nothing follows it.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRippleTrimRequested {
+						clip: ClipId(12),
+						edge: TrimEdge::End,
+						new_frame: Frame(800),
+					},
+					cx,
+				);
+			});
+			assert_eq!(
+				clip(app, 1, 12).expect("B-roll").range(),
+				FrameRange::new(Frame(260), Frame(800))
+			);
+
+			// Roll the shared boundary of 开场/B-roll to 300.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRollRequested {
+						clip_a: ClipId(11),
+						clip_b: ClipId(12),
+						new_frame: Frame(300),
+					},
+					cx,
+				);
+				// Rejected rolls: unknown clip, boundary outside the span.
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRollRequested {
+						clip_a: ClipId(999),
+						clip_b: ClipId(12),
+						new_frame: Frame(300),
+					},
+					cx,
+				);
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRollRequested {
+						clip_a: ClipId(11),
+						clip_b: ClipId(12),
+						new_frame: Frame(10),
+					},
+					cx,
+				);
+			});
+			assert_eq!(clip(app, 1, 11).expect("开场").range().end, Frame(300));
+			assert_eq!(clip(app, 1, 12).expect("B-roll").range().start, Frame(300));
+
+			// A roll across two different tracks is rejected.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::ClipRollRequested {
+						clip_a: ClipId(11),
+						clip_b: ClipId(13),
+						new_frame: Frame(100),
+					},
+					cx,
+				);
+				// Split request: split 开场 at 150.
+				e.apply_timeline_event(
+					&TimelineEvent::ClipSplitRequested {
+						clip: ClipId(11),
+						time: Frame(150),
+					},
+					cx,
+				);
+			});
+			let v1_clips = engine.read(app).track(1).expect("V1").clips().to_vec();
+			assert_eq!(v1_clips.len(), 3, "开场 split in two");
+			assert!(v1_clips
+				.iter()
+				.any(|c| c.range() == FrameRange::new(Frame(150), Frame(300))));
+
+			// Slide: the clip keeps its length at the new start.
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::ClipSlideRequested {
+						clip: ClipId(12),
+						new_start: Frame(500),
+					},
+					cx,
+				);
+				// Unknown clip is ignored.
+				e.apply_timeline_event(
+					&TimelineEvent::ClipSlideRequested {
+						clip: ClipId(999),
+						new_start: Frame(0),
+					},
+					cx,
+				);
+				// Slip: position stays, media offset moves.
+				e.apply_timeline_event(
+					&TimelineEvent::ClipSlipRequested {
+						clip: ClipId(12),
+						new_media_in: Frame(42),
+					},
+					cx,
+				);
+				// Unknown clips are ignored by move too.
+				e.apply_timeline_event(
+					&TimelineEvent::ClipMoveRequested {
+						clip: ClipId(999),
+						new_track: 0,
+						new_start: Frame(0),
+					},
+					cx,
+				);
+			});
+			let b_roll = clip(app, 1, 12).expect("B-roll");
+			assert_eq!(b_roll.range().start, Frame(500), "slid in time");
+			assert_eq!(b_roll.media_in(), Frame(42), "slipped the media offset");
+
+			// Track height (valid + unknown index) and toggles (solo, and
+			// the unknown-track guard).
+			engine.update(app, |e, cx| {
+				e.apply_timeline_event(
+					&TimelineEvent::TrackHeightChanged {
+						track: 1,
+						height: px(80.0),
+					},
+					cx,
+				);
+				e.apply_timeline_event(
+					&TimelineEvent::TrackHeightChanged {
+						track: 99,
+						height: px(10.0),
+					},
+					cx,
+				);
+				e.apply_timeline_event(
+					&TimelineEvent::TrackToggleRequested {
+						track: 99,
+						toggle: TrackHeaderEvent::ToggleLock,
+					},
+					cx,
+				);
+				e.apply_timeline_event(
+					&TimelineEvent::TrackToggleRequested {
+						track: 3,
+						toggle: TrackHeaderEvent::ToggleSolo,
+					},
+					cx,
+				);
+			});
+			assert_eq!(engine.read(app).track(1).expect("V1").height(), px(80.0));
+			assert!(engine.read(app).track(3).expect("A2").is_solo());
+
+			// The direct split_clip API: unknown clip, locked track, an
+			// out-of-range time and a real split.
+			engine.update(app, |e, cx| {
+				e.split_clip(ClipId(999), Frame(10), cx);
+				e.apply_timeline_event(
+					&TimelineEvent::TrackToggleRequested {
+						track: 1,
+						toggle: TrackHeaderEvent::ToggleLock,
+					},
+					cx,
+				);
+				e.split_clip(ClipId(11), Frame(250), cx);
+				assert_eq!(
+					e.tracks[1].clips.len(),
+					3,
+					"a locked track rejects the split"
+				);
+				e.apply_timeline_event(
+					&TimelineEvent::TrackToggleRequested {
+						track: 1,
+						toggle: TrackHeaderEvent::ToggleLock,
+					},
+					cx,
+				);
+				e.split_clip(ClipId(11), Frame(0), cx);
+				assert_eq!(
+					e.tracks[1].clips.len(),
+					3,
+					"a split on the clip edge is a no-op"
+				);
+				e.split_clip(ClipId(11), Frame(100), cx);
+				assert_eq!(e.tracks[1].clips.len(), 4, "the split landed");
+			});
+		});
+	}
+
+	/// Track helpers, clip linking, the sync guard/commands and eligibility.
+	#[gpui::test]
+	async fn track_link_and_sync_helpers(cx: &mut TestAppContext) {
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				// add_track: every kind, including subtitles.
+				let before = e.track_count();
+				e.add_track(TrackKind::Subtitle, cx);
+				assert_eq!(e.track_count(), before + 1);
+				assert_eq!(e.tracks.last().unwrap().kind, TrackKind::Subtitle);
+				assert_eq!(e.tracks.last().unwrap().height, px(32.0));
+
+				// set_track_height applies to every track.
+				e.set_track_height(px(72.0), cx);
+				assert!(e.tracks.iter().all(|t| t.height == px(72.0)));
+
+				// Clip links: a single clip is ignored; a pair links
+				// (normalized both ways) and a fully-linked pair unlinks.
+				e.toggle_clip_links(vec![ClipId(1)], cx);
+				assert!(!e.clips_linked(1, 2));
+				e.toggle_clip_links(vec![ClipId(1), ClipId(2)], cx);
+				assert!(e.clips_linked(1, 2) && e.clips_linked(2, 1));
+				e.toggle_clip_links(vec![ClipId(2), ClipId(1)], cx);
+				assert!(!e.clips_linked(1, 2), "a linked pair unlinks");
+
+				// Sync: a locked track's clips are skipped; the unlocked
+				// ones align to the earliest in point (id 13 is audio-only
+				// and id 12 starts later).
+				e.tracks[2].locked = true;
+				let eligibility = e.sync_eligibility(&[ClipId(11), ClipId(13), ClipId(999)]);
+				assert_eq!(
+					eligibility.source_time, 1,
+					"audio and unknown clips do not count"
+				);
+				e.sync_clips_by_source_time(vec![ClipId(11), ClipId(13), ClipId(12)], cx);
+				assert_eq!(e.tracks[1].clips[1].range.start, Frame(0), "B-roll moved");
+				e.tracks[2].locked = false;
+
+				// Sync eligibility for an audio clip alone.
+				let eligibility = e.sync_eligibility(&[ClipId(13)]);
+				assert_eq!(eligibility.source_time, 0);
+			});
+		});
+	}
+
+	/// Adjustment layers, generator/footage drops without a target track,
+	/// `add_effect`'s unknown type, `add_node_at`, the legacy `start_export`
+	/// wrapper and the demo multicam's create/enable/disable paths.
+	#[gpui::test]
+	async fn drop_add_and_legacy_export_paths(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
+		cx.update(|app| {
+			let engine = demo_engine(app);
+			engine.update(app, |e, cx| {
+				// Adjustment layers: unknown track, non-video track, then a
+				// video track (inserted in ascending start order).
+				assert!(e.add_adjustment_layer(99, Frame(0), cx).is_err());
+				assert!(e.add_adjustment_layer(2, Frame(0), cx).is_err());
+				e.add_adjustment_layer(0, Frame(200), cx)
+					.expect("video track accepts");
+				assert!(e.tracks[0]
+					.clips
+					.iter()
+					.any(|c| c.label == "调整图层"));
+
+				// Unknown effect type keeps the stack unchanged.
+				let before = e.effects.len();
+				assert!(e.add_effect(0, "no-such-effect", cx).is_err());
+				assert_eq!(e.effects.len(), before);
+
+				// A generator drop with the factory table unknown falls back
+				// to the raw type id as the label.
+				e.drop_generator_clip("not-in-the-table", 0, Frame(0), cx)
+					.expect("video track exists");
+				assert!(e
+					.tracks
+					.iter()
+					.any(|t| t.clips.iter().any(|c| c.label == "not-in-the-table")));
+
+				// No video track at all: both generator and video footage
+				// drops are rejected.
+				let keep: Vec<MockTrack> = e
+					.tracks
+					.iter()
+					.filter(|t| t.kind != TrackKind::Video)
+					.cloned()
+					.collect();
+				e.tracks = keep;
+				assert!(e.drop_generator_clip("x", 0, Frame(0), cx).is_err());
+				e.drop_footage(3, TrackKind::Video, 0, Frame(0), cx);
+				assert!(e.footage_drops.is_empty());
+			});
+
+			// Audio footage with no audio track reports and drops nothing.
+			let engine2 = demo_engine(app);
+			engine2.update(app, |e, cx| {
+				e.tracks.retain(|t| t.kind != TrackKind::Audio);
+				let before = e.footage_drops.len();
+				e.drop_footage(20, TrackKind::Audio, 0, Frame(0), cx);
+				assert_eq!(e.footage_drops.len(), before, "no audio track");
+				// An unknown entry id is rejected too.
+				e.drop_footage(u64::MAX, TrackKind::Video, 0, Frame(0), cx);
+			});
+
+			// add_node_at: unknown type errors; a known one gets one video
+			// input and one video output.
+			engine.update(app, |e, cx| {
+				assert!(e.add_node_at("no-such-node", point(px(0.0), px(0.0)), cx).is_err());
+				let entry = e.node_library().into_iter().next().expect("a node type");
+				e.add_node_at(&entry.type_id, point(px(12.0), px(34.0)), cx)
+					.expect("known node type");
+				let added = e.node(NodeId(100)).expect("the created node");
+				assert_eq!(added.title().as_ref(), entry.name.as_str());
+				assert_eq!(added.position(), point(px(12.0), px(34.0)));
+				assert_eq!(added.inputs().len(), 1);
+				assert_eq!(added.outputs().len(), 1);
+				assert!(added.endpoint().is_none());
+
+				// The legacy start_export wrapper delegates and succeeds.
+				let session = e.start_export(0, std::path::PathBuf::from("/tmp/x.mp4"));
+				assert!(session.is_ok());
+				drop(session);
+
+				// The multicam sequence create only renames an unnamed demo
+				// sequence.
+				e.sequence.name = String::new();
+				assert_eq!(
+					e.multicam_create_sequence(vec![], vec![], "Cam".into(), cx),
+					Ok(1)
+				);
+				assert_eq!(e.sequence.name, "Cam");
+				assert_eq!(
+					e.multicam_create_sequence(vec![], vec![], "Other".into(), cx),
+					Ok(1)
+				);
+				assert_eq!(e.sequence.name, "Cam", "a named sequence is kept");
+			});
+
+			// Demo multicam enable/disable run the real commands (the demo
+			// starts enabled, so the first enable is a no-op; disable and
+			// re-enable cover both command paths).
+			let engine3 = demo_engine(app);
+			engine3.update(app, |e, cx| {
+				assert!(e.multicam_state().is_some());
+				e.multicam_enable_selected(vec![], true, cx);
+				assert!(e.multicam_state().is_some(), "enable is a no-op");
+				e.multicam_enable_selected(vec![], false, cx);
+				assert!(e.multicam_state().is_none(), "disabled");
+				e.multicam_enable_selected(vec![], true, cx);
+				assert!(e.multicam_state().is_some(), "enabled again");
+			});
+		});
+	}
 }

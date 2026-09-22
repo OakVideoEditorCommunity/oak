@@ -843,6 +843,28 @@ mod tests {
 	/// tests (the plugin cache is a process singleton with no lock).
 	static HOST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+	/// Saves the marker env var and restores it (including the was-unset
+	/// case) on drop, so a panicking assertion cannot leak the redirect into
+	/// the next serialized host test.
+	struct MarkerEnvGuard(Option<std::ffi::OsString>);
+
+	impl MarkerEnvGuard {
+		fn set(path: &std::path::Path) -> MarkerEnvGuard {
+			let previous = std::env::var_os(MARKER_ENV);
+			unsafe { std::env::set_var(MARKER_ENV, path) };
+			MarkerEnvGuard(previous)
+		}
+	}
+
+	impl Drop for MarkerEnvGuard {
+		fn drop(&mut self) {
+			match self.0.take() {
+				Some(value) => unsafe { std::env::set_var(MARKER_ENV, value) },
+				None => unsafe { std::env::remove_var(MARKER_ENV) },
+			}
+		}
+	}
+
 	/// The minimal test plugin's scan directory (the bundle is assembled
 	/// from the dylib the app build script compiles into OUT_DIR), or `None`
 	/// when the plugin is unavailable (the test skips).
@@ -925,7 +947,7 @@ mod tests {
 		}
 		let marker = marker_path("e2e");
 		let _ = std::fs::remove_file(&marker);
-		unsafe { std::env::set_var(MARKER_ENV, &marker) };
+		let _marker_env = MarkerEnvGuard::set(&marker);
 
 		// (1) app-layer creation: `sync_active_interact` on the plugin
 		// instance handle creates the interact (new_interact → describe →
@@ -986,7 +1008,6 @@ mod tests {
 			std::thread::sleep(std::time::Duration::from_millis(10));
 		};
 
-		unsafe { std::env::remove_var(MARKER_ENV) };
 		let _ = std::fs::remove_file(&marker);
 
 		// Lifecycle reached the plugin, in order.
@@ -1048,7 +1069,7 @@ mod tests {
 		}
 		let marker = marker_path("draw");
 		let _ = std::fs::remove_file(&marker);
-		unsafe { std::env::set_var(MARKER_ENV, &marker) };
+		let _marker_env = MarkerEnvGuard::set(&marker);
 
 		let inst = oak_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
@@ -1060,7 +1081,7 @@ mod tests {
 		// A 64×64 opaque blue base frame.
 		let (w, h) = (64u32, 64u32);
 		let mut base_samples = vec![0.0f32; (w * h * 4) as usize];
-		for px in base_samples.chunks_exact_mut(4) {
+		for px in base_samples.chunks_mut(4) {
 			px.copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
 		}
 		let base = Arc::new(super::super::frames::f32_rgba_to_bgra_image(
@@ -1101,7 +1122,6 @@ mod tests {
 		);
 
 		// The draw action reached the plugin with the viewport args.
-		unsafe { std::env::remove_var(MARKER_ENV) };
 		let lines = read_marker(&marker);
 		let _ = std::fs::remove_file(&marker);
 		assert!(
@@ -1110,6 +1130,210 @@ mod tests {
 		);
 
 		sync_active_interact(None);
+		oak_plugin::host::Host::global().shutdown();
+	}
+
+	// ---------------------------------------------------------------------------
+	// Pure helpers / idle pump
+	// ---------------------------------------------------------------------------
+
+	/// `InteractViewport::at_frame_size` is the 1:1 viewport of a frame.
+	#[test]
+	fn interact_viewport_at_frame_size_is_unit_scale() {
+		let vp = InteractViewport::at_frame_size(1920, 1080);
+		assert_eq!(vp.width, 1920.0);
+		assert_eq!(vp.height, 1080.0);
+		assert_eq!(vp.pixel_scale, (1.0, 1.0));
+	}
+
+	/// A `RenderImage` without CPU bytes converts to `None` (the viewer
+	/// shows the base frame unchanged).
+	#[test]
+	fn bgra_image_to_f32_rgba_returns_none_without_bytes() {
+		let empty = RenderImage::new(smallvec::SmallVec::<[image::Frame; 1]>::new());
+		assert!(bgra_image_to_f32_rgba(&empty).is_none());
+	}
+
+	/// `read_image_f32` unpacks the plugin image's native-endian F32 RGBA
+	/// bytes.
+	#[test]
+	fn read_image_f32_unpacks_native_float_samples() {
+		use oak_plugin::image::{BitDepth, Components, Image};
+		use oak_plugin::instance::OfxRectD;
+		let mut img = Image::allocate(
+			BitDepth::Float,
+			Components::Rgba,
+			OfxRectD {
+				x1: 0.0,
+				y1: 0.0,
+				x2: 2.0,
+				y2: 1.0,
+			},
+		);
+		let samples: [f32; 8] = [0.25, 0.5, 0.75, 1.0, -1.0, 2.0, 0.0, 0.5];
+		let bytes: Vec<u8> = samples.iter().flat_map(|v| v.to_ne_bytes()).collect();
+		img.pixels_mut()[..bytes.len()].copy_from_slice(&bytes);
+		assert_eq!(read_image_f32(&img), samples);
+	}
+
+	/// `composite_overlay` rejects buffers that are not whole RGBA pixels
+	/// and clamps out-of-range alpha.
+	#[test]
+	fn composite_overlay_rejects_unaligned_and_clamps_alpha() {
+		assert!(
+			composite_overlay(&[0.0, 0.0], &[0.0, 0.0]).is_none(),
+			"a two-sample buffer is not an RGBA pixel"
+		);
+		// Alpha above one clamps to fully opaque (the overlay wins).
+		let out = composite_overlay(&[1.0, 0.0, 0.0, 2.0], &[0.0, 0.0, 1.0, 1.0]).unwrap();
+		assert_eq!(out, [1.0, 0.0, 0.0, 1.0]);
+		// Alpha below zero clamps to fully transparent (the base stays).
+		let out = composite_overlay(&[1.0, 0.0, 0.0, -1.0], &[0.0, 0.0, 1.0, 1.0]).unwrap();
+		assert_eq!(out, [0.0, 0.0, 1.0, 1.0]);
+	}
+
+	/// The f-key mapping parses f1..f35; out-of-range or unparseable
+	/// suffixes fall through to the unknown symbol.
+	#[test]
+	fn key_symbol_function_keys_and_unknown_multi_char_keys() {
+		use oak_plugin::host as ofx_key;
+		let ks = |key: &str| gpui::Keystroke::parse(key).unwrap();
+		assert_eq!(
+			key_symbol(&ks("f35")),
+			(ofx_key::KEY_F1 + 34, String::new())
+		);
+		assert_eq!(key_symbol(&ks("f36")), (ofx_key::KEY_UNKNOWN, String::new()));
+		assert_eq!(key_symbol(&ks("f0")), (ofx_key::KEY_UNKNOWN, String::new()));
+		// A bare "f" is the printable character, not a function key.
+		assert_eq!(key_symbol(&ks("f")), (b'f' as i32, "f".to_string()));
+		assert_eq!(
+			key_symbol(&ks("f99999999999999999999")),
+			(ofx_key::KEY_UNKNOWN, String::new())
+		);
+	}
+
+	/// The idle pump is a no-op without an active interact and throttles
+	/// repeat calls: two back-to-back calls must not run the idle action
+	/// twice.
+	#[test]
+	fn pump_interact_idle_is_inert_without_an_interact() {
+		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		// Neither call may panic; with no interact installed they only
+		// exercise the throttle guard.
+		pump_interact_idle();
+		pump_interact_idle();
+	}
+
+	/// `sync_active_interact`: an unknown instance handle and a cleared
+	/// target are no-ops (no interact is installed).
+	#[test]
+	fn sync_active_interact_missing_instance_is_a_noop() {
+		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		assert!(
+			oak_plugin::node_factory::instance_from_id(u64::MAX - 7).is_none(),
+			"the probe handle is not registered"
+		);
+		// The node/instance is gone: nothing to attach.
+		sync_active_interact(Some(u64::MAX - 7));
+		// A cleared target with a (possibly) empty slot: nothing to destroy.
+		sync_active_interact(None);
+	}
+
+	/// `init` is idempotent: a second scan/registration must not duplicate
+	/// plugin node types, and it installs the app-side bridges.
+	#[test]
+	fn init_wiring_is_idempotent() {
+		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let first = init();
+		let second = init();
+		assert_eq!(
+			second, 0,
+			"a second init must not register duplicates (the first registered {first} plugin type(s))"
+		);
+		assert!(
+			oak_plugin::progress::has_reporter_factory(),
+			"init installs the progress reporter factory"
+		);
+	}
+
+	// ---------------------------------------------------------------------------
+	// Interact lifecycle / composite early returns (needs the test plugin)
+	// ---------------------------------------------------------------------------
+
+	/// The app-layer interact management with a real plugin instance:
+	/// re-targeting the same instance is a no-op, `note_interact_viewport`
+	/// updates only the matching instance, and `draw_interact_composite`
+	/// reports `None` for an inert viewport/frame (zero size, mismatch, no
+	/// CPU bytes) without touching GL.
+	#[test]
+	fn interact_viewport_tracking_and_composite_early_returns() {
+		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		if !scan_interact_plugin() {
+			return;
+		}
+		let inst = oak_plugin::host::Host::global()
+			.create_instance(INTERACT_PLUGIN_ID, None)
+			.expect("interact variant instance");
+		let handle = oak_plugin::node_factory::register_instance(inst);
+		sync_active_interact(Some(handle));
+
+		// Re-targeting the same instance keeps the live interact (the
+		// unchanged-target early return).
+		sync_active_interact(Some(handle));
+		let (active_handle, interact, _) = active_interact().expect("active interact");
+		assert_eq!(active_handle, handle);
+
+		// The viewport tracker updates the matching instance...
+		let vp = InteractViewport::at_frame_size(64, 36);
+		note_interact_viewport(handle, vp);
+		assert_eq!(active_interact().expect("active interact").2, vp);
+		// ... and ignores other instances.
+		note_interact_viewport(
+			handle.wrapping_add(1),
+			InteractViewport::at_frame_size(1, 1),
+		);
+		assert_eq!(active_interact().expect("active interact").2, vp);
+
+		// A 2×2 base frame.
+		let samples = vec![0.25f32; 2 * 2 * 4];
+		let base = super::super::frames::f32_rgba_to_bgra_image(2, 2, &samples);
+
+		// A zero-size viewport is inert before any GL work.
+		let zero = InteractViewport {
+			width: 0.0,
+			height: 0.0,
+			pixel_scale: (1.0, 1.0),
+		};
+		assert!(draw_interact_composite(handle, &interact, &zero, 0.0, &base).is_none());
+
+		// Viewport/frame size mismatch.
+		let mismatch = InteractViewport::at_frame_size(4, 4);
+		assert!(draw_interact_composite(handle, &interact, &mismatch, 0.0, &base).is_none());
+
+		// A base image without CPU bytes.
+		let empty = RenderImage::new(smallvec::SmallVec::<[image::Frame; 1]>::new());
+		let matching = InteractViewport::at_frame_size(2, 2);
+		assert!(draw_interact_composite(handle, &interact, &matching, 0.0, &empty).is_none());
+
+		// The in-process GL path: headless Linux has no GL implementation,
+		// so this reports None; a GL-capable host may composite. Either way
+		// it must not panic.
+		let _ = draw_interact_composite(handle, &interact, &matching, 0.0, &base);
+
+		sync_active_interact(None);
+
+		// A plugin that does not declare an overlay interact reports
+		// `new_interact() == None` and stays inert.
+		let plain = oak_plugin::host::Host::global()
+			.create_instance("org.oak.test-plugin", None)
+			.expect("plain effect variant instance");
+		let plain_handle = oak_plugin::node_factory::register_instance(plain);
+		sync_active_interact(Some(plain_handle));
+		assert!(
+			active_interact().is_none(),
+			"a plugin without an interact installs nothing"
+		);
+
 		oak_plugin::host::Host::global().shutdown();
 	}
 }

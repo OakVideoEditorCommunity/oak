@@ -3490,4 +3490,2326 @@ mod tests {
 			);
 		}
 	}
+
+	// -----------------------------------------------------------------------
+	// Parameter helpers (pure)
+	// -----------------------------------------------------------------------
+
+	fn approx(a: f64, b: f64) -> bool {
+		(a - b).abs() < 1e-9
+	}
+
+	fn mk_param(
+		input_id: &str,
+		value_type: ValueType,
+		value: NodeValue,
+		properties: Vec<(&str, NodeValue)>,
+	) -> EffectParam {
+		EffectParam {
+			input_id: input_id.to_string(),
+			display_name: input_id.to_string(),
+			value_type,
+			value,
+			flags: 0,
+			properties: properties
+				.into_iter()
+				.map(|(k, v)| (k.to_string(), v))
+				.collect(),
+		}
+	}
+
+	/// `curve_domain`: the parametric key range comes from the
+	/// `parametric_range` property (repaired when degenerate), and the
+	/// value domain is the unit range for unit data, else the data extent
+	/// with a 10% pad (a unit span for flat data).
+	#[test]
+	fn curve_domain_defaults_to_unit_and_pads_non_unit_data() {
+		use oak_plugin::param_curve::{ControlPoint, Curve};
+		let cp = |key: f64, value: f64| ControlPoint { key, value, slope: 0.0 };
+		let curve = |points: Vec<ControlPoint>| Curve { points };
+		let text = || NodeValue::Text(String::new());
+
+		// No curve and no range property: the unit domain.
+		let p = mk_param("curves_in", ValueType::Parametric, text(), Vec::new());
+		assert_eq!(curve_domain(&p, &[]), (0.0, 1.0, 0.0, 1.0));
+
+		// A unit-range curve keeps the unit value domain.
+		let c = curve(vec![cp(0.0, 0.0), cp(0.5, 1.0)]);
+		assert_eq!(curve_domain(&p, std::slice::from_ref(&c)), (0.0, 1.0, 0.0, 1.0));
+
+		// The parametric_range property overrides the key domain.
+		let p = mk_param(
+			"curves_in",
+			ValueType::Parametric,
+			text(),
+			vec![("parametric_range", NodeValue::Vec2([2.0, 8.0]))],
+		);
+		assert_eq!(curve_domain(&p, std::slice::from_ref(&c)), (2.0, 8.0, 0.0, 1.0));
+
+		// Degenerate and inverted key ranges are widened to a unit span.
+		let p = mk_param(
+			"curves_in",
+			ValueType::Parametric,
+			text(),
+			vec![("parametric_range", NodeValue::Vec2([5.0, 5.0]))],
+		);
+		assert_eq!(curve_domain(&p, &[]), (5.0, 6.0, 0.0, 1.0));
+		let p = mk_param(
+			"curves_in",
+			ValueType::Parametric,
+			text(),
+			vec![("parametric_range", NodeValue::Vec2([8.0, 2.0]))],
+		);
+		assert_eq!(curve_domain(&p, &[]), (8.0, 9.0, 0.0, 1.0));
+
+		// Out-of-unit values: the data extent plus a 10% pad.
+		let p = mk_param("curves_in", ValueType::Parametric, text(), Vec::new());
+		let c = curve(vec![cp(0.0, 10.0), cp(1.0, 20.0)]);
+		assert_eq!(
+			curve_domain(&p, std::slice::from_ref(&c)),
+			(0.0, 1.0, 9.0, 21.0)
+		);
+
+		// Flat non-unit data gets a unit span before the pad.
+		let c = curve(vec![cp(0.0, 10.0), cp(1.0, 10.0)]);
+		let (_, _, vmin, vmax) = curve_domain(&p, std::slice::from_ref(&c));
+		assert!(
+			approx(vmin, 9.9) && approx(vmax, 11.1),
+			"flat curve should pad to 9.9..11.1, got {vmin}..{vmax}"
+		);
+	}
+
+	/// `curve_point_to_editor`: real → normalized coordinates, Hermite
+	/// slopes become bezier handles, and a key not in the list falls back
+	/// to the first control point for the handle lookup.
+	#[test]
+	fn curve_point_to_editor_normalizes_keys_values_and_slopes() {
+		use oak_plugin::param_curve::ControlPoint;
+		let real = |key: f64, value: f64, slope: f64| ControlPoint { key, value, slope };
+		let points = vec![
+			real(0.0, 0.0, 0.0),
+			real(0.5, 0.25, 0.5),
+			real(1.0, 1.0, 1.0),
+		];
+		let unit = (0.0, 1.0, 0.0, 1.0);
+
+		// First point: only the out handle (the next point exists).
+		let e = curve_point_to_editor(&points[0], &points, unit);
+		assert_eq!((e.x, e.y), (0.0, 0.0));
+		assert!(e.handle_in.is_none());
+		let out = e.handle_out.expect("first point out handle");
+		assert!(approx(out.x, 0.5 / 3.0) && approx(out.y, 0.0));
+
+		// Interior point: both handles, slope scaled by sx/sy.
+		let e = curve_point_to_editor(&points[1], &points, unit);
+		assert_eq!((e.x, e.y), (0.5, 0.25));
+		let i = e.handle_in.expect("interior in handle");
+		let o = e.handle_out.expect("interior out handle");
+		assert!(approx(i.x, -0.5 / 3.0) && approx(i.y, -0.5 * 0.5 / 3.0));
+		assert!(approx(o.x, 0.5 / 3.0) && approx(o.y, 0.5 * 0.5 / 3.0));
+
+		// Last point: only the in handle (the previous point exists).
+		let e = curve_point_to_editor(&points[2], &points, unit);
+		assert!(e.handle_out.is_none());
+		let i = e.handle_in.expect("last point in handle");
+		assert!(approx(i.x, -0.5 / 3.0) && approx(i.y, -0.5 * 1.0 / 3.0));
+
+		// A key absent from the list uses index 0 for the handle lookup.
+		let stray = real(0.75, 0.1, 2.0);
+		let e = curve_point_to_editor(&stray, &points, unit);
+		assert!(approx(e.x, 0.75) && approx(e.y, 0.1));
+		assert!(e.handle_in.is_none());
+		let o = e.handle_out.expect("stray out handle via index 0");
+		assert!(approx(o.x, (0.5 - 0.75) / 3.0) && approx(o.y, 2.0 * (0.5 - 0.75) / 3.0));
+
+		// Non-unit domains scale the normalized coordinates.
+		let pair = [real(1.0, 2.0, 3.0), real(2.0, 4.0, 0.0)];
+		let e = curve_point_to_editor(&pair[0], &pair, (0.0, 2.0, 0.0, 4.0));
+		assert!(approx(e.x, 0.5) && approx(e.y, 0.5));
+		let o = e.handle_out.expect("non-unit out handle");
+		assert!(approx(o.x, 0.5 / 3.0) && approx(o.y, 1.5 * 0.5 / 3.0));
+	}
+
+	/// `curve_from_editor`: slopes come from the out handle, then the in
+	/// handle, then the centered/one-sided auto difference; a zero-length
+	/// segment falls through to the auto slope.
+	#[test]
+	fn curve_from_editor_recovers_slopes_from_handles_and_neighbours() {
+		use gpui_widgets::curve_editor::{CurvePoint, CurveVec2};
+		let v = CurveVec2::new;
+		let unit = (0.0, 1.0, 0.0, 1.0);
+
+		// Out handle (preferred) then in handle: both give slope 0.3.
+		let points = vec![
+			CurvePoint {
+				x: 0.0,
+				y: 0.0,
+				handle_in: None,
+				handle_out: Some(v(1.0 / 3.0, 0.1)),
+			},
+			CurvePoint {
+				x: 1.0,
+				y: 1.0,
+				handle_in: Some(v(-1.0 / 3.0, -0.1)),
+				handle_out: None,
+			},
+		];
+		let c = curve_from_editor(&points, unit);
+		assert!(approx(c.points[0].slope, 0.3), "out-handle slope");
+		assert!(approx(c.points[1].slope, 0.3), "in-handle slope");
+
+		// A zero-length segment behind the out handle falls back to the
+		// centred difference, which is also zero here.
+		let points = vec![
+			CurvePoint {
+				x: 0.5,
+				y: 0.0,
+				handle_in: None,
+				handle_out: Some(v(0.1, 0.1)),
+			},
+			CurvePoint {
+				x: 0.5,
+				y: 1.0,
+				handle_in: None,
+				handle_out: None,
+			},
+		];
+		let c = curve_from_editor(&points, unit);
+		assert!(approx(c.points[0].slope, 0.0));
+		assert!(approx(c.points[1].slope, 0.0));
+
+		// A zero-length segment behind the in handle: same fallback.
+		let points = vec![
+			CurvePoint {
+				x: 0.5,
+				y: 1.0,
+				handle_in: None,
+				handle_out: None,
+			},
+			CurvePoint {
+				x: 0.5,
+				y: 0.0,
+				handle_in: Some(v(-0.1, 0.3)),
+				handle_out: None,
+			},
+		];
+		let c = curve_from_editor(&points, unit);
+		assert!(approx(c.points[1].slope, 0.0));
+
+		// No handles: centred difference for an interior point, one-sided
+		// differences for the ends.
+		let points = vec![
+			CurvePoint::new(0.0, 0.0),
+			CurvePoint::new(0.5, 1.0),
+			CurvePoint::new(1.0, 2.0),
+		];
+		let c = curve_from_editor(&points, unit);
+		assert!(approx(c.points[0].slope, 2.0), "first one-sided slope");
+		assert!(approx(c.points[1].slope, 2.0), "interior centred slope");
+		assert!(approx(c.points[2].slope, 2.0), "last one-sided slope");
+
+		// A single point has no neighbours: slope zero.
+		let c = curve_from_editor(&[CurvePoint::new(0.5, 0.5)], unit);
+		assert!(approx(c.points[0].slope, 0.0));
+
+		// A degenerate centred difference (both neighbours on one x): zero.
+		let points = vec![
+			CurvePoint::new(0.0, 0.0),
+			CurvePoint::new(0.5, 1.0),
+			CurvePoint::new(0.0, 2.0),
+		];
+		let c = curve_from_editor(&points, unit);
+		assert!(approx(c.points[1].slope, 0.0));
+
+		// Non-unit domain: the normalized slope scales back by sy/sx.
+		let points = vec![CurvePoint::new(0.0, 0.0), CurvePoint::new(1.0, 1.0)];
+		let c = curve_from_editor(&points, (0.0, 2.0, 0.0, 4.0));
+		assert!(approx(c.points[0].slope, 2.0));
+		assert!(approx(c.points[1].slope, 2.0));
+
+		// A point's key/value map back through the domain.
+		let c = curve_from_editor(&[CurvePoint::new(0.5, 0.25)], (0.0, 2.0, 0.0, 4.0));
+		assert!(approx(c.points[0].key, 1.0) && approx(c.points[0].value, 1.0));
+	}
+
+	/// `curve_points_close`: length, coordinates (1e-6 epsilon) and both
+	/// handles must match.
+	#[test]
+	fn curve_points_close_compares_coordinates_and_handles() {
+		use gpui_widgets::curve_editor::{CurvePoint, CurveVec2};
+		let a = vec![
+			CurvePoint::new(0.0, 0.0),
+			CurvePoint::with_handles(0.5, 0.5, CurveVec2::new(0.1, 0.1)),
+		];
+		assert!(curve_points_close(&a, &a.clone()));
+
+		// Different lengths.
+		assert!(!curve_points_close(&a, &a[..1]));
+
+		// A coordinate outside the epsilon.
+		let mut b = a.clone();
+		b[0].x += 1e-5;
+		assert!(!curve_points_close(&a, &b));
+
+		// Handle presence and value mismatches.
+		let mut b = a.clone();
+		b[1].handle_in = None;
+		assert!(!curve_points_close(&a, &b));
+		let mut b = a.clone();
+		b[1].handle_out = Some(CurveVec2::new(0.1, 0.2));
+		assert!(!curve_points_close(&a, &b));
+
+		// Within the epsilon: close.
+		let mut b = a.clone();
+		b[1].handle_out = Some(CurveVec2::new(0.1, 0.1 + 1e-9));
+		assert!(curve_points_close(&a, &b));
+	}
+
+	/// `slider_value`: ints stay integers, floats stay floats, everything
+	/// else converts through `to_double`.
+	#[test]
+	fn slider_value_maps_int_float_and_other_values() {
+		let p = mk_param("v", ValueType::Int, NodeValue::Int(-3), Vec::new());
+		assert_eq!(slider_value(&p), SliderValue::Integer(-3));
+		let p = mk_param("v", ValueType::Float, NodeValue::Float(2.5), Vec::new());
+		assert_eq!(slider_value(&p), SliderValue::Float(2.5));
+		let p = mk_param("v", ValueType::Boolean, NodeValue::Boolean(true), Vec::new());
+		assert_eq!(slider_value(&p), SliderValue::Float(1.0));
+	}
+
+	/// `combo_haystack`: string combos prefer the `combo_value` list, fall
+	/// back to the labels, and keep an unknown current value in front.
+	#[test]
+	fn combo_haystack_prefers_values_and_keeps_unknown_selection() {
+		let mut p = mk_param(
+			"s",
+			ValueType::StrCombo,
+			NodeValue::StrCombo("b".to_string()),
+			vec![
+				("combo_option", NodeValue::Text("Alpha".to_string())),
+				("combo_option", NodeValue::Text("Beta".to_string())),
+				("combo_value", NodeValue::Text("a".to_string())),
+				("combo_value", NodeValue::Text("b".to_string())),
+			],
+		);
+		assert_eq!(combo_haystack(&p), vec!["a", "b"]);
+
+		// A saved value that is not in the list goes in front (so the
+		// combo shows what the node holds).
+		p.value = NodeValue::StrCombo("saved-elsewhere".to_string());
+		assert_eq!(combo_haystack(&p), vec!["saved-elsewhere", "a", "b"]);
+
+		// An empty current value never is inserted.
+		p.value = NodeValue::StrCombo(String::new());
+		assert_eq!(combo_haystack(&p), vec!["a", "b"]);
+
+		// No combo_value: the option labels are the haystack; a Text value
+		// counts as the current string too.
+		let p = mk_param(
+			"s",
+			ValueType::StrCombo,
+			NodeValue::Text("Serif".to_string()),
+			vec![("combo_option", NodeValue::Text("Sans".to_string()))],
+		);
+		assert_eq!(combo_haystack(&p), vec!["Serif", "Sans"]);
+
+		// Integer combos only have labels.
+		let p = mk_param(
+			"c",
+			ValueType::Combo,
+			NodeValue::Combo(1),
+			vec![
+				("combo_option", NodeValue::Text("One".to_string())),
+				("combo_option", NodeValue::Text("Two".to_string())),
+			],
+		);
+		assert_eq!(combo_haystack(&p), vec!["One", "Two"]);
+	}
+
+	/// `combo_index_for`: string combos match by value (unknown → 0),
+	/// integer combos carry the index clamped at zero.
+	#[test]
+	fn combo_index_for_matches_strings_and_clamps_integers() {
+		let options = vec![
+			("combo_option", NodeValue::Text("Alpha".to_string())),
+			("combo_option", NodeValue::Text("Beta".to_string())),
+			("combo_value", NodeValue::Text("a".to_string())),
+			("combo_value", NodeValue::Text("b".to_string())),
+		];
+		let mut p = mk_param(
+			"s",
+			ValueType::StrCombo,
+			NodeValue::StrCombo("b".to_string()),
+			options.clone(),
+		);
+		assert_eq!(combo_index_for(&p), 1);
+		p.value = NodeValue::Text("b".to_string());
+		assert_eq!(combo_index_for(&p), 1);
+		p.value = NodeValue::StrCombo("missing".to_string());
+		assert_eq!(combo_index_for(&p), 0, "an unknown string falls back to 0");
+		p.value = NodeValue::Combo(0);
+		assert_eq!(combo_index_for(&p), 0, "a non-string value falls back to 0");
+
+		let p = mk_param("c", ValueType::Combo, NodeValue::Int(3), Vec::new());
+		assert_eq!(combo_index_for(&p), 3);
+		let p = mk_param("c", ValueType::Combo, NodeValue::Int(-5), Vec::new());
+		assert_eq!(combo_index_for(&p), 0, "negative indices clamp to 0");
+		let p = mk_param("c", ValueType::Combo, NodeValue::Float(2.9), Vec::new());
+		assert_eq!(combo_index_for(&p), 2);
+	}
+
+	/// `value_components`: vectors and colours flatten, everything else is
+	/// empty.
+	#[test]
+	fn value_components_covers_vectors_and_colors() {
+		assert_eq!(value_components(&NodeValue::Vec2([1.0, 2.0])), vec![1.0, 2.0]);
+		assert_eq!(
+			value_components(&NodeValue::Vec3([1.0, 2.0, 3.0])),
+			vec![1.0, 2.0, 3.0]
+		);
+		assert_eq!(
+			value_components(&NodeValue::Vec4([1.0, 2.0, 3.0, 4.0])),
+			vec![1.0, 2.0, 3.0, 4.0]
+		);
+		assert_eq!(
+			value_components(&NodeValue::Color([0.1, 0.2, 0.3, 0.4])),
+			vec![0.1, 0.2, 0.3, 0.4]
+		);
+		assert!(value_components(&NodeValue::Float(1.0)).is_empty());
+		assert!(value_components(&NodeValue::None).is_empty());
+	}
+
+	/// `default_range` / `numeric_range` / `range_property`: the default
+	/// ranges per type, the attached min/max, and the finite-number filter
+	/// that ignores NaN, infinities and non-numeric properties.
+	#[test]
+	fn numeric_range_reads_properties_and_filters_bad_bounds() {
+		assert_eq!(default_range(ValueType::Int), (-100_000.0, 100_000.0));
+		assert_eq!(default_range(ValueType::Float), (-10_000.0, 10_000.0));
+		assert_eq!(default_range(ValueType::Vec2), (-10_000.0, 10_000.0));
+
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(0.0),
+			vec![
+				("min", NodeValue::Float(1.5)),
+				("max", NodeValue::Int(9)),
+			],
+		);
+		assert_eq!(numeric_range(&p), (1.5, 9.0));
+		assert_eq!(range_property(&p, "min"), Some(1.5));
+		assert_eq!(range_property(&p, "max"), Some(9.0));
+		assert_eq!(range_property(&p, "missing"), None);
+
+		// NaN / infinite bounds are ignored (a broken slider range).
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(0.0),
+			vec![
+				("min", NodeValue::Float(f64::NAN)),
+				("max", NodeValue::Float(f64::INFINITY)),
+			],
+		);
+		assert_eq!(range_property(&p, "min"), None);
+		assert_eq!(range_property(&p, "max"), None);
+		assert_eq!(numeric_range(&p), (-10_000.0, 10_000.0));
+
+		// Non-numeric bounds are ignored too.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(0.0),
+			vec![("min", NodeValue::Text("x".to_string()))],
+		);
+		assert_eq!(range_property(&p, "min"), None);
+
+		// The int default range is wider than the float one.
+		let p = mk_param("i", ValueType::Int, NodeValue::Int(0), Vec::new());
+		assert_eq!(numeric_range(&p), (-100_000.0, 100_000.0));
+	}
+
+	/// `slider_range_and_step`: degenerate and non-finite cases for both
+	/// value kinds (ordered bounds, floor/ceiling-only, bare ranges).
+	#[test]
+	fn slider_range_and_step_handles_degenerate_bounds() {
+		// Int: an inverted range is ordered and the value expands the ends.
+		let p = mk_param(
+			"i",
+			ValueType::Int,
+			NodeValue::Int(5),
+			vec![("min", NodeValue::Int(10)), ("max", NodeValue::Int(0))],
+		);
+		assert_eq!(slider_range_and_step(&p), (0.0, 10.0, 1.0));
+
+		// Int: a degenerate range widens by 200.
+		let p = mk_param(
+			"i",
+			ValueType::Int,
+			NodeValue::Int(5),
+			vec![("min", NodeValue::Int(5)), ("max", NodeValue::Int(5))],
+		);
+		assert_eq!(slider_range_and_step(&p), (5.0, 205.0, 1.0));
+
+		// Int: a non-finite value does not expand the range.
+		let p = mk_param(
+			"i",
+			ValueType::Int,
+			NodeValue::Float(f64::NAN),
+			vec![("min", NodeValue::Int(2)), ("max", NodeValue::Int(4))],
+		);
+		assert_eq!(slider_range_and_step(&p), (2.0, 4.0, 1.0));
+
+		// Float with a floor only: a non-finite value sits on the floor,
+		// its zero span means step one.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(f64::NAN),
+			vec![("min", NodeValue::Float(3.0))],
+		);
+		assert_eq!(slider_range_and_step(&p), (3.0, 203.0, 1.0));
+
+		// Float with a floor only and a value below it: same.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(-5.0),
+			vec![("min", NodeValue::Float(3.0))],
+		);
+		assert_eq!(slider_range_and_step(&p), (3.0, 203.0, 1.0));
+
+		// Float with a ceiling only: the mirror image.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(f64::NAN),
+			vec![("max", NodeValue::Float(7.0))],
+		);
+		assert_eq!(slider_range_and_step(&p), (-193.0, 7.0, 1.0));
+
+		// Both bounds inverted: ordered, and the grid rounds to whole steps.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(3.0),
+			vec![
+				("min", NodeValue::Float(5.0)),
+				("max", NodeValue::Float(1.0)),
+			],
+		);
+		let (min, max, step) = slider_range_and_step(&p);
+		assert_eq!((min, max), (1.0, 5.0));
+		assert!(approx(step, 0.02), "inverted range step {step}");
+
+		// Neither bound, non-finite value: the wide default range with the
+		// 200-step grid.
+		let p = mk_param("f", ValueType::Float, NodeValue::Float(f64::NAN), Vec::new());
+		let (min, max, step) = slider_range_and_step(&p);
+		assert_eq!((min, max), (-10_000.0, 10_000.0));
+		assert!(approx(step, 100.0), "unbounded step {step}");
+
+		// A value barely above the floor rounds to a single (fine) step.
+		let p = mk_param(
+			"f",
+			ValueType::Float,
+			NodeValue::Float(0.0001),
+			vec![
+				("min", NodeValue::Float(0.0)),
+				("max", NodeValue::Float(1.0)),
+			],
+		);
+		let (min, max, step) = slider_range_and_step(&p);
+		assert_eq!((min, max), (0.0, 1.0));
+		assert!(approx(step, 0.0001), "tiny span step {step}");
+	}
+
+	/// `nice_grid_step`: an exact 1/2/5 divisor when one exists, the
+	/// twenty-five-step fallback otherwise, and one for bad spans.
+	#[test]
+	fn nice_grid_step_picks_exact_dividing_steps_and_falls_back() {
+		assert!(approx(nice_grid_step(100.0), 5.0));
+		assert!(approx(nice_grid_step(1.0), 0.05));
+
+		// No 1/2/5 × 10^k step divides this span into a whole number.
+		let span = std::f64::consts::PI * 2.0;
+		assert!(
+			approx(nice_grid_step(span), span / 25.0),
+			"fallback {}",
+			nice_grid_step(span)
+		);
+
+		// Bad spans fall back to one.
+		assert_eq!(nice_grid_step(0.0), 1.0);
+		assert_eq!(nice_grid_step(-10.0), 1.0);
+		assert_eq!(nice_grid_step(f64::INFINITY), 1.0);
+		assert_eq!(nice_grid_step(f64::NAN), 1.0);
+	}
+
+	/// `is_multiline` reads only the `("multiline", true)` property.
+	#[test]
+	fn is_multiline_reads_the_boolean_property() {
+		let p = mk_param(
+			"t",
+			ValueType::Text,
+			NodeValue::Text("x".to_string()),
+			vec![("multiline", NodeValue::Boolean(true))],
+		);
+		assert!(is_multiline(&p));
+		let p = mk_param(
+			"t",
+			ValueType::Text,
+			NodeValue::Text("x".to_string()),
+			vec![("multiline", NodeValue::Boolean(false))],
+		);
+		assert!(!is_multiline(&p));
+		let p = mk_param(
+			"t",
+			ValueType::Text,
+			NodeValue::Text("x".to_string()),
+			vec![("multiline", NodeValue::Int(1))],
+		);
+		assert!(!is_multiline(&p));
+		let p = mk_param("t", ValueType::Text, NodeValue::Text("x".to_string()), Vec::new());
+		assert!(!is_multiline(&p));
+	}
+
+	/// `patch_component` replaces in-range channels of vec/colour values
+	/// and leaves everything else untouched.
+	#[test]
+	fn patch_component_replaces_in_range_and_ignores_other_values() {
+		let patched = patch_component(&NodeValue::Vec2([0.0, 1.0]), 1, 2.0);
+		assert_eq!(value_components(&patched), vec![0.0, 2.0]);
+		let patched = patch_component(&NodeValue::Vec2([0.0, 1.0]), 2, 2.0);
+		assert_eq!(value_components(&patched), vec![0.0, 1.0], "channel out of range");
+
+		let patched = patch_component(&NodeValue::Vec3([0.0, 1.0, 2.0]), 2, 9.0);
+		assert_eq!(value_components(&patched), vec![0.0, 1.0, 9.0]);
+		let patched = patch_component(&NodeValue::Vec3([0.0, 1.0, 2.0]), 3, 9.0);
+		assert_eq!(value_components(&patched), vec![0.0, 1.0, 2.0]);
+
+		let patched = patch_component(&NodeValue::Vec4([0.0, 1.0, 2.0, 3.0]), 3, 9.0);
+		assert_eq!(value_components(&patched), vec![0.0, 1.0, 2.0, 9.0]);
+		let patched = patch_component(&NodeValue::Vec4([0.0, 1.0, 2.0, 3.0]), 4, 9.0);
+		assert_eq!(value_components(&patched), vec![0.0, 1.0, 2.0, 3.0]);
+
+		let patched = patch_component(&NodeValue::Color([0.0, 0.0, 0.0, 1.0]), 0, 0.5);
+		assert_eq!(value_components(&patched), vec![0.5, 0.0, 0.0, 1.0]);
+		let patched = patch_component(&NodeValue::Color([0.0, 0.0, 0.0, 1.0]), 4, 0.5);
+		assert_eq!(value_components(&patched), vec![0.0, 0.0, 0.0, 1.0]);
+
+		let patched = patch_component(&NodeValue::Float(1.0), 0, 2.0);
+		assert_eq!(patched.to_double(), 1.0, "non-vector values are untouched");
+	}
+
+	/// `hue_from_point`: top-to-bottom maps to 0..360 with clamping.
+	#[test]
+	fn hue_from_point_maps_and_clamps() {
+		let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(18.0), px(180.0)));
+		let at = |y: f32| point(px(15.0), px(y));
+		assert_eq!(hue_from_point(bounds, at(20.0)), 0.0);
+		assert_eq!(hue_from_point(bounds, at(200.0)), 360.0);
+		assert_eq!(hue_from_point(bounds, at(110.0)), 180.0);
+		// Out of bounds clamps.
+		assert_eq!(hue_from_point(bounds, at(-100.0)), 0.0);
+		assert_eq!(hue_from_point(bounds, at(900.0)), 360.0);
+	}
+
+	/// `hsv_to_rgb`: every hue sector, including the wraparound sector.
+	#[test]
+	fn hsv_to_rgb_covers_all_hue_sectors() {
+		let rgb = |h: f32, s: f32, v: f32| hsv_to_rgb(h, s, v);
+		// Sector 0, 1, 2, 3.
+		assert_eq!(rgb(0.0, 1.0, 1.0).r, 1.0);
+		assert_eq!(rgb(60.0, 1.0, 1.0).g, 1.0);
+		assert_eq!(rgb(120.0, 1.0, 1.0).g, 1.0);
+		assert_eq!(rgb(180.0, 1.0, 1.0).g, 1.0);
+		assert_eq!(rgb(180.0, 1.0, 1.0).b, 1.0);
+		// Sector 4 and the wraparound sector 5.
+		assert_eq!(rgb(240.0, 1.0, 1.0).b, 1.0);
+		let magenta = rgb(300.0, 1.0, 1.0);
+		assert!(magenta.r == 1.0 && magenta.g == 0.0 && magenta.b == 1.0);
+		// Negative hues wrap into the circle.
+		let wrapped = rgb(-60.0, 1.0, 1.0);
+		assert!(wrapped.r == 1.0 && wrapped.g == 0.0 && wrapped.b == 1.0);
+	}
+
+	/// `sv_from_point` guards against zero-size bounds (a collapsed
+	/// canvas must not divide by zero).
+	#[test]
+	fn sv_from_point_handles_zero_size_bounds() {
+		let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(0.0), px(0.0)));
+		let (s, v) = sv_from_point(bounds, point(px(0.0), px(0.0)));
+		assert!(s.is_finite() && v.is_finite());
+	}
+
+	/// The hex parser trims surrounding whitespace before validating.
+	#[test]
+	fn hex_parse_trims_surrounding_whitespace() {
+		let c = parse_hex("  #112233  ").expect("trimmed hex parses");
+		assert!((c.r - 0x11 as f32 / 255.0).abs() < 1e-6);
+		assert_eq!(format_hex(c), "#112233");
+	}
+
+	// -----------------------------------------------------------------------
+	// Params view: control building, value sync and event wiring (gpui)
+	// -----------------------------------------------------------------------
+
+	use crate::oakui::mock::MockEngine;
+
+	struct ParamsHost {
+		view: Entity<OfxParamsView<MockEngine>>,
+	}
+
+	impl Render for ParamsHost {
+		fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			div()
+				.debug_selector(|| "params-host".into())
+				.size_full()
+				.child(self.view.clone())
+		}
+	}
+
+	/// Opens a params view over the mock engine's text3-shaped parameter set
+	/// (sentinel effect 900) in a test window.
+	fn open_params_view(
+		cx: &mut TestAppContext,
+		width: f32,
+		height: f32,
+	) -> (
+		gpui::WindowHandle<ParamsHost>,
+		Entity<OfxParamsView<MockEngine>>,
+	) {
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(width), px(height)), |window, cx| {
+			let engine = cx.new(MockEngine::create);
+			let view =
+				cx.new(|cx| OfxParamsView::<MockEngine>::new(EffectId(900), engine, window, cx));
+			ParamsHost { view }
+		});
+		cx.run_until_parked();
+		let host = window.root(cx).expect("params host root");
+		let view = cx.read(|cx| host.read(cx).view.clone());
+		(window, view)
+	}
+
+	/// Builds `params` inside the view's context (the shared entity context
+	/// keeps child entities alive) and returns them for inspection. The
+	/// controls are deliberately NOT added to the view.
+	fn build_in_view(
+		view: &Entity<OfxParamsView<MockEngine>>,
+		visual: &mut gpui::VisualTestContext,
+		params: Vec<EffectParam>,
+	) -> Vec<ParamControl> {
+		visual.update(|window, cx| {
+			view.update(cx, |_view, cx| {
+				let mut control_id = 10_000usize;
+				params
+					.iter()
+					.map(|p| build_control(p, &mut control_id, window, cx))
+					.collect()
+			})
+		})
+	}
+
+	/// Builds the extra controls AND wires them to the view (subscriptions
+	/// live on the view entity), moving them into `view.controls` so the
+	/// child entities stay alive.
+	fn add_and_wire_in_view(
+		view: &Entity<OfxParamsView<MockEngine>>,
+		visual: &mut gpui::VisualTestContext,
+		params: Vec<EffectParam>,
+	) {
+		visual.update(|window, cx| {
+			view.update(cx, |view, cx| {
+				let mut control_id = 20_000usize;
+				let controls = params
+					.iter()
+					.map(|p| build_control(p, &mut control_id, window, cx))
+					.collect::<Vec<_>>();
+				let temp = OfxParamsView {
+					engine: view.engine.clone(),
+					effect: view.effect,
+					controls,
+				};
+				wire_controls(&temp, cx);
+				view.controls.extend(temp.controls);
+			})
+		});
+	}
+
+	/// Returns `(kind_name, entity)`-style descriptors for the view's
+	/// controls, so tests can assert the control set without moving entities.
+	fn control_kinds(view: &Entity<OfxParamsView<MockEngine>>, cx: &App) -> Vec<(String, String)> {
+		view.read(cx)
+			.controls
+			.iter()
+			.map(|c| {
+				let kind = match &c.kind {
+					ControlKind::Slider(_) => "slider",
+					ControlKind::CheckBox(_) => "checkbox",
+					ControlKind::Combo(_) => "combo",
+					ControlKind::Spin(_) => "spin",
+					ControlKind::Color(_) => "color",
+					ControlKind::Text { multiline, .. } => {
+						if *multiline {
+							"text-area"
+						} else {
+							"text"
+						}
+					}
+					ControlKind::Curve(_) => "curve",
+					ControlKind::PushButton => "button",
+					ControlKind::ReadOnly(_) => "readonly",
+				};
+				(c.input_id.clone(), kind.to_string())
+			})
+			.collect()
+	}
+
+	/// `build_control` maps every value type to its widget (or read-only
+	/// line), seeding the values and deriving the wrapped labels.
+	#[gpui::test]
+	async fn build_control_builds_a_widget_for_every_param_kind(cx: &mut TestAppContext) {
+		let (window, view) = open_params_view(cx, 420.0, 900.0);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+
+		let params = vec![
+			mk_param(
+				"int_in",
+				ValueType::Int,
+				NodeValue::Int(5),
+				vec![("min", NodeValue::Int(0)), ("max", NodeValue::Int(10))],
+			),
+			mk_param(
+				"float_clamped_in",
+				ValueType::Float,
+				NodeValue::Float(2.5),
+				vec![("min", NodeValue::Int(0)), ("max", NodeValue::Int(1))],
+			),
+			mk_param("bool_on_in", ValueType::Boolean, NodeValue::Boolean(true), Vec::new()),
+			mk_param(
+				"bool_off_in",
+				ValueType::Boolean,
+				NodeValue::Boolean(false),
+				Vec::new(),
+			),
+			mk_param(
+				"combo_in",
+				ValueType::Combo,
+				NodeValue::Combo(1),
+				vec![
+					("combo_option", NodeValue::Text("One".into())),
+					("combo_option", NodeValue::Text("Two".into())),
+				],
+			),
+			mk_param("combo_bare_in", ValueType::Combo, NodeValue::Combo(2), Vec::new()),
+			mk_param(
+				"strcombo_bare_in",
+				ValueType::StrCombo,
+				NodeValue::StrCombo("Sans".into()),
+				Vec::new(),
+			),
+			mk_param("strcombo_odd_in", ValueType::StrCombo, NodeValue::Combo(0), Vec::new()),
+			mk_param(
+				"text_multi_in",
+				ValueType::Text,
+				NodeValue::Text("hello".into()),
+				vec![("multiline", NodeValue::Boolean(true))],
+			),
+			mk_param(
+				"text_single_in",
+				ValueType::Text,
+				NodeValue::Text("hi".into()),
+				Vec::new(),
+			),
+			mk_param("vec2_in", ValueType::Vec2, NodeValue::Vec2([1.0, 2.0]), Vec::new()),
+			// A vector param without a vector value: components default to
+			// zero.
+			mk_param("vec2_empty_in", ValueType::Vec2, NodeValue::None, Vec::new()),
+			// A colour param without a colour value: black, opaque.
+			mk_param("color_empty_in", ValueType::Color, NodeValue::None, Vec::new()),
+			mk_param(
+				"vec3_in",
+				ValueType::Vec3,
+				NodeValue::Vec3([1.0, 2.0, 3.0]),
+				Vec::new(),
+			),
+			mk_param(
+				"color_in",
+				ValueType::Color,
+				NodeValue::Color([0.1, 0.2, 0.3, 0.4]),
+				Vec::new(),
+			),
+			mk_param("button_in", ValueType::PushButton, NodeValue::PushButton, Vec::new()),
+			mk_param(
+				"curves_in",
+				ValueType::Parametric,
+				NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
+					oak_plugin::param_curve::Curve::identity(0.0, 1.0),
+				])),
+				vec![
+					("parametric_range", NodeValue::Vec2([0.0, 1.0])),
+					("ui_group", NodeValue::Text("Group".into())),
+					("ui_page", NodeValue::Text("Page".into())),
+				],
+			),
+			mk_param(
+				"curves_bad_in",
+				ValueType::Parametric,
+				NodeValue::Text("not json".into()),
+				Vec::new(),
+			),
+			mk_param("binary_in", ValueType::Binary, NodeValue::Binary(vec![1, 2]), Vec::new()),
+		];
+		let controls = build_in_view(&view, visual, params);
+
+		let by_id = |id: &str| {
+			controls
+				.iter()
+				.find(|c| c.input_id == id)
+				.unwrap_or_else(|| panic!("control {id}"))
+		};
+		visual.read(|cx| {
+			match &by_id("int_in").kind {
+				ControlKind::Slider(s) => {
+					assert_eq!(s.read(cx).value(), SliderValue::Integer(5));
+				}
+				_ => panic!("int params build a slider"),
+			}
+			// The seeded value clamps into the range.
+			match &by_id("float_clamped_in").kind {
+				ControlKind::Slider(s) => {
+					assert_eq!(s.read(cx).value(), SliderValue::Float(1.0));
+				}
+				_ => panic!("float params build a slider"),
+			}
+			match &by_id("bool_on_in").kind {
+				ControlKind::CheckBox(c) => assert_eq!(c.read(cx).state(), CheckState::Checked),
+				_ => panic!("boolean params build a checkbox"),
+			}
+			match &by_id("bool_off_in").kind {
+				ControlKind::CheckBox(c) => assert_eq!(c.read(cx).state(), CheckState::Unchecked),
+				_ => panic!("boolean params build a checkbox"),
+			}
+			match &by_id("combo_in").kind {
+				ControlKind::Combo(c) => assert_eq!(c.read(cx).selected(), Some(1)),
+				_ => panic!("combo params build a combo box"),
+			}
+			// No option list: the raw values become read-only text.
+			match &by_id("combo_bare_in").kind {
+				ControlKind::ReadOnly(t) => assert_eq!(t.as_ref(), "2"),
+				_ => panic!("bare combos are read-only"),
+			}
+			match &by_id("strcombo_bare_in").kind {
+				ControlKind::Combo(c) => assert_eq!(c.read(cx).selected(), Some(0)),
+				_ => panic!("a string combo with a current value builds a combo"),
+			}
+			match &by_id("strcombo_odd_in").kind {
+				ControlKind::ReadOnly(t) => assert_eq!(t.as_ref(), ""),
+				_ => panic!("a non-string value renders empty"),
+			}
+			match &by_id("text_multi_in").kind {
+				ControlKind::Text { editor, multiline } => {
+					assert!(*multiline);
+					assert_eq!(editor.read(cx).as_str(), "hello");
+				}
+				_ => panic!("text params build an editor"),
+			}
+			match &by_id("text_single_in").kind {
+				ControlKind::Text { multiline, .. } => assert!(!*multiline),
+				_ => panic!("text params build an editor"),
+			}
+			match &by_id("vec2_in").kind {
+				ControlKind::Spin(spins) => {
+					assert_eq!(spins.len(), 2);
+					assert_eq!(spins[0].0.read(cx).value(), SliderValue::Float(1.0));
+					assert_eq!(spins[1].1, 1);
+				}
+				_ => panic!("vec2 params build spin boxes"),
+			}
+			match &by_id("vec2_empty_in").kind {
+				ControlKind::Spin(spins) => {
+					assert_eq!(spins.len(), 2);
+					assert_eq!(spins[0].0.read(cx).value(), SliderValue::Float(0.0));
+					assert_eq!(spins[1].0.read(cx).value(), SliderValue::Float(0.0));
+				}
+				_ => panic!("vec2 params build spin boxes"),
+			}
+			match &by_id("color_empty_in").kind {
+				ControlKind::Color(p) => {
+					assert_eq!(
+						p.read(cx).committed,
+						Rgba {
+							r: 0.0,
+							g: 0.0,
+							b: 0.0,
+							a: 1.0
+						}
+					);
+				}
+				_ => panic!("colour params build a picker"),
+			}
+			match &by_id("vec3_in").kind {
+				ControlKind::Spin(spins) => {
+					assert_eq!(spins.len(), 3);
+					assert_eq!(spins[2].1, 2);
+				}
+				_ => panic!("vec3 params build spin boxes"),
+			}
+			match &by_id("color_in").kind {
+				ControlKind::Color(p) => {
+					let c = p.read(cx);
+					assert!((c.committed.r - 0.1).abs() < 1e-6);
+					assert!((c.committed.a - 0.4).abs() < 1e-6);
+				}
+				_ => panic!("colour params build a picker"),
+			}
+			assert!(matches!(by_id("button_in").kind, ControlKind::PushButton));
+			match &by_id("curves_in").kind {
+				ControlKind::Curve(editors) => assert_eq!(editors.len(), 1),
+				_ => panic!("parametric params build curve editors"),
+			}
+			assert!(by_id("curves_in").curve_domain.is_some());
+			match &by_id("curves_bad_in").kind {
+				ControlKind::Curve(editors) => assert!(editors.is_empty()),
+				_ => panic!("parametric params build curve editors"),
+			}
+			match &by_id("binary_in").kind {
+				ControlKind::ReadOnly(t) => assert_eq!(t.as_ref(), ""),
+				_ => panic!("binary params are read-only"),
+			}
+			// The section group/page travels on the control.
+			assert_eq!(
+				by_id("curves_in").section,
+				Some(("Group".to_string(), "Page".to_string()))
+			);
+			assert_eq!(by_id("binary_in").section, None);
+		});
+	}
+
+	/// `sync_values` reapplies the engine snapshot to every widget kind
+	/// (including hidden params a mock/plugin engine may hand over) and
+	/// drains a viewer eyedropper pick into the colour picker's draft.
+	#[gpui::test]
+	async fn sync_values_applies_the_engine_snapshot_and_viewer_picks(cx: &mut TestAppContext) {
+		let (window, view) = open_params_view(cx, 420.0, 900.0);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// Extra controls whose input ids collide with engine params: a
+		// checkbox on the hidden Boolean(true), a text field on a string
+		// combo, a text field on a float (skipped), and push/read-only
+		// no-ops. These are synced directly (never rendered, so no
+		// duplicate element ids).
+		let extras = vec![
+			mk_param(
+				"use_args_in",
+				ValueType::Boolean,
+				NodeValue::Boolean(false),
+				Vec::new(),
+			),
+			mk_param(
+				"font_family_in",
+				ValueType::Text,
+				NodeValue::Text(String::new()),
+				Vec::new(),
+			),
+			mk_param(
+				"font_size_in",
+				ValueType::Text,
+				NodeValue::Text(String::new()),
+				Vec::new(),
+			),
+			mk_param(
+				"outline_enabled_in",
+				ValueType::PushButton,
+				NodeValue::PushButton,
+				Vec::new(),
+			),
+			mk_param(
+				"glow_color_in",
+				ValueType::Combo,
+				NodeValue::Combo(0),
+				Vec::new(),
+			),
+			// A curve control on a text-valued engine param: the JSON
+			// mirror does not parse, so the sync reseeds with no curves.
+			mk_param(
+				"plain_text_in",
+				ValueType::Parametric,
+				NodeValue::Text(String::new()),
+				Vec::new(),
+			),
+			// A picker on a numeric param: the colour arm's value guard is
+			// false and the draft is left alone.
+			mk_param(
+				"font_size_in",
+				ValueType::Color,
+				NodeValue::Color([0.0, 0.0, 0.0, 1.0]),
+				Vec::new(),
+			),
+			// A vec3 spin control on a vec2 param: the third channel has
+			// no component to sync.
+			mk_param(
+				"pos_in",
+				ValueType::Vec3,
+				NodeValue::Vec3([1.0, 2.0, 3.0]),
+				Vec::new(),
+			),
+			// A curve control on a numeric param: the JSON mirror is not
+			// text, so the reseed is empty.
+			mk_param(
+				"font_size_in",
+				ValueType::Parametric,
+				NodeValue::Text(String::new()),
+				Vec::new(),
+			),
+		];
+		let extras = build_in_view(&view, visual, extras);
+		visual.update(|_window, cx| {
+			view.update(cx, |view, _cx| view.controls.extend(extras));
+		});
+
+		// Corrupt every widget, then let sync_values restore it.
+		visual.update(|_window, cx| {
+			view.update(cx, |view, cx| {
+				for control in &view.controls {
+					match &control.kind {
+						ControlKind::Slider(s) => {
+							s.update(cx, |s, _| s.set_value(SliderValue::Float(0.0)));
+						}
+						ControlKind::CheckBox(c) => {
+							c.update(cx, |c, cx| c.set_state(CheckState::Checked, cx));
+						}
+						ControlKind::Combo(c) => {
+							c.update(cx, |c, cx| c.set_selected(Some(99), cx));
+						}
+						ControlKind::Spin(spins) => {
+							for (s, _) in spins {
+								s.update(cx, |s, cx| {
+									s.set_value(SliderValue::Float(-42.0), cx);
+								});
+							}
+						}
+						ControlKind::Color(p) => {
+							p.update(cx, |p, cx| {
+								p.set_committed(
+									Rgba {
+										r: 1.0,
+										g: 1.0,
+										b: 1.0,
+										a: 1.0,
+									},
+									cx,
+								);
+							});
+						}
+						ControlKind::Text { editor, .. } => {
+							editor.update(cx, |e, cx| e.emplace("corrupted", cx));
+						}
+						ControlKind::Curve(_)
+						| ControlKind::PushButton
+						| ControlKind::ReadOnly(_) => {}
+					}
+				}
+			});
+			// Arm the picker and feed it a sampled colour; the next sync
+			// takes the pick into the draft.
+			let picker = view.read(cx).controls.iter().find_map(|c| match &c.kind {
+				ControlKind::Color(p) => Some(p.clone()),
+				_ => None,
+			});
+			if let Some(picker) = picker {
+				picker.update(cx, |picker, cx| picker.toggle_viewer_pick(cx));
+			}
+			let engine = view.read(cx).engine.clone();
+			let green = Rgba {
+				r: 0.0,
+				g: 1.0,
+				b: 0.0,
+				a: 1.0,
+			};
+			engine.update(cx, |engine, cx| engine.eyedropper_picked(green, cx));
+		});
+		visual.update(|window, cx| {
+			view.update(cx, |view, cx| view.sync_values(window, cx));
+		});
+
+		let (slider_value, check_state, combo_index, spins, custom_text, picker_state) =
+			visual.read(|cx| {
+				let view = view.read(cx);
+				let find = |id: &str| {
+					view.controls
+						.iter()
+						.find(|c| c.input_id == id)
+						.unwrap_or_else(|| panic!("control {id}"))
+				};
+				let slider = match &find("font_size_in").kind {
+					ControlKind::Slider(s) => s.read(cx).value(),
+					_ => panic!("font_size_in"),
+				};
+				let check = match &find("outline_enabled_in").kind {
+					ControlKind::CheckBox(c) => c.read(cx).state(),
+					_ => panic!("outline_enabled_in"),
+				};
+				let combo = match &find("font_family_in").kind {
+					ControlKind::Combo(c) => c.read(cx).selected(),
+					_ => panic!("font_family_in"),
+				};
+				let spins = match &find("size_in").kind {
+					ControlKind::Spin(spins) => spins
+						.iter()
+						.map(|(s, _)| s.read(cx).value())
+						.collect::<Vec<_>>(),
+					_ => panic!("size_in"),
+				};
+				// The custom text control sharing the string-combo id holds
+				// the re-synced string.
+				let custom_text = view
+					.controls
+					.iter()
+					.filter(|c| c.input_id == "font_family_in")
+					.find_map(|c| match &c.kind {
+						ControlKind::Text { editor, .. } => {
+							Some(editor.read(cx).as_str().to_string())
+						}
+						_ => None,
+					})
+					.expect("the custom text control survives");
+				let picker_state = view.controls.iter().find_map(|c| match &c.kind {
+					ControlKind::Color(p) => {
+						let p = p.read(cx);
+						Some((p.draft, p.picking))
+					}
+					_ => None,
+				});
+				(slider, check, combo, spins, custom_text, picker_state)
+			});
+		let (draft, picking) = picker_state.expect("the colour picker");
+		assert_eq!(slider_value, SliderValue::Float(72.0));
+		assert_eq!(check_state, CheckState::Unchecked, "the engine holds false");
+		assert_eq!(combo_index, Some(0));
+		assert_eq!(spins, vec![SliderValue::Float(400.0), SliderValue::Float(300.0)]);
+		assert_eq!(custom_text, "", "a StrCombo syncs into the text field");
+		assert_eq!(
+			draft,
+			Rgba {
+				r: 0.0,
+				g: 1.0,
+				b: 0.0,
+				a: 1.0
+			},
+			"the viewer pick lands in the picker's draft"
+		);
+		assert!(!picking, "the pick disarms the eyedropper");
+
+		// The hidden Boolean(true) param drives a checkbox to Checked.
+		let hidden_check = visual.read(|cx| {
+			view.read(cx)
+				.controls
+				.iter()
+				.filter(|c| c.input_id == "use_args_in")
+				.find_map(|c| match &c.kind {
+					ControlKind::CheckBox(c) => Some(c.read(cx).state()),
+					_ => None,
+				})
+		});
+		assert_eq!(hidden_check, Some(CheckState::Checked));
+	}
+
+	/// The render pass lays out every control kind and emits the section
+	/// titles (group-only, combined, page-only, none); an empty control set
+	/// renders the placeholder line instead.
+	#[gpui::test]
+	async fn params_view_renders_sections_and_extended_controls(cx: &mut TestAppContext) {
+		let (window, view) = open_params_view(cx, 420.0, 900.0);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+
+		let params = vec![
+			mk_param(
+				"sec_group_in",
+				ValueType::Int,
+				NodeValue::Int(3),
+				vec![
+					("min", NodeValue::Int(0)),
+					("max", NodeValue::Int(10)),
+					("ui_group", NodeValue::Text("Group".into())),
+				],
+			),
+			mk_param(
+				"sec_both_in",
+				ValueType::Text,
+				NodeValue::Text("x".into()),
+				vec![
+					("ui_group", NodeValue::Text("Group".into())),
+					("ui_page", NodeValue::Text("Page".into())),
+				],
+			),
+			mk_param(
+				"sec_page_in",
+				ValueType::Text,
+				NodeValue::Text("y".into()),
+				vec![("ui_page", NodeValue::Text("PageOnly".into()))],
+			),
+			mk_param(
+				"plain_row_in",
+				ValueType::Vec3,
+				NodeValue::Vec3([1.0, 2.0, 3.0]),
+				Vec::new(),
+			),
+			mk_param(
+				"render_button_in",
+				ValueType::PushButton,
+				NodeValue::PushButton,
+				Vec::new(),
+			),
+			mk_param("render_ro_in", ValueType::Combo, NodeValue::Combo(0), Vec::new()),
+			mk_param(
+				"render_curves_in",
+				ValueType::Parametric,
+				NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
+					oak_plugin::param_curve::Curve::identity(0.0, 1.0),
+					oak_plugin::param_curve::Curve::from_pairs(&[(0.0, 0.0), (1.0, 0.5)]),
+				])),
+				vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
+			),
+		];
+		let extras = build_in_view(&view, visual, params);
+		visual.update(|_window, cx| {
+			view.update(cx, |view, _cx| view.controls = extras);
+		});
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(visual.debug_bounds("params-host").is_some());
+
+		let kinds = visual.read(|cx| control_kinds(&view, cx));
+		assert_eq!(
+			kinds,
+			vec![
+				("sec_group_in".to_string(), "slider".to_string()),
+				("sec_both_in".to_string(), "text".to_string()),
+				("sec_page_in".to_string(), "text".to_string()),
+				("plain_row_in".to_string(), "spin".to_string()),
+				("render_button_in".to_string(), "button".to_string()),
+				("render_ro_in".to_string(), "readonly".to_string()),
+				("render_curves_in".to_string(), "curve".to_string()),
+			]
+		);
+		let curve_count = visual.read(|cx| {
+			view.read(cx)
+				.controls
+				.iter()
+				.find(|c| c.input_id == "render_curves_in")
+				.map(|c| match &c.kind {
+					ControlKind::Curve(editors) => editors.len(),
+					_ => 0,
+				})
+				.unwrap_or(0)
+		});
+		assert_eq!(curve_count, 2, "one editor per curve dimension");
+
+		// A second draw re-runs sync_values over every custom control (their
+		// ids have no engine param, so the sync skips them) and paints
+		// again.
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// An empty view renders its placeholder text branch.
+		visual.update(|_window, cx| {
+			view.update(cx, |view, _cx| view.controls.clear());
+		});
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(visual.debug_bounds("params-host").is_some());
+	}
+
+	/// The push-button row and the text row's commit button are clickable:
+	/// their clicks route to `effect_push_button` / `set_effect_param` (the
+	/// mock engine rejects both, which the view swallows).
+	#[gpui::test]
+	async fn push_button_and_text_commit_clicks_fire(cx: &mut TestAppContext) {
+		let (window, view) = open_params_view(cx, 420.0, 240.0);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		let params = vec![
+			mk_param(
+				"render_button_in",
+				ValueType::PushButton,
+				NodeValue::PushButton,
+				Vec::new(),
+			),
+			mk_param(
+				"render_text_in",
+				ValueType::Text,
+				NodeValue::Text("value".into()),
+				Vec::new(),
+			),
+		];
+		let extras = build_in_view(&view, visual, params);
+		visual.update(|_window, cx| {
+			view.update(cx, |view, _cx| view.controls = extras);
+		});
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		let host = visual.debug_bounds("params-host").expect("host painted");
+		// The push button is the first row, full-width under the body's p_2
+		// padding.
+		visual.simulate_click(
+			Point::new(
+				host.origin.x + host.size.width * 0.5,
+				host.origin.y + px(16.0),
+			),
+			Modifiers::default(),
+		);
+		// The text row's commit button sits at the row's right edge; the
+		// second row starts below the first (~28px row + 4px gap).
+		visual.simulate_click(
+			Point::new(
+				host.origin.x + host.size.width - px(16.0),
+				host.origin.y + px(50.0),
+			),
+			Modifiers::default(),
+		);
+		cx.run_until_parked();
+		assert!(
+			visual.debug_bounds("params-host").is_some(),
+			"the view survives the clicks"
+		);
+		// The clicks must actually reach the engine: the mock records every
+		// attempt even though it rejects the write (review §10.2 — the
+		// previous version only asserted that the view survived).
+		let (push, sets) = cx.read(|cx| {
+			let engine = view.read(cx).engine.read(cx);
+			(engine.effect_push_attempts(), engine.effect_param_attempts())
+		});
+		assert_eq!(
+			push,
+			vec![(EffectId(900), "render_button_in".to_string())],
+			"the push button routes to effect_push_button"
+		);
+		assert!(
+			sets
+				.iter()
+				.any(|(_, id, value)| id == "render_text_in" && value.contains("value")),
+			"the text commit routes to set_effect_param: {sets:?}"
+		);
+	}
+
+	/// Every wired control event routes through its engine callback:
+	/// sliders (int and float), checkboxes, combos (int and string),
+	/// spin boxes (the whole value is rebuilt from the current one), curve
+	/// editors (all three edit events rebuild and commit the JSON) and the
+	/// colour picker's commit / eyedropper events.
+	#[gpui::test]
+	async fn control_events_route_through_the_engine_callbacks(cx: &mut TestAppContext) {
+		use gpui_widgets::curve_editor::{CurveEditorEvent, CurvePoint, CurveVec2, HandleSide};
+
+		let (window, view) = open_params_view(cx, 420.0, 900.0);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// The mock parameter set has no int slider, int combo or curves:
+		// build and wire custom ones.
+		add_and_wire_in_view(
+			&view,
+			visual,
+			vec![
+				mk_param(
+					"wire_int_in",
+					ValueType::Int,
+					NodeValue::Int(1),
+					vec![("min", NodeValue::Int(0)), ("max", NodeValue::Int(10))],
+				),
+				mk_param(
+					"wire_combo_in",
+					ValueType::Combo,
+					NodeValue::Combo(0),
+					vec![
+						("combo_option", NodeValue::Text("A".into())),
+						("combo_option", NodeValue::Text("B".into())),
+					],
+				),
+				mk_param(
+					"wire_curves_in",
+					ValueType::Parametric,
+					NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
+						oak_plugin::param_curve::Curve::identity(0.0, 1.0),
+					])),
+					vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
+				),
+			],
+		);
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		let (slider, check, combo, spin, picker, int_slider, int_combo, curve) =
+			visual.read(|cx| {
+				let view = view.read(cx);
+				let get = |id: &str| {
+					view.controls
+						.iter()
+						.find(|c| c.input_id == id)
+						.unwrap_or_else(|| panic!("control {id}"))
+				};
+				let slider = match &get("font_size_in").kind {
+					ControlKind::Slider(s) => s.clone(),
+					_ => panic!("font_size_in"),
+				};
+				let check = match &get("outline_enabled_in").kind {
+					ControlKind::CheckBox(c) => c.clone(),
+					_ => panic!("outline_enabled_in"),
+				};
+				let combo = match &get("font_family_in").kind {
+					ControlKind::Combo(c) => c.clone(),
+					_ => panic!("font_family_in"),
+				};
+				let spin = match &get("size_in").kind {
+					ControlKind::Spin(spins) => spins[0].0.clone(),
+					_ => panic!("size_in"),
+				};
+				let picker = match &get("outline_color_in").kind {
+					ControlKind::Color(p) => p.clone(),
+					_ => panic!("outline_color_in"),
+				};
+				let int_slider = match &get("wire_int_in").kind {
+					ControlKind::Slider(s) => s.clone(),
+					_ => panic!("wire_int_in"),
+				};
+				let int_combo = match &get("wire_combo_in").kind {
+					ControlKind::Combo(c) => c.clone(),
+					_ => panic!("wire_combo_in"),
+				};
+				let curve = match &get("wire_curves_in").kind {
+					ControlKind::Curve(editors) => editors[0].clone(),
+					_ => panic!("wire_curves_in"),
+				};
+				(slider, check, combo, spin, picker, int_slider, int_combo, curve)
+			});
+
+		// Slider: both value families reach the engine as Int / Float.
+		cx.update(|cx| {
+			slider.update(cx, |_s, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control: 0,
+					value: SliderValue::Float(12.0),
+				});
+			});
+		});
+		cx.update(|cx| {
+			int_slider.update(cx, |_s, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control: 1,
+					value: SliderValue::Integer(4),
+				});
+			});
+		});
+		cx.update(|cx| {
+			int_slider.update(cx, |_s, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control: 1,
+					value: SliderValue::Float(4.5),
+				});
+			});
+		});
+
+		// Checkbox.
+		cx.update(|cx| {
+			check.update(cx, |_c, cx| {
+				cx.emit(CheckBoxEvent::Toggled {
+					control: 2,
+					state: CheckState::Checked,
+				});
+			});
+		});
+
+		// String combo: an in-range pick maps back to its string; an
+		// out-of-range pick falls back to the empty string.
+		cx.update(|cx| {
+			combo.update(cx, |_c, cx| {
+				cx.emit(ComboBoxEvent::Selected { value: 1 });
+			});
+		});
+		cx.update(|cx| {
+			combo.update(cx, |_c, cx| {
+				cx.emit(ComboBoxEvent::Selected { value: 99 });
+			});
+		});
+		// Integer combo.
+		cx.update(|cx| {
+			int_combo.update(cx, |_c, cx| {
+				cx.emit(ComboBoxEvent::Selected { value: 1 });
+			});
+		});
+
+		// Spin box: the value-changed path rebuilds the vector; the
+		// edit-committed variant is ignored.
+		cx.update(|cx| {
+			spin.update(cx, |_s, cx| {
+				cx.emit(SpinBoxEvent::ValueChanged {
+					control: 3,
+					value: SliderValue::Float(7.0),
+				});
+			});
+		});
+		cx.update(|cx| {
+			spin.update(cx, |_s, cx| {
+				cx.emit(SpinBoxEvent::EditCommitted {
+					control: 3,
+					value: SliderValue::Integer(9),
+				});
+			});
+		});
+
+		// Curve editor: every edit event rebuilds the whole curve set and
+		// commits the JSON mirror. The widget owns the points, so mirror a
+		// real gesture by updating its state before emitting (an emitted
+		// event alone does not move the point) — this makes the JSON
+		// assertion below value-falsifiable.
+		cx.update(|cx| {
+			curve.update(cx, |e, cx| {
+				e.set_points(
+					vec![
+						CurvePoint::new(0.0, 0.0),
+						CurvePoint::new(0.5, 0.25),
+						CurvePoint::new(1.0, 1.0),
+					],
+					cx,
+				)
+			});
+		});
+		cx.update(|cx| {
+			curve.update(cx, |_e, cx| {
+				cx.emit(CurveEditorEvent::PointMoved {
+					control: 4,
+					index: 0,
+					point: CurvePoint::new(0.1, 0.1),
+				});
+			});
+		});
+		cx.update(|cx| {
+			curve.update(cx, |_e, cx| {
+				cx.emit(CurveEditorEvent::HandleMoved {
+					control: 4,
+					index: 0,
+					side: HandleSide::Out,
+					handle: CurveVec2::new(0.01, 0.01),
+				});
+			});
+		});
+		cx.update(|cx| {
+			curve.update(cx, |_e, cx| {
+				cx.emit(CurveEditorEvent::PointAdded {
+					control: 4,
+					index: 2,
+					point: CurvePoint::new(0.9, 0.9),
+				});
+			});
+		});
+
+		// Colour picker: commit (the mock rejects the set — the failure log
+		// path), eyedropper arming routed to the engine, and the local
+		// open/cancel no-ops.
+		let red = Rgba {
+			r: 1.0,
+			g: 0.0,
+			b: 0.0,
+			a: 1.0,
+		};
+		cx.update(|cx| {
+			picker.update(cx, |_p, cx| cx.emit(OfxColorEvent::Committed(red)));
+		});
+		cx.update(|cx| {
+			picker.update(cx, |_p, cx| {
+				cx.emit(OfxColorEvent::PickViewerToggle { armed: true });
+			});
+		});
+		let armed = cx.read(|cx| view.read(cx).engine.read(cx).eyedropper_armed(cx));
+		assert!(armed, "arming the picker arms the engine eyedropper");
+		cx.update(|cx| {
+			picker.update(cx, |_p, cx| {
+				cx.emit(OfxColorEvent::PickViewerToggle { armed: false });
+			});
+		});
+		let armed = cx.read(|cx| view.read(cx).engine.read(cx).eyedropper_armed(cx));
+		assert!(!armed, "disarming the picker disarms the eyedropper");
+		cx.update(|cx| {
+			picker.update(cx, |_p, cx| cx.emit(OfxColorEvent::Opened));
+		});
+		cx.update(|cx| {
+			picker.update(cx, |_p, cx| cx.emit(OfxColorEvent::Cancelled));
+		});
+	
+		// Routing is falsifiable now: every event above must have reached the
+		// engine (recorded even though the mock rejects the write).
+		let sets = cx.read(|cx| view.read(cx).engine.read(cx).effect_param_attempts());
+		let attempted = |id: &str| sets.iter().any(|(_, i, _)| i == id);
+		for id in [
+			"font_size_in",
+			"wire_int_in",
+			"outline_enabled_in",
+			"font_family_in",
+			"wire_combo_in",
+			"size_in",
+			"wire_curves_in",
+			"outline_color_in",
+		] {
+			assert!(attempted(id), "no engine write for {id}: {sets:?}");
+		}
+		assert!(sets
+			.iter()
+			.any(|(_, i, v)| i == "font_size_in" && v.contains("Float(12.0)")));
+		assert!(sets
+			.iter()
+			.any(|(_, i, v)| i == "outline_enabled_in" && v.contains("Boolean(true)")));
+		assert!(sets
+			.iter()
+			.any(|(_, i, v)| i == "wire_int_in" && v.contains("Int(4)")));
+		assert!(sets
+			.iter()
+			.any(|(_, i, v)| i == "wire_combo_in" && v.contains("Combo(1)")));
+		assert!(sets.iter().any(|(_, i, v)| i == "size_in" && v.contains("Vec2")));
+		assert!(
+			sets
+				.iter()
+				.any(|(_, i, v)| i == "wire_curves_in" && v.contains("0.25")),
+			"curve JSON write missing: {sets:?}"
+		);
+		assert!(sets
+			.iter()
+			.any(|(_, i, v)| i == "outline_color_in" && v.contains("Color")));
+}
+
+	// -----------------------------------------------------------------------
+	// OfxColorPicker interactions
+	// -----------------------------------------------------------------------
+
+	struct PickerHost {
+		picker: Entity<OfxColorPicker>,
+		events: Arc<Mutex<Vec<OfxColorEvent>>>,
+		_subscription: Subscription,
+	}
+
+	impl Render for PickerHost {
+		fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			div().size_full().child(self.picker.clone())
+		}
+	}
+
+	fn open_picker(
+		cx: &mut TestAppContext,
+		color: Rgba,
+	) -> (
+		gpui::WindowHandle<PickerHost>,
+		Entity<OfxColorPicker>,
+		Arc<Mutex<Vec<OfxColorEvent>>>,
+	) {
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(320.0), px(560.0)), |window, cx| {
+			let picker = cx.new(|cx| OfxColorPicker::new(1, color, window, cx));
+			let events = Arc::new(Mutex::new(Vec::new()));
+			let events_sub = events.clone();
+			let _subscription = cx.subscribe(
+				&picker,
+				move |_this, _emitter, event: &OfxColorEvent, _cx| {
+					events_sub.lock().unwrap().push(*event);
+				},
+			);
+			PickerHost {
+				picker,
+				events,
+				_subscription,
+			}
+		});
+		cx.run_until_parked();
+		let host = window.root(cx).expect("picker host root");
+		let picker = cx.read(|cx| host.read(cx).picker.clone());
+		let events = cx.read(|cx| host.read(cx).events.clone());
+		(window, picker, events)
+	}
+
+	fn emit_slider(cx: &mut TestAppContext, slider: &Entity<Slider>, control: usize, value: f64) {
+		let slider = slider.clone();
+		cx.update(|cx| {
+			slider.update(cx, |_s, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control,
+					value: SliderValue::Float(value),
+				});
+			});
+		});
+	}
+
+	fn picker_events(events: &Arc<Mutex<Vec<OfxColorEvent>>>) -> Vec<OfxColorEvent> {
+		events.lock().unwrap().clone()
+
+	}
+
+	/// The picker's RGB channel sliders only mutate the draft (never the
+	/// committed colour), refresh the hex field, and ignore non-value /
+	/// out-of-range events.
+	#[gpui::test]
+	async fn color_picker_rgb_sliders_update_the_draft(cx: &mut TestAppContext) {
+		let (_window, picker, events) = open_picker(
+			cx,
+			Rgba {
+				r: 0.2,
+				g: 0.4,
+				b: 0.6,
+				a: 0.8,
+			},
+		);
+		let committed = cx.read(|cx| picker.read(cx).committed);
+		let (c0, c1, c2, a) = cx.read(|cx| {
+			let p = picker.read(cx);
+			(p.c0.clone(), p.c1.clone(), p.c2.clone(), p.a.clone())
+		});
+
+		emit_slider(cx, &c0, 100, 0.9);
+		emit_slider(cx, &c1, 1100, 0.1);
+		emit_slider(cx, &c2, 2100, 0.05);
+		emit_slider(cx, &a, 3100, 0.25);
+
+		let draft = cx.read(|cx| picker.read(cx).draft);
+		assert!((draft.r - 0.9).abs() < 1e-6);
+		assert!((draft.g - 0.1).abs() < 1e-6);
+		assert!((draft.b - 0.05).abs() < 1e-6);
+		assert!((draft.a - 0.25).abs() < 1e-6);
+		assert_eq!(cx.read(|cx| picker.read(cx).committed), committed);
+		assert_eq!(
+			cx.read(|cx| picker.read(cx).hex.read(cx).as_str().to_string()),
+			format_hex(draft),
+			"the hex field follows the draft"
+		);
+		assert!(picker_events(&events).is_empty(), "no commit without OK");
+
+		// An out-of-range channel index and non-value events are ignored.
+		cx.update(|cx| {
+			picker.update(cx, |picker, cx| {
+				let value = SliderEvent::ValueChanged {
+					control: 7,
+					value: SliderValue::Float(0.5),
+				};
+				picker.on_slider(9, &value, cx);
+				let drag = SliderEvent::DragFinished { control: 7 };
+				picker.on_slider(0, &drag, cx);
+			});
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).draft), draft);
+	}
+
+	/// HSV mode: the primary sliders edit hue/saturation/value, the palette
+	/// keeps the hue, the hue bar keeps saturation/value, and switching back
+	/// re-ranges the sliders.
+	#[gpui::test]
+	async fn color_picker_hsv_mode_palette_and_hue_update_the_draft(cx: &mut TestAppContext) {
+		let (_window, picker, _events) = open_picker(
+			cx,
+			Rgba {
+				r: 1.0,
+				g: 0.0,
+				b: 0.0,
+				a: 1.0,
+			},
+		);
+		// Switching to HSV twice is a no-op the second time; switching back
+		// preserves the draft.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.set_mode(ColorMode::Hsv, cx));
+			picker.update(cx, |p, cx| p.set_mode(ColorMode::Hsv, cx));
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).mode), ColorMode::Hsv);
+
+		let (c0, c1, c2, a) = cx.read(|cx| {
+			let p = picker.read(cx);
+			(p.c0.clone(), p.c1.clone(), p.c2.clone(), p.a.clone())
+		});
+		emit_slider(cx, &c0, 0, 120.0);
+		emit_slider(cx, &c1, 1000, 0.5);
+		emit_slider(cx, &c2, 2000, 1.0);
+		emit_slider(cx, &a, 3000, 0.5);
+		let draft = cx.read(|cx| picker.read(cx).draft);
+		let (h, s, v) = rgb_to_hsv(draft.r, draft.g, draft.b);
+		assert!((h - 120.0).abs() < 1e-3, "hue {h}");
+		assert!((s - 0.5).abs() < 1e-4, "saturation {s}");
+		assert!((v - 1.0).abs() < 1e-4, "value {v}");
+		assert!((draft.a - 0.5).abs() < 1e-6);
+
+		// An out-of-range channel index in HSV mode is ignored.
+		cx.update(|cx| {
+			picker.update(cx, |picker, cx| {
+				let value = SliderEvent::ValueChanged {
+					control: 7,
+					value: SliderValue::Float(0.5),
+				};
+				picker.on_slider(9, &value, cx);
+			});
+		});
+
+		// The palette keeps the hue and takes saturation/value.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.on_palette(0.25, 0.75, cx));
+		});
+		let draft = cx.read(|cx| picker.read(cx).draft);
+		let (h, s, v) = rgb_to_hsv(draft.r, draft.g, draft.b);
+		assert!((h - 120.0).abs() < 1e-3, "palette keeps the hue ({h})");
+		assert!((s - 0.25).abs() < 1e-4, "palette takes s ({s})");
+		assert!((v - 0.75).abs() < 1e-4, "palette takes v ({v})");
+
+		// The hue bar keeps saturation/value.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.on_hue(240.0, cx));
+		});
+		let draft = cx.read(|cx| picker.read(cx).draft);
+		let (h, s, v) = rgb_to_hsv(draft.r, draft.g, draft.b);
+		assert!((h - 240.0).abs() < 1e-3, "hue bar takes h ({h})");
+		assert!((s - 0.25).abs() < 1e-4);
+		assert!((v - 0.75).abs() < 1e-4);
+
+		// Back to RGB: the draft survives and the mode switches.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.set_mode(ColorMode::Rgb, cx));
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).mode), ColorMode::Rgb);
+	}
+
+	/// Commit validates a hand-typed hex string (an invalid one keeps the
+	/// popup open with the error hint and commits nothing), cancel discards
+	/// the draft, and both disarm a left-armed eyedropper.
+	#[gpui::test]
+	async fn color_picker_commit_validates_hex_and_cancel_discards(cx: &mut TestAppContext) {
+		let (_window, picker, events) = open_picker(
+			cx,
+			Rgba {
+				r: 0.1,
+				g: 0.2,
+				b: 0.3,
+				a: 1.0,
+			},
+		);
+		let set_hex = |cx: &mut TestAppContext, text: &str| {
+			cx.update(|cx| {
+				picker.update(cx, |p, cx| {
+					let hex = p.hex.clone();
+					hex.update(cx, |hex, cx| hex.emplace(text, cx));
+				});
+			});
+		};
+		let open = |cx: &mut TestAppContext| {
+			cx.update(|cx| {
+				picker.update(cx, |p, cx| {
+					p.open_menu(Point::new(px(10.0), px(10.0)), cx);
+				});
+			});
+		};
+
+		// An external committed colour re-syncs the closed picker; an equal
+		// colour is an early no-op.
+		let blue = Rgba {
+			r: 0.4,
+			g: 0.5,
+			b: 0.6,
+			a: 1.0,
+		};
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.set_committed(blue, cx));
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).draft), blue);
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.set_committed(blue, cx));
+		});
+
+		// Opening resets the draft to the committed colour.
+		open(cx);
+		assert!(cx.read(|cx| picker.read(cx).open));
+		assert_eq!(cx.read(|cx| picker.read(cx).draft), blue);
+
+		// Invalid hex: error hint, popup stays open, no commit.
+		set_hex(cx, "#ZZZ");
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.commit(cx));
+		});
+		let (open_flag, hex_error, committed) = cx.read(|cx| {
+			let p = picker.read(cx);
+			(p.open, p.hex_error, p.committed)
+		});
+		assert!(open_flag && hex_error);
+		assert_eq!(committed, blue, "an invalid hex commits nothing");
+		assert!(
+			!picker_events(&events)
+				.iter()
+				.any(|e| matches!(e, OfxColorEvent::Committed(_))),
+			"no Committed event for invalid hex"
+		);
+
+		// Valid hex: the popup closes and the colour commits.
+		set_hex(cx, "#00FF00");
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.commit(cx));
+		});
+		let (open_flag, committed) =
+			cx.read(|cx| (picker.read(cx).open, picker.read(cx).committed));
+		assert!(!open_flag);
+		assert!(committed.r < 1e-6 && (committed.g - 1.0).abs() < 1e-6);
+		assert!(picker_events(&events)
+			.iter()
+			.any(|e| matches!(e, OfxColorEvent::Committed(_))));
+
+		// While the popup is open, an external committed update must not
+		// clobber the in-progress draft.
+		open(cx);
+		let draft_before = cx.read(|cx| picker.read(cx).draft);
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| {
+				p.set_committed(
+					Rgba {
+						r: 0.9,
+						g: 0.9,
+						b: 0.9,
+						a: 1.0,
+					},
+					cx,
+				);
+			});
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).draft), draft_before);
+
+		// Cancel with the eyedropper armed discloses both events.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.toggle_viewer_pick(cx));
+			picker.update(cx, |p, cx| p.close_menu(cx));
+		});
+		let (open_flag, picking) = cx.read(|cx| (picker.read(cx).open, picker.read(cx).picking));
+		assert!(!open_flag && !picking);
+		let events_now = picker_events(&events);
+		assert!(events_now
+			.iter()
+			.any(|e| matches!(e, OfxColorEvent::Cancelled)));
+		assert!(events_now
+			.iter()
+			.any(|e| matches!(e, OfxColorEvent::PickViewerToggle { armed: false })));
+
+		// Commit with the eyedropper armed disarms it too.
+		open(cx);
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.toggle_viewer_pick(cx));
+		});
+		set_hex(cx, "");
+		let draft_at_commit = cx.read(|cx| picker.read(cx).draft);
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| p.commit(cx));
+		});
+		let (picking, committed, hex) = cx.read(|cx| {
+			let p = picker.read(cx);
+			(p.picking, p.committed, p.hex.read(cx).as_str().to_string())
+		});
+		assert!(!picking, "commit disarms the eyedropper");
+		assert_eq!(
+			committed, draft_at_commit,
+			"an empty hex commits the draft"
+		);
+		assert_eq!(hex, format_hex(committed));
+
+		// `apply_viewer_pick` is a no-op while the eyedropper is disarmed.
+		cx.update(|cx| {
+			picker.update(cx, |p, cx| {
+				p.apply_viewer_pick(
+					Rgba {
+						r: 1.0,
+						g: 0.0,
+						b: 0.0,
+						a: 1.0,
+					},
+					cx,
+				);
+			});
+		});
+		assert_eq!(cx.read(|cx| picker.read(cx).draft), committed);
+	}
+
+	/// The popup's interactive chrome: the swatch toggles it, the RGB/HSV
+	/// tabs switch modes, the hue bar samples, Escape closes (or disarms a
+	/// picking eyedropper first), and the Cancel/OK buttons close it.
+	#[gpui::test]
+	async fn color_picker_popup_swatch_tabs_escape_and_buttons(cx: &mut TestAppContext) {
+		let (window, picker, events) = open_picker(
+			cx,
+			Rgba {
+				r: 0.4,
+				g: 0.2,
+				b: 0.8,
+				a: 0.5,
+			},
+		);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
+		let swatch_center = swatch.center();
+
+		// Open the popup.
+		visual.simulate_click(swatch_center, Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(visual.debug_bounds("ofx-color-popup").is_some());
+
+		// The mode tabs switch the primary sliders.
+		let hsv_tab = visual
+			.debug_bounds("ofx-color-mode-1-hsv")
+			.expect("hsv tab painted");
+		visual.simulate_click(hsv_tab.center(), Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert_eq!(visual.read(|cx| picker.read(cx).mode), ColorMode::Hsv);
+		let rgb_tab = visual
+			.debug_bounds("ofx-color-mode-1-rgb")
+			.expect("rgb tab painted");
+		visual.simulate_click(rgb_tab.center(), Modifiers::default());
+		assert_eq!(visual.read(|cx| picker.read(cx).mode), ColorMode::Rgb);
+
+		// The hue bar maps its vertical position to a hue.
+		let hue_bar = visual
+			.debug_bounds("ofx-color-hue-bar")
+			.expect("hue bar painted");
+		let hue_click = Point::new(
+			hue_bar.origin.x + hue_bar.size.width * 0.5,
+			hue_bar.origin.y + hue_bar.size.height * 0.25,
+		);
+		visual.simulate_click(hue_click, Modifiers::default());
+		cx.run_until_parked();
+		let draft = visual.read(|cx| picker.read(cx).draft);
+		let (h, _, _) = rgb_to_hsv(draft.r, draft.g, draft.b);
+		assert!((h - 90.0).abs() < 10.0, "hue bar click hue {h}");
+
+		// A second click on the swatch closes the popup (cancel).
+		visual.simulate_click(swatch_center, Modifiers::default());
+		cx.run_until_parked();
+		assert!(!visual.read(|cx| picker.read(cx).open));
+		assert!(picker_events(&events)
+			.iter()
+			.any(|e| matches!(e, OfxColorEvent::Cancelled)));
+
+		// Reopen and click Cancel.
+		visual.simulate_click(swatch_center, Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let popup = visual
+			.debug_bounds("ofx-color-popup")
+			.expect("popup painted");
+		let cancel_at = Point::new(
+			popup.origin.x + px(30.0),
+			popup.origin.y + popup.size.height - px(51.0),
+		);
+		visual.simulate_click(cancel_at, Modifiers::default());
+		cx.run_until_parked();
+		assert!(
+			!visual.read(|cx| picker.read(cx).open),
+			"the Cancel button closes the popup"
+		);
+
+		// Reopen, type an invalid hex, and click OK: the popup stays open
+		// (the error hint branch paints) and nothing commits.
+		visual.simulate_click(swatch_center, Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		visual.update(|_window, cx| {
+			picker.update(cx, |p, cx| {
+				let hex = p.hex.clone();
+				hex.update(cx, |hex, cx| hex.emplace("#nope", cx));
+			});
+		});
+		let popup = visual
+			.debug_bounds("ofx-color-popup")
+			.expect("popup painted");
+		let ok_at = Point::new(
+			popup.origin.x + popup.size.width - px(24.0),
+			popup.origin.y + popup.size.height - px(51.0),
+		);
+		visual.simulate_click(ok_at, Modifiers::default());
+		cx.run_until_parked();
+		assert!(
+			visual.read(|cx| picker.read(cx).open),
+			"invalid hex keeps the popup open"
+		);
+		assert!(visual.read(|cx| picker.read(cx).hex_error));
+
+		// A valid hex + OK commits and closes.
+		visual.update(|_window, cx| {
+			picker.update(cx, |p, cx| {
+				let hex = p.hex.clone();
+				hex.update(cx, |hex, cx| hex.emplace("#123456", cx));
+			});
+		});
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let ok_at = Point::new(
+			popup.origin.x + popup.size.width - px(24.0),
+			popup.origin.y + popup.size.height - px(51.0),
+		);
+		visual.simulate_click(ok_at, Modifiers::default());
+		cx.run_until_parked();
+		assert!(!visual.read(|cx| picker.read(cx).open), "OK closes the popup");
+		let committed = visual.read(|cx| picker.read(cx).committed);
+		assert!(
+			(committed.r - 0x12 as f32 / 255.0).abs() < 1e-3,
+			"OK commits the typed hex: {committed:?}"
+		);
+
+		// Escape closes the popup when the hex field has focus.
+		visual.simulate_click(swatch_center, Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let hex_handle = visual.read(|cx| picker.read(cx).hex.read(cx).focus_handle(cx));
+		visual.update(|window, cx| {
+			window.focus(&hex_handle, cx);
+		});
+		visual.simulate_keystrokes("escape");
+		assert!(
+			!visual.read(|cx| picker.read(cx).open),
+			"Escape closes the popup"
+		);
+
+		// While the eyedropper is armed, Escape disarms it without closing;
+		// a second Escape then closes.
+		visual.simulate_click(swatch_center, Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let pick_button = visual
+			.debug_bounds("ofx-color-pick-viewer-1")
+			.expect("pick button painted");
+		visual.simulate_click(pick_button.center(), Modifiers::default());
+		cx.run_until_parked();
+		assert!(visual.read(|cx| picker.read(cx).picking));
+		let hex_handle = visual.read(|cx| picker.read(cx).hex.read(cx).focus_handle(cx));
+		visual.update(|window, cx| {
+			window.focus(&hex_handle, cx);
+		});
+		visual.simulate_keystrokes("escape");
+		let (open_flag, picking) = visual.read(|cx| (picker.read(cx).open, picker.read(cx).picking));
+		assert!(open_flag, "escape while picking keeps the popup open");
+		assert!(!picking, "escape while picking disarms the eyedropper");
+		visual.simulate_keystrokes("escape");
+		assert!(
+			!visual.read(|cx| picker.read(cx).open),
+			"a second escape closes the popup"
+		);
+	}
+
+	/// Dragging inside the S/V palette and the hue bar updates the draft
+	/// through the drag-move handlers (and renders the drag ghosts).
+	#[gpui::test]
+	async fn color_picker_palette_and_hue_drags_update_the_draft(cx: &mut TestAppContext) {
+		let (window, picker, _events) = open_picker(
+			cx,
+			Rgba {
+				r: 0.4,
+				g: 0.2,
+				b: 0.8,
+				a: 0.5,
+			},
+		);
+		let visual = gpui::VisualTestContext::from_window(window.into(), cx).into_mut();
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		let swatch = visual
+			.debug_bounds("ofx-color-swatch")
+			.expect("swatch painted");
+		visual.simulate_click(swatch.center(), Modifiers::default());
+		visual.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// Press inside the palette, then move well past the drag threshold:
+		// gpui starts the palette drag and routes the moves to its
+		// `on_drag_move` handler.
+		let sv = visual
+			.debug_bounds("ofx-color-sv-palette")
+			.expect("sv palette painted");
+		let start = Point::new(sv.origin.x + px(15.0), sv.origin.y + px(15.0));
+		visual.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+		cx.run_until_parked();
+		let after_down = visual.read(|cx| picker.read(cx).draft);
+		visual.simulate_mouse_move(
+			Point::new(start.x + px(50.0), start.y + px(50.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		visual.simulate_mouse_move(
+			Point::new(start.x + px(120.0), start.y + px(90.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		cx.run_until_parked();
+		let after_sv_drag = visual.read(|cx| picker.read(cx).draft);
+		assert_ne!(
+			after_down, after_sv_drag,
+			"dragging the palette follows the cursor"
+		);
+		visual.simulate_mouse_up(
+			Point::new(start.x + px(120.0), start.y + px(90.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		cx.run_until_parked();
+
+		// Same for the hue bar: the drag y position sets the hue.
+		let hue = visual
+			.debug_bounds("ofx-color-hue-bar")
+			.expect("hue bar painted");
+		let hue_start = Point::new(
+			hue.origin.x + hue.size.width * 0.5,
+			hue.origin.y + px(10.0),
+		);
+		visual.simulate_mouse_down(hue_start, MouseButton::Left, Modifiers::default());
+		visual.simulate_mouse_move(
+			Point::new(hue_start.x, hue_start.y + px(100.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		visual.simulate_mouse_move(
+			Point::new(hue_start.x, hue_start.y + px(130.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		cx.run_until_parked();
+		let (h, _, _) = {
+			let draft = visual.read(|cx| picker.read(cx).draft);
+			rgb_to_hsv(draft.r, draft.g, draft.b)
+		};
+		assert!(
+			(240.0..310.0).contains(&h),
+			"the hue drag to y≈140 of the 180px bar should set ~280°, got {h}"
+		);
+		visual.simulate_mouse_up(
+			Point::new(hue_start.x, hue_start.y + px(130.0)),
+			MouseButton::Left,
+			Modifiers::default(),
+		);
+		cx.run_until_parked();
+	}
 }

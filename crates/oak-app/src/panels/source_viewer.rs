@@ -341,4 +341,150 @@ impl<E: AppEngine> DockPanel for SourceViewerPanel<E> {
 			.into_any_element()
 	}
 }
- 			.into_any_element()
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::oakui::MockEngine;
+	use gpui::{Modifiers, px, size, TestAppContext, VisualTestContext};
+	use gpui_widgets::viewer::PlaybackClock as _;
+
+	/// Builds the panel in a window and returns a `VisualTestContext`.
+	fn panel_window(
+		cx: &mut TestAppContext,
+	) -> (
+		&'static mut VisualTestContext,
+		Entity<SourceViewerPanel<MockEngine>>,
+	) {
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(640.0), px(360.0)), |window, cx| {
+			let engine = cx.new(MockEngine::demo);
+			let clock = engine.read(cx).source_clock().clone();
+			SourceViewerPanel::new(engine, clock, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("source viewer panel root");
+		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+		(cx, panel)
+	}
+
+	/// Every viewer context-menu action updates the viewer widget state or
+	/// the engine config; a real menu item id resolves through the shared
+	/// menu mapping, unknown ids are ignored.
+	#[gpui::test]
+	async fn menu_actions_update_viewer_and_engine_state(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(9999, cx);
+
+				panel.apply_viewer_action(menu::ViewerMenuAction::ZoomFit, cx);
+				panel.apply_viewer_action(menu::ViewerMenuAction::ZoomLevel(3), cx);
+				assert_eq!(panel.viewer.read(cx).zoom(), ViewerZoom::Level(3));
+
+				// Resolution/stop-on-last/waveform persist through the
+				// engine's config-backed defaults; exercise the reads and
+				// writes without assuming a fresh config entry type.
+				let _ = panel.engine.read(cx).playback_divider();
+				panel.apply_viewer_action(menu::ViewerMenuAction::Resolution(4), cx);
+				let _ = panel.engine.read(cx).playback_divider();
+
+				panel.apply_viewer_action(menu::ViewerMenuAction::SafeOff, cx);
+				panel.apply_viewer_action(menu::ViewerMenuAction::SafeOn, cx);
+				panel.apply_viewer_action(menu::ViewerMenuAction::SafeCustom, cx);
+
+				let _ = panel.engine.read(cx).stop_on_last();
+				panel.apply_viewer_action(menu::ViewerMenuAction::StopOnLast, cx);
+				let _ = panel.engine.read(cx).stop_on_last();
+
+				let _ = panel.engine.read(cx).waveform_mode();
+				panel.apply_viewer_action(
+					menu::ViewerMenuAction::Waveform(WaveformMode::Both),
+					cx,
+				);
+				let _ = panel.engine.read(cx).waveform_mode();
+
+				let show_fps = panel.viewer.read(cx).show_fps();
+				panel.apply_viewer_action(menu::ViewerMenuAction::ShowFps, cx);
+				assert_eq!(panel.viewer.read(cx).show_fps(), !show_fps);
+
+				panel.apply_viewer_action(menu::ViewerMenuAction::FullScreen, cx);
+
+				// A real menu id from the shared builder resolves and applies.
+				let state = menu::ViewerMenuState {
+					playback_divider: panel.engine.read(cx).playback_divider(),
+					zoom: panel.viewer.read(cx).zoom(),
+					safe: panel.viewer.read(cx).safe_margins(),
+					stop_on_last: panel.engine.read(cx).stop_on_last(),
+					waveform: WaveformMode::from_config_value(
+						panel.engine.read(cx).waveform_mode(),
+					),
+					show_fps: panel.viewer.read(cx).show_fps(),
+				};
+				let menu = menu::viewer_menu(&state);
+				let item = menu.items[0].id;
+				panel.on_local_menu_item(item, cx);
+			});
+		});
+	}
+
+	/// The focused-panel transport commands drive the SOURCE monitor.
+	#[gpui::test]
+	async fn transport_commands_drive_the_source_clock(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.play_pause(cx));
+				assert!(panel.clock.read(cx).is_playing());
+				assert!(panel.play_pause(cx));
+				assert!(!panel.clock.read(cx).is_playing());
+
+				assert!(panel.next_frame(cx));
+				assert!(panel.prev_frame(cx));
+				assert!(panel.go_to_start(cx));
+				assert!(panel.go_to_end(cx));
+				assert!(panel.shuttle_left(cx));
+				assert!(panel.shuttle_stop(cx));
+				assert!(panel.shuttle_right(cx));
+				assert!(panel.play_in_to_out(cx));
+				assert!(panel.go_to_in(cx));
+				assert!(panel.go_to_out(cx));
+			});
+		});
+	}
+
+	/// The panel renders, right-click opens the shared viewer menu, and the
+	/// dock metadata is populated.
+	#[gpui::test]
+	async fn render_right_click_menu_and_dock_metadata(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx);
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		cx.update(|_window, app| {
+			assert!(!panel.read(app).title(app).is_empty());
+			let _ = panel.read(app).tab_content(app);
+		});
+
+		// A right-click anywhere in the panel opens the viewer menu.
+		cx.simulate_mouse_down(
+			gpui::point(px(320.0), px(180.0)),
+			MouseButton::Right,
+			Modifiers::none(),
+		);
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(
+			cx.debug_bounds("menu-popup").is_some(),
+			"the viewer context menu opens"
+		);
+
+		// A left click focuses the panel (the dock re-emits the event).
+		cx.simulate_mouse_down(
+			gpui::point(px(320.0), px(180.0)),
+			MouseButton::Left,
+			Modifiers::none(),
+		);
+	}
+}

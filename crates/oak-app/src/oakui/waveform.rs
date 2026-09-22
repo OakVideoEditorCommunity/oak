@@ -244,4 +244,136 @@ impl ClipDecorator for OakClipDecorator {
 		}
 	}
 }
- 		}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use gpui::timeline::Frame;
+	use gpui::{TestAppContext, VisualTestContext};
+
+	/// Media tests share the codec/undo test lock (FFmpeg is not safe
+	/// against concurrent decode sessions).
+	fn media_lock() -> std::sync::MutexGuard<'static, ()> {
+		crate::oakui::graphops::test_lock()
+	}
+
+	fn test_media(tag: &str, media: bool) -> std::path::PathBuf {
+		let path = std::env::temp_dir().join(format!(
+			"oakapp_waveform_unit_{tag}_{}.mp4",
+			std::process::id()
+		));
+		if media {
+			oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("test media");
+		} else {
+			std::fs::write(&path, b"not media").expect("write");
+		}
+		path
+	}
+
+	/// `extract` reads the first channel of a real audio stream and
+	/// reports the media geometry; non-media and missing files yield None.
+	#[test]
+	fn extract_reads_audio_and_rejects_non_media() {
+		let _lock = media_lock();
+		let good = test_media("ok", true);
+		let waveform = extract(&good.to_string_lossy(), 250, 25.0).expect("waveform");
+		assert!(waveform.channel_count >= 1);
+		assert!(!waveform.peaks.is_empty());
+		assert_eq!(waveform.sample_rate, 48000);
+		assert_eq!(waveform.samples_per_point, 256);
+		assert_eq!(waveform.duration_frames, 250);
+		// The peaks are finite min/max pairs.
+		for p in &waveform.peaks {
+			assert!(p.min.is_finite() && p.max.is_finite());
+			assert!(p.min <= p.max);
+		}
+
+		let not_media = test_media("bad", false);
+		assert!(extract(&not_media.to_string_lossy(), 250, 25.0).is_none());
+		assert!(extract("/definitely/missing.mp4", 250, 25.0).is_none());
+
+		let _ = std::fs::remove_file(&good);
+		let _ = std::fs::remove_file(&not_media);
+	}
+
+	/// The multicam wizard envelope windows the first-channel peaks
+	/// (~100 ms windows) and degrades to None without audio.
+	#[test]
+	fn envelope_windows_peaks_and_degrades_without_audio() {
+		let _lock = media_lock();
+		let media = test_media("env", true);
+		let envelope =
+			extract_audio_envelope(&media.to_string_lossy(), 0).expect("envelope");
+		assert!(!envelope.is_empty());
+		assert!(
+			envelope.len() >= 2,
+			"a 0.4s clip yields several windows: {}",
+			envelope.len()
+		);
+		for peak in &envelope {
+			assert!(peak.is_finite() && (0.0..=1.5).contains(peak), "{peak}");
+		}
+
+		assert!(extract_audio_envelope("/definitely/missing.mp4", 0).is_none());
+		assert!(extract_audio_envelope(&media.to_string_lossy(), 99).is_none());
+		let _ = std::fs::remove_file(&media);
+	}
+
+	struct Probe;
+	impl gpui::Render for Probe {
+		fn render(
+			&mut self,
+			_window: &mut gpui::Window,
+			_cx: &mut gpui::Context<Self>,
+		) -> impl gpui::IntoElement {
+			gpui::div()
+		}
+	}
+
+	/// The timeline decorator's guard paths: a clip without a cache entry
+	/// and zero-width bounds both return before touching the window (the
+	/// drawing loop itself only runs inside a real paint pass, which the
+	/// widget-level tests cover).
+	#[gpui::test]
+	async fn decorator_skips_missing_entries_and_empty_bounds(cx: &mut TestAppContext) {
+		let _lock = media_lock();
+		let media = test_media("paint", true);
+		let cache = WaveformCache::new(25.0);
+		cache.refresh(1, &media.to_string_lossy(), 250);
+		assert!(cache.get(1).is_some(), "the clip has a waveform");
+		assert!(cache.get(99).is_none());
+		assert!(cache.version() >= 1);
+		// A second refresh is a cache hit and does not bump the version.
+		let version = cache.version();
+		cache.refresh(1, &media.to_string_lossy(), 250);
+		assert_eq!(cache.version(), version);
+
+		let window = cx.open_window(
+			gpui::size(gpui::px(200.0), gpui::px(100.0)),
+			|_, _| Probe,
+		);
+		cx.run_until_parked();
+		let mut visual = VisualTestContext::from_window(window.into(), cx);
+		visual.update(|window, _app| {
+			let mut decorator = OakClipDecorator {
+				cache: cache.clone(),
+			};
+			let bounds = Bounds {
+				origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+				size: gpui::size(gpui::px(100.0), gpui::px(40.0)),
+			};
+			let range = FrameRange {
+				start: Frame(0),
+				end: Frame(250),
+			};
+			decorator.paint_waveform(window, ClipId(99), range, bounds);
+			let empty = Bounds {
+				origin: bounds.origin,
+				size: gpui::size(gpui::px(0.0), gpui::px(40.0)),
+			};
+			decorator.paint_waveform(window, ClipId(1), range, empty);
+		});
+
+		let _ = std::fs::remove_file(&media);
+	}
+}

@@ -510,4 +510,219 @@ pub fn apply_bgra8(data: &mut [u8], pixels: i64) {
 		let _ = processor.convert_bgra8(data, pixels);
 	}
 }
- 		let _ = processor.convert_bgra8(data, pixels);
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Restores the tracked monitor fingerprint on drop: a failed
+	/// assertion must not leak a fake monitor into the rest of the
+	/// process (the key and generation of other tests depend on it).
+	struct MonitorRestore(Option<String>);
+
+	impl MonitorRestore {
+		fn capture() -> Self {
+			Self(
+				CURRENT_MONITOR
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.clone(),
+			)
+		}
+	}
+
+	impl Drop for MonitorRestore {
+		fn drop(&mut self) {
+			note_monitor(self.0.take());
+		}
+	}
+
+	/// The active-key tuple follows the monitor fingerprint and the
+	/// content-space override, and resets cleanly when both are cleared.
+	#[test]
+	fn key_tracks_monitor_and_content_override() {
+		let _lock = crate::oakui::graphops::test_lock();
+		let _monitor = MonitorRestore::capture();
+		let previous = ConfigStore::instance()
+			.get(None, CONFIG_KEY_CONTENT_SPACE)
+			.unwrap_or_default();
+
+		note_monitor(Some("x11:TEST-1".into()));
+		let key = current_key();
+		assert_eq!(key.0, display_policy());
+		assert_eq!(key.1, configured_mode());
+		assert_eq!(key.4, "x11:TEST-1");
+		assert!(!key.3.is_empty());
+		assert!(
+			!key.3.starts_with("override:"),
+			"no override installed by default: {}",
+			key.3
+		);
+
+		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, "ACEScg");
+		let key = current_key();
+		assert_eq!(key.3, "override:ACEScg");
+
+		// Clearing the override returns to the project output spec, and an
+		// unknown monitor falls back to the main display.
+		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		note_monitor(None);
+		let key = current_key();
+		assert_eq!(key.4, "");
+		assert_eq!(key.3, format!(
+			"{}:{}",
+			pipeline_output_spec().gamut.as_setting(),
+			pipeline_output_spec().transfer.as_setting()
+		));
+	}
+
+	/// `current()` caches per key: a rebuild only happens after a key
+	/// change (and bumps the generation only when a prior state existed).
+	#[test]
+	fn current_caches_per_key() {
+		let _lock = crate::oakui::graphops::test_lock();
+		let _monitor = MonitorRestore::capture();
+		let previous = ConfigStore::instance()
+			.get(None, CONFIG_KEY_CONTENT_SPACE)
+			.unwrap_or_default();
+
+		note_monitor(None);
+		invalidate();
+		let first = current().expect("the state always builds");
+		let generation_after_first = generation();
+
+		// Same key: the cached state is cloned, not rebuilt — the
+		// generation stands still and the chain Arcs are shared.
+		let cached = current().expect("the cached state is cloned");
+		assert_eq!(
+			generation(),
+			generation_after_first,
+			"a same-key read does not rebuild"
+		);
+		assert_eq!(cached.key, first.key, "the cached state keeps the key");
+		match (&first.f32, &cached.f32) {
+			(Some(first_chain), Some(cached_chain)) => assert!(
+				Arc::ptr_eq(first_chain, cached_chain),
+				"the cached state shares the chain Arcs"
+			),
+			(None, None) => {}
+			_ => panic!("a same-key read changed the chain availability"),
+		}
+
+		// A monitor change rekeys: exactly one bump and a rebuilt state.
+		note_monitor(Some("x11:OTHER".into()));
+		let rekeyed = current().expect("the state rebuilds");
+		assert_eq!(
+			generation(),
+			generation_after_first + 1,
+			"a key change bumps the generation exactly once"
+		);
+		assert_ne!(rekeyed.key, first.key, "the key followed the monitor");
+		assert_eq!(rekeyed.key.4, "x11:OTHER");
+		if let (Some(first_chain), Some(rekeyed_chain)) = (&first.f32, &rekeyed.f32) {
+			assert!(
+				!Arc::ptr_eq(first_chain, rekeyed_chain),
+				"a key change rebuilds the chain"
+			);
+		}
+
+		// The rekeyed state is now the cache: reading it again stands still.
+		let _ = current().expect("the rekeyed state is cached");
+		assert_eq!(
+			generation(),
+			generation_after_first + 1,
+			"the rebuilt key is cached"
+		);
+
+		// Clearing the monitor rekeys back: another single bump.
+		note_monitor(None);
+		let _ = current().expect("the state rebuilds again");
+		assert_eq!(
+			generation(),
+			generation_after_first + 2,
+			"each key change bumps exactly once"
+		);
+
+		// invalidate() drops the cache: the next build is a first build
+		// (no prior state), so it must not bump a third time.
+		invalidate();
+		let _ = current().expect("the state builds after invalidate");
+		assert_eq!(
+			generation(),
+			generation_after_first + 2,
+			"a first build after invalidate does not bump"
+		);
+
+		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		invalidate();
+	}
+
+	/// A clone of the cached state preserves the key and the chain slots.
+	#[test]
+	fn clone_state_preserves_the_chain_slots() {
+		invalidate();
+		let state = current().expect("state");
+		let cloned = clone_state(&state).expect("clone");
+		assert_eq!(cloned.key, state.key);
+		assert_eq!(cloned.f32.is_some(), state.f32.is_some());
+		assert_eq!(cloned.xyz.is_some(), state.xyz.is_some());
+		assert_eq!(cloned.bgra.is_some(), state.bgra.is_some());
+	}
+
+	/// Monitor fingerprints (known, unknown, empty) resolve or degrade
+	/// without panicking, and the empty key field follows the noted
+	/// fingerprint.
+	#[test]
+	fn monitor_profiles_resolve_or_degrade() {
+		let _lock = crate::oakui::graphops::test_lock();
+		let _monitor = MonitorRestore::capture();
+		invalidate();
+
+		// An unparseable fingerprint degrades to the same profile as "no
+		// fingerprint" (the main display), never to a per-monitor lookup
+		// or a panic.
+		assert_eq!(
+			monitor_icc_path("garbage"),
+			monitor_icc_path(""),
+			"a malformed fingerprint falls back to the main display"
+		);
+
+		for fingerprint in ["", "x11:NO-SUCH-OUTPUT", "garbage", "mac:1", "win:X"] {
+			note_monitor(Some(fingerprint.to_string()));
+			assert_eq!(
+				current_key().4,
+				fingerprint,
+				"the effective key follows the noted fingerprint"
+			);
+			let _ = monitor_icc_path(fingerprint);
+		}
+
+		// Clearing the fingerprint returns the key to the main-display
+		// sentinel.
+		note_monitor(None);
+		assert_eq!(current_key().4, "");
+		invalidate();
+	}
+
+	/// Zero-pixel (or inactive) conversions never panic and produce only
+	/// finite output samples.
+	#[test]
+	fn empty_conversions_are_safe() {
+		let mut samples: [f32; 0] = [];
+		apply_f32_rgba(&mut samples, 0);
+		let mut bytes: [u8; 0] = [];
+		apply_bgra8(&mut bytes, 0);
+
+		// A one-pixel conversion either transforms or passes through; it
+		// must never produce NaN.
+		let mut one = [0.25f32, 0.5, 0.75, 1.0];
+		apply_f32_rgba(&mut one, 1);
+		assert!(one.iter().all(|v| v.is_finite()));
+		assert_eq!(one[3], 1.0, "alpha is untouched");
+
+		// The active flag and the content-space declaration agree with the
+		// policy and never panic.
+		let _ = is_active();
+		let _ = content_colorspace();
+	}
+}

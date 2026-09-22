@@ -317,4 +317,115 @@ mod tests {
 			.expect("context menu opened on right-click");
 		assert!(popup.size.height > px(20.0), "popup lists the items");
 	}
+
+	/// A real engine's undo stack renders as rows (the row-list branch of
+	/// `render`); the menu actions route to the engine, the blank-area
+	/// right-click opens the menu, and the dock metadata is populated.
+	#[gpui::test]
+	async fn rows_render_and_interact(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(320.0), px(400.0)), |window, cx| {
+			let engine = cx.new(crate::oakui::RealEngine::create);
+			HistoryPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("history panel root");
+		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+
+		// Seed a project and one undoable edit through the panel's engine:
+		// the panel now renders the row list instead of the placeholder.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.engine.update(cx, |engine, cx| {
+					engine.new_project(cx);
+					engine.add_track(gpui::timeline::TrackKind::Video, cx);
+				});
+			});
+		});
+		cx.run_until_parked();
+		let entries = cx.read(|app| panel.read(app).engine.read(app).history_entries().len());
+		assert!(entries >= 2, "new project + add track: {entries}");
+		let total = entries as i64;
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).history_index()),
+			total,
+			"the pointer starts at the top of the seeded stack"
+		);
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// Dock metadata.
+		cx.update(|_window, app| {
+			assert!(!panel.read(app).title(app).is_empty());
+			assert_eq!(panel.read(app).panel_id(), HISTORY, "the dock routes by id");
+			// `tab_content` only builds an element with no mounted bounds to
+			// inspect in this test, so the call is a no-panic smoke check.
+			let _ = panel.read(app).tab_content(app);
+		});
+
+		// Left click focuses the panel (the dock re-emits the event).
+		cx.simulate_mouse_down(
+			gpui::point(px(160.0), px(380.0)),
+			MouseButton::Left,
+			Modifiers::none(),
+		);
+		// Right-clicking the blank body opens the menu without a row.
+		cx.simulate_mouse_down(
+			gpui::point(px(160.0), px(380.0)),
+			MouseButton::Right,
+			Modifiers::none(),
+		);
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(cx.debug_bounds("menu-popup").is_some(), "blank-area menu opens");
+
+		// Every menu action routes to the engine; unknown ids are ignored,
+		// and show_menu toggles between row and blank-area targets.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				// `menu_row` is still None: jump-here is a no-op and the
+				// pointer stays at the top.
+				panel.on_menu(MENU_JUMP_HERE, cx);
+				assert_eq!(panel.engine.read(cx).history_index(), total);
+
+				// Undo/redo route to the engine stack: the pointer moves,
+				// the row count stays, and the top row joins/leaves the
+				// redoable tail.
+				panel.on_menu(MENU_UNDO, cx);
+				assert_eq!(panel.engine.read(cx).history_index(), total - 1);
+				let entries = panel.engine.read(cx).history_entries();
+				assert_eq!(entries.len(), total as usize, "undo keeps rows listed");
+				assert!(!entries.last().expect("rows").done, "the undone row is gray");
+				panel.on_menu(MENU_REDO, cx);
+				assert_eq!(panel.engine.read(cx).history_index(), total);
+				assert!(
+					panel
+						.engine
+						.read(cx)
+						.history_entries()
+						.last()
+						.expect("rows")
+						.done,
+					"redo restores the top row"
+				);
+
+				// Unknown ids are ignored (the pointer does not move).
+				panel.on_menu(9999, cx);
+				assert_eq!(panel.engine.read(cx).history_index(), total);
+
+				panel.show_menu(None, gpui::point(px(5.0), px(5.0)), cx);
+				assert_eq!(panel.menu_row, None);
+				panel.show_menu(Some(0), gpui::point(px(5.0), px(5.0)), cx);
+				assert_eq!(panel.menu_row, Some(0));
+
+				// Jump-here targets the last right-clicked row: row 0 maps
+				// to stack index 0 + 1 and undoes everything above it.
+				panel.on_menu(MENU_JUMP_HERE, cx);
+				assert_eq!(panel.engine.read(cx).history_index(), 1);
+			});
+		});
+	}
 }

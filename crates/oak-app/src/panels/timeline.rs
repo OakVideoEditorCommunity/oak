@@ -1530,8 +1530,66 @@ pub(crate) fn ruler_menu() -> Menu {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::oakui::engine::EngineGateway;
 	use crate::oakui::MockEngine;
+	use gpui::effect_stack::LibraryEffectDrag;
 	use gpui::timeline::{FrameRange, TimelineDataSource};
+	use gpui::StatefulInteractiveElement;
+
+	/// The empty ghost for the test drag sources.
+	struct DropGhost;
+
+	impl Render for DropGhost {
+		fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			div().size(px(10.0))
+		}
+	}
+
+	/// A test host with draggable footage / effect sources above a real
+	/// timeline panel, so the panel's `on_drag_move` / `on_drop` handlers can
+	/// be exercised end to end.
+	struct DropHost<E: AppEngine> {
+		panel: Entity<TimelinePanel<E>>,
+	}
+
+	impl<E: AppEngine> Render for DropHost<E> {
+		fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			let source = |id: &'static str| {
+				div()
+					.id(id)
+					.debug_selector(move || id.into())
+					.h(px(24.0))
+					.w_full()
+					.flex_shrink_0()
+			};
+			div()
+				.size_full()
+				.flex()
+				.flex_col()
+				.child(
+					source("footage-drag-source")
+						.on_drag(FootageDrag(3), |_drag, _offset, _window, cx| {
+							cx.new(|_| DropGhost)
+						}),
+				)
+				.child(
+					source("footage-drag-source-missing").on_drag(
+						FootageDrag(9999),
+						|_drag, _offset, _window, cx| cx.new(|_| DropGhost),
+					),
+				)
+				.child(
+					source("effect-drag-source").on_drag(
+						LibraryEffectDrag {
+							type_id: "org.olivevideoeditor.Olive.solidgenerator".into(),
+							name: "Solid".into(),
+						},
+						|_drag, _offset, _window, cx| cx.new(|_| DropGhost),
+					),
+				)
+				.child(self.panel.clone())
+		}
+	}
 	use gpui::{px, size, Hsla, TestAppContext, VisualTestContext};
 
 	/// Builds a `TimelinePanel` in a window of the given logical size and
@@ -2016,5 +2074,912 @@ mod tests {
 			]
 		);
 		assert!(menu.items.iter().all(|item| item.checked == Some(false)));
+	}
+
+	// -----------------------------------------------------------------------
+	// Panel behavior: subscriptions, context menus, commands, drops, render.
+	// -----------------------------------------------------------------------
+
+	/// The zoom/height sliders and the snap checkbox drive the view/engine
+	/// through the panel's subscriptions.
+	#[gpui::test]
+	async fn slider_and_snap_events_update_the_view_and_engine(cx: &mut TestAppContext) {
+		use crate::oakui::component::controls::SliderValue;
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		// Zoom slider -> timeline zoom.
+		cx.update(|_window, app| {
+			panel.read(app).zoom.clone().update(app, |_slider, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control: 10,
+					value: SliderValue::Float(3.5),
+				});
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).timeline.read(app).state.zoom),
+			3.5
+		);
+
+		// Track-height slider -> every engine track.
+		cx.update(|_window, app| {
+			panel.read(app).height.clone().update(app, |_slider, cx| {
+				cx.emit(SliderEvent::ValueChanged {
+					control: 11,
+					value: SliderValue::Float(80.0),
+				});
+			});
+		});
+		cx.read(|app| {
+			let engine = panel.read(app).engine.clone();
+			let engine = engine.read(app);
+			assert!(engine.track_count() > 0, "the demo has tracks");
+			for index in 0..engine.track_count() {
+				assert_eq!(engine.track(index).unwrap().height(), px(80.0));
+			}
+		});
+
+		// Snap checkbox -> view state.
+		for (state, expected) in [(CheckState::Unchecked, false), (CheckState::Checked, true)] {
+			cx.update(|_window, app| {
+				panel.read(app).snap.clone().update(app, |_snap, cx| {
+					cx.emit(CheckBoxEvent::Toggled { control: 12, state });
+				});
+			});
+			assert_eq!(
+				cx.read(|app| panel.read(app).timeline.read(app).state.snap_enabled),
+				expected
+			);
+		}
+	}
+
+	/// Every `TimelineHit` variant opens its matching context menu; an
+	/// unselected right-clicked clip is selected first.
+	#[gpui::test]
+	async fn context_menus_open_for_every_hit_kind(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1600.0, 900.0);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				let position = gpui::point(px(20.0), px(20.0));
+
+				panel.open_context_menu(position, TimelineHit::Clip(ClipId(10)), cx);
+				assert!(
+					panel.timeline.read(cx).selection().contains(&ClipId(10)),
+					"an unselected right-clicked clip is selected first"
+				);
+				assert_eq!(panel.context_track, None);
+				assert_eq!(panel.context_empty, None);
+
+				// A second hit on the already-selected clip takes the
+				// no-reselect path.
+				panel.open_context_menu(position, TimelineHit::Clip(ClipId(10)), cx);
+
+				panel.open_context_menu(
+					position,
+					TimelineHit::Empty {
+						track: 2,
+						frame: Frame(42),
+					},
+					cx,
+				);
+				assert_eq!(panel.context_empty, Some((2, Frame(42))));
+				assert_eq!(panel.context_track, None);
+
+				panel.open_context_menu(position, TimelineHit::TrackHead(3), cx);
+				assert_eq!(panel.context_track, Some(3));
+				assert_eq!(panel.context_empty, None);
+
+				panel.open_context_menu(position, TimelineHit::RulerMarker(Frame(7)), cx);
+				assert_eq!(panel.context_track, None);
+				assert_eq!(panel.context_empty, None);
+
+				panel.open_context_menu(position, TimelineHit::Ruler(Frame(9)), cx);
+				assert_eq!(panel.context_track, None);
+				assert_eq!(panel.context_empty, None);
+			});
+		});
+	}
+
+	/// The local (non-registry) menu items route to the engine; missing
+	/// targets and unknown ids are benign no-ops.
+	#[gpui::test]
+	async fn local_menu_items_route_to_the_engine(cx: &mut TestAppContext) {
+		// The Multi-Cam item runs real undoable commands; serialize with the
+		// graph tests sharing the global undo stack.
+		let _guard = crate::oakui::graphops::test_lock();
+		let (cx, panel) = panel_window(cx, 1600.0, 900.0);
+
+		let tracks_before = cx.read(|app| panel.read(app).engine.read(app).track_count());
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(LOCAL_ADD_VIDEO_TRACK, cx);
+				panel.on_local_menu_item(LOCAL_ADD_AUDIO_TRACK, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track_count()),
+			tracks_before + 2
+		);
+
+		// Delete one track (with a recorded track-head target). Without a
+		// target the click is ignored.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(LOCAL_DELETE_TRACK, cx);
+				panel.context_track = Some(2);
+				panel.on_local_menu_item(LOCAL_DELETE_TRACK, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track_count()),
+			tracks_before + 1
+		);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(LOCAL_DELETE_ALL_EMPTY, cx);
+			});
+		});
+
+		// A color label only logs (the engine has no clip-color surface).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(menu::COLOR_LABEL_BASE + 3, cx);
+			});
+		});
+
+		// Add adjustment layer: without a recorded empty-area click it is a
+		// no-op; with one the demo layer lands on the pointed track.
+		let clips_before = cx.read(|app| {
+			panel.read(app).engine.read(app).track(0).unwrap().clips().len()
+		});
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(LOCAL_ADD_ADJUSTMENT_LAYER, cx);
+				panel.context_empty = Some((0, Frame(10)));
+				panel.on_local_menu_item(LOCAL_ADD_ADJUSTMENT_LAYER, cx);
+			});
+		});
+		cx.read(|app| {
+			assert_eq!(
+				panel.read(app).engine.read(app).track(0).unwrap().clips().len(),
+				clips_before + 1,
+				"the adjustment layer joined the video track"
+			);
+		});
+		// An audio target is rejected (the error branch logs).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.context_empty = Some((2, Frame(10)));
+				panel.on_local_menu_item(LOCAL_ADD_ADJUSTMENT_LAYER, cx);
+			});
+		});
+
+		// The cache / timecode / thumbnail placeholders and an unknown id.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				for item in [
+					LOCAL_CACHE_ALL,
+					LOCAL_CACHE_IN_OUT,
+					LOCAL_CACHE_DISCARD,
+					LOCAL_CACHE_AUTO,
+					LOCAL_TIMECODE_DROP_FRAME,
+					LOCAL_TIMECODE_NON_DROP_FRAME,
+					LOCAL_TIMECODE_SECONDS,
+					LOCAL_TIMECODE_FRAMES,
+					LOCAL_TIMECODE_MILLISECONDS,
+					LOCAL_USE_AUDIO_TIME_UNITS,
+					LOCAL_SHOW_WAVEFORMS,
+					LOCAL_THUMBNAIL_OFF,
+					LOCAL_THUMBNAIL_IN_OUT,
+					LOCAL_THUMBNAIL_ON,
+					LOCAL_MARKER_PROPERTIES,
+					LOCAL_REVEAL_FOOTAGE_VIEWER,
+					LOCAL_REVEAL_PROJECT,
+				] {
+					panel.on_local_menu_item(item, cx);
+				}
+				panel.on_local_menu_item(999_999, cx);
+			});
+		});
+
+		// The proxy actions over the selected demo clip (id 10 maps to the
+		// explorer's intro.mov): generate first, then use / reveal / delete.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.timeline.update(cx, |view, cx| {
+					view.state.selection.clear();
+					view.state.selection.insert(ClipId(10));
+					cx.notify();
+				});
+				panel.on_local_menu_item(LOCAL_PROXY_GENERATE, cx);
+				panel.on_local_menu_item(LOCAL_PROXY_USE, cx);
+				panel.on_local_menu_item(LOCAL_PROXY_REVEAL, cx);
+				panel.on_local_menu_item(LOCAL_PROXY_DELETE, cx);
+			});
+		});
+		cx.read(|app| {
+			let engine = panel.read(app).engine.clone();
+			let engine = engine.read(app);
+			assert!(engine.proxy_row(10).is_some(), "the demo row exists");
+		});
+
+		// Multi-Cam flips through the real graph commands.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.timeline.update(cx, |view, cx| {
+					view.state.selection.insert(ClipId(10));
+					cx.notify();
+				});
+				panel.on_local_menu_item(LOCAL_MULTICAM, cx);
+			});
+		});
+	}
+
+	/// The panel command trait routes transport, in/out points, selection and
+	/// editing commands to the engine without panicking.
+	#[gpui::test]
+	async fn panel_commands_cover_transport_edit_and_view(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		// Transport: play/pause toggles the program clock.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.play_pause(cx));
+			});
+		});
+		assert!(
+			cx.read(|app| panel
+				.read(app)
+				.engine
+				.read(app)
+				.program_clock()
+				.read(app)
+				.is_playing()),
+			"play_pause starts the program monitor"
+		);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.play_pause(cx));
+				assert!(panel.prev_frame(cx));
+				assert!(panel.next_frame(cx));
+				assert!(panel.go_to_start(cx));
+				assert!(panel.go_to_end(cx));
+				assert!(panel.shuttle_left(cx));
+				assert!(panel.shuttle_right(cx));
+				assert!(panel.shuttle_stop(cx));
+			});
+		});
+		assert!(
+			!cx.read(|app| panel
+				.read(app)
+				.engine
+				.read(app)
+				.program_clock()
+				.read(app)
+				.is_playing()),
+			"shuttle_stop pauses the program monitor"
+		);
+
+		// In/out points.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.engine.update(cx, |engine, cx| {
+					engine.request_frame(Monitor::Program, Frame(90), cx)
+				});
+				assert!(panel.set_in(cx));
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).workarea().map(|(s, _)| s)),
+			Some(Frame(90))
+		);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.set_out(cx));
+				assert!(panel.reset_in(cx));
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).workarea().map(|(s, _)| s)),
+			Some(Frame::ZERO),
+			"reset_in returns the in point to the sequence start"
+		);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.reset_out(cx));
+			});
+		});
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.clear_in_out(cx));
+			});
+		});
+		assert_eq!(cx.read(|app| panel.read(app).engine.read(app).workarea()), None);
+
+		// Reset with no work area set (the unwrap_or fallbacks).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.reset_in(cx));
+				assert!(panel.reset_out(cx));
+			});
+		});
+		assert!(cx.read(|app| panel.read(app).engine.read(app).workarea()).is_some());
+
+		// Selection + editing commands (the mock's clipboard methods are
+		// no-ops; delete/split touch its demo tracks).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				assert!(panel.select_all(cx));
+				assert!(panel.deselect_all(cx));
+				assert!(panel.delete_selected(cx), "an empty selection is handled");
+				assert!(panel.ripple_delete(cx));
+				assert!(panel.select_all(cx));
+				assert!(panel.copy_selected(cx));
+				assert!(panel.cut_selected(cx));
+				assert!(panel.paste(cx));
+				assert!(panel.delete_selected(cx));
+				assert!(panel.ripple_delete(cx));
+				assert!(panel.split_at_playhead(cx));
+				assert!(panel.default_transition(cx));
+				assert!(panel.set_marker(cx));
+				assert!(panel.sync_by_source_time(cx));
+				assert!(panel.sync_by_waveform(cx));
+				assert!(panel.sync_by_waveform_speed(cx));
+				assert!(panel.toggle_links(cx));
+				assert!(panel.zoom_in(cx));
+				assert!(panel.zoom_out(cx));
+				assert!(panel.increase_track_height(cx));
+				assert!(panel.decrease_track_height(cx));
+			});
+		});
+	}
+
+	/// `delete_selection` ignores an empty selection and removes the selected
+	/// clips through the engine; the work-area commits follow the playhead.
+	#[gpui::test]
+	async fn delete_selection_and_workarea_paths(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.timeline.update(cx, |view, cx| {
+					view.state.selection.clear();
+					cx.notify();
+				});
+				panel.delete_selection(false, cx);
+				panel.delete_selection(true, cx);
+			});
+		});
+
+		let clips_before = cx.read(|app| {
+			panel.read(app).engine.read(app).track(0).unwrap().clips().len()
+		});
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.timeline.update(cx, |view, cx| {
+					view.state.selection.insert(ClipId(10));
+					cx.notify();
+				});
+				panel.delete_selection(false, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track(0).unwrap().clips().len()),
+			clips_before - 1,
+			"the selected clip left its track"
+		);
+
+		// A playhead at frame zero cannot form an out point: the commit is
+		// ignored (and the in point falls back to the sequence length).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.engine.update(cx, |engine, cx| {
+					engine.request_frame(Monitor::Program, Frame::ZERO, cx)
+				});
+				panel.set_point_at_playhead(false, cx);
+				panel.set_point_at_playhead(true, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).workarea().map(|(s, _)| s)),
+			Some(Frame::ZERO)
+		);
+	}
+
+	/// `finish_footage_drop` and `finish_effect_drop` route their pending
+	/// targets; a missing target and an unusable effect are benign no-ops.
+	#[gpui::test]
+	async fn finished_drops_route_to_the_engine(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		let target = || FootageDropTarget {
+			track_kind: TrackKind::Video,
+			track_index: 1,
+			time: Frame(20),
+			length: 250,
+		};
+
+		// No pending footage drop.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.finish_footage_drop(&FootageDrag(3), cx);
+			});
+		});
+		assert!(cx.read(|app| panel.read(app).engine.read(app).footage_drops().is_empty()));
+
+		// A pending drop with an open sequence reaches the engine.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.footage_drop = Some(target());
+				panel.finish_footage_drop(&FootageDrag(3), cx);
+			});
+		});
+		cx.read(|app| {
+			let panel = panel.read(app);
+			assert!(panel.footage_drop.is_none(), "the target is consumed");
+			assert_eq!(panel.engine.read(app).footage_drops().len(), 1);
+		});
+
+		let generator =
+			gpui::effect_stack::LibraryEffectDrag {
+				type_id: "org.olivevideoeditor.Olive.solidgenerator".into(),
+				name: "Solid".into(),
+			};
+		let transition =
+			gpui::effect_stack::LibraryEffectDrag {
+				type_id: "org.olivevideoeditor.Olive.transition".into(),
+				name: "Dissolve".into(),
+			};
+		let non_generator = gpui::effect_stack::LibraryEffectDrag {
+			type_id: "org.olivevideoeditor.Olive.blur".into(),
+			name: "Blur".into(),
+		};
+
+		// No pending effect drop.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.finish_effect_drop(&generator, cx);
+			});
+		});
+
+		// A transition type routes to the engine's transition drop.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.effect_drop = Some(target());
+				panel.finish_effect_drop(&transition, cx);
+			});
+		});
+		cx.read(|app| assert!(panel.read(app).effect_drop.is_none()));
+
+		// A non-generator effect is ignored.
+		let clips_before = cx.read(|app| {
+			panel.read(app).engine.read(app).track(1).unwrap().clips().len()
+		});
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.effect_drop = Some(target());
+				panel.finish_effect_drop(&non_generator, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track(1).unwrap().clips().len()),
+			clips_before,
+			"a non-generator makes no clip"
+		);
+
+		// A generator type creates a standalone clip on the pointed track.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.effect_drop = Some(target());
+				panel.finish_effect_drop(&generator, cx);
+			});
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track(1).unwrap().clips().len()),
+			clips_before + 1,
+			"the generator clip landed on the pointed track"
+		);
+	}
+
+	/// `resolve_drop_point` maps the cursor to track + frame, clamps above
+	/// the ruler / below the tracks and falls back on an empty timeline.
+	#[gpui::test]
+	async fn resolve_drop_point_maps_and_clamps(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		assert_eq!(
+			cx.read(|app| panel
+				.read(app)
+				.resolve_drop_point(gpui::point(px(200.0), px(10.0)), app)),
+			None,
+			"above the ruler there is no clip area"
+		);
+
+		// Inside the header column the frame clamps to zero; the y walk finds
+		// the second track (64px tall rows).
+		let (kind, index, frame) = cx
+			.read(|app| {
+				panel
+					.read(app)
+					.resolve_drop_point(gpui::point(px(10.0), px(100.0)), app)
+			})
+			.expect("below the ruler");
+		assert_eq!((kind, index), (TrackKind::Video, 1));
+		assert_eq!(frame, Frame::ZERO);
+
+		// Below every track clamps to the last one.
+		let (kind, index, _) = cx
+			.read(|app| {
+				panel
+					.read(app)
+					.resolve_drop_point(gpui::point(px(600.0), px(4000.0)), app)
+			})
+			.expect("below the ruler");
+		assert_eq!((kind, index), (TrackKind::Audio, 3));
+
+		// An empty timeline falls back to (Video, 0).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				let engine = panel.engine.clone();
+				engine.update(cx, |engine, cx| {
+					while engine.track_count() > 0 {
+						engine.remove_track(0, cx);
+					}
+				});
+				let (kind, index, _) = panel
+					.resolve_drop_point(gpui::point(px(600.0), px(100.0)), cx)
+					.expect("still below the ruler");
+				assert_eq!((kind, index), (TrackKind::Video, 0));
+			});
+		});
+	}
+
+	/// `zoom_timeline` and `nudge_track_height` scale the view and clamp the
+	/// engine's track heights to the slider range.
+	#[gpui::test]
+	async fn zoom_and_track_height_nudges(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+		let before = cx.read(|app| panel.read(app).timeline.read(app).state.zoom);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| panel.zoom_timeline(1.25, cx));
+		});
+		assert!(cx.read(|app| panel.read(app).timeline.read(app).state.zoom) > before);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| panel.zoom_timeline(0.8, cx));
+		});
+
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| panel.nudge_track_height(1000.0, cx));
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track(0).unwrap().height()),
+			px(160.0),
+			"the height clamps at the slider maximum"
+		);
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| panel.nudge_track_height(-1000.0, cx));
+		});
+		assert_eq!(
+			cx.read(|app| panel.read(app).engine.read(app).track(0).unwrap().height()),
+			px(24.0),
+			"the height clamps at the slider minimum"
+		);
+
+		// No tracks: the 64px default is used as the nudge base.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				let engine = panel.engine.clone();
+				engine.update(cx, |engine, cx| {
+					while engine.track_count() > 0 {
+						engine.remove_track(0, cx);
+					}
+				});
+				panel.nudge_track_height(0.0, cx);
+			});
+		});
+	}
+
+	/// The toolbar's tool buttons and trailing controls run their `on_click`
+	/// closures: tool selection, add-track buttons, zoom buttons and the
+	/// snap icon.
+	#[gpui::test]
+	async fn toolbar_buttons_switch_tools_and_route_actions(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1600.0, 900.0);
+		let toolbar = cx.debug_bounds("timeline-toolbar").expect("toolbar rendered");
+		let y = toolbar.origin.y + px(15.0);
+
+		// The eight tool buttons sit at 24px + 8px-gap offsets after the 8px
+		// toolbar padding.
+		for index in 0..8 {
+			let x = toolbar.origin.x + px(8.0 + 32.0 * index as f32 + 12.0);
+			cx.simulate_click(gpui::point(x, y), gpui::Modifiers::none());
+			assert_eq!(
+				cx.read(|app| panel.read(app).timeline.read(app).tool()),
+				TimelineTool::from_index(index).unwrap(),
+				"toolbar button {index} selects its tool"
+			);
+		}
+		// Clicking the already-selected tool again hits the no-op guard.
+		cx.simulate_click(
+			gpui::point(toolbar.origin.x + px(8.0 + 7.0 * 32.0 + 12.0), y),
+			gpui::Modifiers::none(),
+		);
+
+		// Walk the trailing controls: each hit routes through an `on_click`
+		// closure (add-track buttons, zoom buttons, the snap toggle).
+		let mut saw_add_track = false;
+		let mut saw_zoom = false;
+		let mut saw_snap = false;
+		let mut x = toolbar.origin.x + px(264.0);
+		while x < toolbar.right() {
+			let (tracks_before, zoom_before, snap_before) = cx.read(|app| {
+				let panel = panel.read(app);
+				let engine = panel.engine.read(app);
+				(
+					engine.track_count(),
+					panel.timeline.read(app).state.zoom,
+					panel.timeline.read(app).state.snap_enabled,
+				)
+			});
+			cx.simulate_click(gpui::point(x, y), gpui::Modifiers::none());
+			let (tracks_after, zoom_after, snap_after) = cx.read(|app| {
+				let panel = panel.read(app);
+				let engine = panel.engine.read(app);
+				(
+					engine.track_count(),
+					panel.timeline.read(app).state.zoom,
+					panel.timeline.read(app).state.snap_enabled,
+				)
+			});
+			saw_add_track |= tracks_after != tracks_before;
+			saw_zoom |= (zoom_after - zoom_before).abs() > f32::EPSILON;
+			saw_snap |= snap_after != snap_before;
+			x += px(4.0);
+		}
+		assert!(saw_add_track, "an add-track button was hit");
+		assert!(saw_zoom, "a zoom button was hit");
+		assert!(saw_snap, "the snap toggle was hit");
+	}
+
+	/// The drop ghost renders (including the out-of-range row break), the
+	/// dock metadata is populated and a left click focuses the panel.
+	#[gpui::test]
+	async fn drop_ghost_and_dock_metadata(cx: &mut TestAppContext) {
+		let (cx, panel) = panel_window(cx, 1280.0, 720.0);
+
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.footage_drop = Some(FootageDropTarget {
+					track_kind: TrackKind::Video,
+					track_index: 1,
+					time: Frame(50),
+					length: 250,
+				});
+				cx.notify();
+			});
+		});
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(cx.debug_bounds("timeline-canvas").is_some());
+
+		// A target beyond the last track breaks the row walk instead of
+		// panicking; a zero-length ghost keeps its 4px minimum width.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.footage_drop = None;
+				panel.effect_drop = Some(FootageDropTarget {
+					track_kind: TrackKind::Audio,
+					track_index: 999,
+					time: Frame(10),
+					length: 0,
+				});
+				cx.notify();
+			});
+		});
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+
+		// Dock metadata.
+		cx.update(|_window, app| {
+			let panel = panel.read(app);
+			assert_eq!(panel.panel_id(), crate::panels::ids::TIMELINE);
+			assert!(!panel.title(app).is_empty());
+			let _ = panel.tab_content(app);
+		});
+
+		// A left click focuses the panel (the root's mouse-down handler).
+		cx.simulate_mouse_down(
+			gpui::point(px(640.0), px(400.0)),
+			gpui::MouseButton::Left,
+			gpui::Modifiers::none(),
+		);
+	}
+
+	/// Dispatches one complete drag gesture against the current rendered
+	/// frame (a repaint between the events would consume the listeners).
+	fn dispatch_drag(
+		cx: &mut VisualTestContext,
+		start: gpui::Point<Pixels>,
+		hover: gpui::Point<Pixels>,
+		ruler: gpui::Point<Pixels>,
+	) {
+		cx.update(|window, cx| {
+			window.dispatch_event(
+				gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+					position: start,
+					modifiers: gpui::Modifiers::none(),
+					button: gpui::MouseButton::Left,
+					click_count: 1,
+					first_mouse: false,
+				}),
+				cx,
+			);
+			let mut move_to = |position| {
+				window.dispatch_event(
+					gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+						position,
+						modifiers: gpui::Modifiers::none(),
+						pressed_button: Some(gpui::MouseButton::Left),
+					}),
+					cx,
+				);
+			};
+			// Past the drag threshold to start the drag.
+			move_to(start + gpui::point(px(6.0), px(0.0)));
+			// Over the ruler first (no target yet, so the clear is a no-op),
+			// then hover the drop point, slide up to the ruler (clearing the
+			// target) and hover it again.
+			move_to(ruler);
+			move_to(hover);
+			move_to(ruler);
+			move_to(hover);
+			window.dispatch_event(
+				gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+					position: hover,
+					modifiers: gpui::Modifiers::none(),
+					button: gpui::MouseButton::Left,
+					click_count: 1,
+				}),
+				cx,
+			);
+		});
+	}
+
+	/// A full drag onto the timeline canvas resolves the drop target (and
+	/// clears it over the ruler), then routes the payload to the engine.
+	#[gpui::test]
+	async fn drag_gestures_resolve_targets_and_route_drops(cx: &mut TestAppContext) {
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(1280.0), px(720.0)), |window, cx| {
+			let engine = cx.new(MockEngine::demo);
+			let timeline = cx.new(|cx| TimelineView::new(engine.clone(), window, cx).zoom(2.0));
+			let panel = cx.new(|cx| TimelinePanel::new(engine, timeline, window, cx));
+			DropHost { panel }
+		});
+		cx.run_until_parked();
+		let host = window.root(cx).expect("drop host root");
+		let mut cx = VisualTestContext::from_window(window.into(), cx);
+		let panel = cx.read(|app| host.read(app).panel.clone());
+
+		let canvas = cx.debug_bounds("timeline-canvas").expect("canvas rendered");
+		let hover = gpui::point(
+			canvas.left() + px(HEADER_WIDTH + 100.0),
+			canvas.top() + px(RULER_HEIGHT + 20.0),
+		);
+		let ruler = gpui::point(
+			canvas.left() + px(HEADER_WIDTH + 100.0),
+			canvas.top() + px(10.0),
+		);
+
+		// An unknown footage id falls back to a one-frame ghost and the
+		// engine rejects the drop.
+		let source = cx
+			.debug_bounds("footage-drag-source-missing")
+			.expect("missing-footage source");
+		dispatch_drag(&mut cx, source.center(), hover, ruler);
+		cx.run_until_parked();
+		cx.read(|app| {
+			let panel = panel.read(app);
+			assert!(panel.footage_drop.is_none(), "the drop consumed the target");
+			assert!(
+				panel.engine.read(app).footage_drops().is_empty(),
+				"the unknown entry never placed a clip"
+			);
+		});
+
+		// The real footage entry places its clip.
+		let source = cx
+			.debug_bounds("footage-drag-source")
+			.expect("footage source");
+		dispatch_drag(&mut cx, source.center(), hover, ruler);
+		cx.run_until_parked();
+		cx.read(|app| {
+			let panel = panel.read(app);
+			let drops = panel.engine.read(app).footage_drops().to_vec();
+			assert_eq!(drops.len(), 1, "the footage drop reached the engine");
+			assert_eq!(drops[0].id, 3);
+			assert_eq!(drops[0].track_kind, TrackKind::Video);
+			assert_eq!(drops[0].track_index, 0);
+			assert!(drops[0].time.0 >= 0);
+		});
+
+		// The generator effect becomes a standalone clip on the pointed
+		// track (the drop point sits on the first row).
+		let clips_before = cx.read(|app| {
+			panel.read(app).engine.read(app).track(0).unwrap().clips().len()
+		});
+		let source = cx
+			.debug_bounds("effect-drag-source")
+			.expect("effect source");
+		dispatch_drag(&mut cx, source.center(), hover, ruler);
+		cx.run_until_parked();
+		cx.read(|app| {
+			let panel = panel.read(app);
+			assert!(panel.effect_drop.is_none(), "the effect drop is consumed");
+			assert_eq!(
+				panel.engine.read(app).track(0).unwrap().clips().len(),
+				clips_before + 1,
+				"the generator clip landed on the pointed track"
+			);
+		});
+	}
+
+	/// With no open sequence the footage drop is handed back to the shell and
+	/// the work-area helpers fall back to a one-frame sequence.
+	#[gpui::test]
+	async fn no_sequence_paths_use_the_fallbacks(cx: &mut TestAppContext) {
+		use std::cell::Cell;
+		use std::rc::Rc;
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(1280.0), px(720.0)), |window, cx| {
+			let engine = cx.new(crate::oakui::RealEngine::create);
+			let timeline = cx.new(|cx| TimelineView::new(engine.clone(), window, cx).zoom(2.0));
+			let panel = cx.new(|cx| TimelinePanel::new(engine, timeline, window, cx));
+			DropHost { panel }
+		});
+		cx.run_until_parked();
+		let host = window.root(cx).expect("host root");
+		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+		let panel = cx.read(|app| host.read(app).panel.clone());
+
+		let emitted = Rc::new(Cell::new(false));
+		cx.update(|_window, app| {
+			let emitted = emitted.clone();
+			app.subscribe(
+				&panel,
+				move |_panel: Entity<TimelinePanel<crate::oakui::RealEngine>>,
+				      _event: &FootageDropNeedsSequence,
+				      _cx| {
+					emitted.set(true);
+				},
+			)
+			.detach();
+			panel.update(app, |panel, cx| {
+				panel.footage_drop = Some(FootageDropTarget {
+					track_kind: TrackKind::Video,
+					track_index: 0,
+					time: Frame(5),
+					length: 1,
+				});
+				panel.finish_footage_drop(&FootageDrag(3), cx);
+			});
+		});
+		assert!(
+			emitted.get(),
+			"the shell is asked to set up a sequence first"
+		);
+		cx.read(|app| assert!(panel.read(app).footage_drop.is_none()));
+
+		// No sequence length is available: the fallbacks use the playhead.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.set_point_at_playhead(false, cx);
+				panel.set_point_at_playhead(true, cx);
+				assert!(panel.reset_in(cx));
+				assert!(panel.reset_out(cx));
+			});
+		});
 	}
 }

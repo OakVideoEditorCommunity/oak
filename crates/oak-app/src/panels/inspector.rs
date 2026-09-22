@@ -496,4 +496,92 @@ mod tests {
 			]
 		);
 	}
+
+	use crate::oakui::MockEngine;
+	use gpui::{Modifiers, px, size, TestAppContext, VisualTestContext};
+
+	/// The panel's context-menu routing (card menu target, every local
+	/// item, no-target guard), the pending add-menu render and the dock
+	/// metadata.
+	#[gpui::test]
+	async fn panel_context_and_add_menu_paths(cx: &mut TestAppContext) {
+		cx.update(|cx| cx.init_colors());
+		let window = cx.open_window(size(px(420.0), px(500.0)), |window, cx| {
+			let engine = cx.new(MockEngine::demo);
+			InspectorPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("inspector panel root");
+		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
+
+		// Dock metadata.
+		cx.update(|_window, app| {
+			assert!(!panel.read(app).title(app).is_empty());
+			let _ = panel.read(app).tab_content(app);
+			assert_eq!(panel.read(app).panel_id(), INSPECTOR);
+		});
+
+		// Right click targets the first effect card and opens the card menu.
+		cx.simulate_mouse_down(
+			gpui::point(px(200.0), px(200.0)),
+			MouseButton::Right,
+			Modifiers::none(),
+		);
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		assert!(
+			cx.debug_bounds("menu-popup").is_some(),
+			"the card context menu opens"
+		);
+
+		// Every local item routes; a missing target is a no-op.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.on_local_menu_item(LOCAL_ENABLE, cx);
+				panel.on_local_menu_item(LOCAL_RENAME, cx);
+				panel.on_local_menu_item(LOCAL_PROPERTIES, cx);
+				panel.on_local_menu_item(9999, cx);
+				panel.context_effect = None;
+				panel.on_local_menu_item(LOCAL_ENABLE, cx);
+				panel.context_effect = Some((EffectId(1), true, true));
+				panel.on_local_menu_item(LOCAL_REMOVE, cx);
+			});
+		});
+
+		// The add-effect menu renders while an add is pending (the mock
+		// always reports a stack target).
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.pending_add = Some(0);
+				cx.notify();
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|window, cx| {
+			window.draw(cx).clear();
+		});
+		// The add-menu list itself carries an element id but no debug
+		// selector; its group headers do, so the menu's presence is
+		// asserted through the built-in group header it renders.
+		let menu_rendered = [
+			"add-effect-group-row-color",
+			"add-effect-group-row-filter",
+			"add-effect-group-row-distort",
+			"add-effect-group-row-keying",
+			"add-effect-group-row-generator",
+			"add-effect-group-row-math",
+		]
+		.into_iter()
+		.any(|selector| cx.debug_bounds(selector).is_some());
+		assert!(
+			menu_rendered,
+			"the add menu renders while an add is pending"
+		);
+		assert_eq!(
+			cx.update(|_window, app| panel.read(app).pending_add),
+			Some(0),
+			"the mock engine has a stack target, so the pending add stays open"
+		);
+	}
 }
