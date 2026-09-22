@@ -83,7 +83,7 @@ const TICKET_AUDIO: i32 = ticket_kind::AUDIO;
 /// dropped with the C ABI: the direct ticket arena carries a forced size
 /// and pixel format only (the eval producer performs no color
 /// management). The matrix fields are retained for API parity but unused.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ForceParams {
 	/// Forced output width (0 = off).
 	pub force_width: i32,
@@ -98,6 +98,22 @@ pub struct ForceParams {
 	pub force_format: i32,
 	/// Forced channel count (0 = off).
 	pub force_channel_count: i32,
+}
+
+impl Default for ForceParams {
+	/// All overrides off: in particular `force_format` is `-1` ("off"), not
+	/// `0` (which is a real `PixelFormat` code — U8, and the F32 render
+	/// pipeline rejects it).
+	fn default() -> Self {
+		ForceParams {
+			force_width: 0,
+			force_height: 0,
+			force_matrix: [0.0; 16],
+			has_force_matrix: false,
+			force_format: -1,
+			force_channel_count: 0,
+		}
+	}
 }
 
 /// Subclass hooks, standing in for the C++ protected virtuals
@@ -1225,3 +1241,4 @@ fn shm_frame_to_texture(frame: &ShmFrameRef) -> oak_core::texture::Texture {
 		.collect();
 	oak_core::texture::Texture::wrap_frame(f)
 }
+ 		.collect();

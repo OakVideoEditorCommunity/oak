@@ -580,6 +580,30 @@ pub struct RippleInfo {
 	append_gap: bool,
 }
 
+impl RippleInfo {
+	/// Creates a per-block ripple record: `block` is the block whose length
+	/// the ripple changes, and `append_gap` requests inserting a gap of the
+	/// movement span ahead of it instead (C++
+	/// `TrackListRippleToolCommand::RippleInfo{block, append_gap}`).
+	///
+	/// Added for the M6 test-coverage pass: without a constructor the
+	/// integration tests could only build an empty info list, leaving the
+	/// whole `ripple()` body unreachable (review §M5).
+	pub fn new(block: NodeRef, append_gap: bool) -> Self {
+		Self { block, append_gap }
+	}
+
+	/// The block this record targets.
+	pub fn block(&self) -> &NodeRef {
+		&self.block
+	}
+
+	/// Whether the ripple inserts a gap instead of resizing the block.
+	pub fn append_gap(&self) -> bool {
+		self.append_gap
+	}
+}
+
 /// `TrackListRippleToolCommand` — ripple-tool edit: shift blocks on the listed
 /// tracks by `ripple_movement` (timelineundoripple.h).
 #[allow(dead_code)] // `track_list` mirrors the C++ member; the per-track info drives the work.

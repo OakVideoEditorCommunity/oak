@@ -873,7 +873,9 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 								_ => NodeValue::Float(value.to_f64()),
 							};
 							engine.update(cx, |engine, cx| {
-								let _ = engine.set_effect_param(effect, &input_id, nv, cx);
+								if let Err(err) = engine.set_effect_param(effect, &input_id, nv, cx) {
+									eprintln!("[ofx params] set {input_id:?} failed: {err}");
+								}
 							});
 						}
 					},
@@ -886,7 +888,9 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 					let CheckBoxEvent::Toggled { state, .. } = event;
 					let nv = NodeValue::Boolean(*state == CheckState::Checked);
 					engine.update(cx, |engine, cx| {
-						let _ = engine.set_effect_param(effect, &input_id, nv, cx);
+						if let Err(err) = engine.set_effect_param(effect, &input_id, nv, cx) {
+							eprintln!("[ofx params] set {input_id:?} failed: {err}");
+						}
 					});
 				})
 				.detach();
@@ -912,7 +916,9 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 						_ => NodeValue::Combo(*value as i64),
 					};
 					engine.update(cx, |engine, cx| {
-						let _ = engine.set_effect_param(effect, &input_id, nv, cx);
+						if let Err(err) = engine.set_effect_param(effect, &input_id, nv, cx) {
+							eprintln!("[ofx params] set {input_id:?} failed: {err}");
+						}
 					});
 				})
 				.detach();
@@ -1023,12 +1029,14 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 								.collect();
 							let json = oak_plugin::param_curve::curves_to_json(&curves);
 							engine.update(cx, |engine, cx| {
-								let _ = engine.set_effect_param(
+								if let Err(err) = engine.set_effect_param(
 									effect,
 									&input_id,
 									NodeValue::Text(json),
 									cx,
-								);
+								) {
+									eprintln!("[ofx params] set {input_id:?} failed: {err}");
+								}
 							});
 						},
 					)
@@ -1105,7 +1113,9 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 					.child(button_label)
 					.on_click(move |_event: &ClickEvent, _window, cx| {
 						engine.update(cx, |engine, cx| {
-							let _ = engine.effect_push_button(effect, &input_id, cx);
+							if let Err(err) = engine.effect_push_button(effect, &input_id, cx) {
+								eprintln!("[ofx params] push {input_id:?} failed: {err}");
+							}
 						});
 					})
 					.into_any_element()
@@ -1204,12 +1214,14 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 									.on_click(move |_event: &ClickEvent, _window, cx| {
 										let text = editor_commit.read(cx).as_str().to_string();
 										engine.update(cx, |engine, cx| {
-											let _ = engine.set_effect_param(
+											if let Err(err) = engine.set_effect_param(
 												effect,
 												&input_id,
 												NodeValue::Text(text),
 												cx,
-											);
+											) {
+												eprintln!("[ofx params] set {input_id:?} failed: {err}");
+											}
 										});
 									}),
 							)

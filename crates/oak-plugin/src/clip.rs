@@ -346,7 +346,7 @@ impl ClipInstance {
 		use crate::error::Error;
 		use crate::render::{texture_get_frame, PIXEL_FORMAT_F32};
 
-		let texture = self
+		let mut texture = self
 			.output_texture
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
@@ -384,11 +384,22 @@ impl ClipInstance {
 			let s = y * tight;
 			dst_bytes[d..d + tight].copy_from_slice(&pixels[s..s + tight]);
 		}
-		// GPU 目标纹理：拷贝只落在下载帧上，经后端 upload 回写
-		// （CPU 纹理无需上传）。
-		if let crate::render::Texture::Gpu { token, ctx, .. } = &texture {
-			ctx.upload(*token, &frame)
-				.map_err(|e| Error::Failed(format!("输出纹理上传失败：{e}")))?;
+		// 写回目标纹理：CPU 纹理的 `to_frame` 是深拷贝，必须把改写
+		// 后的帧放回本体（同 render_driver::write_output_frame 的值
+		// 模型修复）；GPU 目标纹理：拷贝只落在下载帧上，经后端
+		// upload 回写。
+		match &mut texture {
+			crate::render::Texture::Cpu(f) => {
+				f.data = frame.data;
+			}
+			crate::render::Texture::Gpu { token, ctx, .. } => {
+				ctx.upload(*token, &frame)
+					.map_err(|e| Error::Failed(format!("输出纹理上传失败：{e}")))?;
+			}
+			// 未解析的平面纹理不会成为插件输出目标（解码路径会先解析）。
+			crate::render::Texture::Planar(_) => {
+				return Err(Error::Failed("平面纹理不能作为插件输出目标".into()));
+			}
 		}
 		Ok(texture)
 	}

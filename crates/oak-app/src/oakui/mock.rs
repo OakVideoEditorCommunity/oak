@@ -493,6 +493,17 @@ pub struct MockEngine {
 	effects: Vec<MockEffect>,
 	/// Id allocator for effects added at runtime.
 	next_effect_id: u64,
+	/// Parameter-write attempts from the params view (`input_id` + value
+	/// debug), recorded even when the call fails, so the routing tests are
+	/// falsifiable (review §10.2: previously the mock swallowed every write
+	/// and the tests could not observe it).
+	effect_param_attempts: Mutex<Vec<(EffectId, String, String)>>,
+	/// Push-button attempts from the params view.
+	effect_push_attempts: Mutex<Vec<(EffectId, String)>>,
+	/// Result returned by `set_effect_param`/`effect_push_button` (default
+	/// `Err`: the demo models an unsupported node; tests can flip it to cover
+	/// the success path).
+	effect_param_ok: bool,
 	/// Whether the program monitor is playing (mirrors the clock; kept here
 	/// because the audio-meter data source has no `App` to read the clock).
 	program_playing: bool,
@@ -588,6 +599,29 @@ pub struct MockEngine {
 
 impl MockEngine {
 	/// Builds the demo project: 第一稿.ove, one HD sequence, four tracks.
+	/// The parameter-write attempts the params view routed to this engine
+	/// (`(effect, input_id, value debug)`), in call order.
+	pub fn effect_param_attempts(&self) -> Vec<(EffectId, String, String)> {
+		self.effect_param_attempts
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clone()
+	}
+
+	/// The push-button attempts the params view routed to this engine.
+	pub fn effect_push_attempts(&self) -> Vec<(EffectId, String)> {
+		self.effect_push_attempts
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clone()
+	}
+
+	/// Flip the result of `set_effect_param`/`effect_push_button` (default
+	/// `Err`); tests use `true` to cover the accepted path.
+	pub fn set_effect_param_ok(&mut self, ok: bool) {
+		self.effect_param_ok = ok;
+	}
+
 	pub fn demo(cx: &mut Context<Self>) -> Self {
 		let rate = VideoFormat::hd_1080p25().rate;
 		let clip =
@@ -862,6 +896,9 @@ impl MockEngine {
 				},
 			],
 			next_effect_id: 4,
+			effect_param_attempts: Mutex::new(Vec::new()),
+			effect_push_attempts: Mutex::new(Vec::new()),
+			effect_param_ok: false,
 			program_playing: false,
 			selected_item: None,
 			meter_phase: 0,
@@ -1679,6 +1716,43 @@ impl AppEngine for MockEngine {
 				),
 			]
 		})
+	}
+
+	fn set_effect_param(
+		&mut self,
+		effect: EffectId,
+		input_id: &str,
+		value: oak_node::value::NodeValue,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		self.effect_param_attempts
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.push((effect, input_id.to_string(), format!("{value:?}")));
+		if self.effect_param_ok {
+			cx.notify();
+			Ok(())
+		} else {
+			Err("the demo engine does not apply effect parameters".into())
+		}
+	}
+
+	fn effect_push_button(
+		&mut self,
+		effect: EffectId,
+		input_id: &str,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		self.effect_push_attempts
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.push((effect, input_id.to_string()));
+		if self.effect_param_ok {
+			cx.notify();
+			Ok(())
+		} else {
+			Err("the demo engine does not trigger effect push buttons".into())
+		}
 	}
 
 	fn add_node_at(

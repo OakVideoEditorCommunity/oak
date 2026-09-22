@@ -16,9 +16,11 @@
 
 //! The `TaskManager` singleton, mirroring `src/task/src/taskmanager.h`.
 //!
-//! Holds the set of live [`crate::task::Task`] instances; starting a task
-//! hands its ownership to the manager, which also exposes the codec task
-//! submitter registration (see [`crate::codecbridge`]).
+//! Holds the set of live [`crate::task::Task`] instances and starts them
+//! on worker threads. Codec task-submitter registration is a **separate**
+//! concern owned by [`crate::codecbridge`]: the embedding application
+//! calls `register_codec_task_submitter()` explicitly (the manager never
+//! installs the callback itself — see [`TaskManager::init`]).
 //!
 //! CPP-PARITY: src/task/src/taskmanager.h
 //!
@@ -43,7 +45,10 @@ pub struct TaskManager {
 	tasks: Vec<Box<dyn TaskBox>>,
 	/// Worker threads, parallel to `tasks` (moved out before joining).
 	threads: Vec<Option<std::thread::JoinHandle<()>>>,
-	/// Whether the codec task submitter is currently registered.
+	/// Whether the embedding application registered the codec task
+	/// submitter (`crate::codecbridge::register_codec_task_submitter`).
+	/// Pure bookkeeping on the manager: [`TaskManager::init`] never
+	/// registers anything itself, so a fresh singleton reads `false`.
 	codec_submitter_registered: bool,
 }
 
@@ -81,9 +86,23 @@ impl TaskManager {
 		guard.as_ref().map(|p| unsafe { &*p.0 })
 	}
 
-	/// Create the singleton and register the codec task submitter. Returns
-	/// `Err(Error::State)` if already initialized (mirrors
-	/// `oaktask_manager_init`).
+	/// Create the singleton. Returns `Err(Error::State)` if already
+	/// initialized (mirrors `oaktask_manager_init`).
+	///
+	/// This **does not** register the codec task submitter: registration is
+	/// `crate::codecbridge::register_codec_task_submitter`, an explicit
+	/// call by the embedding application. Two reasons:
+	///
+	/// - the C++ parity (`TaskManager::create_instance`) creates the
+	///   manager only; codecbridge wires the callback separately, and
+	/// - the codec bridge's interim contract is *synchronous* submission
+	///   (`submit_codec_task` runs the task inline), so registration needs
+	///   no manager state.
+	///
+	/// Consequently a fresh manager reports
+	/// [`TaskManager::codec_submitter_registered`] as `false`; the
+	/// application flips it via [`TaskManager::set_codec_submitter_registered`]
+	/// when it performs the registration itself.
 	pub fn init() -> Result<()> {
 		let mut guard = INSTANCE.lock().unwrap();
 		if guard.is_some() {
@@ -98,7 +117,9 @@ impl TaskManager {
 		Ok(())
 	}
 
-	/// Destroy the singleton. Idempotent.
+	/// Destroy the singleton. Idempotent. Does not unregister the codec
+	/// task submitter (the registration is owned by the embedding
+	/// application, not by the manager — see [`TaskManager::init`]).
 	pub fn shutdown() {
 		let ptr = {
 			let mut guard = INSTANCE.lock().unwrap();
@@ -231,12 +252,19 @@ impl TaskManager {
 		out
 	}
 
-	/// Whether this manager registered the codec submitter itself.
+	/// Whether this manager's bookkeeping flag says the embedding
+	/// application registered the codec submitter. Never set by
+	/// [`TaskManager::init`] (which registers nothing); see
+	/// [`TaskManager::set_codec_submitter_registered`].
 	pub fn codec_submitter_registered(&self) -> bool {
 		self.codec_submitter_registered
 	}
 
-	/// Mark whether this manager registered the codec submitter.
+	/// Record whether the embedding application registered the codec
+	/// submitter. This is pure bookkeeping: it neither installs nor
+	/// removes the oakcodec callback (that is
+	/// `crate::codecbridge::register_codec_task_submitter` /
+	/// `unregister_codec_task_submitter`).
 	pub fn set_codec_submitter_registered(&mut self, registered: bool) {
 		self.codec_submitter_registered = registered;
 	}
