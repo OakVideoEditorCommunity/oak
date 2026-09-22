@@ -2899,11 +2899,38 @@ mod tests {
 		);
 	}
 
+	/// Restores an environment variable on drop, so a test that toggles
+	/// process-wide configuration cannot leak the value into parallel
+	/// tests or into a later test when an assertion panics.
+	struct EnvVarGuard {
+		key: &'static str,
+		saved: Option<std::ffi::OsString>,
+	}
+
+	impl EnvVarGuard {
+		fn set(key: &'static str, value: &str) -> Self {
+			let saved = std::env::var_os(key);
+			std::env::set_var(key, value);
+			Self { key, saved }
+		}
+	}
+
+	impl Drop for EnvVarGuard {
+		fn drop(&mut self) {
+			match self.saved.take() {
+				Some(v) => std::env::set_var(self.key, v),
+				None => std::env::remove_var(self.key),
+			}
+		}
+	}
+
 	#[test]
 	fn user_config_env_override() {
-		std::env::set_var("OAK_RENDER_BACKEND", "vulkan");
+		// The tests that let the user config pick the shared context read
+		// the same variable; hold their lock while it is overridden.
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let _env = EnvVarGuard::set("OAK_RENDER_BACKEND", "vulkan");
 		assert_eq!(BackendKind::from_user_config(), BackendKind::Vulkan);
-		std::env::remove_var("OAK_RENDER_BACKEND");
 	}
 
 	#[test]
@@ -2966,6 +2993,9 @@ mod tests {
 	/// that has created a texture is no longer replaceable.
 	#[test]
 	fn shared_slot_replaces_an_unused_engine_context() {
+		// The same shared-state lock as the other slot tests
+		// (`shared_slot_host_marking_and_queries`): the slot is process-wide.
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(base) = any_gpu() else {
 			return;
 		};
@@ -3325,6 +3355,42 @@ mod tests {
 		ctx.destroy_texture(dst);
 	}
 
+	/// The bit-depth-aware YUV transform: the 8-bit variant matches the
+	/// exact 8-bit code-value expansion (proved against ffmpeg/swscale on
+	/// real media), and the 16-bit variant is bit-identical with the
+	/// original `from_matrix` the M2 pass was validated with.
+	#[test]
+	fn yuv_transform_depth_matches_reference_math() {
+		use crate::colormath::YuvMatrix;
+		let t8 = YuvTransform::from_matrix_depth(YuvMatrix::Bt709, false, 8);
+		// demo.mp4 @ (960,540): Y=145, U=117, V=164 (limited BT.709).
+		let (y, u, v) = (145.0f32 / 255.0, 117.0 / 255.0, 164.0 / 255.0);
+		let rgb = [
+			t8.matrix[0][0] * y + t8.matrix[0][2] * v + t8.offset[0],
+			t8.matrix[1][0] * y + t8.matrix[1][1] * u + t8.matrix[1][2] * v + t8.offset[1],
+			t8.matrix[2][0] * y + t8.matrix[2][1] * u + t8.offset[2],
+		];
+		let expect = [0.8421f32, 0.5230, 0.4979];
+		for c in 0..3 {
+			assert!(
+				(rgb[c] - expect[c]).abs() < 1e-3,
+				"channel {c}: {} vs {}",
+				rgb[c],
+				expect[c]
+			);
+		}
+
+		// The depth-16 constructor is exactly the original formula.
+		for matrix in [YuvMatrix::Bt601, YuvMatrix::Bt709, YuvMatrix::Bt2020] {
+			for full in [false, true] {
+				assert_eq!(
+					YuvTransform::from_matrix(matrix, full),
+					YuvTransform::from_matrix_depth(matrix, full, 16)
+				);
+			}
+		}
+	}
+
 	/// The generic color LUT pass (graph `ColorTransformJob`): trilinear
 	/// LUT application into an `Rgba32Float` texture, GPU→GPU.
 	#[test]
@@ -3506,5 +3572,837 @@ mod tests {
 		pod2.height = 2;
 		let mut other = r.create_texture(&pod2, None).unwrap();
 		assert!(r.blit_color_managed(Some(&src), &mut other, None).is_err());
+	}
+
+	// ---- Branch-coverage fill-ins ------------------------------------------
+
+	#[test]
+	fn backend_kind_strings_cover_every_variant() {
+		for (kind, s) in [
+			(BackendKind::Auto, "auto"),
+			(BackendKind::Metal, "metal"),
+			(BackendKind::Vulkan, "vulkan"),
+			(BackendKind::Gl, "opengl"),
+			(BackendKind::Cpu, "cpu"),
+		] {
+			assert_eq!(kind.to_config_string(), s);
+			assert_eq!(BackendKind::from_config_string(s), kind);
+		}
+		// The parser trims whitespace and folds case.
+		assert_eq!(
+			BackendKind::from_config_string("  VULKAN  "),
+			BackendKind::Vulkan
+		);
+		// `Auto` and `Metal` share the same fallback list; `Cpu` has none.
+		assert_eq!(
+			BackendKind::Auto.wgpu_fallbacks(),
+			BackendKind::Metal.wgpu_fallbacks()
+		);
+		assert_eq!(
+			BackendKind::Vulkan.wgpu_fallbacks().first(),
+			Some(&wgpu::Backends::VULKAN)
+		);
+		assert_eq!(
+			BackendKind::Gl.wgpu_fallbacks().first(),
+			Some(&wgpu::Backends::GL)
+		);
+		assert!(BackendKind::Cpu.wgpu_fallbacks().is_empty());
+	}
+
+	/// The `OAK_REQUIRE_GPU` policy is a pure parser plus two handling
+	/// arms. Driving both from arguments (instead of flipping the real
+	/// environment variable) keeps this test from racing the GPU
+	/// acceptance tests, which read the variable from parallel threads and
+	/// would panic if they observed a transient `1`.
+	#[test]
+	fn require_gpu_adapter_parses_env_values() {
+		for (value, expected) in [
+			(None, false), // unset means "skipping is allowed"
+			(Some("0"), false),
+			(Some("false"), false),
+			(Some("FALSE"), false),
+			(Some("1"), true),
+			(Some("yes"), true),
+			(Some(""), true),
+		] {
+			assert_eq!(
+				require_gpu_from_value(value),
+				expected,
+				"value {value:?}"
+			);
+		}
+		// The soft-skip arm logs and returns instead of failing.
+		skip_or_fail_gpu_with(false, "a coverage probe");
+		// The hard-fail arm panics when a GPU is required.
+		let panicked =
+			std::panic::catch_unwind(|| skip_or_fail_gpu_with(true, "a coverage probe"));
+		assert!(
+			panicked.is_err(),
+			"a required GPU must hard-fail a missing adapter"
+		);
+	}
+
+	#[test]
+	fn shared_slot_host_marking_and_queries() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		// `mark_host_context` creates the process context on first use and
+		// marks it as the host's render device; the three query helpers
+		// then agree on it.
+		let marked = GpuContext::mark_host_context();
+		assert_eq!(marked, GpuContext::shared().is_some());
+		assert_eq!(GpuContext::host_gpu_installed(), marked);
+		assert_eq!(GpuContext::shared_is_installed(), marked);
+	}
+
+	#[test]
+	fn future_executor_drives_pending_futures() {
+		use std::future::Future;
+		use std::pin::Pin;
+		use std::task::{Context, Poll};
+
+		/// Pending once (forcing the executor's yield arm), then ready;
+		/// also clones the waker to exercise the no-op vtable.
+		struct CloneWakerThenYield {
+			yielded: bool,
+		}
+
+		impl Future for CloneWakerThenYield {
+			type Output = u32;
+
+			fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u32> {
+				let waker = cx.waker().clone();
+				assert!(waker.will_wake(cx.waker()));
+				drop(waker);
+				if self.yielded {
+					Poll::Ready(42)
+				} else {
+					self.yielded = true;
+					Poll::Pending
+				}
+			}
+		}
+
+		assert_eq!(
+			pollster_block_on(CloneWakerThenYield { yielded: false }),
+			42
+		);
+		// The packing helper is little-endian f32 bytes.
+		assert_eq!(f32_uniform_bytes(&[1.0f32]), vec![0x00, 0x00, 0x80, 0x3f]);
+	}
+
+	#[test]
+	fn frame_from_pixels_for_upload_validates_arguments() {
+		let mut frame = Frame::new();
+		let pod = VideoParamsPod {
+			width: 2,
+			height: 2,
+			..Default::default()
+		};
+		frame.set_video_params(pod);
+		frame.allocate();
+		let stride = frame.linesize_bytes();
+		// Null pointer / non-positive geometry.
+		assert!(unsafe { frame_from_pixels_for_upload((2, 2), std::ptr::null(), stride) }.is_err());
+		assert!(
+			unsafe { frame_from_pixels_for_upload((0, 2), frame.data.as_ptr(), stride) }.is_err()
+		);
+		assert!(
+			unsafe { frame_from_pixels_for_upload((2, -1), frame.data.as_ptr(), stride) }.is_err()
+		);
+		// Stride must match the F32 line size.
+		assert!(unsafe { frame_from_pixels_for_upload((2, 2), frame.data.as_ptr(), 3) }.is_err());
+		// The valid shape copies the pixels.
+		let built =
+			unsafe { frame_from_pixels_for_upload((2, 2), frame.data.as_ptr(), stride) }.unwrap();
+		assert_eq!(built.width, 2);
+		assert_eq!(built.height, 2);
+		assert_eq!(built.data.len(), frame.data.len());
+	}
+
+	#[test]
+	fn gpu_context_accessors_and_registry_errors() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		// Engine-created contexts host a non-CPU adapter and are unused
+		// until the first texture.
+		assert!(ctx.is_gpu());
+		assert_ne!(ctx.kind(), BackendKind::Cpu);
+		assert!(!ctx.is_adopted());
+		assert!(!ctx.is_used());
+		let _ = ctx.is_filterable();
+		let (device, queue) = ctx.device_queue();
+		assert!(Arc::strong_count(&device) >= 1);
+		assert!(Arc::strong_count(&queue) >= 1);
+
+		// Invalid create parameters are rejected before any GPU work.
+		assert_eq!(
+			ctx.create_texture(0, 4).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		assert_eq!(
+			ctx.create_texture(4, -1).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		assert_eq!(
+			ctx.create_texture_format(
+				4,
+				4,
+				0,
+				wgpu::TextureFormat::R8Unorm,
+				wgpu::TextureUsages::TEXTURE_BINDING,
+			)
+			.unwrap_err()
+			.code(),
+			Error::Invalid.code()
+		);
+
+		let token = ctx.create_texture(4, 3).unwrap();
+		assert!(ctx.is_used());
+		assert_eq!(ctx.texture_size(token), Some((4, 3)));
+		assert_eq!(
+			ctx.texture_format(token),
+			Some(wgpu::TextureFormat::Rgba32Float)
+		);
+		assert!(ctx.texture_handle(token).is_some());
+		assert_eq!(ctx.texture_size(999999), None);
+		assert_eq!(ctx.texture_format(999999), None);
+		assert!(!ctx.has_texture(999999));
+
+		// The placeholder is created once and cached.
+		let placeholder = ctx.placeholder_texture().unwrap();
+		assert_eq!(ctx.placeholder_texture().unwrap(), placeholder);
+		assert!(ctx.has_texture(placeholder));
+
+		// Clearing an existing texture succeeds; a missing token reports
+		// NotFound.
+		ctx.clear_texture(token).unwrap();
+		assert_eq!(
+			ctx.clear_texture(999999).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+
+		// The trait-object surface used by fakes/hardware import.
+		let like: &dyn GpuContextLike = ctx.as_ref();
+		assert_eq!(like.kind(), ctx.kind());
+		assert!(like.as_any().is_some());
+		assert!(like.texture_handle(placeholder).is_some());
+	}
+
+	#[test]
+	fn gpu_plane_upload_formats_and_bounds() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+		// Every single-channel format the bpp table accepts (R16Float
+		// covers the 2-byte arm; R16Unorm requires an optional device
+		// feature the context does not enable).
+		let r8 = ctx
+			.create_texture_format(4, 2, 1, wgpu::TextureFormat::R8Unorm, usage)
+			.unwrap();
+		ctx.upload_plane(r8, &[7u8; 8]).unwrap();
+		let r16f = ctx
+			.create_texture_format(4, 2, 1, wgpu::TextureFormat::R16Float, usage)
+			.unwrap();
+		ctx.upload_plane(r16f, &[0u8; 16]).unwrap();
+		let r32f = ctx
+			.create_texture_format(4, 2, 1, wgpu::TextureFormat::R32Float, usage)
+			.unwrap();
+		ctx.upload_plane(r32f, &[0u8; 32]).unwrap();
+
+		// A short buffer and an unsupported format are rejected.
+		assert_eq!(
+			ctx.upload_plane(r8, &[0u8; 7]).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		let rgba = ctx
+			.create_texture_format(4, 2, 1, wgpu::TextureFormat::Rgba8Unorm, usage)
+			.unwrap();
+		assert_eq!(
+			ctx.upload_plane(rgba, &[0u8; 32]).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		// Missing tokens report NotFound.
+		assert_eq!(
+			ctx.upload_plane(999999, &[0u8; 8]).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.download(999999).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+		// Only Rgba32Float/Rgba16Float are readable back.
+		let err = ctx.download(r8).unwrap_err();
+		assert!(
+			err.to_string().contains("unsupported format"),
+			"the format error is named: {err}"
+		);
+	}
+
+	#[test]
+	fn gpu_lut_lifecycle_cache_and_validation() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let lut = crate::lut::Lut3d::build(3, [0.0; 3], [1.0; 3], |c| [c[1], c[2], c[0]]);
+		// Installing twice replaces (and destroys) the previous LUT texture.
+		ctx.set_display_lut(&lut).unwrap();
+		assert!(ctx.has_display_lut());
+		ctx.set_display_lut(&lut).unwrap();
+		assert!(ctx.has_display_lut());
+
+		let src = ctx.create_texture(2, 2).unwrap();
+		// Two present calls: the first builds the Rgba16Float pipeline, the
+		// second reuses the cached one.
+		let presented = ctx.present_texture(src).unwrap();
+		let presented2 = ctx.present_texture(src).unwrap();
+		assert_ne!(presented, presented2);
+
+		// The caller-keyed cache uploads once per key.
+		reset_gpu_transfer_counters();
+		let first = ctx.apply_color_lut(src, "swap", &lut).unwrap();
+		assert_eq!(gpu_transfer_counters(), (1, 0));
+		reset_gpu_transfer_counters();
+		let again = ctx.apply_color_lut(src, "swap", &lut).unwrap();
+		assert_eq!(gpu_transfer_counters(), (0, 0));
+		assert_ne!(first, again);
+
+		// Nine more keys exceed the 8-entry cache: the oldest is evicted.
+		for i in 0..9 {
+			ctx.apply_color_lut(src, &format!("key-{i}"), &lut).unwrap();
+		}
+		// The original key was evicted and re-uploads.
+		reset_gpu_transfer_counters();
+		ctx.apply_color_lut(src, "swap", &lut).unwrap();
+		assert_eq!(gpu_transfer_counters(), (1, 0));
+
+		// A malformed LUT is rejected before any upload.
+		let mut malformed = lut.clone();
+		malformed.data.truncate(3);
+		assert_eq!(
+			ctx.upload_lut(&malformed).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		// An unknown source texture is NotFound.
+		assert_eq!(
+			ctx.apply_color_lut(999999, "swap", &lut)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+	}
+
+	#[test]
+	fn gpu_upload_download_and_blit_validate_arguments() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let token = ctx.create_texture(4, 4).unwrap();
+		let other = ctx.create_texture(4, 4).unwrap();
+
+		let mut frame = Frame::new();
+		let pod = VideoParamsPod {
+			width: 4,
+			height: 4,
+			..Default::default()
+		};
+		frame.set_video_params(pod);
+		frame.allocate();
+		ctx.upload(token, &frame).unwrap();
+
+		// Non-F32 input.
+		let mut wrong_format = frame.clone();
+		wrong_format.format = PixelFormat::U8;
+		assert_eq!(
+			ctx.upload(token, &wrong_format).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		// Geometry mismatch with the texture.
+		let mut wrong_size = Frame::new();
+		let small = VideoParamsPod {
+			width: 2,
+			height: 4,
+			..Default::default()
+		};
+		wrong_size.set_video_params(small);
+		wrong_size.allocate();
+		assert_eq!(
+			ctx.upload(token, &wrong_size).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		// Declared F32 geometry but truncated pixels.
+		let mut truncated = frame.clone();
+		truncated.data.truncate(frame.linesize_bytes() * 4 - 1);
+		assert_eq!(
+			ctx.upload(token, &truncated).unwrap_err().code(),
+			Error::Invalid.code()
+		);
+		// Unknown tokens.
+		assert_eq!(
+			ctx.upload(999999, &frame).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+
+		// The trait-object upload/download/blit paths used by callers that
+		// only know `GpuContextLike`.
+		let like: &dyn GpuContextLike = ctx.as_ref();
+		like.upload(token, &frame).unwrap();
+		let out = like.download(token).unwrap();
+		assert_eq!(out.data, frame.data);
+		like.blit(token, other, None).unwrap();
+		assert!(like
+			.blit(
+				token,
+				other,
+				Some(&crate::color::ColorProcessor::pass_through())
+			)
+			.is_err());
+		// Unknown blit endpoints are NotFound.
+		assert_eq!(
+			ctx.blit(999999, other, None).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.blit(token, 999999, None).unwrap_err().code(),
+			Error::NotFound.code()
+		);
+	}
+
+	#[test]
+	fn gpu_compile_and_run_shader_pass() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let wgsl = r#"
+@group(0) @binding(1) var src_tex: texture_2d<f32>;
+@group(0) @binding(2) var src_smp: sampler;
+@fragment
+fn main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureLoad(src_tex, vec2<i32>(i32(frag.x), i32(frag.y)), 0);
+}
+"#;
+		let program = ctx
+			.compile_shader_pass("test/pass", wgsl, 1, false, false)
+			.unwrap();
+		assert_eq!(program.texture_count, 1);
+		assert!(!program.has_uniforms);
+		assert!(!program.filtering);
+		// The program cache returns the same compiled pass.
+		let cached = ctx
+			.compile_shader_pass("test/pass", wgsl, 1, false, false)
+			.unwrap();
+		assert!(Arc::ptr_eq(&program, &cached));
+
+		let src = ctx.create_texture(2, 2).unwrap();
+		let dst = ctx.create_texture(2, 2).unwrap();
+		// The input texture count must match the compiled layout.
+		assert_eq!(
+			ctx.run_shader_pass(&program, &[], &[], dst)
+				.unwrap_err()
+				.code(),
+			Error::Invalid.code()
+		);
+		// Missing input/destination textures are NotFound.
+		assert_eq!(
+			ctx.run_shader_pass(&program, &[], &[999999], dst)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_shader_pass(&program, &[], &[src], 999999)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		ctx.run_shader_pass(&program, &[], &[src], dst).unwrap();
+
+		// A uniform-declaring, filtering pass; an empty uniform block is
+		// still uploaded as the minimum 16-byte binding.
+		let with_uniform = r#"
+struct U { v: vec4<f32> };
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var src_tex: texture_2d<f32>;
+@group(0) @binding(2) var src_smp: sampler;
+@fragment
+fn main() -> @location(0) vec4<f32> { return u.v; }
+"#;
+		let uniform_program = ctx
+			.compile_shader_pass("test/uniform", with_uniform, 1, true, true)
+			.unwrap();
+		assert!(uniform_program.has_uniforms);
+		assert!(uniform_program.filtering);
+		ctx.run_shader_pass(&uniform_program, &[], &[src], dst)
+			.unwrap();
+		ctx.run_shader_pass(&uniform_program, &[0u8; 16], &[src], dst)
+			.unwrap();
+
+		// A pipeline that fails device validation is a fallible result (the
+		// validation error scope), not a panic: this shader parses but has
+		// no `main` fragment entry point.
+		let bad = ctx.compile_shader_pass(
+			"test/bad",
+			"@fragment fn not_main() -> @location(0) vec4<f32> { return vec4<f32>(1.0); }",
+			0,
+			false,
+			false,
+		);
+		assert!(bad.is_err(), "a missing entry point must fail the compile");
+	}
+
+	#[test]
+	fn gpu_yuv_and_planar_passes_cover_error_arms() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let usage = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+		let (w, h) = (4u32, 2u32);
+
+		// Planar pass: R16Float luma + interleaved RG8 chroma.
+		let y = ctx
+			.create_texture_format(w as i32, h as i32, 1, wgpu::TextureFormat::R16Float, usage)
+			.unwrap();
+		let uv = ctx
+			.create_texture_format(w as i32, h as i32, 1, wgpu::TextureFormat::Rg8Unorm, usage)
+			.unwrap();
+		let dst = ctx.create_texture(w as i32, h as i32).unwrap();
+		let y_data: Vec<u8> = (0..w * h)
+			.flat_map(|_| half::f16::from_f32(0.5).to_bits().to_le_bytes())
+			.collect();
+		ctx.upload_plane(y, &y_data).unwrap();
+		// upload_plane has no Rg8 entry; write the chroma plane directly
+		// (neutral 128 = limited-range zero chroma).
+		let uv_data = vec![128u8; (w * h * 2) as usize];
+		ctx.queue.write_texture(
+			wgpu::TexelCopyTextureInfo {
+				texture: &ctx.texture_handle(uv).unwrap(),
+				mip_level: 0,
+				origin: wgpu::Origin3d::ZERO,
+				aspect: wgpu::TextureAspect::All,
+			},
+			&uv_data,
+			wgpu::TexelCopyBufferLayout {
+				offset: 0,
+				bytes_per_row: Some(w * 2),
+				rows_per_image: None,
+			},
+			wgpu::Extent3d {
+				width: w,
+				height: h,
+				depth_or_array_layers: 1,
+			},
+		);
+		let transform = YuvTransform::bt709_limited();
+		// Two runs reuse the cached planar pipeline.
+		ctx.run_planar_yuv_to_rgb(y, uv, dst, &transform).unwrap();
+		ctx.run_planar_yuv_to_rgb(y, uv, dst, &transform).unwrap();
+		let out = ctx.download(dst).unwrap();
+		assert_eq!(out.data.len(), (w * h) as usize * 16);
+		assert!(
+			out.data.iter().any(|&b| b != 0),
+			"the planar pass writes pixels"
+		);
+		// Missing plane/destination tokens are NotFound.
+		assert_eq!(
+			ctx.run_planar_yuv_to_rgb(999999, uv, dst, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_planar_yuv_to_rgb(y, 999999, dst, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_planar_yuv_to_rgb(y, uv, 999999, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+
+		// The 3-plane entry point validates every token too.
+		assert_eq!(
+			ctx.run_yuv_to_rgb(999999, uv, uv, dst, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_yuv_to_rgb(y, 999999, uv, dst, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_yuv_to_rgb(y, uv, 999999, dst, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+		assert_eq!(
+			ctx.run_yuv_to_rgb(y, uv, uv, 999999, &transform)
+				.unwrap_err()
+				.code(),
+			Error::NotFound.code()
+		);
+	}
+
+	#[test]
+	fn display_renderer_gpu_texture_paths() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(ctx) = any_gpu() else {
+			return;
+		};
+		let mut renderer = DisplayRenderer::new(BackendKind::Cpu);
+		// The tests inject the context directly; the public accessors must
+		// report it.
+		renderer.ctx = Some(ctx.clone());
+		assert!(renderer.is_initialized());
+		assert_eq!(renderer.backend(), BackendKind::Cpu);
+		assert_eq!(renderer.context().map(|c| c.kind()), Some(ctx.kind()));
+
+		let pod = VideoParamsPod {
+			width: 4,
+			height: 4,
+			..Default::default()
+		};
+		let mut frame = Frame::new();
+		frame.set_video_params(pod);
+		frame.allocate();
+		frame.data[0] = 0x5a;
+
+		// A pixel-initialized GPU texture uploads through the constructor.
+		let src = renderer
+			.create_texture(&pod, Some((frame.data.as_ptr(), frame.linesize_bytes())))
+			.unwrap();
+		assert!(matches!(src, Texture::Gpu { .. }));
+		let Texture::Gpu { token, .. } = &src else {
+			unreachable!()
+		};
+		let token = *token;
+		assert_eq!(crate::backend::texture_id_of(&src), token as i32);
+		// A mismatched initializing linesize destroys the new token and
+		// fails.
+		assert_eq!(
+			renderer
+				.create_texture(&pod, Some((frame.data.as_ptr(), 1)))
+				.unwrap_err()
+				.code(),
+			Error::Invalid.code()
+		);
+
+		// upload_texture: the GPU branch requires the frame line size.
+		let mut target = renderer.create_texture(&pod, None).unwrap();
+		unsafe {
+			renderer.upload_texture(&mut target, frame.data.as_ptr(), frame.linesize_bytes())
+		}
+		.unwrap();
+		let _ =
+			unsafe { renderer.upload_texture(&mut target, frame.data.as_ptr(), 1) }.unwrap_err();
+		// download_texture: the stride must match the frame line size.
+		let mut buf = vec![0u8; frame.linesize_bytes() * 4];
+		unsafe { renderer.download_texture(&target, buf.as_mut_ptr(), frame.linesize_bytes()) }
+			.unwrap();
+		assert_eq!(buf[0], 0x5a);
+		let _ = unsafe { renderer.download_texture(&target, buf.as_mut_ptr(), 1) }.unwrap_err();
+
+		// GPU→GPU blit through the renderer (same context).
+		let mut other = renderer.create_texture(&pod, None).unwrap();
+		renderer
+			.blit_color_managed(Some(&target), &mut other, None)
+			.unwrap();
+
+		// Planar textures are never uploadable and have no display id.
+		let y = ctx
+			.create_texture_format(
+				4,
+				2,
+				1,
+				wgpu::TextureFormat::R8Unorm,
+				wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+			)
+			.unwrap();
+		let uv = ctx
+			.create_texture_format(
+				4,
+				2,
+				1,
+				wgpu::TextureFormat::Rg8Unorm,
+				wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+			)
+			.unwrap();
+		let planar = crate::texture::PlanarTexture::new(
+			ctx.clone(),
+			crate::texture::PlanarFormat::Nv12,
+			(4, 2),
+			(y, uv),
+			YuvTransform::bt709_limited(),
+			(1, 1),
+		);
+		let mut planar_texture = Texture::wrap_planar(planar);
+		assert_eq!(crate::backend::texture_id_of(&planar_texture), 0);
+		assert!(planar_texture.is_planar());
+		assert!(planar_texture.to_frame().is_err());
+		let _ = unsafe { renderer.upload_texture(&mut planar_texture, std::ptr::null(), 0) }
+			.unwrap_err();
+
+		// Mixed CPU/GPU blits are rejected in both directions.
+		let cpu_renderer = DisplayRenderer::new(BackendKind::Cpu);
+		let mut cpu_src = cpu_renderer.create_texture(&pod, None).unwrap();
+		assert_eq!(
+			renderer
+				.blit_color_managed(Some(&cpu_src), &mut other, None)
+				.unwrap_err()
+				.code(),
+			crate::error::OAKCORE_E_FAILED
+		);
+		assert!(renderer
+			.blit_color_managed(Some(&target), &mut cpu_src, None)
+			.is_err());
+
+		// Cross-backend readback: CPU renderers have no GPU registry.
+		let mut readback = vec![0u8; frame.linesize_bytes() * 4];
+		assert_eq!(
+			unsafe {
+				cpu_renderer.download_from_texture(
+					token as i32,
+					&pod,
+					readback.as_mut_ptr(),
+					frame.linesize_bytes(),
+				)
+			}
+			.unwrap_err()
+			.code(),
+			crate::error::OAKCORE_E_FAILED
+		);
+		// The GPU renderer downloads by id; the stride must be F32 RGBA.
+		unsafe {
+			renderer.download_from_texture(
+				token as i32,
+				&pod,
+				readback.as_mut_ptr(),
+				frame.linesize_bytes(),
+			)
+		}
+		.unwrap();
+		assert_eq!(readback[0], 0x5a);
+		assert!(unsafe {
+			renderer.download_from_texture(token as i32, &pod, readback.as_mut_ptr(), 4)
+		}
+		.is_err());
+	}
+
+	#[test]
+	fn display_renderer_cpu_pixel_initialization() {
+		let renderer = DisplayRenderer::new(BackendKind::Cpu);
+		let pod = VideoParamsPod {
+			width: 2,
+			height: 2,
+			..Default::default()
+		};
+		let mut frame = Frame::new();
+		frame.set_video_params(pod);
+		frame.allocate();
+		frame.data[3] = 0x33;
+		// CPU textures accept pixel data with a matching line size.
+		let texture = renderer
+			.create_texture(&pod, Some((frame.data.as_ptr(), frame.linesize_bytes())))
+			.unwrap();
+		let Texture::Cpu(cpu) = &texture else {
+			unreachable!()
+		};
+		assert_eq!(cpu.data[3], 0x33);
+		// A mismatched line size is rejected (nothing was allocated).
+		assert_eq!(
+			renderer
+				.create_texture(&pod, Some((frame.data.as_ptr(), 3)))
+				.unwrap_err()
+				.code(),
+			Error::Invalid.code()
+		);
+	}
+
+	#[test]
+	fn display_bit_depth_from_user_config_reads_the_store() {
+		// The store defaults to 10-bit when the key is missing; the call
+		// must never panic and always resolve a depth.
+		let depth = DisplayBitDepth::from_user_config();
+		assert!(matches!(
+			depth,
+			DisplayBitDepth::Bit8 | DisplayBitDepth::Bit10
+		));
+		assert_eq!(
+			depth.to_config_string(),
+			if depth == DisplayBitDepth::Bit8 {
+				"8"
+			} else {
+				"10"
+			}
+		);
+	}
+
+	/// A minimal trait-only context: the default `as_any`/`texture_handle`
+	/// methods must return `None` (callers then fall back to CPU delivery).
+	struct FakeContext;
+
+	impl GpuContextLike for FakeContext {
+		fn kind(&self) -> BackendKind {
+			BackendKind::Cpu
+		}
+
+		fn destroy_texture(&self, _token: u64) {}
+
+		fn upload(&self, _token: u64, _frame: &Frame) -> Result<()> {
+			Ok(())
+		}
+
+		fn download(&self, _token: u64) -> Result<Frame> {
+			Ok(Frame::dummy())
+		}
+
+		fn blit(
+			&self,
+			_src: u64,
+			_dst: u64,
+			_processor: Option<&crate::color::ColorProcessor>,
+		) -> Result<()> {
+			Ok(())
+		}
+	}
+
+	#[test]
+	fn trait_only_context_uses_the_default_downcast_hooks() {
+		let fake = FakeContext;
+		assert_eq!(fake.kind(), BackendKind::Cpu);
+		assert!(fake.as_any().is_none());
+		assert!(fake.texture_handle(1).is_none());
+		let texture = Texture::gpu(Arc::new(FakeContext), 7, 2, 2, PixelFormat::F32);
+		assert_eq!(texture_id_of(&texture), 7);
+		assert!(format!("{texture:?}").contains("Texture::Gpu"));
+	}
+
+	#[test]
+	fn display_renderer_init_uses_the_shared_context_for_the_user_backend() {
+		let _guard = GPU_COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+		// A renderer whose backend equals the user's configured choice
+		// adopts the process-wide shared context (one device per process).
+		let kind = BackendKind::from_user_config();
+		let mut renderer = DisplayRenderer::new(kind);
+		let result = renderer.init(std::ptr::null_mut());
+		assert_eq!(
+			result.is_ok(),
+			GpuContext::shared().is_some(),
+			"init follows the shared slot"
+		);
+		assert_eq!(renderer.is_initialized(), result.is_ok());
 	}
 }

@@ -121,6 +121,31 @@ pub fn set_test_encoders(list: Vec<Arc<dyn Encoder>>) {
 	*store.lock().unwrap() = list;
 }
 
+/// Serializes every test that reads the built-in encoder registry and
+/// clears the test injection on drop: a panicking assertion must not leak
+/// fake encoders into the process-wide registry used by later tests. The
+/// held [`crate::TestLock`] is released only after the clear.
+#[cfg(test)]
+struct RegistryGuard {
+	/// Held for the test's duration; never read, only dropped.
+	_lock: crate::TestLock,
+}
+
+#[cfg(test)]
+impl Drop for RegistryGuard {
+	fn drop(&mut self) {
+		set_test_encoders(Vec::new());
+	}
+}
+
+/// Take the shared test lock and return the guard.
+#[cfg(test)]
+fn registry_guard() -> RegistryGuard {
+	RegistryGuard {
+		_lock: crate::lock_tests(),
+	}
+}
+
 /// `Encoder::create_from_params` — instantiate an encoder for `params`.
 ///
 /// # CPP-PARITY
@@ -251,6 +276,7 @@ mod tests {
 
 	#[test]
 	fn create_from_params_maps_formats() {
+		let _guard = registry_guard();
 		let mut p = EncodingParams::default();
 
 		// FFmpeg-backed containers.
@@ -346,7 +372,63 @@ mod tests {
 			String::new()
 		}
 	}
+
+	#[test]
+	fn encoder_trait_defaults_are_conservative() {
+		let e = UnimplementedDummy;
+		assert!(!e.supports_video());
+		assert!(!e.supports_audio());
+		assert!(!e.supports_subtitles());
+		assert!(!e.supports_image_sequences());
+		assert!(!e.is_configurable());
+	}
+
+	#[test]
+	fn encoder_registry_injection_wins_and_restores() {
+		let _guard = registry_guard();
+		// Unknown format: the built-in mapping returns None.
+		let p = EncodingParams {
+			format: 999,
+			..EncodingParams::default()
+		};
+		assert!(create_from_params(&p).is_none());
+
+		set_test_encoders(vec![Arc::new(UnimplementedDummy)]);
+		let injected = create_from_params(&p).expect("injected encoder wins");
+		assert_eq!(injected.id(), "dummy");
+
+		set_test_encoders(Vec::new());
+		assert!(create_from_params(&p).is_none());
+	}
+
+	/// The injection restore is panic-safe: the guard clears the registry
+	/// on unwind, so a failing assertion cannot leave the fake encoder
+	/// installed for later tests in the same process.
+	#[test]
+	fn encoder_registry_clears_after_a_panicking_injection() {
+		let panicked = std::panic::catch_unwind(|| {
+			let _guard = registry_guard();
+			set_test_encoders(vec![Arc::new(UnimplementedDummy)]);
+			let p = EncodingParams {
+				format: 999,
+				..EncodingParams::default()
+			};
+			assert_eq!(
+				create_from_params(&p).map(|e| e.id()).as_deref(),
+				Some("dummy"),
+				"the fake encoder is installed"
+			);
+			panic!("simulated assertion failure after injection");
+		});
+		assert!(panicked.is_err(), "the closure must panic");
+		let _guard = registry_guard();
+		let p = EncodingParams {
+			format: 999,
+			..EncodingParams::default()
+		};
+		assert!(
+			create_from_params(&p).is_none(),
+			"no fake encoder may leak into the next test"
+		);
+	}
 }
-+	/// Held for the test's duration; never read, only dropped.
-+		set_test_encoders(Vec::new());
-+		_lock: crate::lock_tests(),

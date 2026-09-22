@@ -460,13 +460,30 @@ pub fn create_from_id(id: &str) -> Option<Arc<dyn Decoder>> {
 /// not injected, in which case the built-in list below is used.
 static TEST_DECODERS: OnceLock<Mutex<Vec<Arc<dyn Decoder>>>> = OnceLock::new();
 
-/// Serializes every test that reads the built-in decoder registry. Tests
-/// inject through [`set_test_decoders`] under [`crate::lock_tests`] (the
-/// shared test lock), so the registry assertions below take that same lock
-/// to never race with an injected list.
+/// Serializes every test that reads the built-in decoder registry and
+/// clears the test injection on drop: a panicking assertion must not leak
+/// fake decoders into the process-wide registry used by later tests. The
+/// held [`crate::TestLock`] is released only after the clear.
 #[cfg(test)]
-fn registry_guard() -> crate::TestLock {
-	crate::lock_tests()
+struct RegistryGuard {
+	/// Held for the test's duration; never read, only dropped.
+	_lock: crate::TestLock,
+}
+
+#[cfg(test)]
+impl Drop for RegistryGuard {
+	fn drop(&mut self) {
+		set_test_decoders(Vec::new());
+	}
+}
+
+/// Take the shared test lock and clear any injection left behind by an
+/// earlier panicking test, then return the guard.
+#[cfg(test)]
+fn registry_guard() -> RegistryGuard {
+	let lock = crate::lock_tests();
+	set_test_decoders(Vec::new());
+	RegistryGuard { _lock: lock }
 }
 
 /// Replace the decoder registry with `list`; pass an empty list to restore
@@ -785,6 +802,149 @@ mod tests_unimplemented {
 		assert_eq!(off.numerator(), 0);
 		assert_eq!(off.denominator(), 1);
 	}
+
+	/// A decoder that relies on every trait default (no overrides), so the
+	/// conservative default bodies are covered.
+	struct DefaultsOnly;
+
+	impl Decoder for DefaultsOnly {
+		fn id(&self) -> String {
+			"defaults".to_string()
+		}
+		fn probe(&self, _f: &str, _c: Option<&CancelAtom>) -> Option<FootageDescription> {
+			None
+		}
+		fn open(&self, _s: &CodecStream) -> crate::error::Result<()> {
+			Err(crate::error::Error::Invalid)
+		}
+		fn close(&self) -> crate::error::Result<()> {
+			Ok(())
+		}
+		fn stream(&self) -> CodecStream {
+			CodecStream::new()
+		}
+		fn retrieve_video_frame(
+			&self,
+			_p: &RetrieveVideoParams,
+		) -> crate::error::Result<Arc<Frame>> {
+			Err(crate::error::Error::Invalid)
+		}
+		fn retrieve_video(
+			&self,
+			_p: &RetrieveVideoParams,
+		) -> crate::error::Result<OakRenderTexture> {
+			Err(crate::error::Error::Invalid)
+		}
+		fn retrieve_audio(
+			&self,
+			_d: &mut [f32],
+			_r: &TimeRange,
+			_s: i32,
+			_l: u64,
+		) -> crate::error::Result<RetrieveAudioStatus> {
+			Ok(RetrieveAudioStatus::Unsupported)
+		}
+		fn conform_audio(
+			&self,
+			_o: &[String],
+			_s: i32,
+			_l: u64,
+			_sf: i32,
+			_c: Option<&CancelAtom>,
+		) -> crate::error::Result<()> {
+			Ok(())
+		}
+	}
+
+	fn test_params() -> RetrieveVideoParams {
+		RetrieveVideoParams {
+			stream: CodecStream::new(),
+			time: Rational::new(0, 1),
+			length: TimeRange::default(),
+			force_range: K_COLOR_RANGE_DEFAULT,
+			is_image_sequence: false,
+			image_sequence_digits: 0,
+			image_sequence_number: 0,
+			mode: RenderMode::Offline,
+			alpha_is_premultiplied: false,
+			target_size: None,
+		}
+	}
+
+	#[test]
+	fn decoder_trait_defaults_are_conservative() {
+		let d = DefaultsOnly;
+		assert!(!d.supports_video());
+		assert!(!d.supports_audio());
+		assert!(!d.hardware_decoding());
+		assert_eq!(d.get_audio_start_offset(), Rational::new(0, 1));
+		assert!(d.retrieve_video_frame_gpu(&test_params()).unwrap().is_none());
+	}
+
+	#[test]
+	fn oiio_placeholder_reports_unimplemented() {
+		let _g = registry_guard();
+		let d = builtin("oiio");
+		assert!(d.probe("x.exr", None).is_none());
+		assert!(d
+			.open(&CodecStream::with_block("x.exr".to_string(), 0, None))
+			.is_err());
+		assert!(d.close().is_err());
+		assert_eq!(d.stream().filename(), "");
+		let p = test_params();
+		assert!(d.retrieve_video_frame(&p).is_err());
+		assert!(d.retrieve_video(&p).is_err());
+		let mut dest = [0f32; 4];
+		assert!(d
+			.retrieve_audio(
+				&mut dest,
+				&TimeRange::new(Rational::new(0, 1), Rational::new(1, 1)),
+				48000,
+				0x3
+			)
+			.is_err());
+		assert!(d
+			.conform_audio(&["a.pcm".to_string()], 48000, 0x3, 10, None)
+			.is_err());
+		// The placeholder keeps the conservative defaults too.
+		assert!(!d.hardware_decoding());
+		assert_eq!(d.get_audio_start_offset(), Rational::new(0, 1));
+		assert!(d.retrieve_video_frame_gpu(&p).unwrap().is_none());
+	}
+
+	#[test]
+	fn decoder_registry_injection_wins_and_restores() {
+		let _g = registry_guard();
+		set_test_decoders(vec![Arc::new(DefaultsOnly)]);
+		assert_eq!(
+			create_from_id("defaults").map(|d| d.id()).as_deref(),
+			Some("defaults")
+		);
+		assert!(create_from_id("ffmpeg").is_none());
+		set_test_decoders(Vec::new());
+		assert!(create_from_id("ffmpeg").is_some());
+	}
+
+	/// The injection restore is panic-safe: the guard clears the registry
+	/// on unwind, so a failing assertion cannot leave the fake decoder
+	/// installed for later tests in the same process.
+	#[test]
+	fn decoder_registry_clears_after_a_panicking_injection() {
+		let panicked = std::panic::catch_unwind(|| {
+			let _g = registry_guard();
+			set_test_decoders(vec![Arc::new(DefaultsOnly)]);
+			assert!(
+				create_from_id("defaults").is_some(),
+				"the fake decoder is installed"
+			);
+			panic!("simulated assertion failure after injection");
+		});
+		assert!(panicked.is_err(), "the closure must panic");
+		let _g = registry_guard();
+		assert!(
+			create_from_id("ffmpeg").is_some(),
+			"no fake decoder may leak into the next test"
+		);
+		assert!(create_from_id("defaults").is_none());
+	}
 }
-+	/// Held for the test's duration; never read, only dropped.
-+		set_test_decoders(Vec::new());

@@ -769,4 +769,86 @@ mod tests_extra {
 		);
 	}
 }
- 		);
+
+#[cfg(test)]
+mod tests_coverage {
+	use super::*;
+
+	#[test]
+	fn proxy_state_numeric_and_string_conversions() {
+		assert_eq!(ProxyState::try_from(0), Ok(ProxyState::Missing));
+		assert_eq!(ProxyState::try_from(1), Ok(ProxyState::Generating));
+		assert_eq!(ProxyState::try_from(2), Ok(ProxyState::Ready));
+		assert_eq!(ProxyState::try_from(3), Ok(ProxyState::Failed));
+		assert_eq!(ProxyState::try_from(4), Err(()));
+		assert_eq!(ProxyState::try_from(-1), Err(()));
+
+		for state in [
+			ProxyState::Missing,
+			ProxyState::Generating,
+			ProxyState::Ready,
+			ProxyState::Failed,
+		] {
+			let name = ProxyManager::proxy_state_to_string(state);
+			assert_eq!(ProxyManager::proxy_state_from_string(&name), state);
+			assert_eq!(
+				ProxyManager::proxy_state_from_string(&(state as i32).to_string()),
+				state
+			);
+		}
+
+		// Whitespace is trimmed; unknown names fall back to Missing.
+		assert_eq!(
+			ProxyManager::proxy_state_from_string("  generating "),
+			ProxyState::Generating
+		);
+		assert_eq!(
+			ProxyManager::proxy_state_from_string("bogus"),
+			ProxyState::Missing
+		);
+		assert_eq!(ProxyManager::proxy_state_from_string(""), ProxyState::Missing);
+	}
+
+	#[test]
+	fn proxy_filename_audio_tag_detection() {
+		assert!(ProxyManager::proxy_filename_has_audio("/c/shot.a1.mp4"));
+		assert!(ProxyManager::proxy_filename_has_audio("shot.a1.mov"));
+		assert!(!ProxyManager::proxy_filename_has_audio("/c/shot.a2.mp4"));
+		assert!(!ProxyManager::proxy_filename_has_audio("/c/shot.mp4"));
+		assert!(!ProxyManager::proxy_filename_has_audio(""));
+	}
+
+	#[test]
+	fn get_proxy_state_reads_the_filesystem() {
+		assert_eq!(ProxyManager::get_proxy_state(""), ProxyState::Missing);
+
+		let dir = std::env::temp_dir().join(format!("oakcodec-proxy-coverage-{}", std::process::id()));
+		std::fs::create_dir_all(&dir).unwrap();
+
+		// A finished proxy exists on disk.
+		let proxy = dir.join("clip.mp4");
+		std::fs::write(&proxy, b"proxy").unwrap();
+		assert_eq!(
+			ProxyManager::get_proxy_state(&proxy.to_string_lossy()),
+			ProxyState::Ready
+		);
+
+		// Only the working file exists: still generating.
+		let pending = dir.join("pending.mp4");
+		let working =
+			ProxyManager::get_working_filename(&pending.to_string_lossy()).unwrap();
+		std::fs::write(&working, b"partial").unwrap();
+		assert_eq!(
+			ProxyManager::get_proxy_state(&pending.to_string_lossy()),
+			ProxyState::Generating
+		);
+
+		// Neither file exists.
+		assert_eq!(
+			ProxyManager::get_proxy_state(&dir.join("none.mp4").to_string_lossy()),
+			ProxyState::Missing
+		);
+
+		std::fs::remove_dir_all(&dir).ok();
+	}
+}

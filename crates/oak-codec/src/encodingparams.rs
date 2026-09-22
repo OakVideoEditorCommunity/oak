@@ -1118,4 +1118,65 @@ mod tests {
 		assert_eq!(offset_of!(EncodingParams, color_range), 1548);
 	}
 }
- 		assert_eq!(offset_of!(EncodingParams, color_range), 1548);
+
+#[cfg(test)]
+mod tests_coverage {
+	use super::*;
+
+	#[test]
+	fn load_rejects_malformed_and_foreign_documents() {
+		let mut p = EncodingParams::default();
+		for doc in [
+			"",
+			"<export",
+			"<export x=1></export>",
+			"<export x=\"1></export>",
+			"<export></other>",
+			"<export><video/>text</export>",
+			"<not-export/>",
+		] {
+			assert!(p.load(doc).is_err(), "must reject: {doc}");
+		}
+	}
+
+	#[test]
+	fn load_maps_video_audio_and_falls_back_on_unknown_codes() {
+		let mut p = EncodingParams::default();
+		p.load(
+			r#"<export><filename>out.mov</filename><format>2</format>
+			<video enabled="1"><codec>4</codec><width>1920</width><height>1080</height>
+			<format>4</format><timebase>30000/1001</timebase>
+			<pixelaspect>1/1</pixelaspect><vscale>2</vscale></video>
+			<audio enabled="0"><format>5</format><bitrate>192000</bitrate></audio>
+			</export>"#,
+		)
+		.unwrap();
+		assert_eq!(p.extension(), "mp4", "format 2 is MPEG-4 video");
+		assert_eq!(p.video_width, 1920);
+		assert_eq!(p.video_height, 1080);
+		assert_eq!(p.video_pixel_format, PixelFormat::F32);
+		assert_eq!(p.video_time_base_num, 30000);
+		assert_eq!(p.video_time_base_den, 1001);
+		assert_eq!(p.video_scaling_method, VideoScalingMethod::Crop);
+		assert_eq!(p.audio_sample_format, SampleFormat::F64Planar);
+		assert_eq!(p.audio_bit_rate, 192000);
+
+		// Unknown numeric codes fall back to Invalid / Stretch.
+		let mut p = EncodingParams::default();
+		p.load(
+			r#"<export><video><format>99</format><vscale>99</vscale></video>
+			<audio><format>99</format></audio></export>"#,
+		)
+		.unwrap();
+		assert_eq!(p.video_pixel_format, PixelFormat::Invalid);
+		assert_eq!(p.video_scaling_method, VideoScalingMethod::Stretch);
+		assert_eq!(p.audio_sample_format, SampleFormat::Invalid);
+
+		// -1 is the explicit Invalid code; vscale 0 is Fit.
+		let mut p = EncodingParams::default();
+		p.load(r#"<export><video><format>-1</format><vscale>0</vscale></video></export>"#)
+			.unwrap();
+		assert_eq!(p.video_pixel_format, PixelFormat::Invalid);
+		assert_eq!(p.video_scaling_method, VideoScalingMethod::Fit);
+	}
+}

@@ -2326,4 +2326,243 @@ mod tests {
 			assert_eq!(vp.time_in_timebase_units(n, d), Some(expected));
 		}
 	}
+
+	// ---- Branch-coverage fill-ins ------------------------------------------
+
+	#[test]
+	fn new_with_time_base_null_par_defaults_to_square() {
+		// C++ validate_pixel_aspect_ratio(): a null PAR falls back to 1/1.
+		let vp = VideoParams::new_with_time_base(
+			640,
+			480,
+			1,
+			25,
+			PixelFormat::U16,
+			3,
+			0,
+			7,
+			2,
+			1,
+		);
+		assert_eq!(vp.pixel_aspect_ratio(), (1, 1));
+		// The BottomFirst interlacing code passes through the ctor too.
+		assert_eq!(vp.interlacing(), Interlacing::BottomFirst);
+		assert_eq!(vp.time_base(), (1, 25));
+	}
+
+	#[test]
+	fn square_pixel_width_with_zero_par_denominator() {
+		// A (x, 0) PAR is a NaN rational no setter can produce (setters
+		// validate); the defensive denominator check must return the raw
+		// width instead of propagating NaN.
+		let mut vp = default_vp();
+		vp.pixel_aspect_ratio = (4, 0);
+		assert_eq!(vp.square_pixel_width(), 1920);
+	}
+
+	#[test]
+	fn load_xml_bad_values_error_for_interlacing_and_colorrange() {
+		let mut vp = VideoParams::new();
+		// stoi_field failures inside these two arms propagate as errors.
+		assert!(vp
+			.load_xml("<videoparams><interlacing>notanumber</interlacing></videoparams>")
+			.is_err());
+		assert!(vp
+			.load_xml("<videoparams><colorrange>notanumber</colorrange></videoparams>")
+			.is_err());
+	}
+
+	#[test]
+	fn pixel_format_code_round_trip_all_arms() {
+		for (code, expected) in [
+			(-1, PixelFormat::Invalid),
+			(0, PixelFormat::U8),
+			(1, PixelFormat::U10),
+			(2, PixelFormat::U16),
+			(3, PixelFormat::F16),
+			(4, PixelFormat::F32),
+			(5, PixelFormat::Count),
+			(6, PixelFormat::Invalid),
+			(99, PixelFormat::Invalid),
+		] {
+			assert_eq!(pf_from_code(code), expected, "code {code}");
+		}
+		for pf in [
+			PixelFormat::U8,
+			PixelFormat::U10,
+			PixelFormat::U16,
+			PixelFormat::F16,
+			PixelFormat::F32,
+		] {
+			assert_eq!(pf_from_code(pf_code(pf)), pf);
+		}
+	}
+
+	#[test]
+	fn enum_i32_mapping_all_arms() {
+		assert_eq!(interlacing_from_i32(1), Interlacing::TopFirst);
+		assert_eq!(interlacing_from_i32(2), Interlacing::BottomFirst);
+		assert_eq!(interlacing_from_i32(3), Interlacing::None);
+		assert_eq!(video_type_from_i32(1), VideoType::Still);
+		assert_eq!(video_type_from_i32(2), VideoType::ImageSequence);
+		assert_eq!(video_type_from_i32(9), VideoType::Video);
+		assert_eq!(color_range_from_i32(1), ColorRange::Full);
+		assert_eq!(color_range_from_i32(0), ColorRange::Limited);
+	}
+
+	#[test]
+	fn save_xml_escapes_reserved_characters() {
+		let mut vp = default_vp();
+		vp.set_colorspace("a&b<c>d");
+		let xml = vp.save_xml().unwrap();
+		assert!(
+			xml.contains("<colorspace>a&amp;b&lt;c&gt;d</colorspace>"),
+			"escaped text: {xml}"
+		);
+		let mut loaded = VideoParams::new();
+		loaded.load_xml(&xml).unwrap();
+		assert_eq!(loaded.colorspace(), "a&b<c>d");
+	}
+
+	#[test]
+	fn gcd_and_rational_helpers_sign_arms() {
+		// Negative second operand exercises the `b = -b` arm.
+		assert_eq!(i64_gcd(4, -6), 2);
+		assert_eq!(i64_gcd(-4, -6), 2);
+		assert_eq!(i64_gcd(0, 5), 5);
+		assert_eq!(i64_gcd(7, 0), 7);
+		assert_eq!(i64_gcd(0, 0), 0);
+		// A negative numerator flows through the reduce path.
+		assert_eq!(make_rational(-6, 4), (-3, 2));
+	}
+
+	#[test]
+	fn rational_flipped_sign_and_degenerate_inputs() {
+		// Negative denominator after the swap is sign-fixed.
+		assert_eq!(rational_flipped((3, -2)), (-2, 3));
+		assert_eq!(rational_flipped((-3, 2)), (-2, 3));
+		// Null rational is returned untouched.
+		assert_eq!(rational_flipped((0, 5)), (0, 5));
+		assert_eq!(rational_flipped((0, 0)), (0, 0));
+		// Non-null numerator with a zero denominator swaps to 0/1.
+		assert_eq!(rational_flipped((1, 0)), (0, 1));
+	}
+
+	#[test]
+	fn xml_nested_field_text_and_attributes() {
+		let mut vp = VideoParams::new();
+		// Nested elements inside a known field: depth-1 text only.
+		vp.load_xml("<videoparams><width><inner>9</inner>640</width></videoparams>")
+			.unwrap();
+		assert_eq!(vp.width(), 640);
+		// Whitespace after the tag name, around '=', and single-quoted values.
+		vp.load_xml("<videoparams version = \"2.0\" xmlns:x='y' ><height>480</height></videoparams>")
+			.unwrap();
+		assert_eq!(vp.height(), 480);
+		// Entities (and plain runs) inside attribute values are validated.
+		vp.load_xml("<videoparams note=\"a&amp;b&#65;\" ><depth>2</depth></videoparams>")
+			.unwrap();
+		assert_eq!(vp.depth(), 2);
+		// Unknown entities in an attribute value are parse errors.
+		assert!(vp
+			.load_xml("<videoparams note=\"a&nope;b\"><depth>2</depth></videoparams>")
+			.is_err());
+	}
+
+	#[test]
+	fn xml_doctype_paths() {
+		let mut vp = VideoParams::new();
+		vp.load_xml("<!DOCTYPE videoparams><videoparams><width>1</width></videoparams>")
+			.unwrap();
+		assert_eq!(vp.width(), 1);
+		// An internal subset keeps the '>' inside the brackets from ending
+		// the declaration.
+		vp.load_xml(
+			"<!DOCTYPE videoparams [ <!ENTITY x \"y\"> ]><videoparams><width>2</width></videoparams>",
+		)
+		.unwrap();
+		assert_eq!(vp.width(), 2);
+		// A closing bracket with no open one saturates at zero.
+		vp.load_xml("<!DOCTYPE videoparams ]><videoparams><width>3</width></videoparams>")
+			.unwrap();
+		assert_eq!(vp.width(), 3);
+		// An unterminated declaration is a parse error.
+		assert!(vp.load_xml("<!DOCTYPE videoparams").is_err());
+	}
+
+	#[test]
+	fn xml_structural_malformations_fail() {
+		let mut vp = VideoParams::new();
+		// Empty tag name.
+		assert!(vp.load_xml("<videoparams>< ></videoparams>").is_err());
+		// Unterminated start tag (no '>').
+		assert!(vp.load_xml("<videoparams><width").is_err());
+		// '/' not followed by '>'.
+		assert!(vp.load_xml("<videoparams><width/ x></videoparams>").is_err());
+		// Attribute without '='.
+		assert!(vp
+			.load_xml("<videoparams foo bar=\"x\"><width>1</width></videoparams>")
+			.is_err());
+		// Attribute value without an opening quote.
+		assert!(vp
+			.load_xml("<videoparams foo=bar><width>1</width></videoparams>")
+			.is_err());
+		// Unterminated attribute value.
+		assert!(vp
+			.load_xml("<videoparams foo=\"bar><width>1</width></videoparams>")
+			.is_err());
+		// Junk after an end-element name.
+		assert!(vp
+			.load_xml("<videoparams><width>1</width x></videoparams>")
+			.is_err());
+		// An end tag that never closes errors too.
+		assert!(vp.load_xml("<videoparams></videoparams").is_err());
+		// Whitespace before the end tag's '>' is fine.
+		vp.load_xml("<videoparams><width>5</width ></videoparams>")
+			.unwrap();
+		assert_eq!(vp.width(), 5);
+	}
+
+	#[test]
+	fn xml_numeric_entities() {
+		let mut vp = VideoParams::new();
+		vp.load_xml("<videoparams><colorspace>&#x41;&#66;&#x1F600;</colorspace></videoparams>")
+			.unwrap();
+		assert_eq!(vp.colorspace(), "AB\u{1F600}");
+		// Invalid hex digits / out-of-range code points are parse errors.
+		assert!(vp
+			.load_xml("<videoparams><colorspace>&#xZZ;</colorspace></videoparams>")
+			.is_err());
+		assert!(vp
+			.load_xml("<videoparams><colorspace>&#x110000;</colorspace></videoparams>")
+			.is_err());
+		assert!(vp
+			.load_xml("<videoparams><colorspace>&#1114112;</colorspace></videoparams>")
+			.is_err());
+	}
+
+	#[test]
+	fn xml_cursor_handles_unclosed_event_streams() {
+		// Defensive: a truncated event list reaches EndDocument inside
+		// read_element_text.
+		let mut cur = XmlCursor::new(vec![XmlEvent::StartElement("a".to_string())]);
+		assert!(cur.next_start_element());
+		assert_eq!(cur.read_element_text(), "");
+		// ... and inside skip_current_element.
+		let mut cur = XmlCursor::new(vec![XmlEvent::StartElement("a".to_string())]);
+		assert!(cur.next_start_element());
+		cur.skip_current_element();
+		// Nested elements count depth; only depth-1 characters accumulate.
+		let mut cur = XmlCursor::new(vec![
+			XmlEvent::StartElement("a".to_string()),
+			XmlEvent::Characters("x".to_string()),
+			XmlEvent::StartElement("b".to_string()),
+			XmlEvent::Characters("ignored".to_string()),
+			XmlEvent::EndElement("b".to_string()),
+			XmlEvent::Characters("y".to_string()),
+			XmlEvent::EndElement("a".to_string()),
+		]);
+		assert!(cur.next_start_element());
+		assert_eq!(cur.read_element_text(), "xy");
+	}
 }

@@ -214,4 +214,12 @@ mod tests {
 		mgr.clear();
 		assert_eq!(mgr.pool.lock().unwrap().len(), 0);
 	}
+
+	#[test]
+	fn instance_is_a_process_singleton() {
+		let a = FrameManager::instance();
+		let b = FrameManager::instance();
+		assert!(std::ptr::eq(a, b));
+		a.clear();
+	}
 }

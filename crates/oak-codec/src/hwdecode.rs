@@ -72,12 +72,37 @@ pub const CONFIG_KEY_HARDWARE_DECODING: &str = "HardwareDecoding";
 static UNAVAILABLE_DEVICES: [std::sync::atomic::AtomicBool; 64] =
     [const { std::sync::atomic::AtomicBool::new(false) }; 64];
 
-/// Test-only counter of `open_hw_accel` device-context creation attempts
-/// (incremented at the top of the function, before any FFmpeg call). Lets
-/// tests prove the negative cache short-circuits before FFmpeg is
-/// involved.
 #[cfg(test)]
-static CREATE_ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+thread_local! {
+	/// Test-only counter of `open_hw_accel` device-context creation
+	/// attempts on the calling thread (incremented at the top of the
+	/// function, before any FFmpeg call). Lets tests prove the negative
+	/// cache short-circuits before FFmpeg is involved.
+	///
+	/// Thread-local on purpose: the real-media tests decode on other
+	/// threads *without* the shared test lock, so a process-wide counter
+	/// would let their attempts perturb the negative-cache assertion on
+	/// this thread.
+	static CREATE_ATTEMPTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The calling thread's creation-attempt count (tests only).
+#[cfg(test)]
+fn creation_attempts() -> u64 {
+	CREATE_ATTEMPTS.with(std::cell::Cell::get)
+}
+
+/// Count one creation attempt on the calling thread (tests only).
+#[cfg(test)]
+fn note_creation_attempt() {
+	CREATE_ATTEMPTS.with(|count| count.set(count.get() + 1));
+}
+
+/// Reset the calling thread's creation-attempt count (tests only).
+#[cfg(test)]
+fn reset_creation_attempts() {
+	CREATE_ATTEMPTS.with(|count| count.set(0));
+}
 
 /// Whether `device_type` is known unavailable — a device-context
 /// creation failed once earlier in this process.
@@ -178,9 +203,7 @@ pub fn open_hw_accel(
 		return None;
 	}
 	#[cfg(test)]
-	{
-		CREATE_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-	}
+	note_creation_attempt();
 	let mut context = ffmpeg::codec::Context::from_parameters(params.clone()).ok()?;
 	let mut device: *mut sys::AVBufferRef = std::ptr::null_mut();
 	// SAFETY: `device` is a valid out-pointer; on success it owns the
@@ -329,6 +352,10 @@ mod tests {
 	/// boxes without the driver).
 	#[test]
 	fn negative_cache_skips_marked_device() {
+		// Serialize with the media tests that hold the shared test lock
+		// (the counter itself is thread-local, but the negative cache is
+		// process-wide).
+		let _lock = crate::lock_tests();
 		// VDPAU is not a candidate on any supported platform, so marking
 		// it cannot disturb the platform tests in this process (e.g. the
 		// macOS VideoToolbox test above).
@@ -342,11 +369,11 @@ mod tests {
 		let params = fstream.parameters();
 		let codec = ffmpeg::decoder::find(params.id()).expect("software h264 codec");
 
-		CREATE_ATTEMPTS.store(0, std::sync::atomic::Ordering::Relaxed);
+		reset_creation_attempts();
 		let opened = open_hw_accel(&params, codec, dev);
 		assert!(opened.is_none(), "marked device must not open");
 		assert_eq!(
-			CREATE_ATTEMPTS.load(std::sync::atomic::Ordering::Relaxed),
+			creation_attempts(),
 			0,
 			"marked device must be skipped before any creation attempt"
 		);
@@ -365,6 +392,3 @@ mod tests {
 		assert!(!device_unavailable(dev));
 	}
 }
-+	/// would let their attempts perturb the negative-cache assertion on
-+#[cfg(test)]
-+#[cfg(test)]
