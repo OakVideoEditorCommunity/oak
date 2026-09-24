@@ -88,10 +88,24 @@ use crate::render::VideoParams;
 
 // ---- 对外 API（平台无关签名；实现按平台 cfg 分派）----------------------
 
+/// Whether the TEST build may touch the real CGL context on macOS. The
+/// headless CI runner cannot exercise Apple's GL reliably (parallel unit
+/// tests have segfaulted inside the driver), so the test build behaves as
+/// if GL were unavailable unless `OAK_GPU_TESTS` asks for it — the same
+/// gate the integration GL tests use. Release builds are untouched.
+#[cfg(all(test, target_os = "macos"))]
+fn real_gl_gated() -> bool {
+	std::env::var_os("OAK_GPU_TESTS").is_none()
+}
+
 /// GL 上下文是否可用（离屏上下文可创建）。use_opengl 决策用它当
 /// "目标纹理有有效 GL 名" 的门：桥能为目标帧建出真实 GL 纹理 ⟺
 /// 上下文可用。惰性创建，幂等。
 pub fn gl_available() -> bool {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return false;
+	}
 	imp::gl_available()
 }
 
@@ -99,6 +113,12 @@ pub fn gl_available() -> bool {
 /// 返回的 guard 在 drop 时清 current 并放锁。失败（无 GL / 上下文
 /// 创建失败）→ 调用方回退 CPU。
 pub fn acquire() -> crate::error::Result<GlGuard> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return Err(crate::error::Error::Failed(
+			"gl_bridge: real GL is gated behind OAK_GPU_TESTS in tests".to_string(),
+		));
+	}
 	imp::acquire()
 }
 

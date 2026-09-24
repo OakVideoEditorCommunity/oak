@@ -505,6 +505,17 @@ jobs:
             cargo test --workspace --locked
           fi
 
+      # A SIGSEGV in a test binary gives no Rust backtrace; Apple's crash
+      # reports carry the native stack, so surface the newest ones.
+      - name: Crash reports
+        if: failure()
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
+            echo "===== $f"
+            head -c 6000 "$f"
+            echo
+          done
+
   # second upstream target: openKylin (Debian/Ubuntu-derived) in its own
   # image. The base image is bare (no sudo, no make, no python3) and the
   # steps run as root, so there is no sudo prefix anywhere below.

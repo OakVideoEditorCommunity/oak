@@ -2500,6 +2500,32 @@ mod tests {
 		oak_codec::testmedia::write_test_clip_solid(&blue, 64, 64, 10, 10, [0.0, 0.0, 1.0, 1.0])
 			.expect("blue angle");
 
+		// Diagnostic (the Windows-only switch failure): decode each file
+		// directly, so a red-ish source 1 can be blamed on the generated
+		// media or on the graph.
+		let probe = |name: &str, path: &std::path::Path| -> (f32, f32) {
+			let texture = oak_render::eval::render_footage_frame(
+				&path.to_string_lossy(),
+				0,
+				oak_core::Rational::new(0, 1),
+				(64, 64),
+				oak_core::PixelFormat::F32,
+			)
+			.unwrap_or_else(|e| panic!("probe {name}: {e}"));
+			let frame = texture.to_frame().expect("probe readback");
+			let stride = frame.linesize_bytes() as usize;
+			let off = 8 * stride + 8 * 16;
+			(
+				f32::from_le_bytes(frame.data[off..off + 4].try_into().unwrap()),
+				f32::from_le_bytes(frame.data[off + 8..off + 12].try_into().unwrap()),
+			)
+		};
+		println!(
+			"multicam media probe: red={:?} blue={:?}",
+			probe("red", &red),
+			probe("blue", &blue)
+		);
+
 		let (project, seq, _rfoot) = project_with_clip(&red);
 		let bfoot = graphops::import_footage(&project, &blue).expect("import blue");
 		graphops::add_track(&project, seq, TrackType::Video).expect("track 1");
@@ -2623,6 +2649,12 @@ mod tests {
 			}
 		}
 		let (r1, b1) = render_rgb(0);
+		// Diagnostic on failure: identical pairs mean the second render was
+		// served the first frame; a red-ish source 1 means the selected
+		// element resolved wrong.
+		println!(
+			"multicam graph render: source 0 -> (r={r0:.4}, b={b0:.4}), source 1 -> (r={r1:.4}, b={b1:.4})"
+		);
 		assert!(
 			b1 > 0.4 && r1 < 0.4,
 			"source 1 switches the node-graph frame to blue (r={r1} b={b1})"
