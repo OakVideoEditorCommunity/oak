@@ -118,14 +118,30 @@ case "$(uname -s)" in
 		run "${SUDO[@]}" git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
 		run "${SUDO[@]}" make -C /tmp/nv-codec-headers install PREFIX=/usr
 		elif command -v dnf >/dev/null; then
-			run "${SUDO[@]}" dnf install -y --setopt=install_weak_deps=False \
-				--setopt=max_parallel_downloads=16 \
-				gcc gcc-c++ clang clang-devel cmake python3 pkgconf-pkg-config nasm \
-				x264-devel x265-devel dav1d-devel libvpx-devel \
-				openh264-devel openjpeg2-devel libtheora-devel libwebp-devel \
-				lame-devel opus-devel libvorbis-devel speex-devel \
-				snappy-devel libass-devel freetype-devel fribidi-devel \
+			# x264/x265 are patent-encumbered: Fedora's own repositories
+			# do not carry them, RPM Fusion does. Install its release
+			# package first (fetched over HTTPS from the official mirror;
+			# dnf skips the OpenPGP check for the commandline package and
+			# imports the repository keys for everything it pulls after).
+			if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
+				run "${SUDO[@]}" dnf install -y --setopt=install_weak_deps=False \
+					"https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
+			fi
+			DNFPKGS=(
+				gcc gcc-c++ clang clang-devel cmake python3 pkgconf-pkg-config nasm
+				x264-devel x265-devel libdav1d-devel libvpx-devel
+				openh264-devel openjpeg-devel libtheora-devel libwebp-devel
+				lame-devel opus-devel libvorbis-devel speex-devel
+				snappy-devel libass-devel freetype-devel fribidi-devel
 				fontconfig-devel gnutls-devel libva-devel libdrm-devel
+			)
+			if ! run "${SUDO[@]}" dnf install -y --setopt=install_weak_deps=False \
+				--setopt=max_parallel_downloads=16 "${DNFPKGS[@]}"; then
+				echo "Some packages are unavailable here; installing the rest" >&2
+				run "${SUDO[@]}" dnf install -y --skip-unavailable \
+					--setopt=install_weak_deps=False --setopt=max_parallel_downloads=16 \
+					"${DNFPKGS[@]}"
+			fi
 		elif command -v pacman >/dev/null; then
 			run "${SUDO[@]}" pacman -S --needed --noconfirm base-devel clang cmake python pkgconf nasm \
 				x264 x265 dav1d libvpx openh264 openjpeg2 libtheora libwebp \
