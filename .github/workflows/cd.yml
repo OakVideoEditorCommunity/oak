@@ -21,15 +21,18 @@ jobs:
   # distro's container so the declared dependencies always resolve to
   # the distro's own package names (dpkg-shlibdeps / rpmbuild
   # auto-requires / Arch static base list). The FFmpeg/codec libraries
-  # come from the vcpkg manifest (root vcpkg.json, x64-linux triplet), so
-  # these containers carry the build toolchain and the headless/UI
-  # runtime deps only. deb: hand-rolled dpkg-deb; rpm: rpmbuild; arch:
-  # makepkg. AppImage stays on the Ubuntu runner (self-contained by
+  # come from the vcpkg manifest (root vcpkg.json, the distro/arch
+  # triplet), so these containers carry the build toolchain and the
+  # headless/UI runtime deps only. deb: hand-rolled dpkg-deb, built once
+  # in debian:12 (the general Debian-family package, labeled "+debian")
+  # and once per openKylin arch (x64/arm64, labeled "+openkylin") so each
+  # family gets deps that resolve against its own repos; rpm: rpmbuild;
+  # arch: makepkg. AppImage stays on the Ubuntu runner (self-contained by
   # design).
   # ------------------------------------------------------------------
   linux:
-    name: Linux packages (${{ matrix.distro }})
-    runs-on: warp-ubuntu-latest-x64-8x
+    name: Linux packages (${{ matrix.distro }} ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
 
     strategy:
@@ -38,10 +41,29 @@ jobs:
         include:
           - distro: debian
             image: debian:12
+            arch: x64
+            runner: warp-ubuntu-latest-x64-16x
+            triplet: x64-linux
           - distro: fedora
             image: fedora:41
+            arch: x64
+            runner: warp-ubuntu-latest-x64-16x
+            triplet: x64-linux
           - distro: arch
             image: archlinux:latest
+            arch: x64
+            runner: warp-ubuntu-latest-x64-16x
+            triplet: x64-linux
+          - distro: openkylin
+            image: openkylin/openkylin:latest
+            arch: x64
+            runner: warp-ubuntu-latest-x64-16x
+            triplet: x64-linux
+          - distro: openkylin
+            image: openkylin/openkylin:latest
+            arch: arm64
+            runner: warp-ubuntu-latest-arm64-32x
+            triplet: arm64-linux
 
     steps:
       # git/curl must land BEFORE actions/checkout runs inside the
@@ -49,7 +71,7 @@ jobs:
       - name: Install git and fetch tools
         run: |
           case "${{ matrix.distro }}" in
-            debian) apt-get update && apt-get install -y git curl ;;
+            debian|openkylin) apt-get update && apt-get install -y git curl ;;
             fedora) dnf install -y git curl ;;
             arch) pacman -Sy --noconfirm git curl ;;
           esac
@@ -58,6 +80,19 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: true
+
+      # The openKylin image runs as root with HOME=/github/home; rustup
+      # refuses the euid mismatch and installs a toolchain the later steps
+      # cannot find. Pin the whole job to root's home (same as the CI
+      # openKylin jobs).
+      - name: Pin HOME for rustup (openKylin)
+        if: matrix.distro == 'openkylin'
+        run: |
+          {
+            echo "HOME=/root"
+            echo "CARGO_HOME=/root/.cargo"
+            echo "RUSTUP_HOME=/root/.rustup"
+          } >> "$GITHUB_ENV"
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -95,6 +130,20 @@ jobs:
                 mesa vulkan-headers vulkan-icd-loader \
                 libxkbcommon libxkbcommon-x11 librsvg libdrm autoconf autoconf-archive automake libtool
               ;;
+            openkylin)
+              # The CI openKylin build set plus dpkg-dev (dpkg-shlibdeps
+              # computes the runtime deps) and librsvg2-bin (app icon).
+              apt-get update
+              apt-get install -y \
+                build-essential clang libclang-dev cmake pkg-config nasm \
+                git curl zip unzip tar python3 patch xz-utils dpkg-dev \
+                libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
+                libasound2-dev libpulse-dev libsndfile1-dev \
+                libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+                libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
+                libdrm-dev file librsvg2-bin \
+                autoconf autoconf-archive automake libtool
+              ;;
           esac
 
       # ------------------------------------------------------------------
@@ -113,16 +162,17 @@ jobs:
           path: |
             vcpkg_installed
             ~/.cache/vcpkg/archives
-          # The distro prefix matters: the same Ubuntu-runner cache scope
-          # backs three different container distros.
-          key: vcpkg-${{ matrix.distro }}-x64-linux-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # The distro and triplet prefixes matter: one Ubuntu-runner
+          # cache scope backs several containers, and the openKylin arm64
+          # build must never restore the x64 binaries.
+          key: vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            vcpkg-${{ matrix.distro }}-x64-linux-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ matrix.distro }}-x64-linux-
+            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-
           save-always: true
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet x64-linux
+        run: vcpkg install --triplet ${{ matrix.triplet }}
 
       - name: Configure build environment
         run: |
@@ -134,7 +184,7 @@ jobs:
           # builds (the [patch.crates-io] ocio-sys tracks shaloong/ocio-rs
           # main, whose vendored sources build on GCC >= 16).
           bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/x64-linux"
+          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
           echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
@@ -142,14 +192,22 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: oak-${{ matrix.distro }}
+          shared-key: oak-${{ matrix.distro }}-${{ matrix.arch }}
           cache-on-failure: true
 
       - name: Build (release)
         run: cargo build --release --locked
 
       - name: Generate app icon (PNG from Oak_Icon.svg)
-        run: rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
+        run: |
+          mkdir -p icons
+          if command -v rsvg-convert >/dev/null 2>&1; then
+            rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
+          else
+            # Defensive: some containers (openKylin) may not carry
+            # librsvg2-bin; the scalable icon still installs.
+            echo "::warning::rsvg-convert is unavailable; packaging the scalable icon only"
+          fi
 
       - name: Package
         run: |
@@ -158,16 +216,17 @@ jobs:
           # Cargo.toml (single source of truth; tags do not carry it).
           VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           case "${{ matrix.distro }}" in
-            debian) tooling/package/build-deb.sh "$VERSION" ;;
-            fedora) tooling/package/build-rpm.sh "$VERSION" ;;
-            arch)   tooling/package/build-pkg.sh "$VERSION" ;;
+            debian)   tooling/package/build-deb.sh "$VERSION" debian ;;
+            openkylin) tooling/package/build-deb.sh "$VERSION" openkylin ;;
+            fedora)   tooling/package/build-rpm.sh "$VERSION" ;;
+            arch)     tooling/package/build-pkg.sh "$VERSION" ;;
           esac
         shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: oak-linux-${{ matrix.distro }}
+          name: oak-linux-${{ matrix.distro }}-${{ matrix.arch }}
           path: |
             target/release/*.deb
             target/release/*.rpm
@@ -179,7 +238,7 @@ jobs:
   # ------------------------------------------------------------------
   appimage:
     name: Linux AppImage
-    runs-on: warp-ubuntu-latest-x64-8x
+    runs-on: warp-ubuntu-latest-x64-16x
 
     steps:
       - name: Checkout
@@ -269,7 +328,7 @@ jobs:
 
   macos:
     name: macOS DMG (Apple Silicon)
-    runs-on: warp-macos-26-arm64-6x
+    runs-on: warp-macos-26-arm64-12x
 
     steps:
       - name: Checkout
@@ -378,13 +437,43 @@ jobs:
   # ------------------------------------------------------------------
   windows:
     name: Windows installer (NSIS)
-    runs-on: warp-windows-2025-vs2026-x64-16x
+    runs-on: warp-windows-2025-vs2026-x64-32x
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           submodules: true
+
+      # Defender's real-time scanning slows the MSVC/vcpkg build down
+      # badly; disable it for the job and keep exclusions as the fallback
+      # when policy blocks the change (same step as the CI Windows job).
+      - name: Disable Windows Defender scanning
+        shell: pwsh
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+            Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+            Set-MpPreference -DisableArchiveScanning $true -ErrorAction SilentlyContinue
+            Write-Host "Windows Defender real-time scanning disabled for this job"
+          } catch {
+            Write-Host "Windows Defender could not be disabled (non-fatal, falling back to exclusions): $_"
+          }
+          foreach ($path in @(
+            $env:GITHUB_WORKSPACE,
+            "$env:USERPROFILE\.cargo",
+            "$env:USERPROFILE\.rustup",
+            "$env:LOCALAPPDATA\vcpkg"
+          )) {
+            Add-MpPreference -ExclusionPath $path -ErrorAction SilentlyContinue
+          }
+          try {
+            Get-MpPreference |
+              Select-Object DisableRealtimeMonitoring, DisableScriptScanning, ExclusionPath |
+              Format-List
+          } catch {
+            Write-Host "Defender status unavailable: $_"
+          }
 
       - name: Install Rust (stable, MSVC)
         uses: dtolnay/rust-toolchain@stable

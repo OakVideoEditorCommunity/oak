@@ -18,10 +18,23 @@
 # Build the .deb by hand: stage the release binaries + resources, compute
 # the FULL runtime dependency set with dpkg-shlibdeps (Debian-family names
 # of the build distro), and pack with dpkg-deb. Run from the repo root
-# after `cargo build --release`. Usage: tooling/package/build-deb.sh <version>
+# after `cargo build --release`.
+#
+# Usage: tooling/package/build-deb.sh <version> [<variant>]
+#   <variant> marks the build distro in the package version and file name:
+#   CD passes "debian" for the general build and "openkylin" for the
+#   openKylin builds. The "+" suffix is valid Debian version syntax and
+#   sorts above the plain version.
 set -euo pipefail
 
-VERSION="${1:?usage: build-deb.sh <version>}"
+VERSION="${1:?usage: build-deb.sh <version> [<variant>]}"
+VARIANT="${2:-}"
+if [ -n "$VARIANT" ]; then
+	DEB_VERSION="${VERSION}+${VARIANT}"
+else
+	DEB_VERSION="$VERSION"
+fi
+ARCH="$(dpkg --print-architecture)"
 STAGING=target/pkg/deb
 rm -rf "$STAGING"
 mkdir -p "$STAGING/usr/bin" "$STAGING/usr/share/applications" \
@@ -31,7 +44,13 @@ mkdir -p "$STAGING/usr/bin" "$STAGING/usr/share/applications" \
 install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
 	"$STAGING/usr/bin/"
 install -m644 packaging/oak.desktop "$STAGING/usr/share/applications/oak.desktop"
-install -m644 icons/icon.png "$STAGING/usr/share/icons/hicolor/512x512/apps/oak.png"
+if [ -f icons/icon.png ]; then
+	install -m644 icons/icon.png "$STAGING/usr/share/icons/hicolor/512x512/apps/oak.png"
+else
+	# The icon step warns and skips when rsvg-convert is unavailable;
+	# the scalable icon still installs.
+	echo "warning: icons/icon.png missing; shipping the scalable icon only"
+fi
 install -m644 Oak_Icon.svg "$STAGING/usr/share/icons/hicolor/scalable/apps/oak.svg"
 install -m644 assets/i18n/*.yaml "$STAGING/usr/share/oak/i18n/"
 
@@ -44,10 +63,10 @@ echo "declared deps: $DEPS"
 
 cat > "$STAGING/DEBIAN/control" <<EOF
 Package: oak-editor
-Version: $VERSION
+Version: $DEB_VERSION
 Section: video
 Priority: optional
-Architecture: $(dpkg --print-architecture)
+Architecture: $ARCH
 Maintainer: Oak Team
 Depends: $DEPS
 Description: Oak Video Editor — a free, open-source non-linear video editor
@@ -55,5 +74,5 @@ Description: Oak Video Editor — a free, open-source non-linear video editor
  proxy editing, multicam, hardware decoding).
 EOF
 
-dpkg-deb --root-owner-group --build "$STAGING" "target/release/oak-editor_${VERSION}_amd64.deb"
-echo "built target/release/oak-editor_${VERSION}_amd64.deb"
+dpkg-deb --root-owner-group --build "$STAGING" "target/release/oak-editor_${DEB_VERSION}_${ARCH}.deb"
+echo "built target/release/oak-editor_${DEB_VERSION}_${ARCH}.deb"
