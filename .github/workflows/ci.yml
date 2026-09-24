@@ -242,6 +242,37 @@ jobs:
           # from the vcpkg manifest). librsvg is CD's icon renderer.
           brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
 
+      # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
+      # ships include/, MSVC import libs (.lib), pkg-config files and the
+      # runtime DLLs, built from FFmpeg's release/8.1 branch by BtbN's
+      # public GitHub Actions (BtbN is an FFmpeg developer and ffmpeg.org
+      # links these builds). Downloaded from his release page and
+      # verified against the checksums.sha256 published in the same
+      # release; nothing is mirrored here, so provenance stays upstream.
+      # The alternative — a cold vcpkg FFmpeg build — costs ~40 minutes
+      # per run on this platform.
+      - name: Install prebuilt FFmpeg (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+          $asset = "ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
+          $dir = Join-Path $env:RUNNER_TEMP "ffmpeg-prebuilt"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Invoke-WebRequest -Uri "$base/checksums.sha256" -OutFile "$dir\checksums.sha256"
+          $line = Select-String -Path "$dir\checksums.sha256" -Pattern ([regex]::Escape($asset) + "\s*$") |
+            Select-Object -First 1
+          if (-not $line) { throw "no checksum for $asset in the release's checksums.sha256" }
+          $expected = $line.Line.Split()[0].ToLowerInvariant()
+          Invoke-WebRequest -Uri "$base/$asset" -OutFile "$dir\$asset"
+          $actual = (Get-FileHash "$dir\$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "FFmpeg checksum mismatch: expected $expected, got $actual" }
+          $root = "$env:GITHUB_WORKSPACE\.cache"
+          Remove-Item "$root\ffmpeg", "$root\ffmpeg-extract" -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -Path "$dir\$asset" -DestinationPath "$root\ffmpeg-extract" -Force
+          $inner = Get-ChildItem "$root\ffmpeg-extract" -Directory | Select-Object -First 1
+          Move-Item $inner.FullName "$root\ffmpeg"
+
       # ------------------------------------------------------------------
       # vcpkg (manifest mode) + caches
       # ------------------------------------------------------------------
@@ -406,14 +437,18 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          # FFmpeg comes from the prebuilt archive extracted above (the
+          # manifest no longer installs it on Windows); vcpkg only
+          # provides pkgconf for oak-ffmpeg-link's build script.
           $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
-          "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
-          "PKG_CONFIG_PATH=$prefix\lib\pkgconfig" >> $env:GITHUB_ENV
+          $ffmpeg = "$env:GITHUB_WORKSPACE\.cache\ffmpeg"
+          "FFMPEG_DIR=$ffmpeg" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$ffmpeg\lib\pkgconfig" >> $env:GITHUB_ENV
+          # The test binaries load the FFmpeg DLLs: without this the
+          # runner reports STATUS_DLL_NOT_FOUND when the first test
+          # executable starts.
+          "$ffmpeg\bin" >> $env:GITHUB_PATH
           "$prefix\tools\pkgconf" >> $env:GITHUB_PATH
-          # The test binaries link vcpkg's dynamic DLLs (ffmpeg and its
-          # codecs): without this the runner reports STATUS_DLL_NOT_FOUND
-          # when the first test executable starts.
-          "$prefix\bin" >> $env:GITHUB_PATH
           # Bundled OCIO: ocio-sys' vendored sources build with the MSVC
           # toolchain (what they need — the MSYS2 package was the
           # workaround, not the preference), so no OCIO_INSTALL_DIR and
