@@ -93,9 +93,21 @@ use crate::render::VideoParams;
 /// tests have segfaulted inside the driver), so the test build behaves as
 /// if GL were unavailable unless `OAK_GPU_TESTS` asks for it — the same
 /// gate the integration GL tests use. Release builds are untouched.
+///
+/// Every public entry point below obeys the gate: the suites fabricate
+/// contexts and texture names when they drive the GL paths without a
+/// real driver, so even a "context is current" call must not reach CGL.
 #[cfg(all(test, target_os = "macos"))]
 fn real_gl_gated() -> bool {
 	std::env::var_os("OAK_GPU_TESTS").is_none()
+}
+
+/// The error gated entry points report in tests (see [`real_gl_gated`]).
+#[cfg(all(test, target_os = "macos"))]
+fn gl_gated_error() -> crate::error::Error {
+	crate::error::Error::Failed(
+		"gl_bridge: real GL is gated behind OAK_GPU_TESTS in tests".to_string(),
+	)
 }
 
 /// GL 上下文是否可用（离屏上下文可创建）。use_opengl 决策用它当
@@ -115,9 +127,7 @@ pub fn gl_available() -> bool {
 pub fn acquire() -> crate::error::Result<GlGuard> {
 	#[cfg(all(test, target_os = "macos"))]
 	if real_gl_gated() {
-		return Err(crate::error::Error::Failed(
-			"gl_bridge: real GL is gated behind OAK_GPU_TESTS in tests".to_string(),
-		));
+		return Err(gl_gated_error());
 	}
 	imp::acquire()
 }
@@ -129,6 +139,10 @@ pub fn acquire() -> crate::error::Result<GlGuard> {
 ///
 /// 要求 GL 上下文已 current（[`GlGuard`] 持有期间调用）。
 pub fn create_output_texture(w: i32, h: i32, params: &VideoParams) -> crate::error::Result<i32> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return Err(gl_gated_error());
+	}
 	imp::create_output_texture(w, h, params)
 }
 
@@ -139,6 +153,10 @@ pub fn create_output_texture(w: i32, h: i32, params: &VideoParams) -> crate::err
 ///
 /// 要求 GL 上下文已 current（[`GlGuard`] 持有期间调用）。
 pub fn create_input_texture(w: i32, h: i32, pixels: &[u8]) -> crate::error::Result<i32> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return Err(gl_gated_error());
+	}
 	imp::create_input_texture(w, h, pixels)
 }
 
@@ -148,6 +166,10 @@ pub fn create_input_texture(w: i32, h: i32, pixels: &[u8]) -> crate::error::Resu
 ///
 /// 要求 GL 上下文已 current。
 pub fn delete_gl_texture(name: i32) {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::delete_gl_texture(name);
 }
 
@@ -158,6 +180,10 @@ pub fn delete_gl_texture(name: i32) {
 ///
 /// 要求 GL 上下文已 current。
 pub fn create_fbo(tex: i32, w: i32, h: i32) -> crate::error::Result<i32> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return Err(gl_gated_error());
+	}
 	imp::create_fbo(tex, w, h)
 }
 
@@ -167,6 +193,10 @@ pub fn create_fbo(tex: i32, w: i32, h: i32) -> crate::error::Result<i32> {
 ///
 /// 要求 GL 上下文已 current。
 pub fn bind_fbo(fbo: i32) {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::bind_fbo(fbo);
 }
 
@@ -176,6 +206,10 @@ pub fn bind_fbo(fbo: i32) {
 ///
 /// 要求 GL 上下文已 current。
 pub fn delete_fbo(fbo: i32) {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::delete_fbo(fbo);
 }
 
@@ -185,6 +219,10 @@ pub fn delete_fbo(fbo: i32) {
 ///
 /// 要求 GL 上下文已 current。
 pub fn set_viewport(w: i32, h: i32) {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::set_viewport(w, h);
 }
 
@@ -196,6 +234,10 @@ pub fn set_viewport(w: i32, h: i32) {
 ///
 /// 要求 GL 上下文已 current、目标 FBO 仍绑定。
 pub fn read_pixels_to_image(w: i32, h: i32, params: &VideoParams) -> crate::error::Result<Arc<Image>> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return Err(gl_gated_error());
+	}
 	imp::read_pixels_to_image(w, h, params)
 }
 
@@ -205,6 +247,10 @@ pub fn read_pixels_to_image(w: i32, h: i32, params: &VideoParams) -> crate::erro
 ///
 /// 要求 GL 上下文已 current。
 pub fn gl_clear_color(r: f32, g: f32, b: f32, a: f32) {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::gl_clear_color(r, g, b, a);
 }
 
@@ -214,11 +260,19 @@ pub fn gl_clear_color(r: f32, g: f32, b: f32, a: f32) {
 ///
 /// 要求 GL 上下文已 current。
 pub fn gl_clear() {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return;
+	}
 	imp::gl_clear();
 }
 
 /// 当前 GL 实现的版本串（真实上下文证据；测试用）。
 pub fn gl_version_string() -> Option<String> {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return None;
+	}
 	imp::gl_version_string()
 }
 
@@ -231,6 +285,10 @@ pub struct GlGuard {
 /// 后为 true）。无 GL 的调用方（Draw suite 在 draw action 外被调）据此
 /// 不触 GL 命令——macOS 无 current 上下文时调 GL 是未定义行为。
 pub fn is_current() -> bool {
+	#[cfg(all(test, target_os = "macos"))]
+	if real_gl_gated() {
+		return false;
+	}
 	imp::is_current()
 }
 
