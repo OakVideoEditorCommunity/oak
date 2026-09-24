@@ -775,6 +775,30 @@ python3 tooling/coverage_report.py --json target/coverage.json
   oak-task 89.5% / 62.8%；oak-storage 82.9% / 66.6%。
 - 下一步仍为分支 80%（缺口 ~8.4pp）；热点见上。
 
+### 第八批（§3.1 语义修复与两处 UI 回归，2026-09-24）
+
+- **§3.1 修复**（详见 review §3.1/§9）：`block.rs` 的两个长度 setter 按其
+  C++ 契约重写为三个存储模型原语：
+  - `set_length_and_media_out` = in 固定、out 移动、media 不动；
+  - `set_length_and_media_in` = in 固定、out 移动、`media_in += old−new`；
+  - 新增 `set_length_keeping_out` = out 固定、in 移动、`media_in += old−new`。
+  undopointer/undogeneral/undoripple/undosplit/graphops/cli/nodeops 的调用点
+  逐点对齐，修掉两处实证缺陷：
+  1. `TrackReplaceBlockWithGapCommand` 在“块后紧跟缺口”时把缺口向右生长，
+     吞掉缺口之后的块——即用户报告的“拖动一个素材影响到其他无关素材”；
+     现在缺口向左覆盖被移除块的跨度，后续块不动（domain_test 回归断言）。
+  2. roll 不滚动、slide 出现负入点、trim-in/ripple splice 把时间线 in 写进
+     `media_in`（播放错误内容）；全部 KNOWN-SWAP 期望按正确几何改写，并补
+     `media_in` 维度断言（roll 接缝移动、follower 媒体推进、slide 无负坐标、
+     insert-gaps 向右生长、ResizeWithMediaIn `media_in=20`）。
+- **i18n 刷新**：dock 的 `PanelHandle` 在注册时快照 `DockPanel::title`，
+  语言切换后页签停留在旧语言（截图的“英文界面 + 中文页签”）。gpui 侧新增
+  `DockArea::refresh_panel_titles`（经类型擦除 provider 重读标题 + 通知面板），
+  shell 在菜单与首选项两条切换路径调用；首选项对话框自身同步重绘。
+  （gpui 子模块提交见 `oak-gpui`。）
+- **OCIO 参数面板**：Vec4 评分参数（对比度/偏移/曝光）建 4 个 SpinBox，
+  `base` 步长锚定范围（pivot 不再一拖就飞出 ±10000）。
+
 ## 8. 风险与对策
 
 1. **oak-app UI 覆盖成本最高、最易 flaky**：只用 test-support 的确定性

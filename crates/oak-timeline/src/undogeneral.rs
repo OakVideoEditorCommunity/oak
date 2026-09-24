@@ -37,8 +37,9 @@ use crate::util::{
 	block_add_to_graph, block_connect, block_connected_input, block_disconnect_input,
 	block_enabled, block_gap_create, block_in, block_kind, block_length, block_next, block_out,
 	block_previous, block_range, block_remove_from_graph, block_set_enabled, block_set_in,
-	block_set_length_and_media_in, block_set_length_and_media_out, block_set_range, block_track,
-	clip_media_in, clip_set_media_in, same_block, track_append_block, track_create,
+	block_set_length_and_media_in, block_set_length_and_media_out, block_set_length_keeping_out,
+	block_set_range, block_track, clip_media_in, clip_set_media_in, same_block, track_append_block,
+	track_create,
 	track_insert_block_after, track_insert_block_before, track_replace_block,
 	track_ripple_remove_block, tracklist_append, tracklist_remove, tracklist_track_at,
 	tracklist_track_count, tracklist_type, transition_offsets,
@@ -865,11 +866,17 @@ impl TrackReplaceBlockWithGapCommand {
 			if let Some(gap) = &self.existing_gap {
 				// Extend an existing gap. In the module world the block's in/out
 				// points are stored on the block (Olive derives them from the track
-				// order), so the extension must keep the gap's in point anchored —
-				// an out-anchored `set_length_and_media_out` would push the in point
-				// negative.
+				// order), so the extension must grow towards the block's span:
+				// a gap that PRECEDES the block grows rightward (in anchored),
+				// while a gap that merely FOLLOWS it must grow leftward to start
+				// at the block's in point (out anchored) — growing it at the out
+				// would swallow whatever follows the gap.
 				new_gap_length = new_gap_length + block_length(gap);
-				block_set_length_and_media_in(gap, new_gap_length);
+				if previous_is_a_gap {
+					block_set_length_and_media_out(gap, new_gap_length);
+				} else {
+					block_set_length_keeping_out(gap, new_gap_length);
+				}
 				track_ripple_remove_block(&self.track, &self.block);
 				self.existing_gap_precedes =
 					previous.as_ref().map(|p| same_block(gap, p)).unwrap_or(false);
@@ -882,7 +889,7 @@ impl TrackReplaceBlockWithGapCommand {
 						// (the module stores positions on the block; the gap
 						// fills the block's stored span).
 						block_set_in(gap, self.block_in_point);
-						block_set_length_and_media_in(gap, new_gap_length);
+						block_set_length_and_media_out(gap, new_gap_length);
 					}
 				}
 				if let Some(gap) = &self.our_gap {
@@ -935,9 +942,14 @@ impl TrackReplaceBlockWithGapCommand {
 					track_insert_block_before(&self.track, &self.block, gap);
 				}
 
-				// Restore the gap's original length (in-anchored: its in point was
-				// untouched by the redo extension).
-				block_set_length_and_media_in(gap, original_gap_length);
+				// Restore the gap's original length on the same anchor the redo
+				// grew it from (the in point for a preceding gap, the out point
+				// for a following one).
+				if self.existing_gap_precedes {
+					block_set_length_and_media_out(gap, original_gap_length);
+				} else {
+					block_set_length_keeping_out(gap, original_gap_length);
+				}
 				self.existing_gap = None;
 			}
 		} else {
@@ -1191,7 +1203,7 @@ impl TrackListInsertGaps {
 			// explicitly.
 			let gap_in = g.before.as_ref().map(block_out).unwrap_or(self.point);
 			block_set_in(&g.gap, gap_in);
-			block_set_length_and_media_in(&g.gap, self.length);
+			block_set_length_and_media_out(&g.gap, self.length);
 			block_add_to_graph(&g.gap, g.entry.take());
 			track_insert_block_after(&g.track, &g.gap, g.before.as_ref());
 		}

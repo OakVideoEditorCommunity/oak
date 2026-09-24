@@ -478,9 +478,12 @@ fn timeline_ripple_delete_gaps_resizes_longer_gap() {
 	assert!(cmd.has_commands());
 
 	cmd.redo();
-	// The gap keeps its out point and loses the 20-frame region length.
+	// The gap keeps its in point and loses the 20-frame region length. In
+	// the C++ the following clip also ripples left by the removed length
+	// (the layout derives it); the stored-range command trims the gap only,
+	// so callers that need the tail shifted do it explicitly.
 	assert_eq!(track_block_count(&track), 3);
-	assert_eq!(span_of(&gap), Some((Rational::new(70, 1), Rational::new(150, 1))));
+	assert_eq!(span_of(&gap), Some((Rational::new(50, 1), Rational::new(130, 1))));
 
 	cmd.undo();
 	assert_eq!(span_of(&gap), Some((Rational::new(50, 1), Rational::new(150, 1))));
@@ -556,14 +559,9 @@ fn track_list_ripple_tool_empty_info_is_noop() {
 }
 
 /// `TrackListRippleToolCommand` with real per-track info resizes the block
-/// and restores it on undo.
-///
-/// KNOWN-SWAP: the expectations below pin the CURRENT (swapped)
-/// `set_length_and_media_out` behavior documented in
-/// `docs/zh/plans/test-coverage-90-80-review.md` §3.1/§9 — the trim ripples the
-/// in-point and writes the timeline in into `media_in` instead of moving the
-/// out-point. The semantic fix must rewrite these values deliberately
-/// (C++ `BlockTrimCommand::redo` kTrimOut keeps the in-point and moves out).
+/// and restores it on undo. Trim-out is in-anchored: the clip keeps its in
+/// point and its out follows the movement, while the media window (which
+/// the ripple does not consume here) stays put.
 #[test]
 fn track_list_ripple_tool_resizes_with_real_info() {
 	let project = make_project();
@@ -583,10 +581,10 @@ fn track_list_ripple_tool_resizes_with_real_info() {
 	cmd.redo();
 	assert_eq!(
 		span_of(&clip),
-		Some((Rational::new(-10, 1), Rational::new(100, 1))),
-		"current (swapped) behavior: the in-point shifts, the out-point stays"
+		Some((Rational::new(0, 1), Rational::new(110, 1))),
+		"the in-point stays and the out-point follows the movement"
 	);
-	assert_eq!(clip_media_in(&clip), Rational::new(-10, 1));
+	assert_eq!(clip_media_in(&clip), Rational::new(0, 1));
 
 	cmd.undo();
 	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(100, 1))));
@@ -610,8 +608,9 @@ fn track_list_ripple_tool_append_gap_creates_a_gap() {
 	);
 	cmd.redo();
 	assert_eq!(track_block_count(&track), 2, "a gap was inserted");
-	// KNOWN-SWAP: the inserted gap overlaps the clip (its in is the clip's
-	// in); §3.1/§9's fix will move it to the clip's out.
+	// The gap takes the block's in point; the stored-range command leaves
+	// the block in place (the C++ layout would push it right by the gap
+	// length — the caller owns that shift, see the insert site's note).
 	let gap = track_block_at(&track, 0).expect("gap at the front");
 	assert_eq!(block_kind(&gap), BlockKind::Gap);
 	assert_eq!(span_of(&gap), Some((Rational::new(0, 1), Rational::new(10, 1))));
@@ -629,12 +628,9 @@ fn track_list_ripple_tool_append_gap_creates_a_gap() {
 /// `BlockTrimCommand` shortens a clip and lengthens its adjacent gap so
 /// the rest of the track keeps its position; undo restores both.
 ///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// the expectations below pin the current (swapped)
-/// `set_length_and_media_out` behavior — the trim moves the clip's in-point
-/// instead of its out-point. C++ `BlockTrimCommand` TrimOut is in-anchored
-/// (`common.rs` `k_trim_out`: trim the out point); the semantic fix must
-/// re-derive this geometry.
+/// Trim-out is in-anchored (`common.rs` `k_trim_out`: trim the out point):
+/// the clip keeps its in and the following gap grows leftward to meet the
+/// new out, so everything after the gap stays put.
 #[test]
 fn block_trim_with_gap_adjacent_round_trip() {
 	let project = make_project();
@@ -651,27 +647,22 @@ fn block_trim_with_gap_adjacent_round_trip() {
 	);
 	cmd.prepare();
 	cmd.redo();
-	// Current (swapped) behavior: the clip's in shifts to 25 and the gap
-	// keeps its in at 50, growing its out by the 25 trimmed away. The
-	// in-anchored C++ TrimOut would keep the in and move the out instead
-	// (see the KNOWN-SWAP note).
-	assert_eq!(span_of(&clip), Some((Rational::new(25, 1), Rational::new(50, 1))));
-	assert_eq!(span_of(&gap), Some((Rational::new(50, 1), Rational::new(125, 1))));
+	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(25, 1))));
+	assert_eq!(span_of(&gap), Some((Rational::new(25, 1), Rational::new(100, 1))));
+	assert_eq!(
+		clip_media_in(&clip),
+		Rational::new(0, 1),
+		"a trim-out does not move the media window"
+	);
 
 	cmd.undo();
 	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(50, 1))));
 	assert_eq!(span_of(&gap), Some((Rational::new(50, 1), Rational::new(100, 1))));
+	assert_eq!(clip_media_in(&clip), Rational::new(0, 1));
 }
 
 /// `BlockTrimCommand` inserts a gap filling the space the trim freed when
 /// the adjacent block is a clip and the trim is not a roll edit.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// the geometry below pins the swapped `set_length_and_media_out` behavior
-/// — the swapped trim moved `first`'s in to 25 and inserted the
-/// compensating gap at [50,75), sharing its in with `second` (the true
-/// in-anchored TrimOut keeps `first` at [0,25); the semantic fix must
-/// rewrite this geometry).
 #[test]
 fn block_trim_creates_gap_next_to_clip() {
 	let project = make_project();
@@ -692,11 +683,10 @@ fn block_trim_creates_gap_next_to_clip() {
 	assert_eq!(track_block_at(&track, 0).unwrap().id, first.id);
 	let created = track_block_at(&track, 1).unwrap();
 	assert_eq!(block_kind(&created), BlockKind::Gap);
-	// KNOWN-SWAP: the swapped trim shrinks `first` from the in side, so the
-	// "compensating" gap lands at [50,75) and overlaps `second` instead of
-	// filling the freed [25,50) space (§3.1/§9).
-	assert_eq!(span_of(&first), Some((Rational::new(25, 1), Rational::new(50, 1))));
-	assert_eq!(span_of(&created), Some((Rational::new(50, 1), Rational::new(75, 1))));
+	// The trim keeps `first`'s in fixed and moves its out to 25; the fresh
+	// gap fills the freed [25,50) space so `second` does not move.
+	assert_eq!(span_of(&first), Some((Rational::new(0, 1), Rational::new(25, 1))));
+	assert_eq!(span_of(&created), Some((Rational::new(25, 1), Rational::new(50, 1))));
 	assert_eq!(track_block_at(&track, 2).unwrap().id, second.id);
 
 	cmd.undo();
@@ -706,13 +696,8 @@ fn block_trim_creates_gap_next_to_clip() {
 }
 
 /// `BlockTrimCommand::set_trim_is_a_roll_edit` trims into the adjacent
-/// clip instead of creating a compensating gap.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`): the
-/// expectations below characterize the swapped `set_length_and_media_out`
-/// behavior — the seam does NOT move; the left clip's IN shifts and the
-/// follower's OUT grows. A true roll edit is first=[0,25) / second=[25,100)
-/// with the seam at 25; the semantic fix must rewrite these values.
+/// clip instead of creating a compensating gap: the shared seam moves, the
+/// left clip keeps its in, the follower keeps its out.
 #[test]
 fn block_trim_roll_edit_resizes_adjacent_clip() {
 	let project = make_project();
@@ -731,23 +716,29 @@ fn block_trim_roll_edit_resizes_adjacent_clip() {
 	cmd.prepare();
 	cmd.redo();
 	assert_eq!(track_block_count(&track), 2);
-	assert_eq!(span_of(&first), Some((Rational::new(25, 1), Rational::new(50, 1))));
-	assert_eq!(span_of(&second), Some((Rational::new(50, 1), Rational::new(125, 1))));
-	// The seam stays at 50 under the current mapping (see the KNOWN-SWAP
-	// note); `media_in` pins the coordinate-space confusion: the left clip's
-	// timeline in (25) is written into `media_in`, and the follower's
-	// media-in is left untouched.
+	assert_eq!(span_of(&first), Some((Rational::new(0, 1), Rational::new(25, 1))));
+	assert_eq!(span_of(&second), Some((Rational::new(25, 1), Rational::new(100, 1))));
 	assert_eq!(
 		span_of(&first).map(|(_, out)| out),
 		span_of(&second).map(|(in_, _)| in_),
-		"the shared seam does not move under the current mapping"
+		"the two clips keep sharing the rolled seam"
 	);
-	assert_eq!(clip_media_in(&first), Rational::new(25, 1));
-	assert_eq!(clip_media_in(&second), Rational::new(0, 1));
+	assert_eq!(
+		clip_media_in(&first),
+		Rational::new(0, 1),
+		"the left clip's media window is untouched (trim-out)"
+	);
+	assert_eq!(
+		clip_media_in(&second),
+		Rational::new(-25, 1),
+		"the follower grows at its head, revealing earlier media"
+	);
 
 	cmd.undo();
 	assert_eq!(span_of(&first), Some((Rational::new(0, 1), Rational::new(50, 1))));
 	assert_eq!(span_of(&second), Some((Rational::new(50, 1), Rational::new(100, 1))));
+	assert_eq!(clip_media_in(&first), Rational::new(0, 1));
+	assert_eq!(clip_media_in(&second), Rational::new(0, 1));
 }
 
 /// `BlockTrimCommand` (default `set_remove_zero_length_from_graph`) removes
@@ -834,14 +825,12 @@ fn block_trim_same_length_is_noop() {
 }
 
 /// `TrackSlideCommand` resizes both adjacent blocks by the movement;
-/// undo restores their original lengths.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// under the current setters the slid block itself does not move; the
-/// previous block grows leftward into the slide's start (reaching a negative
-/// timeline in-point) while the next block's out shrinks by the movement.
-/// These expectations characterize that state; the semantic fix must rewrite
-/// them to a true slide.
+/// undo restores their original lengths. The previous neighbour grows at
+/// its out edge (in anchored; no negative in-point) and the next shrinks at
+/// its in edge (out anchored, media advancing over the consumed head). The
+/// command does not position the sliding blocks itself — the stored-range
+/// model has no track layout, so the caller places them by `movement` (see
+/// `graphops::slide_clip`).
 #[test]
 fn track_slide_resizes_adjacent_blocks() {
 	let project = make_project();
@@ -860,22 +849,30 @@ fn track_slide_resizes_adjacent_blocks() {
 	);
 	cmd.prepare();
 	cmd.redo();
-	assert_eq!(span_of(&previous), Some((Rational::new(-20, 1), Rational::new(50, 1))));
+	assert_eq!(span_of(&previous), Some((Rational::new(0, 1), Rational::new(70, 1))));
 	assert_eq!(span_of(&slide), Some((Rational::new(50, 1), Rational::new(100, 1))));
-	assert_eq!(span_of(&next), Some((Rational::new(100, 1), Rational::new(130, 1))));
+	assert_eq!(span_of(&next), Some((Rational::new(120, 1), Rational::new(150, 1))));
+	assert_eq!(
+		clip_media_in(&previous),
+		Rational::new(0, 1),
+		"the in-anchored growth leaves the media window alone"
+	);
+	assert_eq!(
+		clip_media_in(&next),
+		Rational::new(20, 1),
+		"the next block's head is consumed, advancing its media in"
+	);
 
 	cmd.undo();
 	assert_eq!(span_of(&previous), Some((Rational::new(0, 1), Rational::new(50, 1))));
 	assert_eq!(span_of(&next), Some((Rational::new(100, 1), Rational::new(150, 1))));
+	assert_eq!(clip_media_in(&previous), Rational::new(0, 1));
+	assert_eq!(clip_media_in(&next), Rational::new(0, 1));
 }
 
 /// `TrackSlideCommand` removes the out adjacent when the movement exactly
-/// consumes it; undo re-attaches it after the moving block.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// the swapped setters leave the slid clip in place and grow `in_gap`'s in
-/// leftward (a negative timeline in-point) instead of resizing it on the
-/// slide's trailing side; the semantic fix must rewrite this geometry.
+/// consumes it; undo re-attaches it after the moving block. The in adjacent
+/// grows at its out edge (in anchored) while the out adjacent disappears.
 #[test]
 fn track_slide_removes_out_adjacent_at_boundary() {
 	let project = make_project();
@@ -897,9 +894,7 @@ fn track_slide_removes_out_adjacent_at_boundary() {
 	assert_eq!(track_block_count(&track), 2);
 	assert!(block_track(&out_gap).is_none());
 	assert!(!node_in_graph(&project, &out_gap));
-	// KNOWN-SWAP: the gap grew leftward past zero because the slide did not
-	// move the clip (§3.1/§9).
-	assert_eq!(span_of(&in_gap), Some((Rational::new(-20, 1), Rational::new(20, 1))));
+	assert_eq!(span_of(&in_gap), Some((Rational::new(0, 1), Rational::new(40, 1))));
 
 	cmd.undo();
 	assert_eq!(track_block_count(&track), 3);
@@ -910,12 +905,8 @@ fn track_slide_removes_out_adjacent_at_boundary() {
 }
 
 /// `TrackSlideCommand` removes the in adjacent when a leftward movement
-/// exactly consumes it; undo re-attaches it before the moving block.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// the swapped setters leave the slid clip in place and grow `out_gap`'s out
-/// rightward instead of resizing it on the slide's leading side; the
-/// semantic fix must rewrite this geometry.
+/// exactly consumes it; undo re-attaches it before the moving block. The
+/// out adjacent grows at its in edge (out anchored) as the clip slides left.
 #[test]
 fn track_slide_removes_in_adjacent_at_boundary() {
 	let project = make_project();
@@ -937,9 +928,7 @@ fn track_slide_removes_in_adjacent_at_boundary() {
 	assert_eq!(track_block_count(&track), 2);
 	assert!(block_track(&in_gap).is_none());
 	assert!(!node_in_graph(&project, &in_gap));
-	// KNOWN-SWAP: the gap grew rightward because the slide did not move the
-	// clip (§3.1/§9).
-	assert_eq!(span_of(&out_gap), Some((Rational::new(70, 1), Rational::new(110, 1))));
+	assert_eq!(span_of(&out_gap), Some((Rational::new(50, 1), Rational::new(90, 1))));
 
 	cmd.undo();
 	assert_eq!(track_block_count(&track), 3);
@@ -1230,15 +1219,9 @@ fn block_split_preserving_links_noop_time() {
 // ---------------------------------------------------------------------------
 
 /// `BlockResizeWithMediaInCommand` resizes keeping the timeline in-point
-/// fixed (C++ `ClipBlock::set_length_and_media_in` adjusts `media_in` so the
-/// media out stays put); undo restores the original length.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// today neither setter adjusts `media_in`, so the media
-/// out is silently shortened with the block (media_in stays 0 here). The
-/// assertion below pins that current state so the semantic fix must change
-/// it deliberately (the fixed behavior yields `media_in = 20` for this
-/// resize, keeping `media_out = 50`).
+/// fixed while `media_in` follows the length change, so the media content
+/// end stays anchored (C++ `ClipBlock::set_length_and_media_in`); undo
+/// restores the original length and media window.
 #[test]
 fn block_resize_with_media_in_round_trip() {
 	let project = make_project();
@@ -1249,7 +1232,11 @@ fn block_resize_with_media_in_round_trip() {
 	let mut cmd = BlockResizeWithMediaInCommand::new(clip.clone(), Rational::new(30, 1));
 	cmd.redo();
 	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(30, 1))));
-	assert_eq!(clip_media_in(&clip), Rational::new(0, 1));
+	assert_eq!(
+		clip_media_in(&clip),
+		Rational::new(20, 1),
+		"media_in advances by the trimmed 20 frames (media_out stays at 50)"
+	);
 	cmd.undo();
 	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(50, 1))));
 	assert_eq!(clip_media_in(&clip), Rational::new(0, 1));
@@ -1302,12 +1289,10 @@ fn block_enable_disable_round_trip() {
 }
 
 /// `TrackListInsertGaps` extends an existing gap crossed by the insertion
-/// point instead of adding a second one; undo restores its length.
-///
-/// KNOWN-SWAP (§3.1/§9 of `docs/zh/plans/test-coverage-90-80-review.md`):
-/// the gap grows leftwards across the insertion point
-/// and overlaps the preceding block; the fixed `_media_out`/`_media_in`
-/// semantics must re-derive this geometry.
+/// point instead of adding a second one; undo restores its length. The
+/// extension is in-anchored (the insertion pushes the following content
+/// rightward; the C++ derives that shift from the track layout, while this
+/// caller-facing command leaves it to whoever places the followers).
 #[test]
 fn track_list_insert_gaps_extends_existing_gap() {
 	let project = make_project();
@@ -1321,9 +1306,9 @@ fn track_list_insert_gaps_extends_existing_gap() {
 		TrackListInsertGaps::new(list, Rational::new(75, 1), Rational::new(20, 1));
 	cmd.prepare();
 	cmd.redo();
-	// The gap keeps its out point and grows leftward by the gap length.
+	// The gap keeps its in point and grows rightward by the gap length.
 	assert_eq!(track_block_count(&track), 3);
-	assert_eq!(span_of(&gap), Some((Rational::new(30, 1), Rational::new(100, 1))));
+	assert_eq!(span_of(&gap), Some((Rational::new(50, 1), Rational::new(120, 1))));
 
 	cmd.undo();
 	assert_eq!(track_block_count(&track), 3);
@@ -1603,8 +1588,8 @@ fn boxed_prepared_commands_round_trip() {
 		cmd.prepare();
 		let mut boxed = cmd.to_command();
 		boxed.redo_now();
-		assert_eq!(span_of(&previous), Some((Rational::new(-20, 1), Rational::new(50, 1))));
-		assert_eq!(span_of(&next), Some((Rational::new(100, 1), Rational::new(130, 1))));
+		assert_eq!(span_of(&previous), Some((Rational::new(0, 1), Rational::new(70, 1))));
+		assert_eq!(span_of(&next), Some((Rational::new(120, 1), Rational::new(150, 1))));
 		boxed.undo_now();
 		assert_eq!(span_of(&previous), Some((Rational::new(0, 1), Rational::new(50, 1))));
 		assert_eq!(span_of(&next), Some((Rational::new(100, 1), Rational::new(150, 1))));

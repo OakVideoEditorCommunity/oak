@@ -46,16 +46,27 @@ fn block_core_ranges() {
 	core.set_out(Rational::new(9, 1));
 	assert_eq!(core.length(), Rational::new(4, 1));
 
-	// media_out anchored: in shifts so out stays.
+	// `set_length_and_media_out`: the in point (and the media in point)
+	// stays, the out point follows the length.
 	core.media_in = Rational::new(2, 1);
 	core.set_length_and_media_out(Rational::new(3, 1));
-	assert_eq!(core.out(), Rational::new(9, 1), "out stays put");
-	assert_eq!(core.length(), Rational::new(3, 1));
+	assert_eq!(core.in_(), Rational::new(5, 1), "in stays put");
+	assert_eq!(core.out(), Rational::new(8, 1), "out follows the length");
+	assert_eq!(core.media_in, Rational::new(2, 1), "media in untouched");
 
-	// media_in anchored: in stays, out shifts.
+	// `set_length_and_media_in`: the in point stays while the media in
+	// moves with the length (the media out is what stays anchored).
 	core.set_length_and_media_in(Rational::new(4, 1));
-	assert_eq!(core.in_(), Rational::new(6, 1), "in stays put");
+	assert_eq!(core.in_(), Rational::new(5, 1), "in stays put");
 	assert_eq!(core.length(), Rational::new(4, 1));
+	assert_eq!(core.media_in, Rational::new(1, 1), "media in follows the length");
+
+	// `set_length_keeping_out`: the out point (and the media content end)
+	// stays, the in point shifts.
+	core.set_length_keeping_out(Rational::new(2, 1));
+	assert_eq!(core.out(), Rational::new(9, 1), "out stays put");
+	assert_eq!(core.in_(), Rational::new(7, 1), "in shifts");
+	assert_eq!(core.media_in, Rational::new(3, 1), "media in follows the in point");
 }
 
 /// block.rs: behavior constructors + node inputs.

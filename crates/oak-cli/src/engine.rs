@@ -411,14 +411,14 @@ pub fn place_footage_clip(
 	};
 
 	// The clip block, positioned by media-in + length (the facade's
-	// `oaknode_clip_set_media_in` + `oaknode_block_set_length_and_media_in`).
+	// `oaknode_clip_set_media_in` + `oaknode_block_set_length_and_media_out`).
 	let clip_id = {
 		let mut guard = lock(project);
 		let (core, behavior) = block::clip_create();
 		let id = guard.graph.add_node(core, behavior);
 		if let Some(c) = clip_behavior_mut(&mut guard.graph, id) {
 			c.core.media_in = media_r;
-			c.core.set_length_and_media_in(length);
+			c.core.set_length_and_media_out(length);
 		}
 		id
 	};

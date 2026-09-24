@@ -148,6 +148,10 @@ disturbing anything else"）。附带缺陷：`media_in := range.in_()` 把媒�
 统一裁决 block.rs:93-107 的语义互换，届时上述期望值按 graphops NOTE 的
 意图 "deliberately" 改写。
 
+**裁决（2026-09-24，已修复）**：准备项落地后按 §9 的三原语方案完成语义
+修复，全部 KNOWN-SWAP 期望已按正确几何改写，并补上 `media_in` 与
+"缺口后的块不受影响"回归断言（详见 §9 §3.1）。
+
 ### 3.2 🔴 `oak-task/tests/render_test.rs:932-951`：全批次唯一"永不失败"的测试 [实证]
 
 `private_dispatcher_renders_frames_and_audio_through_workers` 对两次真实
@@ -328,10 +332,10 @@ M4 的平台/真机 job。
 
 ## 7. 建议行动（按优先级）
 
-1. **裁决 `block.rs:93-107` setter 互换**（产品缺陷，§3.1）：修复时按
-   graphops NOTE 的意图 "deliberately" 改写约 12 个期望值；先给
-   `undocommands_test.rs` 的无标注固化处补偏差 NOTE、给全文件补
-   media_in 断言维度、给 `RippleInfo` 加公开构造器（M5）。
+1. ✅ **裁决 `block.rs:93-107` setter 互换**（产品缺陷，§3.1）：2026-09-24
+   按 §9 的三原语方案修复，约 12 个期望值按 graphops NOTE 的意图
+   "deliberately" 改写；`RippleInfo` 公开构造器与 media_in 断言维度已先行
+   落地（M5）。
 2. **消灭"双向接受"**（§3.2）：`render_test.rs:932` 的 Err 分支按错误
    内容分流，产品性错误必须失败。
 3. **修回放验收测试的跳过判别**（§3.3）：source-window 补槽位检查；
@@ -357,10 +361,10 @@ M4 的平台/真机 job。
 
 ## 9. 处理记录（2026-09-22）
 
-本报告的高/中危与 §5 条目已按下列状态处理；仅 §3.1 的语义裁决按报告
-建议延后（准备项已落地，修复清单已细化）。
+本报告的高/中危与 §5 条目已按下列状态处理；§3.1 的语义裁决首先按报告
+建议延后（准备项先行落地），随后于 2026-09-24 完成修复。
 
-### §3.1（准备项已落地，语义裁决延后）
+### §3.1 ✅（2026-09-24 裁决并修复）
 
 **已用仓库内 C++ 上游源码核准语义**（此前报告 §8 的局限已解除）：
 
@@ -387,10 +391,38 @@ M4 的平台/真机 job。
 | `BlockTrimCommand`(TrimOut) | in 固定、out 移动 | 无 |
 
 另有 `TrackSlide`、`TrackListInsertGaps`、`TrackListRippleToolCommand`、multicam 等
-调用点与 undosplit/undoripple/undogeneral 的补偿性选边需要一并裁决；应作为独立
-PR 处理（先按 §7 第 7 条把 M5 与覆盖率测试分开提交）。
+调用点与 undosplit/undoripple/undogeneral 的补偿性选边需要一并裁决（2026-09-24
+已随修复落地，见下；`TrackSlide`/`TrackListInsertGaps` 的“调用方摆放/ripple”
+契约同时记入模块文档）。
 
-**本批已落地**：
+**修复落地（2026-09-24）**。存储 range 模型定为三个原语
+（`crates/oak-node/src/block.rs`），各调用点按上表逐点选择：
+
+- `set_length_and_media_out`：**in 固定、out 移动，media 不动**
+  （Resize / TrimOut / 缺口向右生长）；
+- `set_length_and_media_in`：**in 固定、out 移动，`media_in += old−new`**
+  （ResizeWithMediaIn、splice 的右半、ripple TrimIn）；
+- 新增 `set_length_keeping_out`：**out 固定、in 移动，`media_in += old−new`**
+  （TrimIn 本体与 out 邻块、滑块右侧邻块、ripple trim_in）。
+
+关键点：
+
+- `TrackReplaceBlockWithGapCommand` 的“仅后随缺口”分支改为 out 锚定：
+  原实现把缺口向右生长，会吞掉缺口之后的块——这正是“拖动一个素材影响到
+  其他无关素材”的实证缺陷。回归断言已补（`domain_test`）。
+- `undoripple` 的 trim_out 改为 in 锚定（不再误写 media_in），splice 与
+  trim_in 现在同步推进 `media_in`（内容损坏修复）。
+- `undosplit` 显式写两半的 range 与 media：第二半从切点继续，不再依赖
+  `range.in_()` 的坐标空间巧合。
+- `TrackSlideCommand` 保持“调用方摆放滑动块，命令只处理邻块”的存储模型
+  契约（文档已注明）；`TrackListInsertGaps`/`timeline_ripple_delete_gaps`
+  的后续块 ripple 仍由调用方负责（C++ 布局的显式替代，未在本次范围）。
+- 测试：`domain_test`、`undocommands_test` 的全部 KNOWN-SWAP 期望按上表
+  “故意”改写（roll 真正移动接缝、slide 无负入点、insert-gaps 向右生长、
+  ResizeWithMediaIn `media_in=20`），`graphops` 内联 roll 期望同步改写；
+  `phase2_units_test` 按新语义修正并补 `set_length_keeping_out` 断言。
+
+**本批已落地（准备项）**：
 
 - `RippleInfo::new(block, append_gap)` + `block()`/`append_gap()` 访问器；
   `undocommands_test.rs` 新增 2 个真实 info 测试（resize 往返、append_gap

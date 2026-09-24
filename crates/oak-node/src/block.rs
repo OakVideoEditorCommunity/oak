@@ -90,20 +90,35 @@ impl BlockCore {
 		self.range = TimeRange::new(self.in_(), out);
 	}
 
-	/// Set the length, keeping the media out anchored (C++
-	/// `Block::set_length_and_media_out`): the timeline in-point shifts
-	/// so the out-point stays put, and the media in follows it.
+	/// Set the length, keeping the timeline in-point and the media in-point
+	/// anchored (C++ `Block::set_length_and_media_out`): the out-point
+	/// shifts (and the media out follows it). The stored-range model has no
+	/// track layout to derive the in-point from, so the caller arranges the
+	/// neighbouring blocks explicitly when a different anchor is wanted.
 	pub fn set_length_and_media_out(&mut self, length: Rational) {
-		let out = self.in_() + self.length();
-		self.range = TimeRange::new(out - length, out);
-		self.media_in = self.range.in_();
+		self.range = TimeRange::new(self.in_(), self.in_() + length);
 	}
 
-	/// Set the length, keeping the media in anchored (C++
-	/// `Block::set_length_and_media_in`): the in-point stays, the
-	/// out-point shifts.
+	/// Set the length, keeping the timeline in-point and the MEDIA OUT
+	/// anchored (C++ `Block::set_length_and_media_in`): the media in-point
+	/// moves by `old_length - length` so the media content end stays put
+	/// while the timeline out-point follows the length.
 	pub fn set_length_and_media_in(&mut self, length: Rational) {
+		let delta = self.length() - length;
 		self.range = TimeRange::new(self.in_(), self.in_() + length);
+		self.media_in = self.media_in + delta;
+	}
+
+	/// Set the length, keeping the timeline OUT-point and the media content
+	/// between the two ends anchored: the in-point shifts by the length
+	/// delta and the media in-point follows it, so the media out stays put
+	/// too (the stored-range model's net for a head trim, where the C++
+	/// derives the new in-point from the resized previous block).
+	pub fn set_length_keeping_out(&mut self, length: Rational) {
+		let delta = self.length() - length;
+		let out = self.out();
+		self.range = TimeRange::new(out - length, out);
+		self.media_in = self.media_in + delta;
 	}
 
 	/// Media out (in + length; C++ `Block::media_out`).

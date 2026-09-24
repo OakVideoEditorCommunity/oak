@@ -35,9 +35,9 @@ use oak_node::id::NodeId;
 use oak_undo::undocommand::UndoCommand;
 
 use crate::util::{
-	block_in, block_length, block_out, block_set_length_and_media_in,
-	block_set_length_and_media_out, block_track, track_insert_block_after,
-	track_ripple_remove_block, GraphBlockRange, NodeRef,
+	block_in, block_length, block_out, block_set_length_and_media_out, block_set_range, block_track,
+	clip_media_in, clip_set_media_in, track_insert_block_after, track_ripple_remove_block,
+	GraphBlockRange, NodeRef,
 };
 
 /// `BlockSplitCommand` — split one block at a point
@@ -177,10 +177,11 @@ impl BlockSplitCommand {
 	/// second half, and insert it after `block`.
 	///
 	/// The split keeps the ORIGINAL block anchored at its in-point (the
-	/// C++ `set_length_and_media_in` on the original) and anchors the
-	/// cloned `new_block` at its out-point (the C++
-	/// `set_length_and_media_out` on the copy — the copy carried the
-	/// original span, so the out point is preserved exactly).
+	/// C++ `set_length_and_media_out` on the original) and anchors the
+	/// cloned `new_block` between the split point and the original out
+	/// point (the C++ `set_length_and_media_in` on the copy — the copy
+	/// carried the original span, so the out point is preserved exactly),
+	/// with its media window continuing where the first half stops.
 	pub fn redo(&mut self) {
 		// Create the second half if redo is invoked without a preceding
 		// prepare() (the oakundo command path may call redo directly).
@@ -199,14 +200,19 @@ impl BlockSplitCommand {
 
 		let first_half_length = self.point - block_in;
 		let second_half_length = block_out - self.point;
+		// The second half continues the media exactly where the first half
+		// stops (C++ `ClipBlock::set_length_and_media_in` on the copy).
+		let media_in = clip_media_in(&self.block);
 
 		if let Some(new_block) = &self.new_block {
-			// In-anchored length for the first half keeps the original's in
-			// point (the C++ `set_length_and_media_in`); the out-anchored
-			// length for the second half keeps the copy's out point (the
-			// C++ `set_length_and_media_out`).
-			block_set_length_and_media_in(&self.block, first_half_length);
-			block_set_length_and_media_out(new_block, second_half_length);
+			// First half: the original's in point stays and its out lands on
+			// the split point (in-anchored, media unchanged).
+			block_set_length_and_media_out(&self.block, first_half_length);
+			// Second half: the split point up to the original out point. The
+			// stored-range model has no track layout to derive these from, so
+			// both ends are written explicitly along with the media window.
+			block_set_range(new_block, oak_core::TimeRange::new(self.point, self.point + second_half_length));
+			clip_set_media_in(new_block, media_in + first_half_length);
 
 			if let Some(track) = block_track(&self.block) {
 				track_insert_block_after(&track, new_block, Some(&self.block));
@@ -223,12 +229,10 @@ impl BlockSplitCommand {
 	/// and detach the whole copied subgraph from the project graph.
 	pub fn undo(&mut self) {
 		if let Some(track) = block_track(&self.block) {
-			// The redo shrank the original from its in point (it became the
-			// first half, in-anchored), so the restore grows it in-anchored
-			// too — the module stores the span on the block (the C++
-			// `set_length_and_media_out` derives positions from the track
-			// order and does not apply here).
-			block_set_length_and_media_in(&self.block, self.old_length);
+			// The redo shrank the original from its out point (it became the
+			// first half, in-anchored), so the restore grows it at the out
+			// again; the media window was never touched.
+			block_set_length_and_media_out(&self.block, self.old_length);
 			if let Some(new_block) = &self.new_block {
 				track_ripple_remove_block(&track, new_block);
 			}

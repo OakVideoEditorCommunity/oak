@@ -44,8 +44,8 @@ use oak_node::track::{TrackBehavior, TrackListBehavior, TrackType};
 use oak_node::value::VideoParams;
 use oak_timeline::handle::CHandle;
 use oak_timeline::util::{
-	block_in, block_length, block_out, block_set_in, block_set_length_and_media_in,
-	block_set_length_and_media_out, clip_set_media_in, NodeRef,
+	block_in, block_length, block_out, block_set_in, block_set_length_and_media_out,
+	block_set_length_keeping_out, clip_set_media_in, NodeRef,
 };
 
 use oak_storage::backend::StorageBackend;
@@ -1565,7 +1565,8 @@ fn footage_display_name(g: &Graph, footage: NodeId) -> String {
 /// Create a footage clip block in `g`: the shared span/state setup plus
 /// the per-clip color and footage-name label, both fixed at creation
 /// time (C++ `oaknode_clip_set_media_in` +
-/// `oaknode_block_set_length_and_media_in`).
+/// `oaknode_block_set_length_and_media_out`; the place command writes the
+/// in point).
 fn create_footage_clip(
 	g: &mut Graph,
 	footage: NodeId,
@@ -1584,7 +1585,7 @@ fn create_footage_clip(
 			.and_then(|a| a.downcast_mut::<ClipBlockBehavior>())
 		{
 			c.core.media_in = media_in;
-			c.core.set_length_and_media_in(length);
+			c.core.set_length_and_media_out(length);
 		}
 	}
 	id
@@ -2363,7 +2364,7 @@ pub fn place_generator_clip(
 			.as_any_mut()
 			.and_then(|a| a.downcast_mut::<ClipBlockBehavior>())
 		{
-			c.core.set_length_and_media_in(length);
+			c.core.set_length_and_media_out(length);
 		}
 	}
 
@@ -2545,11 +2546,6 @@ pub fn split_clips_preserving_links(
 	)
 }
 
-/// Trim `clip`'s timeline range to `[new_in_ts, new_out_ts)` (undoable
-/// "Trim Clip"; the facade's `oakengine_clip_trim` semantics: one end at
-/// a time, trim-in anchors the OUT, trim-out anchors the IN — the
-/// module's own `BlockTrimCommand` applies its length setters with
-/// inverted semantics, so the closures carry the correct mapping).
 /// An undoable length change for `clip` (trim semantics: `out_anchored`
 /// keeps the out point — trim-in — and shifts the in; otherwise the in
 /// stays — trim-out). Shared by [`trim_clip`] and [`ripple_trim_clip`];
@@ -2567,9 +2563,9 @@ pub(crate) fn trim_command(
 			let mut guard = lock(&p1);
 			with_block_core_mut(&mut guard.graph, clip, |core| {
 				if out_anchored {
-					core.set_length_and_media_out(new);
+					core.set_length_keeping_out(new);
 				} else {
-					core.set_length_and_media_in(new);
+					core.set_length_and_media_out(new);
 				}
 			});
 		},
@@ -2577,9 +2573,9 @@ pub(crate) fn trim_command(
 			let mut guard = lock(&p2);
 			with_block_core_mut(&mut guard.graph, clip, |core| {
 				if out_anchored {
-					core.set_length_and_media_out(old);
+					core.set_length_keeping_out(old);
 				} else {
-					core.set_length_and_media_in(old);
+					core.set_length_and_media_out(old);
 				}
 			});
 		},
@@ -2588,9 +2584,9 @@ pub(crate) fn trim_command(
 
 /// Trim `clip`'s timeline range to `[new_in_ts, new_out_ts)` (undoable
 /// "Trim Clip"; the facade's `oakengine_clip_trim` semantics: one end at
-/// a time, trim-in anchors the OUT, trim-out anchors the IN — the
-/// module's own `BlockTrimCommand` applies its length setters with
-/// inverted semantics, so the closures carry the correct mapping).
+/// a time, trim-in anchors the OUT (its in moves and the media window
+/// follows), trim-out anchors the IN (its out moves, media untouched) —
+/// the same net anchors as the module's own `BlockTrimCommand`).
 pub fn trim_clip(
 	p: &ProjectRef,
 	clip: NodeId,
@@ -2811,22 +2807,22 @@ pub fn slide_clip(p: &ProjectRef, clip: NodeId, new_start: i64) -> Result<(), St
 		if new > block_in(&l_ref) {
 			let (r1, r2) = (l_ref.clone(), l_ref);
 			children.push(oak_undo::undocommand::UndoCommand::from_closures(
-				move || block_set_length_and_media_in(&r1, l_len + delta),
-				move || block_set_length_and_media_in(&r2, l_len),
+				move || block_set_length_and_media_out(&r1, l_len + delta),
+				move || block_set_length_and_media_out(&r2, l_len),
 			));
 		}
 	}
-	// Right neighbor: its in follows the clip's new out (out anchored,
-	// media untouched); skipped when it would collapse to a negative
-	// length.
+	// Right neighbor: its in follows the clip's new out while its content
+	// end stays anchored (out anchored; the media in advances over the
+	// consumed head); skipped when it would collapse to a negative length.
 	if let Some(r) = right {
 		let r_ref = node_ref(p, r);
 		let r_len = block_length(&r_ref);
 		if new + clip_len < block_out(&r_ref) {
 			let (r1, r2) = (r_ref.clone(), r_ref);
 			children.push(oak_undo::undocommand::UndoCommand::from_closures(
-				move || block_set_length_and_media_out(&r1, r_len - delta),
-				move || block_set_length_and_media_out(&r2, r_len),
+				move || block_set_length_keeping_out(&r1, r_len - delta),
+				move || block_set_length_keeping_out(&r2, r_len),
 			));
 		}
 	}
@@ -6053,21 +6049,28 @@ mod gap_coverage_tests {
 		assert!(roll_edit(&project, track, a, b, 10).is_ok(), "unmoved boundary");
 		roll_edit(&project, track, a, b, 12).expect("roll");
 		{
-			// NOTE: the module's TrimOut roll mapping anchors the left clip's
-			// OUT (its IN moves) and the follower's IN (its OUT moves); the
-			// shared seam itself does not move. Assert the actual outcome so
-			// a future semantic fix has to update this expectation
-			// deliberately (review §3.1 of test-coverage-90-80-review.md).
+			// The roll moves the shared seam to 12: the left clip keeps its
+			// in point and grows at its out (media window untouched), the
+			// follower keeps its out point and its head is consumed (its
+			// media in advances by the rolled amount).
 			let g = lock(&project);
 			assert_eq!(
 				clip_range(&g.graph, a).unwrap(),
 				(
-					ts_to_rational(-2, tb),
-					ts_to_rational(10, tb),
-					ts_to_rational(-2, tb)
+					Rational::new(0, 1),
+					ts_to_rational(12, tb),
+					Rational::new(0, 1)
 				)
 			);
-			assert_eq!(clip_range(&g.graph, b).unwrap().1, ts_to_rational(18, tb));
+			assert_eq!(
+				clip_range(&g.graph, b).unwrap(),
+				(
+					ts_to_rational(12, tb),
+					ts_to_rational(20, tb),
+					ts_to_rational(2, tb)
+				),
+				"the follower's head loses the 2 rolled frames from its media"
+			);
 		}
 		oak_undo::global::undo().unwrap();
 

@@ -774,7 +774,8 @@ pub fn block_media_in(project: &ProjectRef, block: NodeId) -> Rational {
 		.unwrap_or_else(|| Rational::new(0, 1))
 }
 
-/// Set the block's length keeping the media out anchored
+/// Set the block's length keeping the in point and the media in point
+/// anchored — the out point (and the media out) shift
 /// (`oaknode_block_set_length_and_media_out`).
 pub fn block_set_length_and_media_out(project: &ProjectRef, block: NodeId, n: i64, d: i64) {
 	let mut guard = lock_project(project);

@@ -254,7 +254,10 @@ fn split_command_redo_undo() {
 }
 
 /// `TrackReplaceBlockWithGapCommand` merges a clip into a following gap on
-/// redo and restores both blocks on undo.
+/// redo and restores both blocks on undo. The gap grows LEFTWARD over the
+/// clip's span (out anchored): growing it at the out instead would swallow
+/// the clip that follows the gap — the "dragging one clip moved unrelated
+/// clips" regression.
 #[test]
 fn replace_block_with_gap_round_trip() {
 	let project = make_project();
@@ -262,19 +265,23 @@ fn replace_block_with_gap_round_trip() {
 	let track = TimelineAddTrackCommand::run_immediately(list);
 	let clip = add_clip(&track, Rational::new(0, 1), Rational::new(50, 1));
 	let gap = add_gap(&track, Rational::new(50, 1), Rational::new(100, 1));
+	let tail = add_clip(&track, Rational::new(100, 1), Rational::new(150, 1));
 
 	let mut cmd = TrackReplaceBlockWithGapCommand::new(track.clone(), clip.clone(), false);
 	cmd.redo();
-	// The clip is gone; the gap absorbed its length (in-anchored at 50).
-	assert_eq!(track_block_count(&track), 1);
+	// The clip is gone; the FOLLOWING gap grew leftward over its span.
+	assert_eq!(track_block_count(&track), 2);
 	let remaining = track_block_at(&track, 0).unwrap();
 	assert_eq!(remaining.id, gap.id);
-	assert_eq!(block_in(&remaining), Rational::new(50, 1));
+	assert_eq!(block_in(&remaining), Rational::new(0, 1));
 	assert_eq!(block_length(&remaining), Rational::new(100, 1));
 	assert!(block_track(&clip).is_none());
+	assert_eq!(track_block_at(&track, 1).unwrap().id, tail.id);
+	assert_eq!(block_in(&tail), Rational::new(100, 1));
+	assert_eq!(block_out(&tail), Rational::new(150, 1), "the clip after the gap is untouched");
 
 	cmd.undo();
-	assert_eq!(track_block_count(&track), 2);
+	assert_eq!(track_block_count(&track), 3);
 	let first = track_block_at(&track, 0).unwrap();
 	assert_eq!(first.id, clip.id);
 	assert_eq!(block_in(&first), Rational::new(0, 1));
@@ -283,6 +290,9 @@ fn replace_block_with_gap_round_trip() {
 	assert_eq!(second.id, gap.id);
 	assert_eq!(block_in(&second), Rational::new(50, 1));
 	assert_eq!(block_length(&second), Rational::new(50, 1));
+	assert_eq!(track_block_at(&track, 2).unwrap().id, tail.id);
+	assert_eq!(block_in(&tail), Rational::new(100, 1));
+	assert_eq!(block_out(&tail), Rational::new(150, 1));
 }
 
 /// `TrackReplaceBlockWithGapCommand` creates its own gap when no
@@ -358,7 +368,7 @@ fn ripple_remove_area_round_trip() {
 	);
 }
 
-/// `BlockResizeCommand` changes a block's length out-anchored and restores
+/// `BlockResizeCommand` changes a block's length in-anchored and restores
 /// it on undo.
 #[test]
 fn block_resize_round_trip() {
@@ -370,8 +380,9 @@ fn block_resize_round_trip() {
 	let mut cmd = BlockResizeCommand::new(clip.clone(), Rational::new(30, 1));
 	cmd.redo();
 	assert_eq!(block_length(&clip), Rational::new(30, 1));
-	// Out-anchored: the in point shifts so the out stays at 50.
-	assert_eq!(block_out(&clip), Rational::new(50, 1));
+	// In-anchored: the in point stays so the out follows the length.
+	assert_eq!(block_in(&clip), Rational::new(0, 1));
+	assert_eq!(block_out(&clip), Rational::new(30, 1));
 	cmd.undo();
 	assert_eq!(block_length(&clip), Rational::new(50, 1));
 	assert_eq!(block_in(&clip), Rational::new(0, 1));

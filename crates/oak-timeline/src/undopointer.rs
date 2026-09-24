@@ -34,7 +34,7 @@ use crate::undocommon::{
 use crate::util::{
 	block_add_to_graph, block_gap_create, block_in, block_kind, block_length, block_next,
 	block_out, block_previous, block_remove_from_graph, block_set_in,
-	block_set_length_and_media_in, block_set_length_and_media_out, block_track,
+	block_set_length_and_media_out, block_set_length_keeping_out, block_track,
 	track_append_block, track_insert_block_after, track_insert_block_before, track_length,
 	track_ripple_remove_block, tracklist_track_at, tracklist_track_count, BlockKind, NodeRef,
 };
@@ -159,18 +159,20 @@ impl BlockTrimCommand {
 
 			if self.we_created_adjacent_ {
 				// We shortened but don't have a viable adjacent to lengthen, so create
-				// one filling exactly the space the trim freed: for a trim-in it
-				// spans [in - diff, in), for a trim-out [out, out + diff). The
-				// module stores positions on the block, so both the in point and
-				// the length are written explicitly.
+				// one filling exactly the space the trim freed. The module stores
+				// positions on the block (Olive derives the inserted gap's position
+				// from the track order), so the in point is the freed space's start
+				// and the length closes the gap up to the block's new edge:
+				// trim-in frees [in, in + diff) (the gap is inserted before the
+				// block), trim-out frees [out - diff, out) (inserted after it).
 				self.adjacent_ = Some(block_gap_create(&self.track.project));
 				if let Some(gap) = &self.adjacent_ {
 					if self.mode == MovementMode::TrimIn {
-						block_set_in(gap, block_in(&self.block) - self.trim_diff_);
+						block_set_in(gap, block_in(&self.block));
 					} else {
-						block_set_in(gap, block_out(&self.block));
+						block_set_in(gap, block_out(&self.block) - self.trim_diff_);
 					}
-					block_set_length_and_media_in(gap, self.trim_diff_);
+					block_set_length_and_media_out(gap, self.trim_diff_);
 				}
 			} else if let Some(adjacent) = &self.adjacent_ {
 				// Determine if we're removing the adjacent
@@ -187,8 +189,10 @@ impl BlockTrimCommand {
 		}
 
 		if self.mode == MovementMode::TrimIn {
-			block_set_length_and_media_in(&self.block, self.new_length);
+			// Trim-in keeps the out fixed and moves the in (media follows).
+			block_set_length_keeping_out(&self.block, self.new_length);
 		} else {
+			// Trim-out keeps the in fixed and moves the out (media untouched).
 			block_set_length_and_media_out(&self.block, self.new_length);
 		}
 
@@ -221,9 +225,13 @@ impl BlockTrimCommand {
 				let adjacent_length = block_length(adjacent) + self.trim_diff_;
 
 				if self.mode == MovementMode::TrimIn {
+					// The previous neighbour grows/shrinks at its out edge
+					// to meet the trimmed in point.
 					block_set_length_and_media_out(adjacent, adjacent_length);
 				} else {
-					block_set_length_and_media_in(adjacent, adjacent_length);
+					// The next neighbour grows/shrinks at its in edge to
+					// meet the trimmed out point (its content end anchored).
+					block_set_length_keeping_out(adjacent, adjacent_length);
 				}
 			}
 		}
@@ -264,14 +272,14 @@ impl BlockTrimCommand {
 					if self.mode == MovementMode::TrimIn {
 						block_set_length_and_media_out(adjacent, adjacent_length);
 					} else {
-						block_set_length_and_media_in(adjacent, adjacent_length);
+						block_set_length_keeping_out(adjacent, adjacent_length);
 					}
 				}
 			}
 		}
 
 		if self.mode == MovementMode::TrimIn {
-			block_set_length_and_media_in(&self.block, self.old_length_);
+			block_set_length_keeping_out(&self.block, self.old_length_);
 		} else {
 			block_set_length_and_media_out(&self.block, self.old_length_);
 		}
@@ -365,7 +373,7 @@ impl TrackSlideCommand {
 				// of the first block. Positions are stored on the block in
 				// the module model, so both ends are written explicitly.
 				block_set_in(gap, block_in(&self.blocks[0]) + self.movement);
-				block_set_length_and_media_in(gap, Rational::new(0, 1) - self.movement);
+				block_set_length_and_media_out(gap, Rational::new(0, 1) - self.movement);
 			}
 			self.we_created_in_adjacent_ = true;
 		} else {
@@ -381,7 +389,7 @@ impl TrackSlideCommand {
 				// (movement > 0): the gap fills [last_out, last_out + movement)
 				// after the last block.
 				block_set_in(gap, block_out(self.blocks.last().expect("non-empty blocks")));
-				block_set_length_and_media_in(gap, self.movement);
+				block_set_length_and_media_out(gap, self.movement);
 			}
 			self.we_created_out_adjacent_ = true;
 		} else {
@@ -390,6 +398,12 @@ impl TrackSlideCommand {
 	}
 
 	/// `redo`: apply the slide.
+	///
+	/// The C++ derives the sliding blocks' new positions from the track
+	/// layout (the resized neighbours shift them implicitly); the
+	/// stored-range model has no layout, so the CALLER positions the
+	/// `blocks` by `movement` before running this command — it only owns
+	/// the adjacent resize/insert/remove half of the slide.
 	pub fn redo(&mut self) {
 		// We will always have an in adjacent if there was a valid slide
 		if self.we_created_in_adjacent_ {
@@ -452,16 +466,15 @@ impl TrackSlideCommand {
 
 				self.we_removed_out_adjacent_ = true;
 			} else {
-				// Simply resize the adjacent
-				block_set_length_and_media_in(
-					adjacent,
-					block_length(adjacent) - self.movement,
-				);
+				// Simply resize the adjacent: its in edge follows the last
+				// sliding block's out, so the content end stays anchored.
+				block_set_length_keeping_out(adjacent, block_length(adjacent) - self.movement);
 			}
 		}
 	}
 
-	/// `undo`: revert the slide.
+	/// `undo`: revert the slide (the caller restores the moved blocks
+	/// alongside this, mirroring how it positioned them for the redo).
 	pub fn undo(&mut self) {
 		if self.we_created_in_adjacent_ {
 			// We created this, so we can remove it now
@@ -508,11 +521,8 @@ impl TrackSlideCommand {
 					Some(self.blocks.last().expect("non-empty blocks")),
 				);
 			} else {
-				// Simply resize the adjacent
-				block_set_length_and_media_in(
-					adjacent,
-					block_length(adjacent) + self.movement,
-				);
+				// Simply resize the adjacent (mirror of the redo).
+				block_set_length_keeping_out(adjacent, block_length(adjacent) + self.movement);
 			}
 		}
 	}
@@ -625,7 +635,7 @@ impl TrackPlaceBlockCommand {
 					self.gap_ = Some(block_gap_create(&self.timeline.project));
 					if let Some(gap) = &self.gap_ {
 						block_set_in(gap, track_length(&track));
-						block_set_length_and_media_in(gap, in_ - track_length(&track));
+						block_set_length_and_media_out(gap, in_ - track_length(&track));
 					}
 				}
 				if let Some(gap) = &self.gap_ {

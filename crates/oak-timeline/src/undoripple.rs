@@ -41,8 +41,8 @@ use crate::undocommon::{
 use crate::util::{
 	block_add_to_graph, block_gap_create, block_in, block_kind, block_length, block_next,
 	block_out, block_previous, block_remove_from_graph, block_set_in,
-	block_set_length_and_media_in, block_set_length_and_media_out, block_track,
-	sequence_all_tracks, sequence_track_list,
+	block_set_length_and_media_in, block_set_length_and_media_out, block_set_length_keeping_out,
+	block_track, sequence_all_tracks, sequence_track_list,
 	track_insert_block_after, track_locked, track_nearest_block_after_or_at,
 	track_nearest_block_before_or_at, track_prepend_block, track_ripple_remove_block,
 	tracklist_track_at, tracklist_track_count, BlockKind, NodeRef,
@@ -335,10 +335,11 @@ impl TrackRippleRemoveAreaCommand {
 			let cmd = self.splice_split_command_.as_mut().unwrap();
 			cmd.redo();
 
-			// Trim the in of the split (the second half produced by the
-			// split keeps the original out point; the in-end trim shifts
-			// its stored in point to the range out — the module equivalent
-			// of the C++ ripple shifting the remainder earlier).
+			// Trim the in of the split: the second half produced by the
+			// split keeps the original out point, so removing the first
+			// `range.length()` of it keeps the timeline in fixed at the
+			// range out and advances the media window past the removed
+			// content (in-anchored, media in moves with the length).
 			if let Some(split) = cmd.new_block() {
 				let new_len =
 					block_length(&split) - (self.range.out() - block_in(&split));
@@ -346,15 +347,15 @@ impl TrackRippleRemoveAreaCommand {
 			}
 		} else {
 			if let Some(t) = &self.trim_out_ {
-				// An out-end trim keeps the in point (in-anchored; the
-				// C++ setter name is kept, but the module's in/out are
-				// stored values, see the splice trim above).
-				block_set_length_and_media_in(&t.block, t.new_length);
+				// An out-end trim keeps the in point and the media window
+				// (in-anchored).
+				block_set_length_and_media_out(&t.block, t.new_length);
 			}
 
 			if let Some(t) = &self.trim_in_ {
-				// An in-end trim keeps the out point (out-anchored).
-				block_set_length_and_media_out(&t.block, t.new_length);
+				// An in-end trim keeps the out point and advances the media
+				// window past the removed head.
+				block_set_length_keeping_out(&t.block, t.new_length);
 			}
 
 			// Perform removals
@@ -389,12 +390,12 @@ impl TrackRippleRemoveAreaCommand {
 		} else {
 			if let Some(t) = &self.trim_out_ {
 				// In-anchored, matching the redo (see above).
-				block_set_length_and_media_in(&t.block, t.old_length);
+				block_set_length_and_media_out(&t.block, t.old_length);
 			}
 
 			if let Some(t) = &self.trim_in_ {
 				// Out-anchored, matching the redo (see above).
-				block_set_length_and_media_out(&t.block, t.old_length);
+				block_set_length_keeping_out(&t.block, t.old_length);
 			}
 
 			// Un-remove any blocks
@@ -699,14 +700,15 @@ impl TrackListRippleToolCommand {
 				if redo {
 					if wd.created_gap.is_none() {
 						let gap = block_gap_create(&track_copy.project);
-						// The gap takes the ripple movement's span ahead of
-						// `b`; positions are stored on the block in the
+						// The gap takes the ripple movement's span at `b`'s
+						// in point; positions are stored on the block in the
 						// module model, so both ends are written explicitly
-						// (approximation: the C++ ripple additionally shifts
-						// the successors, which the stored positions render
-						// as an overlap-free gap right before `b`).
+						// (approximation: the C++ layout additionally shifts
+						// `b` and its successors right by that span — the
+						// stored-range command leaves that shift to the
+						// caller).
 						block_set_in(&gap, block_in(&b));
-						block_set_length_and_media_in(
+						block_set_length_and_media_out(
 							&gap,
 							if self.ripple_movement < Rational::new(0, 1) {
 								rat_neg(self.ripple_movement)

@@ -311,8 +311,8 @@ pub fn block_set_enabled(b: &NodeRef, enabled: bool) {
 	}
 }
 
-/// `block_set_length_and_media_out`: keep the out point anchored (the
-/// in point shifts).
+/// `block_set_length_and_media_out`: keep the in point anchored (the out
+/// point shifts; the media in point does not move).
 pub fn block_set_length_and_media_out(b: &NodeRef, len: Rational) {
 	let mut p = b.lock();
 	if let Some(core) = block_core_of_mut(&mut p, b.id) {
@@ -320,12 +320,23 @@ pub fn block_set_length_and_media_out(b: &NodeRef, len: Rational) {
 	}
 }
 
-/// `block_set_length_and_media_in`: keep the in point anchored (the
-/// out point shifts).
+/// `block_set_length_and_media_in`: keep the in point anchored (the out
+/// point shifts) while the media in point follows the length change, so
+/// the media out stays anchored.
 pub fn block_set_length_and_media_in(b: &NodeRef, len: Rational) {
 	let mut p = b.lock();
 	if let Some(core) = block_core_of_mut(&mut p, b.id) {
 		core.set_length_and_media_in(len);
+	}
+}
+
+/// Keep the OUT point anchored (the in point shifts) and move the media
+/// in point with it: the net of a head trim in the stored-range model
+/// (the C++ derives the shifted in-point from the resized previous block).
+pub fn block_set_length_keeping_out(b: &NodeRef, len: Rational) {
+	let mut p = b.lock();
+	if let Some(core) = block_core_of_mut(&mut p, b.id) {
+		core.set_length_keeping_out(len);
 	}
 }
 
@@ -364,7 +375,8 @@ pub fn block_range(b: &NodeRef) -> Option<oak_core::TimeRange> {
 /// Set the block's stored timeline range (a no-op for a stale/non-block
 /// node). The range is written whole, so the caller can move the in/out
 /// pair together without a media-in side effect (unlike
-/// [`block_set_length_and_media_out`] / [`block_set_length_and_media_in`]).
+/// [`block_set_length_and_media_in`] / [`block_set_length_keeping_out`],
+/// which adjust the media in point with the length).
 pub fn block_set_range(b: &NodeRef, range: oak_core::TimeRange) {
 	let mut p = b.lock();
 	if let Some(core) = block_core_of_mut(&mut p, b.id) {
