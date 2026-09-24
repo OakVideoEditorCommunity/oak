@@ -4737,10 +4737,13 @@ mod tests {
 	#[test]
 	fn find_real_worker_honors_existing_env_override() {
 		let _lock = pool_test_lock();
-		let _env = EnvRestore::set("OAK_WORKER_BIN", "/bin/sh");
+		// The override must name a file that exists on every platform
+		// (`/bin/sh` never does on Windows): the test's own executable.
+		let worker = std::env::current_exe().expect("test executable");
+		let _env = EnvRestore::set("OAK_WORKER_BIN", worker.to_string_lossy().as_ref());
 		assert_eq!(
 			find_real_worker().as_deref(),
-			Some(std::path::Path::new("/bin/sh")),
+			Some(worker.as_path()),
 			"an existing OAK_WORKER_BIN wins over the sibling probe"
 		);
 	}

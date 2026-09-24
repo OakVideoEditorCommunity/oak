@@ -1147,7 +1147,13 @@ mod tests {
 		let mut with_tb = tb_cache();
 		with_tb.validate(TimeRange::new(Rational::new(0, 1), Rational::new(16, 1)));
 		let name = with_tb.frame_filename(Rational::new(15, 1)).expect("cached");
-		assert!(name.ends_with("/450"), "{name}");
+		assert_eq!(
+			std::path::Path::new(&name)
+				.file_name()
+				.and_then(|n| n.to_str()),
+			Some("450"),
+			"{name}"
+		);
 
 		let path = PlaybackCache::frame_cache_path(
 			"/cache",
@@ -1180,7 +1186,13 @@ mod tests {
 		c.set_saving_enabled(false);
 		c.validate(TimeRange::new(Rational::new(0, 1), Rational::new(4, 1)));
 		let name = c.frame_filename(Rational::new(1, 2)).expect("cached");
-		assert!(name.ends_with("/1"), "{name}");
+		assert_eq!(
+			std::path::Path::new(&name)
+				.file_name()
+				.and_then(|n| n.to_str()),
+			Some("1"),
+			"{name}"
+		);
 		assert!(name.contains(c.uuid()), "{name}");
 	}
 
