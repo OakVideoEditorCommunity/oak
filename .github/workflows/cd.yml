@@ -186,7 +186,7 @@ jobs:
         run: |
           dnf install -y \
             gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
-            git curl zip unzip tar python3 patch xz-utils which \
+            git curl zip unzip tar python3 patch xz which \
             pipewire-devel jack-audio-connection-kit-devel \
             alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
             mesa-libGL-devel mesa-vulkan-drivers \
@@ -202,7 +202,7 @@ jobs:
         run: |
           pacman -S --needed --noconfirm \
             base-devel clang cmake pkgconf nasm \
-            git curl zip unzip tar python patch xz-utils which \
+            git curl zip unzip tar python patch xz which \
             pipewire jack2 alsa-lib libpulse libsndfile \
             mesa vulkan-headers vulkan-icd-loader \
             libxkbcommon libxkbcommon-x11 librsvg libdrm \
