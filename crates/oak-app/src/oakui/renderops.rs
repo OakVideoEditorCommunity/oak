@@ -2646,6 +2646,12 @@ mod tests {
 					-1,
 					oak_node::value::NodeValue::Combo(1),
 				);
+				// Diagnostic (the Windows-only switch failure): confirm the
+				// evaluator can see the new selector.
+				println!(
+					"multicam current_in read-back: {:?}",
+					core.standard_value(oak_node::nodes::multicamnode::CURRENT_INPUT, -1)
+				);
 			}
 		}
 		let (r1, b1) = render_rgb(0);

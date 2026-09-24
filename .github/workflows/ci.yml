@@ -501,10 +501,32 @@ jobs:
         run: |
           # Retry once (same policy as the other platforms): worker-pool
           # startup under full-suite parallelism has flaked on Linux. A
-          # real regression fails both passes.
-          if ! cargo test --workspace --locked; then
+          # real regression fails both passes. A hang trips the in-script
+          # watchdog, which samples the test processes (the offending
+          # test's native stack lands in the log) before killing the suite.
+          run_suite() {
+            cargo test --workspace --locked &
+            TEST_PID=$!
+            (
+              sleep 900
+              echo "::warning::macOS test suite exceeded 900s; sampling hung processes"
+              for p in $(pgrep -f 'target/debug/deps/' || true); do
+                echo "===== sample of pid $p ====="
+                sample "$p" 2 10 2>&1 | head -120 || true
+              done
+              pkill -9 -f 'target/debug/deps/' || true
+              pkill -9 -f 'target/debug/oak-worker' || true
+            ) &
+            WATCHDOG_PID=$!
+            wait $TEST_PID
+            rc=$?
+            kill $WATCHDOG_PID 2>/dev/null || true
+            wait $WATCHDOG_PID 2>/dev/null || true
+            return $rc
+          }
+          if ! run_suite; then
             echo "first pass failed; retrying once for worker-pool flakes"
-            cargo test --workspace --locked
+            run_suite
           fi
 
       # A SIGSEGV in a test binary gives no Rust backtrace; Apple's crash
