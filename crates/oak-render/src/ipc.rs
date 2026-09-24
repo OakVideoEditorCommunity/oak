@@ -1405,6 +1405,31 @@ impl SharedMemoryRegion {
 		format!("olive-rw-{owner_pid}-{worker_index}")
 	}
 
+	/// The `shm_open` name for `key`. POSIX names must start with a single
+	/// slash and contain no others. macOS additionally caps them at
+	/// `PSHMNAMLEN` (31 bytes including the slash) and answers
+	/// `ENAMETOOLONG` beyond that, while Linux allows 255 — so longer
+	/// keys are folded into a deterministic short name. Both the owner
+	/// and the worker derive the name from the same key through here, so
+	/// they always agree.
+	#[cfg(unix)]
+	fn shm_name_for_key(key: &str) -> String {
+		const MAX: usize = 31;
+		let raw = format!("/{}", key.replace('/', "_"));
+		if raw.len() <= MAX {
+			return raw;
+		}
+		// FNV-1a 64: stable across processes and releases (unlike
+		// `DefaultHasher`, whose algorithm is not a compatibility
+		// surface).
+		let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+		for byte in raw.as_bytes() {
+			hash ^= u64::from(*byte);
+			hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+		}
+		format!("/oak-{hash:016x}")
+	}
+
 	// -------------------------------------------------------------------
 	// Unix backend (POSIX shm_open/mmap/munmap/shm_unlink)
 	// -------------------------------------------------------------------
@@ -1416,7 +1441,7 @@ impl SharedMemoryRegion {
 	/// segment stays valid — POSIX unlinks only remove the name.
 	#[cfg(unix)]
 	pub fn unlink_key(key: &str) {
-		let shm_name = format!("/{}", key.replace('/', "_"));
+		let shm_name = Self::shm_name_for_key(key);
 		if let Ok(name_c) = std::ffi::CString::new(shm_name) {
 			// SAFETY: a NUL-terminated name; unlink is safe whether or not
 			// the segment exists (ENOENT is ignored by the caller).
@@ -1518,8 +1543,9 @@ impl SharedMemoryRegion {
 		}
 
 		// POSIX shared-memory names must start with a single slash and
-		// contain no others.
-		let shm_name = format!("/{}", key.replace('/', "_"));
+		// contain no others; over-long names are folded (macOS caps POSIX
+		// shm names at 31 bytes).
+		let shm_name = Self::shm_name_for_key(key);
 		let name_c = match std::ffi::CString::new(shm_name.clone()) {
 			Ok(c) => c,
 			Err(_) => {
@@ -2919,6 +2945,39 @@ mod tests {
 	fn region_make_key_format() {
 		assert_eq!(SharedMemoryRegion::make_key(4242, 3), "olive-rw-4242-3");
 		assert_eq!(SharedMemoryRegion::make_key(1, 0), "olive-rw-1-0");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn region_shm_name_folds_long_keys_for_macos() {
+		// macOS rejects POSIX shm names longer than PSHMNAMLEN (31 bytes
+		// including the leading slash) with ENAMETOOLONG; longer keys must
+		// fold to a deterministic short name so an owner and a worker
+		// still meet on the same segment.
+		let long = "oak-procpool-ut-4242-audio-release";
+		let name = SharedMemoryRegion::shm_name_for_key(long);
+		assert!(name.len() <= 31, "folded name too long: {name}");
+		assert!(name.starts_with('/') && !name[1..].contains('/'), "{name}");
+		assert_eq!(
+			name,
+			SharedMemoryRegion::shm_name_for_key(long),
+			"the fold is deterministic"
+		);
+		assert_ne!(
+			name,
+			SharedMemoryRegion::shm_name_for_key("oak-procpool-ut-4242-audio-other"),
+			"different keys keep different names"
+		);
+		// Short keys keep their exact spelling.
+		assert_eq!(
+			SharedMemoryRegion::shm_name_for_key("olive-rw-4242-0"),
+			"/olive-rw-4242-0"
+		);
+		assert_eq!(
+			SharedMemoryRegion::shm_name_for_key("a/b/c"),
+			"/a_b_c",
+			"slashes become underscores before folding"
+		);
 	}
 
 	#[test]
