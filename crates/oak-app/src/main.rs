@@ -16,6 +16,12 @@
 
 //! The `oakapp` binary: opens the Oak main window (see [`oakapp::app`]).
 
+// Windows release builds are GUI applications: without the subsystem
+// attribute the linker marks the executable as a console program and
+// launching Oak opens a console window. Debug builds keep the console
+// (`cargo run` shows logs). The attribute is ignored elsewhere.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 fn main() {
 	oakapp::run();
 }

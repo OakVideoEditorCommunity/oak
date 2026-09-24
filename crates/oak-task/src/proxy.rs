@@ -213,9 +213,10 @@ impl ProxyTask {
 	}
 
 	fn probe_hw_encoder_uncached(ffmpeg_path: &str) -> HwEncoder {
-		let out = Command::new(ffmpeg_path)
-			.args(["-hide_banner", "-encoders"])
-			.output();
+		let mut command = Command::new(ffmpeg_path);
+		command.args(["-hide_banner", "-encoders"]);
+		oak_core::miscutils::hide_console_window(&mut command);
+		let out = command.output();
 		let Ok(out) = out else {
 			return HwEncoder::Software;
 		};
@@ -251,24 +252,25 @@ impl ProxyTask {
 	/// Whether `encoder` can initialize and encode one tiny frame; see the
 	/// caller for why the `-encoders` list is not enough.
 	fn encoder_usable(ffmpeg_path: &str, encoder: &str) -> bool {
-		let out = Command::new(ffmpeg_path)
-			.args([
-				"-hide_banner",
-				"-loglevel",
-				"error",
-				"-f",
-				"lavfi",
-				"-i",
-				"color=size=64x64:rate=1:duration=1",
-				"-frames:v",
-				"1",
-				"-c:v",
-				encoder,
-				"-f",
-				"null",
-				"-",
-			])
-			.output();
+		let mut command = Command::new(ffmpeg_path);
+		command.args([
+			"-hide_banner",
+			"-loglevel",
+			"error",
+			"-f",
+			"lavfi",
+			"-i",
+			"color=size=64x64:rate=1:duration=1",
+			"-frames:v",
+			"1",
+			"-c:v",
+			encoder,
+			"-f",
+			"null",
+			"-",
+		]);
+		oak_core::miscutils::hide_console_window(&mut command);
+		let out = command.output();
 		matches!(out, Ok(out) if out.status.success())
 	}
 
@@ -508,6 +510,8 @@ impl TaskBehavior for ProxyTask {
 			.args(&args)
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped());
+		// A GUI Oak spawning a console child would flash a console window.
+		oak_core::miscutils::hide_console_window(&mut command);
 		let mut child = match command.spawn() {
 			Ok(child) => child,
 			Err(_) => {
@@ -601,17 +605,18 @@ fn probe_source_duration_seconds(ffmpeg_path: &str, source_filename: &str) -> f6
 	if !ffprobe.exists() {
 		return 0.0;
 	}
-	let output = Command::new(&ffprobe)
-		.args([
-			"-v",
-			"error",
-			"-show_entries",
-			"format=duration",
-			"-of",
-			"default=noprint_wrappers=1:nokey=1",
-			source_filename,
-		])
-		.output();
+	let mut command = Command::new(&ffprobe);
+	command.args([
+		"-v",
+		"error",
+		"-show_entries",
+		"format=duration",
+		"-of",
+		"default=noprint_wrappers=1:nokey=1",
+		source_filename,
+	]);
+	oak_core::miscutils::hide_console_window(&mut command);
+	let output = command.output();
 	match output {
 		Ok(out) if out.status.success() => {
 			let text = String::from_utf8_lossy(&out.stdout);

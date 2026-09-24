@@ -1950,14 +1950,18 @@ impl ProcessDispatcher {
 		);
 		let shm = ShmRegionView::create(&key, inner.slots, inner.slot_bytes)?;
 
-		let mut child = Command::new(&inner.bin)
+		let mut command = Command::new(&inner.bin);
+		command
 			// Auto backend: prefer the GPU, fall back to the CPU renderer
 			// (M16 S1 — the worker tolerates a GPU init failure and keeps
 			// evaluating headless).
 			.args(["--backend", "auto"])
 			.stdin(Stdio::piped())
 			.stdout(Stdio::piped())
-			.stderr(Stdio::inherit())
+			.stderr(Stdio::inherit());
+		// A GUI Oak spawning a console child would flash a console window.
+		oak_core::miscutils::hide_console_window(&mut command);
+		let mut child = command
 			.spawn()
 			.map_err(|e| Error::Failed(format!("spawn oak-worker: {e}")))?;
 		let stdin = child.stdin.take();

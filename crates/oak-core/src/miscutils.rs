@@ -316,6 +316,25 @@ impl Current {
 	}
 }
 
+/// Hide the console window a child process would otherwise create on
+/// Windows: a GUI binary (the release `oak-editor.exe`) spawning a
+/// console-subsystem child — `oak-worker`, the OFX host, `ffmpeg` —
+/// flashes a console window even when every stream is piped. No-op on
+/// other platforms.
+pub fn hide_console_window(command: &mut std::process::Command) {
+	#[cfg(windows)]
+	{
+		use std::os::windows::process::CommandExt;
+		/// `CREATE_NO_WINDOW` (winbase.h).
+		const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+		command.creation_flags(CREATE_NO_WINDOW);
+	}
+	#[cfg(not(windows))]
+	{
+		let _ = command;
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::ffi::c_void;

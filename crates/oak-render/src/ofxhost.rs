@@ -466,6 +466,8 @@ impl OfxHost {
 		for (key, value) in &config.env {
 			command.env(key, value);
 		}
+		// A GUI Oak spawning a console child would flash a console window.
+		oak_core::miscutils::hide_console_window(&mut command);
 		let mut child = command
 			.spawn()
 			.map_err(|e| Error::Failed(format!("spawn OFX host {}: {e}", bin.display())))?;
