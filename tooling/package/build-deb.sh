@@ -54,9 +54,50 @@ fi
 install -m644 Oak_Icon.svg "$STAGING/usr/share/icons/hicolor/scalable/apps/oak.svg"
 install -m644 assets/i18n/*.yaml "$STAGING/usr/share/oak/i18n/"
 
+# vcpkg's libva/libva-drm are shared libraries that FFmpeg links
+# dynamically. Debian 12 / openKylin carry an older libva than FFmpeg 8
+# expects (vaMapBuffer2), so ship vcpkg's copies next to the app and give
+# the executables a relative RUNPATH (`$ORIGIN`) — a system libva can then
+# not shadow them. `VCPKG_LIB` is the vcpkg_installed/<triplet>/lib dir
+# (CD passes it; a local build without it just skips the bundle).
+if [ -n "${VCPKG_LIB:-}" ]; then
+	mkdir -p "$STAGING/usr/lib/oak-editor"
+	bundled=0
+	for so in "$VCPKG_LIB"/libva*.so.* "$VCPKG_LIB"/libdrm*.so.*; do
+		[ -f "$so" ] || continue
+		install -m755 "$so" "$STAGING/usr/lib/oak-editor/"
+		bundled=1
+	done
+	if [ "$bundled" = 1 ]; then
+		for bin in "$STAGING"/usr/bin/*; do
+			patchelf --set-rpath '$ORIGIN/../lib/oak-editor' "$bin"
+		done
+	fi
+fi
+
 # The full shlib dependency set (FFmpeg/OCIO are statically linked, so
-# only base-OS packages appear).
-DEPS=$(for bin in "$STAGING"/usr/bin/*; do dpkg-shlibdeps -O "$bin"; done \
+# mostly base-OS packages appear). dpkg-shlibdeps only runs inside a
+# Debian source tree, so give it a synthetic one;
+# `--ignore-missing-info` skips libraries no distro package provides
+# (those are the vcpkg copies bundled above).
+DEPS_DIR=target/pkg/deb-deps
+rm -rf "$DEPS_DIR"
+mkdir -p "$DEPS_DIR/debian"
+cat > "$DEPS_DIR/debian/control" <<'EOF'
+Source: oak-editor
+Section: video
+Priority: optional
+Maintainer: Oak Team
+Standards-Version: 4.6.0
+
+Package: oak-editor
+Architecture: any
+Description: Oak Video Editor
+EOF
+STAGING_ABS="$PWD/$STAGING"
+DEPS=$(cd "$DEPS_DIR" && for bin in "$STAGING_ABS"/usr/bin/*; do
+	dpkg-shlibdeps -O --ignore-missing-info "$bin" || exit 1
+done \
 	| sed 's/^shlibs:Depends=//' | tr ',' '\n' | sed 's/^ //;s/ $//' | sort -u \
 	| paste -sd', ' -)
 echo "declared deps: $DEPS"

@@ -15,11 +15,91 @@ concurrency:
 permissions:
   contents: read
 
+# One matrix, seven platforms: the three Linux-family packaging distros
+# (Debian 12, Fedora 41, Arch), openKylin on x64 and arm64, macOS and
+# Windows. The environments match .github/workflows/cd.yml exactly (same
+# container images, same dependency lists, same runner sizes), so a
+# "passes CI, fails CD" dependency drift is caught here first.
 jobs:
-  linux:
-    name: Build & test (Linux)
-    runs-on: warp-ubuntu-latest-x64-8x
+  build-test:
+    name: Build & test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    # Container entries carry the container as JSON ({"image":...,
+    # "options":...}); the empty string means "run on the host"
+    # (actions/runner#265 allows an empty container value).
+    container: ${{ matrix.container != '' && fromJSON(matrix.container) || '' }}
+    # The Test step's watchdog caps a hung suite at 30 min; leave a cold
+    # vcpkg install + full compile room beyond that.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian
+            platform: linux
+            distro: debian
+            arch: x64
+            runner: warp-ubuntu-latest-x64-32x
+            triplet: x64-linux
+            container: '{"image":"debian:12","options":"--shm-size=8g"}'
+          - name: Fedora
+            platform: linux
+            distro: fedora
+            arch: x64
+            runner: warp-ubuntu-latest-x64-32x
+            triplet: x64-linux
+            container: '{"image":"fedora:41","options":"--shm-size=8g"}'
+          - name: Arch
+            platform: linux
+            distro: arch
+            arch: x64
+            runner: warp-ubuntu-latest-x64-32x
+            triplet: x64-linux
+            container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
+          - name: openKylin x64
+            platform: linux
+            distro: openkylin
+            arch: x64
+            runner: warp-ubuntu-latest-x64-32x
+            triplet: x64-linux
+            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
+          - name: openKylin arm64
+            platform: linux
+            distro: openkylin
+            arch: arm64
+            runner: warp-ubuntu-latest-arm64-32x
+            triplet: arm64-linux
+            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
+          - name: macOS
+            platform: macos
+            distro: macos
+            arch: arm64
+            runner: warp-macos-26-arm64-12x
+            triplet: arm64-osx
+            container: ''
+          - name: Windows
+            platform: windows
+            distro: windows
+            arch: x64
+            runner: warp-windows-2025-vs2026-x64-32x
+            triplet: x64-windows
+            container: ''
+
     steps:
+      # The container images are bare (Fedora/Arch even lack git);
+      # checkout and vcpkg need git/curl, and WarpCache needs wget inside
+      # a container (its README requires it). First step of the job, so
+      # the package lists are still fresh.
+      - name: Bootstrap container (git, curl, wget)
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          case "${{ matrix.distro }}" in
+            fedora) dnf install -y git curl wget which ;;
+            arch) pacman -Sy --noconfirm git curl wget which ;;
+            debian|openkylin) apt-get update && apt-get install -y git curl ca-certificates wget ;;
+          esac
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -27,254 +107,14 @@ jobs:
           # their own repo and build as path dependencies of oakapp.
           submodules: true
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      # ------------------------------------------------------------------
-      # System dependencies
-      # ------------------------------------------------------------------
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          # The codec/filter libraries behind FFmpeg come from the vcpkg
-          # manifest (root vcpkg.json; see docs/build.md) — this list is
-          # the toolchain vcpkg itself needs, cmake/make for the vendored
-          # OpenColorIO build (ocio-sys `bundled`; Ubuntu's
-          # libopencolorio-dev is 2.1, older than the bridge's API floor),
-          # and the headless test infra gpui needs: X11, software Mesa
-          # Vulkan (lavapipe) and xvfb. `icc-profiles-free` gives the
-          # oak-core display-ICC tests a system profile (sRGB.icc); without
-          # it `color.rs::system_icc` finds nothing on this runner and the
-          # viewer black-screen guard silently skips.
-          sudo apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
-            git curl zip unzip tar python3 \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            icc-profiles-free \
-            autoconf autoconf-archive automake libtool
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
-      # ------------------------------------------------------------------
-      # The runner has no vcpkg preinstalled; bootstrap a fresh clone.
-      # The manifest at the repo root pins the dependency set (FFmpeg 8.1.2
-      # via `overrides`, everything else via `builtin-baseline`) and the
-      # resolved tree lands in vcpkg_installed/.
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed. Every run saves under a fresh key
-      # (so an existing cache is updated, never a save failure) and
-      # restores the newest matching entry through `restore-keys`.
-      # WarpBuild's cache service backs this job (the GitHub Actions
-      # cache quota is full); macOS/Windows keep actions/cache.
-      - name: Restore vcpkg artifacts
-        id: vcpkg-cache
-        uses: WarpBuilds/cache/restore@v2
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
-
-      - name: Install dependencies (vcpkg manifest)
-        run: |
-          # Source tarballs come from third-party hosts (x264 lives on
-          # code.videolan.org); a transient connection failure aborts the
-          # whole install — vcpkg refuses to retry that class of curl
-          # error — so retry here. vcpkg resumes from its archive and
-          # download caches, so a repeat attempt is cheap.
-          for attempt in 1 2 3; do
-            vcpkg install --triplet x64-linux && exit 0
-            echo "vcpkg install failed (attempt $attempt); retrying"
-            sleep 15
-          done
-          exit 1
-
-      # Explicit restore/save pair: the old `save-always: true` on the
-      # combined step does not actually save on a failed job (the action
-      # deprecation warning), so a run that failed after the install left
-      # no binary cache and the next run rebuilt FFmpeg from source
-      # (~40 min on Windows).
-      - name: Save vcpkg artifacts
-        if: always()
-        uses: WarpBuilds/cache/save@v2
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
-
-      # ------------------------------------------------------------------
-      # Build environment
-      # ------------------------------------------------------------------
-      # ocio-sys builds a stub bridge unless these are set; the oak-core
-      # ocioutils tests need the real library.
-      # tooling/ocio-env.sh: vendored static OCIO (the [patch.crates-io]
-      # ocio-sys tracks shaloong/ocio-rs main, whose vendored sources build
-      # on GCC >= 16).
-      - name: Configure build environment
-        run: |
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/x64-linux"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-          # vcpkg's libva/libva-drm are shared libraries that FFmpeg links
-          # dynamically; without this path the loader picks a system libva
-          # that may predate symbols FFmpeg uses (undefined vaMapBuffer2).
-          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-
-      # ------------------------------------------------------------------
-      # Caches
-      # ------------------------------------------------------------------
-      # Covers the whole target/ dir plus ~/.cargo; shared across branches
-      # of the same OS.
-      - name: Cache cargo artifacts
-        uses: WarpBuilds/rust-cache@v2
-        with:
-          shared-key: oak-ci-linux
-          cache-on-failure: true
-
-      # ------------------------------------------------------------------
-      # Build & test
-      # ------------------------------------------------------------------
-      # `cargo check` (not build): the Test step links the test binaries
-      # anyway, and a full build would codegen every workspace crate twice
-      # (once without and once with cfg(test)).
-      - name: Build
-        run: cargo check --workspace --locked
-
-      # xvfb + 24-bit screen: the gpui #[gpui::test] tests open real windows
-      # and render through wgpu on Mesa's software Vulkan (lavapipe).
-      # The watchdog bounds the step: a deadlocked test produces no output
-      # and no failure, so after 1800 s it dumps every hung process's
-      # thread stacks and kills the suite.
-      - name: Test
-        timeout-minutes: 40
-        env:
-          # lavapipe is present on this job: a missing adapter must fail
-          # the GPU acceptance tests instead of silently skipping them.
-          OAK_REQUIRE_GPU: "1"
-        run: |
-          sudo apt-get install -y gdb
-          run_suite() {
-            xvfb-run -a -s "-screen 0 1920x1080x24" cargo test --workspace --locked &
-            TEST_PID=$!
-            # The watchdog inherits the step's stdout/stderr; detach it so
-            # it cannot keep the runner's I/O pipes open after the step
-            # ends ("WaitDelay expired before I/O complete" otherwise).
-            (
-              sleep 1800
-              echo "::warning::test suite exceeded 1800s; dumping hung-process stacks"
-              for p in $(pgrep -f 'target/debug/deps/|target/debug/oak-worker'); do
-                echo "===== thread stacks of pid $p ($(readlink /proc/$p/exe 2>/dev/null)) ====="
-                sudo gdb -batch -ex 'thread apply all bt' -p "$p" || true
-              done
-              pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) >/dev/null 2>&1 &
-            WATCHDOG_PID=$!
-            wait $TEST_PID
-            rc=$?
-            kill $WATCHDOG_PID 2>/dev/null || true
-            # Reap the watchdog so no child holds the step's pipes.
-            wait $WATCHDOG_PID 2>/dev/null || true
-            return $rc
-          }
-          # Retry once (same policy as the Windows job): worker-pool
-          # startup under full-suite parallelism has flaked once
-          # (full_res_worker_outlives_a_dropped_project: the render
-          # manager's process dispatcher failed to start while every other
-          # test passed). A real regression fails both passes.
-          if ! run_suite; then
-            echo "first pass failed; retrying once for worker-pool flakes"
-            run_suite
-          fi
-
-      # A crashing (SIGSEGV) test gives no Rust backtrace; rerun the
-      # crashing test binaries under gdb to capture the native stack.
-      # `--args` is required — plain `--` makes gdb treat the test args as
-      # a core file. The extra probes target loader-stage crashes (the
-      # copier_test SIGSEGV happens inside ld.so's dl_main): si_addr/si_code
-      # pin down the fault type, the dynsym dump exposes symbols the
-      # executable exports for interposition, strace shows the last loader
-      # syscalls, and valgrind catches a corrupting static initializer.
-      - name: Backtrace on test failure
-        if: failure()
-        run: |
-          sudo apt-get install -y gdb strace valgrind
-          for name in node_e2e_test suites_test copier_test; do
-            BIN=$(ls -t target/debug/deps/$name-* | grep -v '\.d$' | head -1)
-            [ -n "$BIN" ] || continue
-            echo "===== $BIN ====="
-            file "$BIN" || true
-            echo "--- exported defined dynsyms:"
-            readelf --dyn-syms -W "$BIN" 2>/dev/null | grep -v ' UND ' | tail -n +4 | head -30 || true
-            echo "--- strace tail:"
-            strace -f "$BIN" --list 2>&1 | tail -15 || true
-            echo "--- valgrind tail:"
-            valgrind -q "$BIN" --list 2>&1 | tail -25 || true
-            echo "--- gdb:"
-            xvfb-run -a gdb -batch \
-              -ex run \
-              -ex 'bt' \
-              -ex 'p $_siginfo.si_code' \
-              -ex 'p/x $_siginfo._sifields._sigfault.si_addr' \
-              -ex 'x/6i $rip' \
-              --args "$BIN" --nocapture || true
-          done
-
-      # ------------------------------------------------------------------
-      # OFX plugin discovery end-to-end
-      # ------------------------------------------------------------------
-      # Build a minimal but real OFX plugin into a .ofx.bundle, point
-      # OFX_PLUGIN_PATH at it and let the scan_probe example run the full
-      # host path (directory scan -> dlopen -> setHost -> load -> describe
-      # -> register). The assertion is the plugin's registration line; CI
-      # machines have no system-wide OFX plugins, so the fixture is the
-      # only discovery.
-      - name: Build OFX fixture plugin
-        run: crates/oak-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
-
-      - name: Probe OFX plugin discovery
-        run: |
-          OFX_PLUGIN_PATH="$PWD/.cache/ofx-fixture" \
-            cargo run --locked -p oak-plugin --example scan_probe > probe.log 2>&1
-          grep -q 'type_id=rs.oak.CiTestPlugin' probe.log
-          # A project carrying a plugin node must survive save/load (the
-          # serializer resolves plugin types via the dynamic factory).
-          OAK_OFX_FIXTURE_DIR="$PWD/.cache/ofx-fixture" \
-            cargo test --locked -p oak-plugin --test ofx_roundtrip
-
-  windows:
-    name: Build & test (Windows)
-    runs-on: warp-windows-2025-vs2026-x64-32x
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          # gpui/ is a git submodule; its crates are workspace members of
-          # their own repo and build as path dependencies of oakapp.
-          submodules: true
-
-      # Taste the disk before the toolchains land: Defender scans every file
-      # the vcpkg/cargo builds touch (tens of thousands of small writes),
-      # which dominates a cold Windows build. The runner is an ephemeral VM,
-      # so the scanner is turned off for the job (exclusions are kept as a
-      # fallback for images where real-time protection cannot be disabled).
+      # Taste the disk before the toolchains land: Defender scans every
+      # file the vcpkg/cargo builds touch (tens of thousands of small
+      # writes), which dominates a cold Windows build. The runner is an
+      # ephemeral VM, so the scanner is turned off for the job
+      # (exclusions are kept as a fallback for images where real-time
+      # protection cannot be disabled).
       - name: Disable Windows Defender scanning
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           try {
@@ -301,24 +141,119 @@ jobs:
             Write-Host "Defender status unavailable: $_"
           }
 
-      - name: Install Rust (stable, MSVC)
+      # The containers run as root but Actions sets HOME=/github/home;
+      # rustup refuses the euid mismatch ("$HOME differs from
+      # euid-obtained home directory") and would install a toolchain the
+      # later steps cannot find under the Actions home. Pin the job to
+      # root's home so rustup/cargo and the toolchain agree.
+      - name: Pin HOME for rustup
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          {
+            echo "HOME=/root"
+            echo "CARGO_HOME=/root/.cargo"
+            echo "RUSTUP_HOME=/root/.rustup"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           # The Windows build is MSVC-ABI (the runner carries VS 2026):
           # vcpkg's FFmpeg and the vendored OCIO build both want it.
-          toolchain: stable-x86_64-pc-windows-msvc
+          toolchain: ${{ matrix.platform == 'windows' && 'stable-x86_64-pc-windows-msvc' || 'stable' }}
+
+      # ------------------------------------------------------------------
+      # System dependencies — one list per distro, byte-for-byte the same
+      # lists CD uses (see .github/workflows/cd.yml): a package a CD build
+      # needs cannot be missing here.
+      # ------------------------------------------------------------------
+      - name: Install system dependencies (Debian)
+        if: matrix.distro == 'debian'
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential clang libclang-dev cmake pkg-config nasm \
+            git curl zip unzip tar python3 dpkg-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
+            libasound2-dev libpulse-dev libsndfile1-dev \
+            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
+            icc-profiles-free gdb file librsvg2-bin patchelf \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (Fedora)
+        if: matrix.distro == 'fedora'
+        shell: bash
+        run: |
+          dnf install -y \
+            gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
+            git curl zip unzip tar python3 patch xz-utils which \
+            pipewire-devel jack-audio-connection-kit-devel \
+            alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
+            mesa-libGL-devel mesa-vulkan-drivers \
+            vulkan-headers vulkan-loader-devel \
+            libxkbcommon-devel libxkbcommon-x11-devel \
+            rpm-build librsvg2-tools libdrm-devel perl-IPC-Cmd \
+            xorg-x11-server-Xvfb xorg-x11-xauth gdb file \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (Arch)
+        if: matrix.distro == 'arch'
+        shell: bash
+        run: |
+          pacman -S --needed --noconfirm \
+            base-devel clang cmake pkgconf nasm \
+            git curl zip unzip tar python patch xz-utils which \
+            pipewire jack2 alsa-lib libpulse libsndfile \
+            mesa vulkan-headers vulkan-icd-loader \
+            libxkbcommon libxkbcommon-x11 librsvg libdrm \
+            xorg-server-xvfb xorg-xauth gdb file \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (openKylin)
+        if: matrix.distro == 'openkylin'
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential clang libclang-dev cmake pkg-config nasm \
+            git curl zip unzip tar python3 patch xz-utils dpkg-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
+            libasound2-dev libpulse-dev libsndfile1-dev \
+            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
+            gdb file patchelf fonts-dejavu-core \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
+          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what
+          # vcpkg's ffmpeg port requires to build (FFmpeg libraries come
+          # from the vcpkg manifest). librsvg is CD's icon renderer.
+          brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
 
       # ------------------------------------------------------------------
       # vcpkg (manifest mode) + caches
       # ------------------------------------------------------------------
-      # vcpkg.json at the repo root pins the dependency set (FFmpeg with
-      # every free codec + hwaccel, pkgconf, librsvg); the resolved tree
-      # lands in vcpkg_installed/ and is keyed on the manifest. The
-      # binary-cache archives dir makes a manifest bump rebuild cheap.
       # Bootstrap a fresh clone rather than leaning on whatever vcpkg the
       # image carries: `builtin-baseline`/`overrides` are only honored by
-      # a recent vcpkg-tool, and all three OS jobs must behave alike.
+      # a recent vcpkg-tool, and every platform must behave alike.
       - name: Bootstrap vcpkg
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
+          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
+          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Bootstrap vcpkg (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$env:GITHUB_WORKSPACE\.cache\vcpkg"
           & "$env:GITHUB_WORKSPACE\.cache\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
@@ -326,48 +261,146 @@ jobs:
           "$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_PATH
           "VCPKG_ROOT=$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_ENV
 
-      - name: Restore vcpkg artifacts
+      # The archives dir is vcpkg's binary cache: a manifest bump then
+      # rebuilds only what changed. Every run saves under a fresh key (so
+      # an existing cache is updated, never a save failure) and restores
+      # the newest matching entry through `restore-keys`. WarpBuild's
+      # cache service backs the Linux jobs (the GitHub Actions cache
+      # quota is full); macOS/Windows keep actions/cache.
+      - name: Restore vcpkg artifacts (WarpCache)
+        if: matrix.platform == 'linux'
         id: vcpkg-cache
+        uses: WarpBuilds/cache/restore@v2
+        # A job container does not inherit the runner environment;
+        # WarpCache authenticates with this token (README: "Running
+        # inside a container").
+        env:
+          WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
+        with:
+          path: |
+            vcpkg_installed
+            ~/.cache/vcpkg/archives
+          key: vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-
+
+      - name: Restore vcpkg artifacts (GitHub)
+        if: matrix.platform != 'linux'
+        id: vcpkg-cache-github
         uses: actions/cache/restore@v6
         with:
           path: |
             vcpkg_installed
+            ~/.cache/vcpkg/archives
             ~/AppData/Local/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
 
       - name: Install dependencies (vcpkg manifest)
+        if: matrix.platform != 'windows'
+        shell: bash
         run: |
-          # See the Linux job: transient source-download failures abort
-          # the manifest install; retry before giving up.
+          # Source tarballs come from third-party hosts (x264 lives on
+          # code.videolan.org); a transient connection failure aborts the
+          # whole install — vcpkg refuses to retry that class of curl
+          # error — so retry here. vcpkg resumes from its archive and
+          # download caches, so a repeat attempt is cheap.
+          for attempt in 1 2 3; do
+            vcpkg install --triplet ${{ matrix.triplet }} && exit 0
+            echo "vcpkg install failed (attempt $attempt); retrying"
+            sleep 15
+          done
+          exit 1
+
+      - name: Install dependencies (vcpkg manifest, Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
           for ($i = 1; $i -le 3; $i++) {
-            vcpkg install --triplet x64-windows
+            vcpkg install --triplet ${{ matrix.triplet }}
             if ($LASTEXITCODE -eq 0) { exit 0 }
             Write-Host "vcpkg install failed (attempt $i); retrying"
             Start-Sleep -Seconds 15
           }
           exit 1
 
-      # Explicit restore/save pair (see the Linux job: `save-always` did
-      # not save after a failed job, so Windows rebuilt FFmpeg from source
-      # for ~40 minutes on every run).
-      - name: Save vcpkg artifacts
-        if: always()
+      # Explicit restore/save pair: the old `save-always: true` on the
+      # combined step does not actually save on a failed job (the action
+      # deprecation warning), so a run that failed after the install left
+      # no binary cache and the next run rebuilt FFmpeg from source.
+      - name: Save vcpkg artifacts (WarpCache)
+        if: always() && matrix.platform == 'linux'
+        uses: WarpBuilds/cache/save@v2
+        env:
+          WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
+        with:
+          path: |
+            vcpkg_installed
+            ~/.cache/vcpkg/archives
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      - name: Save vcpkg artifacts (GitHub)
+        if: always() && matrix.platform != 'linux'
         uses: actions/cache/save@v6
         with:
           path: |
             vcpkg_installed
+            ~/.cache/vcpkg/archives
             ~/AppData/Local/vcpkg/archives
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+          key: ${{ steps.vcpkg-cache-github.outputs.cache-primary-key }}
 
       # ------------------------------------------------------------------
       # Build environment
       # ------------------------------------------------------------------
-      - name: Configure build environment
+      # ocio-sys builds a stub bridge unless these are set; the oak-core
+      # ocioutils tests need the real library.
+      # tooling/ocio-env.sh: vendored static OCIO (the [patch.crates-io]
+      # ocio-sys tracks shaloong/ocio-rs main, whose vendored sources build
+      # on GCC >= 16).
+      - name: Configure build environment (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
         run: |
-          $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\x64-windows"
+          {
+            echo "CC=clang"
+            echo "CXX=clang++"
+          } >> "$GITHUB_ENV"
+          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
+          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
+          # vcpkg's libva/libva-drm are shared libraries that FFmpeg links
+          # dynamically; without this path the loader picks a system libva
+          # that may predate symbols FFmpeg uses (undefined vaMapBuffer2).
+          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          # The packaging tools resolve the ELF needs through ldd as well
+          # (dpkg-shlibdeps, linuxdeploy): register the vcpkg libs with the
+          # dynamic linker so `libva-drm.so.2` is found when a package is
+          # assembled.
+          echo "$prefix/lib" > /etc/ld.so.conf.d/oak-vcpkg.conf
+          ldconfig
+
+      - name: Configure build environment (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          # Vendored static OCIO (same as every non-Windows platform via
+          # tooling/ocio-env.sh); no OCIO_INSTALL_DIR override.
+          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
+          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
+
+      - name: Configure build environment (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
           "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$prefix\lib\pkgconfig" >> $env:GITHUB_ENV
           "$prefix\tools\pkgconf" >> $env:GITHUB_PATH
@@ -385,12 +418,24 @@ jobs:
           # pins them via overrides + builtin-baseline).
           vcpkg list
 
-      # Covers the whole target/ dir plus ~/.cargo; shared across branches
-      # of the same OS.
-      - name: Cache cargo artifacts
+      # ------------------------------------------------------------------
+      # Cargo caches: whole target/ dir plus ~/.cargo, shared per
+      # distro+arch (WarpCache for Linux, GitHub for macOS/Windows).
+      # ------------------------------------------------------------------
+      - name: Cache cargo artifacts (WarpCache)
+        if: matrix.platform == 'linux'
+        uses: WarpBuilds/rust-cache@v2
+        env:
+          WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
+        with:
+          shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
+          cache-on-failure: true
+
+      - name: Cache cargo artifacts (GitHub)
+        if: matrix.platform != 'linux'
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: oak-ci-windows
+          shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
           cache-on-failure: true
 
       # ------------------------------------------------------------------
@@ -402,136 +447,66 @@ jobs:
       - name: Build
         run: cargo check --workspace --locked
 
-      - name: Test
-        timeout-minutes: 40
+      # xvfb + 24-bit screen: the gpui #[gpui::test] tests open real
+      # windows and render through wgpu on Mesa's software Vulkan
+      # (lavapipe). The watchdog bounds the step: a deadlocked test
+      # produces no output and no failure, so after 1800 s it dumps every
+      # hung process's thread stacks and kills the suite.
+      - name: Test (Linux)
+        if: matrix.platform == 'linux'
+        timeout-minutes: 45
+        shell: bash
+        env:
+          # lavapipe is present in these images: a missing adapter must
+          # fail the GPU acceptance tests instead of silently skipping
+          # them (Debian is the x64 reference; the other distros keep the
+          # historical lenient policy).
+          OAK_REQUIRE_GPU: ${{ matrix.distro == 'debian' && '1' || '0' }}
         run: |
-          cargo test --workspace --locked
-          if ($LASTEXITCODE -ne 0) {
-            # Retry once: a few gpui keystroke tests flake on Windows CI —
-            # a synthetic keystroke is occasionally never delivered (the
-            # undo/redo pair and a plain 's' toggle both failed once,
-            # each identically to its pass state). A real regression
-            # fails both passes.
-            Write-Host "first pass failed; retrying once for gpui keystroke flakes"
-            cargo test --workspace --locked
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          run_suite() {
+            xvfb-run -a -s "-screen 0 1920x1080x24" cargo test --workspace --locked &
+            TEST_PID=$!
+            # The watchdog inherits the step's stdout/stderr; detach it so
+            # it cannot keep the runner's I/O pipes open after the step
+            # ends ("WaitDelay expired before I/O complete" otherwise).
+            (
+              sleep 1800
+              echo "::warning::test suite exceeded 1800s; dumping hung-process stacks"
+              for p in $(pgrep -f 'target/debug/deps/|target/debug/oak-worker'); do
+                echo "===== thread stacks of pid $p ($(readlink /proc/$p/exe 2>/dev/null)) ====="
+                gdb -batch -ex 'thread apply all bt' -p "$p" || true
+              done
+              pkill -9 -f 'target/debug/deps/' || true
+              pkill -9 -f 'target/debug/oak-worker' || true
+            ) >/dev/null 2>&1 &
+            WATCHDOG_PID=$!
+            wait $TEST_PID
+            rc=$?
+            kill $WATCHDOG_PID 2>/dev/null || true
+            # Reap the watchdog so no child holds the step's pipes.
+            wait $WATCHDOG_PID 2>/dev/null || true
+            return $rc
           }
-
-  macos:
-    name: Build & test (macOS)
-    runs-on: warp-macos-26-arm64-12x
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          # gpui/ is a git submodule; its crates are workspace members of
-          # their own repo and build as path dependencies of oakapp.
-          submodules: true
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      # ------------------------------------------------------------------
-      # System dependencies
-      # ------------------------------------------------------------------
-      - name: Install system dependencies
-        run: |
-          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
-          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what
-          # vcpkg's ffmpeg port requires to build (same split as the other
-          # platforms: FFmpeg libraries come from the vcpkg manifest).
-          brew install cmake pkg-config nasm autoconf automake libtool autoconf-archive
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
-      # ------------------------------------------------------------------
-      # The runner has no vcpkg preinstalled; bootstrap a fresh clone.
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed. Every run saves under a fresh key
-      # (so an existing cache is updated, never a save failure) and
-      # restores the newest matching entry through `restore-keys`.
-      - name: Restore vcpkg artifacts
-        id: vcpkg-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
-
-      - name: Install dependencies (vcpkg manifest)
-        run: |
-          # See the Linux job: transient source-download failures abort
-          # the manifest install; retry before giving up.
-          for attempt in 1 2 3; do
-            vcpkg install --triplet arm64-osx && exit 0
-            echo "vcpkg install failed (attempt $attempt); retrying"
-            sleep 15
-          done
-          exit 1
-
-      - name: Save vcpkg artifacts
-        if: always()
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
-
-      # ------------------------------------------------------------------
-      # Build environment
-      # ------------------------------------------------------------------
-      - name: Configure build environment
-        run: |
-          # Vendored static OCIO (same as every non-Windows platform via
-          # tooling/ocio-env.sh); no OCIO_INSTALL_DIR override.
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/arm64-osx"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      # ------------------------------------------------------------------
-      # Caches
-      # ------------------------------------------------------------------
-      # Covers the whole target/ dir plus ~/.cargo; shared across branches
-      # of the same OS.
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: oak-ci-macos
-          cache-on-failure: true
-
-      # ------------------------------------------------------------------
-      # Build & test
-      # ------------------------------------------------------------------
-      # `cargo check` (not build): the Test step links the test binaries
-      # anyway, and a full build would codegen every workspace crate twice
-      # (once without and once with cfg(test)).
-      - name: Build
-        run: cargo check --workspace --locked
+          # Retry once (same policy as the Windows job): worker-pool
+          # startup under full-suite parallelism has flaked once
+          # (full_res_worker_outlives_a_dropped_project: the render
+          # manager's process dispatcher failed to start while every other
+          # test passed). A real regression fails both passes.
+          if ! run_suite; then
+            echo "first pass failed; retrying once for worker-pool flakes"
+            run_suite
+          fi
 
       # The runner's GUI session doubles as the display for the gpui
       # #[gpui::test] windows; wgpu renders through Metal.
-      - name: Test
+      - name: Test (macOS)
+        if: matrix.platform == 'macos'
         timeout-minutes: 40
         run: |
-          # Retry once (same policy as the other platforms): worker-pool
-          # startup under full-suite parallelism has flaked on Linux. A
-          # real regression fails both passes. A hang trips the in-script
-          # watchdog, which samples the test processes (the offending
-          # test's native stack lands in the log) before killing the suite.
+          # Retry once (same policy as the other platforms). A hang trips
+          # the in-script watchdog, which samples the test processes (the
+          # offending test's native stack lands in the log) before killing
+          # the suite.
           run_suite() {
             cargo test --workspace --locked &
             TEST_PID=$!
@@ -557,223 +532,65 @@ jobs:
             run_suite
           fi
 
-      # A SIGSEGV in a test binary gives no Rust backtrace; Apple's crash
-      # reports carry the native stack, so surface the newest ones.
-      - name: Crash reports
-        if: failure()
+      - name: Test (Windows)
+        if: matrix.platform == 'windows'
+        timeout-minutes: 40
+        shell: pwsh
         run: |
-          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
-            echo "===== $f"
-            head -c 6000 "$f"
-            echo
-          done
-
-  # second upstream target: openKylin (Debian/Ubuntu-derived) in its own
-  # image. The base image is bare (no sudo, no make, no python3) and the
-  # steps run as root, so there is no sudo prefix anywhere below.
-  openkylin:
-    name: Build & test (openKylin ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    container:
-      image: openkylin/openkylin:latest
-      # A container's default /dev/shm is 64 MiB; the process pool reserves
-      # >64 MiB per worker eagerly (posix_fallocate) and the render manager
-      # fails to start when the reservation is refused. The suite also runs
-      # the 512 MiB shared-memory spike and several worker pools in
-      # parallel — 2 GiB used to run dry mid-suite (observed as an
-      # intermittent SIGSEGV in the oak-render tests), so give it headroom.
-      options: --shm-size=8g
-      # WarpCache authenticates with the runner's verification token, and
-      # a container does not inherit the runner's environment: pass it in
-      # explicitly (WarpBuilds/cache README, "Running inside a
-      # container"). Without it every cache step warns "Authentication
-      # token is invalid" and the cache is silently not restored/saved.
-      env:
-        WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            runner: warp-ubuntu-latest-x64-8x
-            triplet: x64-linux
-          - arch: arm64
-            runner: warp-ubuntu-latest-arm64-16x
-            triplet: arm64-linux
-    # The Test step's watchdog caps a hung suite at 30 min; give a cold
-    # vcpkg install + full compile + test room beyond that.
-    timeout-minutes: 90
-    steps:
-      # The image ships neither git nor curl (checkout and vcpkg need
-      # both); wget is what WarpCache uses to download cache segments
-      # inside a container (its README requires it), and without it the
-      # cache steps fail. First step of the job, so the package lists are
-      # still fresh.
-      - name: Install git, curl and wget
-        run: apt-get update && apt-get install -y git curl ca-certificates wget
-
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          # gpui/ is a git submodule; its crates are workspace members of
-          # their own repo and build as path dependencies of oakapp.
-          submodules: true
-
-      # The container runs as root but Actions sets HOME=/github/home;
-      # rustup refuses the euid mismatch ("$HOME differs from
-      # euid-obtained home directory") and would install a toolchain the
-      # later steps cannot find under the Actions home. Pin the whole job
-      # to root's home so rustup/cargo and the toolchain agree.
-      - name: Pin HOME for rustup
-        run: |
-          {
-            echo "HOME=/root"
-            echo "CARGO_HOME=/root/.cargo"
-            echo "RUSTUP_HOME=/root/.rustup"
-          } >> "$GITHUB_ENV"
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) {
+            # Retry once: a few gpui keystroke tests flake on Windows CI —
+            # a synthetic keystroke is occasionally never delivered (the
+            # undo/redo pair and a plain 's' toggle both failed once,
+            # each identically to its pass state). A real regression
+            # fails both passes.
+            Write-Host "first pass failed; retrying once for gpui keystroke flakes"
+            cargo test --workspace --locked
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       # ------------------------------------------------------------------
-      # System dependencies
+      # Failure diagnostics
       # ------------------------------------------------------------------
-      # Same package set as the Linux job (both distros carry the Ubuntu
-      # names); patch/xz-utils are openKylin's own packaging brought in by
-      # zip/unzip. nasm and zip come from the kylinsoft "anything" PPA,
-      # which the image enables by default.
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
-            git curl zip unzip tar python3 patch xz-utils \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            gdb file autoconf autoconf-archive automake libtool \
-            fonts-dejavu-core
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
-      # ------------------------------------------------------------------
-      # The image has no vcpkg preinstalled; bootstrap a fresh clone.
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed.
-      # WarpBuild's cache service backs this job (the GitHub Actions
-      # cache quota is full); macOS/Windows keep actions/cache.
-      - name: Restore vcpkg artifacts
-        id: vcpkg-cache
-        uses: WarpBuilds/cache/restore@v2
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          # The arch prefix matters here: both jobs run the same distro
-          # image through the same cache scope, unlike the OS jobs.
-          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-
-
-      - name: Install dependencies (vcpkg manifest)
-        run: |
-          # See the Linux job: transient source-download failures abort
-          # the manifest install; retry before giving up.
-          for attempt in 1 2 3; do
-            vcpkg install --triplet ${{ matrix.triplet }} && exit 0
-            echo "vcpkg install failed (attempt $attempt); retrying"
-            sleep 15
-          done
-          exit 1
-
-      - name: Save vcpkg artifacts
-        if: always()
-        uses: WarpBuilds/cache/save@v2
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
-
-      # ------------------------------------------------------------------
-      # Build environment
-      # ------------------------------------------------------------------
-      - name: Configure build environment
-        run: |
-          {
-            echo "CC=clang"
-            echo "CXX=clang++"
-          } >> "$GITHUB_ENV"
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-          # See the Linux job: vcpkg's shared libva must win at runtime.
-          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-
-      # Covers the whole target/ dir plus ~/.cargo.
-      - name: Cache cargo artifacts
-        uses: WarpBuilds/rust-cache@v2
-        with:
-          shared-key: oak-ci-openkylin-${{ matrix.arch }}
-          cache-on-failure: true
-
-      # ------------------------------------------------------------------
-      # Build & test
-      # ------------------------------------------------------------------
-      - name: Build
-        run: cargo check --workspace --locked
-
-      # xvfb + 24-bit screen, same as the Linux job: the gpui
-      # #[gpui::test] tests open real windows and render through wgpu on
-      # Mesa's software Vulkan (lavapipe). The watchdog logic is the Linux
-      # job's; the retry once below covers the same worker-pool flake,
-      # which is a stale-tmpfs/container property too — a real regression
-      # fails both passes.
-      - name: Test
-        timeout-minutes: 45
+      # A crashing (SIGSEGV) test gives no Rust backtrace; rerun the
+      # crashing test binaries under gdb to capture the native stack.
+      # `--args` is required — plain `--` makes gdb treat the test args as
+      # a core file. The extra probes target loader-stage crashes (the
+      # copier_test SIGSEGV happens inside ld.so's dl_main): si_addr/si_code
+      # pin down the fault type, the dynsym dump exposes symbols the
+      # executable exports for interposition, strace shows the last loader
+      # syscalls, and valgrind catches a corrupting static initializer.
+      - name: Backtrace on test failure (Debian)
+        if: failure() && matrix.distro == 'debian'
         shell: bash
         run: |
-          run_suite() {
-            xvfb-run -a -s "-screen 0 1920x1080x24" cargo test --workspace --locked &
-            TEST_PID=$!
-            (
-              sleep 1800
-              echo "::warning::test suite exceeded 1800s; dumping hung-process stacks"
-              for p in $(pgrep -f 'target/debug/deps/|target/debug/oak-worker'); do
-                echo "===== thread stacks of pid $p ($(readlink /proc/$p/exe 2>/dev/null)) ====="
-                gdb -batch -ex 'thread apply all bt' -p "$p" || true
-              done
-              pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) >/dev/null 2>&1 &
-            WATCHDOG_PID=$!
-            wait $TEST_PID
-            rc=$?
-            kill $WATCHDOG_PID 2>/dev/null || true
-            wait $WATCHDOG_PID 2>/dev/null || true
-            return $rc
-          }
-          if ! run_suite; then
-            echo "first pass failed; retrying once for worker-pool flakes"
-            run_suite
-          fi
+          apt-get install -y gdb strace valgrind
+          for name in node_e2e_test suites_test copier_test; do
+            BIN=$(ls -t target/debug/deps/$name-* | grep -v '\.d$' | head -1)
+            [ -n "$BIN" ] || continue
+            echo "===== $BIN ====="
+            file "$BIN" || true
+            echo "--- exported defined dynsyms:"
+            readelf --dyn-syms -W "$BIN" 2>/dev/null | grep -v ' UND ' | tail -n +4 | head -30 || true
+            echo "--- strace tail:"
+            strace -f "$BIN" --list 2>&1 | tail -15 || true
+            echo "--- valgrind tail:"
+            valgrind -q "$BIN" --list 2>&1 | tail -25 || true
+            echo "--- gdb:"
+            xvfb-run -a gdb -batch \
+              -ex run \
+              -ex 'bt' \
+              -ex 'p $_siginfo.si_code' \
+              -ex 'p/x $_siginfo._sifields._sigfault.si_addr' \
+              -ex 'x/6i $rip' \
+              --args "$BIN" --nocapture || true
+          done
 
-      # A crashing (SIGSEGV) test binary gives no Rust backtrace: rerun the
-      # big suites under gdb so the native stack lands in the log. gdb is
-      # installed with the system dependencies.
-      - name: Backtrace on test failure
-        if: failure()
+      # Same idea for the other distro containers (gdb is installed with
+      # the system dependencies).
+      - name: Backtrace on test failure (containers)
+        if: failure() && matrix.platform == 'linux' && matrix.distro != 'debian'
+        shell: bash
         run: |
           for name in oak_render oakapp oak_plugin; do
             BIN=$(ls -t target/debug/deps/$name-* 2>/dev/null | grep -v '\.d$' | head -1)
@@ -784,3 +601,38 @@ jobs:
               -ex 'thread apply all bt' \
               --args "$BIN" || true
           done
+
+      # A SIGSEGV in a test binary gives no Rust backtrace; Apple's crash
+      # reports carry the native stack, so surface the newest ones.
+      - name: Crash reports (macOS)
+        if: failure() && matrix.platform == 'macos'
+        run: |
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -3); do
+            echo "===== $f"
+            head -c 6000 "$f"
+            echo
+          done
+
+      # ------------------------------------------------------------------
+      # OFX plugin discovery end-to-end (x64 Linux reference)
+      # ------------------------------------------------------------------
+      # Build a minimal but real OFX plugin into a .ofx.bundle, point
+      # OFX_PLUGIN_PATH at it and let the scan_probe example run the full
+      # host path (directory scan -> dlopen -> setHost -> load -> describe
+      # -> register). The assertion is the plugin's registration line; CI
+      # machines have no system-wide OFX plugins, so the fixture is the
+      # only discovery.
+      - name: Build OFX fixture plugin
+        if: matrix.distro == 'debian'
+        run: crates/oak-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
+
+      - name: Probe OFX plugin discovery
+        if: matrix.distro == 'debian'
+        run: |
+          OFX_PLUGIN_PATH="$PWD/.cache/ofx-fixture" \
+            cargo run --locked -p oak-plugin --example scan_probe > probe.log 2>&1
+          grep -q 'type_id=rs.oak.CiTestPlugin' probe.log
+          # A project carrying a plugin node must survive save/load (the
+          # serializer resolves plugin types via the dynamic factory).
+          OAK_OFX_FIXTURE_DIR="$PWD/.cache/ofx-fixture" \
+            cargo test --locked -p oak-plugin --test ofx_roundtrip

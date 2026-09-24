@@ -9,400 +9,109 @@ on:
 permissions:
   contents: write
 
-# Release packages are built from scratch: CD uses no vcpkg/cargo caches.
-# A restored vcpkg_installed or target tree has masked packaging problems
-# before (stale ports, missing tools); a release build must not depend on
-# restored state.
+# One matrix, seven platforms, the same environments CI tests in (see
+# .github/workflows/ci.yml): Debian 12 / Fedora 41 / Arch / openKylin x64
+# and arm64 containers plus the macOS and Windows hosts. Every package is
+# built from scratch — no vcpkg/cargo caches: a restored vcpkg_installed
+# or target tree has masked packaging problems before (stale ports,
+# missing tools), and a release must not depend on restored state.
 jobs:
-  # ------------------------------------------------------------------
-  # Linux: deb + AppImage + pacman in one job. cargo-packager does not
-  # support rpm (its format list is deb/appimage/pacman/nsis/dmg/app/wix),
-  # and its "pacman" format emits a PKGBUILD + source tarball rather than a
-  # compiled pkg.tar.zst — both are upstream limitations.
-  # ------------------------------------------------------------------
-  # ------------------------------------------------------------------
-  # Linux: one native package per distro, each built INSIDE that
-  # distro's container so the declared dependencies always resolve to
-  # the distro's own package names (dpkg-shlibdeps / rpmbuild
-  # auto-requires / Arch static base list). The FFmpeg/codec libraries
-  # come from the vcpkg manifest (root vcpkg.json, the distro/arch
-  # triplet), so these containers carry the build toolchain and the
-  # headless/UI runtime deps only. deb: hand-rolled dpkg-deb, built once
-  # in debian:12 (the general Debian-family package, labeled "+debian")
-  # and once per openKylin arch (x64/arm64, labeled "+openkylin") so each
-  # family gets deps that resolve against its own repos; rpm: rpmbuild;
-  # arch: makepkg. AppImage stays on the Ubuntu runner (self-contained by
-  # design).
-  # ------------------------------------------------------------------
-  linux:
-    name: Linux packages (${{ matrix.distro }} ${{ matrix.arch }})
+  package:
+    name: Package (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.image }}
-
+    # Container entries carry the container as JSON ({"image":...,
+    # "options":...}); the empty string means "run on the host"
+    # (actions/runner#265 allows an empty container value).
+    container: ${{ matrix.container != '' && fromJSON(matrix.container) || '' }}
+    # Cold vcpkg install + release build + packaging.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         include:
-          - distro: debian
-            image: debian:12
+          - name: Debian
+            platform: linux
+            distro: debian
             arch: x64
-            runner: warp-ubuntu-latest-x64-16x
+            runner: warp-ubuntu-latest-x64-32x
             triplet: x64-linux
-          - distro: fedora
-            image: fedora:41
+            artifact: linux-debian
+            container: '{"image":"debian:12","options":"--shm-size=8g"}'
+          - name: Fedora
+            platform: linux
+            distro: fedora
             arch: x64
-            runner: warp-ubuntu-latest-x64-16x
+            runner: warp-ubuntu-latest-x64-32x
             triplet: x64-linux
-          - distro: arch
-            image: archlinux:latest
+            artifact: linux-fedora
+            container: '{"image":"fedora:41","options":"--shm-size=8g"}'
+          - name: Arch
+            platform: linux
+            distro: arch
             arch: x64
-            runner: warp-ubuntu-latest-x64-16x
+            runner: warp-ubuntu-latest-x64-32x
             triplet: x64-linux
-          - distro: openkylin
-            image: openkylin/openkylin:latest
+            artifact: linux-arch
+            container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
+          - name: openKylin x64
+            platform: linux
+            distro: openkylin
             arch: x64
-            runner: warp-ubuntu-latest-x64-16x
+            runner: warp-ubuntu-latest-x64-32x
             triplet: x64-linux
-          - distro: openkylin
-            image: openkylin/openkylin:latest
+            artifact: linux-openkylin-x64
+            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
+          - name: openKylin arm64
+            platform: linux
+            distro: openkylin
             arch: arm64
             runner: warp-ubuntu-latest-arm64-32x
             triplet: arm64-linux
+            artifact: linux-openkylin-arm64
+            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
+          - name: macOS
+            platform: macos
+            distro: macos
+            arch: arm64
+            runner: warp-macos-26-arm64-12x
+            triplet: arm64-osx
+            artifact: macos
+            container: ''
+          - name: Windows
+            platform: windows
+            distro: windows
+            arch: x64
+            runner: warp-windows-2025-vs2026-x64-32x
+            triplet: x64-windows
+            artifact: windows
+            container: ''
 
     steps:
-      # git/curl must land BEFORE actions/checkout runs inside the
-      # container.
-      - name: Install git and fetch tools
-        run: |
-          case "${{ matrix.distro }}" in
-            debian|openkylin) apt-get update && apt-get install -y git curl ;;
-            fedora) dnf install -y git curl ;;
-            arch) pacman -Sy --noconfirm git curl ;;
-          esac
-
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      # The openKylin image runs as root with HOME=/github/home; rustup
-      # refuses the euid mismatch and installs a toolchain the later steps
-      # cannot find. Pin the whole job to root's home (same as the CI
-      # openKylin jobs).
-      - name: Pin HOME for rustup (openKylin)
-        if: matrix.distro == 'openkylin'
-        run: |
-          {
-            echo "HOME=/root"
-            echo "CARGO_HOME=/root/.cargo"
-            echo "RUSTUP_HOME=/root/.rustup"
-          } >> "$GITHUB_ENV"
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          case "${{ matrix.distro }}" in
-            debian)
-              apt-get update
-              apt-get install -y \
-                build-essential clang libclang-dev cmake pkg-config nasm \
-                git curl zip unzip tar python3 dpkg-dev \
-                libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-                libasound2-dev libpulse-dev libsndfile1-dev \
-                libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-                libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-                gdb xvfb libdrm-dev librsvg2-bin autoconf autoconf-archive automake libtool
-              ;;
-            fedora)
-              dnf install -y \
-                gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
-                git curl zip unzip tar python3 \
-                pipewire-devel jack-audio-connection-kit-devel \
-                alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
-                mesa-libGL-devel mesa-vulkan-drivers \
-                vulkan-headers vulkan-loader-devel \
-                libxkbcommon-devel libxkbcommon-x11-devel \
-                rpm-build librsvg2-tools libdrm-devel autoconf autoconf-archive automake libtool
-              ;;
-            arch)
-              pacman -S --needed --noconfirm \
-                base-devel clang cmake pkgconf nasm \
-                git curl zip unzip tar python \
-                pipewire jack2 alsa-lib libpulse libsndfile \
-                mesa vulkan-headers vulkan-icd-loader \
-                libxkbcommon libxkbcommon-x11 librsvg libdrm autoconf autoconf-archive automake libtool
-              ;;
-            openkylin)
-              # The CI openKylin build set plus dpkg-dev (dpkg-shlibdeps
-              # computes the runtime deps) and librsvg2-bin (app icon).
-              apt-get update
-              apt-get install -y \
-                build-essential clang libclang-dev cmake pkg-config nasm \
-                git curl zip unzip tar python3 patch xz-utils dpkg-dev \
-                libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-                libasound2-dev libpulse-dev libsndfile1-dev \
-                libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-                libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-                libdrm-dev file librsvg2-bin \
-                autoconf autoconf-archive automake libtool
-              ;;
-          esac
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) — built from scratch, no caches (see the
-      # policy note at the top of this file)
-      # ------------------------------------------------------------------
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet ${{ matrix.triplet }}
-
-      - name: Configure build environment
-        run: |
-          {
-            echo "CC=clang"
-            echo "CXX=clang++"
-          } >> "$GITHUB_ENV"
-          # tooling/ocio-env.sh: vendored static OCIO everywhere it
-          # builds (the [patch.crates-io] ocio-sys tracks shaloong/ocio-rs
-          # main, whose vendored sources build on GCC >= 16).
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Build (release)
-        run: cargo build --release --locked
-
-      - name: Generate app icon (PNG from Oak_Icon.svg)
-        run: |
-          mkdir -p icons
-          if command -v rsvg-convert >/dev/null 2>&1; then
-            rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
-          else
-            # Defensive: some containers (openKylin) may not carry
-            # librsvg2-bin; fall back to the committed 512x512 render.
-            cp assets/app-icon.png icons/icon.png
-          fi
-
-      - name: Package
-        run: |
-          set -euo pipefail
-          # The release version lives in [workspace.package] of the root
-          # Cargo.toml (single source of truth; tags do not carry it).
-          VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          case "${{ matrix.distro }}" in
-            debian)   tooling/package/build-deb.sh "$VERSION" debian ;;
-            openkylin) tooling/package/build-deb.sh "$VERSION" openkylin ;;
-            fedora)   tooling/package/build-rpm.sh "$VERSION" ;;
-            arch)     tooling/package/build-pkg.sh "$VERSION" ;;
-          esac
+      # The container images are bare (Fedora/Arch even lack git);
+      # checkout and vcpkg need git/curl. First step of the job, so the
+      # package lists are still fresh.
+      - name: Bootstrap container (git, curl, wget)
+        if: matrix.container != ''
         shell: bash
+        run: |
+          case "${{ matrix.distro }}" in
+            fedora) dnf install -y git curl wget which ;;
+            arch) pacman -Sy --noconfirm git curl wget which ;;
+            debian|openkylin) apt-get update && apt-get install -y git curl ca-certificates wget ;;
+          esac
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oak-linux-${{ matrix.distro }}-${{ matrix.arch }}
-          path: |
-            target/release/*.deb
-            target/release/*.rpm
-            target/release/*.pkg.tar.zst
-          if-no-files-found: error
-
-  # ------------------------------------------------------------------
-  # AppImage (self-contained; cargo-packager on the Ubuntu runner).
-  # ------------------------------------------------------------------
-  appimage:
-    name: Linux AppImage
-    runs-on: warp-ubuntu-latest-x64-16x
-
-    steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          submodules: true
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          # FFmpeg/codec libraries come from the vcpkg manifest (root
-          # vcpkg.json); this list is the toolchain vcpkg needs plus the
-          # GUI runtime deps the AppImage bundles.
-          sudo apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
-            git curl zip unzip tar python3 \
-            librsvg2-bin \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libdrm-dev \
-            autoconf autoconf-archive automake libtool
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) — built from scratch, no caches (see the
-      # policy note at the top of this file)
-      # ------------------------------------------------------------------
-      - name: Bootstrap vcpkg
-        run: |
-          # Full clone (no --depth): the manifest pins a builtin-baseline
-          # and port trees, and a shallow vcpkg cannot check them out
-          # ("failed to unpack tree object ... Try again with a full
-          # vcpkg clone").
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet x64-linux
-
-      - name: Configure build environment
-        run: |
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/x64-linux"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
-
-      - name: Generate app icon (PNG from Oak_Icon.svg)
-        run: |
-          mkdir -p icons
-          rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
-          file icons/icon.png
-
-      - name: Build (release)
-        run: cargo build --release --locked
-
-      - name: Package (AppImage)
-        run: cargo packager --release --formats appimage
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oak-linux-appimage
-          path: target/release/*.AppImage
-          if-no-files-found: error
-
-  macos:
-    name: macOS DMG (Apple Silicon)
-    runs-on: warp-macos-26-arm64-12x
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
-        run: |
-          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
-          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what
-          # vcpkg's ffmpeg port requires to build. librsvg stays for
-          # rsvg-convert (app icon) and is bundled into the .app below.
-          brew install cmake pkg-config nasm librsvg nasm autoconf automake libtool autoconf-archive
-
-      # ------------------------------------------------------------------
-      # vcpkg (manifest mode) — built from scratch, no caches (see the
-      # policy note at the top of this file)
-      # ------------------------------------------------------------------
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet arm64-osx
-
-      - name: Configure build environment
-        run: |
-          # Vendored static OCIO (same as every non-Windows platform via
-          # tooling/ocio-env.sh); no OCIO_INSTALL_DIR override.
-          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/arm64-osx"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
-
-      - name: Generate app icon (PNG from Oak_Icon.svg)
-        run: |
-          mkdir -p icons
-          # cargo-packager's tauri-icns 0.1.0 maps only 512x512@1x (and
-          # 1024x1024@2x); a plain 1024x1024 PNG aborts with "No matching
-          # IconType", so render 512x512.
-          rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
-          file icons/icon.png
-
-      # Build the packaged binaries (default members: the app, oak-cli,
-      # oak-worker).
-      - name: Build (release)
-        run: cargo build --release --locked
-
-      - name: Package .app bundle
-        run: cargo packager --release --formats app
-
-      # Pull the Homebrew dylibs the binaries reference into
-      # Contents/Frameworks and rewrite install names to
-      # @executable_path-relative (the script ad-hoc re-signs the bundle).
-      - name: Bundle dylibs into the .app
-        run: tooling/package/bundle-dylibs-macos.sh target/release/Oak.app
-
-      - name: Create DMG
-        run: |
-          rm -rf dmg-staging
-          mkdir -p dmg-staging
-          cp -R target/release/Oak.app dmg-staging/
-          ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "Oak Video Editor" \
-            -srcfolder dmg-staging -ov -format UDZO Oak-macOS-arm64.dmg
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oak-macos
-          path: Oak-macOS-arm64.dmg
-          if-no-files-found: error
-
-  # ------------------------------------------------------------------
-  # Windows: NSIS installer (restored; cargo-packager downloads its own
-  # makensis, SHA-1 verified). The obsolete `-p oakengine` cdylib prebuild
-  # from before M14 R4 is dropped — no packaged binary links the cdylib.
-  # ------------------------------------------------------------------
-  windows:
-    name: Windows installer (NSIS)
-    runs-on: warp-windows-2025-vs2026-x64-32x
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
+          # gpui/ is a git submodule; its crates are workspace members of
+          # their own repo and build as path dependencies of oakapp.
           submodules: true
 
       # Defender's real-time scanning slows the MSVC/vcpkg build down
       # badly; disable it for the job and keep exclusions as the fallback
-      # when policy blocks the change (same step as the CI Windows job).
+      # when policy blocks the change.
       - name: Disable Windows Defender scanning
+        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           try {
@@ -429,21 +138,120 @@ jobs:
             Write-Host "Defender status unavailable: $_"
           }
 
-      - name: Install Rust (stable, MSVC)
+      # The containers run as root but Actions sets HOME=/github/home;
+      # rustup refuses the euid mismatch ("$HOME differs from
+      # euid-obtained home directory") and would install a toolchain the
+      # later steps cannot find under the Actions home. Pin the job to
+      # root's home so rustup/cargo and the toolchain agree.
+      - name: Pin HOME for rustup
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          {
+            echo "HOME=/root"
+            echo "CARGO_HOME=/root/.cargo"
+            echo "RUSTUP_HOME=/root/.rustup"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           # The Windows build is MSVC-ABI (the runner carries VS 2026):
           # vcpkg's FFmpeg and the vendored OCIO build both want it.
-          toolchain: stable-x86_64-pc-windows-msvc
+          toolchain: ${{ matrix.platform == 'windows' && 'stable-x86_64-pc-windows-msvc' || 'stable' }}
 
-      # vcpkg.json at the repo root pins the dependency set (FFmpeg with
-      # every free codec + hwaccel, pkgconf, librsvg); the resolved tree
-      # lands in vcpkg_installed/ and is built from scratch (no cache, see
-      # the policy note at the top). Bootstrapping a fresh clone rather
-      # than leaning on whatever vcpkg the image carries: the
-      # `builtin-baseline`/`overrides` are only honored by a recent
-      # vcpkg-tool, and every OS job must behave alike.
+      # ------------------------------------------------------------------
+      # System dependencies — one list per distro, byte-for-byte the same
+      # lists CI uses (see .github/workflows/ci.yml): what compiles there
+      # compiles here.
+      # ------------------------------------------------------------------
+      - name: Install system dependencies (Debian)
+        if: matrix.distro == 'debian'
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential clang libclang-dev cmake pkg-config nasm \
+            git curl zip unzip tar python3 dpkg-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
+            libasound2-dev libpulse-dev libsndfile1-dev \
+            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
+            icc-profiles-free gdb file librsvg2-bin patchelf \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (Fedora)
+        if: matrix.distro == 'fedora'
+        shell: bash
+        run: |
+          dnf install -y \
+            gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
+            git curl zip unzip tar python3 patch xz-utils which \
+            pipewire-devel jack-audio-connection-kit-devel \
+            alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
+            mesa-libGL-devel mesa-vulkan-drivers \
+            vulkan-headers vulkan-loader-devel \
+            libxkbcommon-devel libxkbcommon-x11-devel \
+            rpm-build librsvg2-tools libdrm-devel perl-IPC-Cmd \
+            xorg-x11-server-Xvfb xorg-x11-xauth gdb file \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (Arch)
+        if: matrix.distro == 'arch'
+        shell: bash
+        run: |
+          pacman -S --needed --noconfirm \
+            base-devel clang cmake pkgconf nasm \
+            git curl zip unzip tar python patch xz-utils which \
+            pipewire jack2 alsa-lib libpulse libsndfile \
+            mesa vulkan-headers vulkan-icd-loader \
+            libxkbcommon libxkbcommon-x11 librsvg libdrm \
+            xorg-server-xvfb xorg-xauth gdb file \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (openKylin)
+        if: matrix.distro == 'openkylin'
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential clang libclang-dev cmake pkg-config nasm \
+            git curl zip unzip tar python3 patch xz-utils dpkg-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
+            libasound2-dev libpulse-dev libsndfile1-dev \
+            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
+            gdb file patchelf fonts-dejavu-core \
+            autoconf autoconf-archive automake libtool
+
+      - name: Install system dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
+          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what
+          # vcpkg's ffmpeg port requires to build (FFmpeg libraries come
+          # from the vcpkg manifest). librsvg stays for rsvg-convert (app
+          # icon) and is bundled into the .app by the dylib script.
+          brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
+
+      # ------------------------------------------------------------------
+      # vcpkg (manifest mode) — built from scratch, no caches
+      # ------------------------------------------------------------------
+      # Bootstrap a fresh clone rather than leaning on whatever vcpkg the
+      # image carries: `builtin-baseline`/`overrides` are only honored by
+      # a recent vcpkg-tool, and every platform must behave alike.
       - name: Bootstrap vcpkg
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
+          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
+          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Bootstrap vcpkg (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$env:GITHUB_WORKSPACE\.cache\vcpkg"
           & "$env:GITHUB_WORKSPACE\.cache\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
@@ -452,11 +260,78 @@ jobs:
           "VCPKG_ROOT=$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_ENV
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet x64-windows
-
-      - name: Configure build environment
+        if: matrix.platform != 'windows'
+        shell: bash
         run: |
-          $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\x64-windows"
+          # Source tarballs come from third-party hosts (x264 lives on
+          # code.videolan.org); a transient connection failure aborts the
+          # whole install — vcpkg refuses to retry that class of curl
+          # error — so retry here.
+          for attempt in 1 2 3; do
+            vcpkg install --triplet ${{ matrix.triplet }} && exit 0
+            echo "vcpkg install failed (attempt $attempt); retrying"
+            sleep 15
+          done
+          exit 1
+
+      - name: Install dependencies (vcpkg manifest, Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            vcpkg install --triplet ${{ matrix.triplet }}
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "vcpkg install failed (attempt $i); retrying"
+            Start-Sleep -Seconds 15
+          }
+          exit 1
+
+      # ------------------------------------------------------------------
+      # Build environment
+      # ------------------------------------------------------------------
+      # ocio-sys builds a stub bridge unless these are set; the oak-core
+      # ocioutils tests need the real library.
+      # tooling/ocio-env.sh: vendored static OCIO (the [patch.crates-io]
+      # ocio-sys tracks shaloong/ocio-rs main, whose vendored sources build
+      # on GCC >= 16).
+      - name: Configure build environment (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          {
+            echo "CC=clang"
+            echo "CXX=clang++"
+          } >> "$GITHUB_ENV"
+          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
+          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          # The Debian-family packaging tools resolve the ELF needs through
+          # ldd (dpkg-shlibdeps, linuxdeploy): register the vcpkg libs with
+          # the dynamic linker so `libva-drm.so.2` is found when a package
+          # is assembled.
+          echo "$prefix/lib" > /etc/ld.so.conf.d/oak-vcpkg.conf
+          ldconfig
+
+      - name: Configure build environment (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          # Vendored static OCIO (same as every non-Windows platform via
+          # tooling/ocio-env.sh); no OCIO_INSTALL_DIR override.
+          bash tooling/ocio-env.sh >> "$GITHUB_ENV"
+          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
+          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
+
+      - name: Configure build environment (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
           "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$prefix\lib\pkgconfig" >> $env:GITHUB_ENV
           "$prefix\tools\pkgconf" >> $env:GITHUB_PATH
@@ -469,41 +344,129 @@ jobs:
           vcpkg list
 
       - name: Install cargo-packager
+        if: matrix.distro == 'debian' || matrix.platform != 'linux'
         run: cargo install cargo-packager --locked
 
       - name: Generate app icon (PNG from Oak_Icon.svg)
+        if: matrix.platform != 'windows'
         run: |
-          # vcpkg's librsvg port builds with -Drsvg-convert=disabled (it
-          # ships the library only and provides no rsvg-convert.exe), so
-          # use the committed 512x512 render of Oak_Icon.svg.
-          New-Item -ItemType Directory -Force icons | Out-Null
-          Copy-Item assets/app-icon.png icons/icon.png
+          mkdir -p icons
+          if command -v rsvg-convert >/dev/null 2>&1; then
+            rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
+          else
+            # Defensive: some containers may not carry an SVG renderer;
+            # fall back to the committed 512x512 render.
+            cp assets/app-icon.png icons/icon.png
+          fi
 
+      # ------------------------------------------------------------------
+      # Build
+      # ------------------------------------------------------------------
+      # Default dynamic CRT on Windows: the vendored OCIO is compiled /MD,
+      # so forcing Rust to /MT fails with LNK2038 'RuntimeLibrary'
+      # mismatch; the redistributable DLLs ship with the installer below.
       - name: Build (release)
-        run: |
-          # Static CRT: the installer then needs no vcruntime DLLs (the
-          # vcpkg DLLs below are the only runtime pieces to bundle).
-          $env:RUSTFLAGS = "-C target-feature=+crt-static"
-          cargo build --release --locked
+        run: cargo build --release --locked
 
-      # The vcpkg runtime DLLs (avcodec/avformat/... and the codec libs)
-      # ship next to the executables: copy them into target/pkg/win-dlls,
-      # which the packager `resources` glob installs alongside (the MSVC
-      # CRT itself is covered by the toolchain's static linking story;
-      # OCIO is bundled statically).
+      # ------------------------------------------------------------------
+      # Package
+      # ------------------------------------------------------------------
+      - name: Package (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The release version lives in [workspace.package] of the root
+          # Cargo.toml (single source of truth; tags do not carry it).
+          VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          case "${{ matrix.distro }}" in
+            debian)
+              # The general Debian-family package, labeled "+debian".
+              VCPKG_LIB="$PWD/vcpkg_installed/${{ matrix.triplet }}/lib" \
+                tooling/package/build-deb.sh "$VERSION" debian
+              # appimagetool self-extracts instead of mounting (containers
+              # have no FUSE).
+              APPIMAGE_EXTRACT_AND_RUN=1 cargo packager --release --formats appimage
+              ;;
+            fedora)
+              tooling/package/build-rpm.sh "$VERSION"
+              ;;
+            arch)
+              tooling/package/build-pkg.sh "$VERSION"
+              ;;
+            openkylin)
+              # The openKylin build, labeled "+openkylin"; dpkg-shlibdeps
+              # resolves the runtime deps against openKylin's own repos
+              # and the vcpkg libva/libdrm ship next to the app (openKylin's
+              # system libva predates FFmpeg's vaMapBuffer2).
+              VCPKG_LIB="$PWD/vcpkg_installed/${{ matrix.triplet }}/lib" \
+                tooling/package/build-deb.sh "$VERSION" openkylin
+              ;;
+          esac
+
+      - name: Package (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cargo packager --release --formats app
+          # cargo-packager names the bundle after the packager
+          # `productName` ("Oak Video Editor.app"), so resolve it instead
+          # of guessing.
+          APP="$(ls -d target/release/*.app | head -1)"
+          tooling/package/bundle-dylibs-macos.sh "$APP"
+          rm -rf dmg-staging
+          mkdir -p dmg-staging
+          cp -R "$APP" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Oak Video Editor" \
+            -srcfolder dmg-staging -ov -format UDZO Oak-macOS-arm64.dmg
+
       - name: Bundle runtime DLLs
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force target/pkg/win-dlls | Out-Null
-          Copy-Item "vcpkg_installed\x64-windows\bin\*.dll" target/pkg/win-dlls/
+          # vcpkg's dynamic libs (FFmpeg + codecs).
+          Copy-Item "vcpkg_installed\${{ matrix.triplet }}\bin\*.dll" target/pkg/win-dlls/
+          # The MSVC runtime: the build keeps the default dynamic CRT (see
+          # the Build step), so ship the redistributable DLLs app-locally.
+          $crt = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object FullName | Select-Object -Last 1
+          if (-not $crt) { throw "MSVC CRT redist directory not found" }
+          Copy-Item "$($crt.FullName)\*.dll" target/pkg/win-dlls/
 
       - name: Package (NSIS)
+        if: matrix.platform == 'windows'
+        shell: pwsh
         run: cargo packager --release --formats nsis
+
+      # ------------------------------------------------------------------
+      # Upload
+      # ------------------------------------------------------------------
+      - name: Stage artifacts
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/*.deb dist/ 2>/dev/null || true
+          cp target/release/*.rpm dist/ 2>/dev/null || true
+          cp target/release/*.pkg.tar.zst dist/ 2>/dev/null || true
+          cp target/release/*.AppImage dist/ 2>/dev/null || true
+          cp ./*.dmg dist/ 2>/dev/null || true
+          ls -la dist
+
+      - name: Stage artifacts (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/*-setup.exe dist/
+          Get-ChildItem dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: oak-windows
-          path: target/release/*-setup.exe
+          name: oak-${{ matrix.artifact }}
+          path: dist/*
           if-no-files-found: error
 
   # ------------------------------------------------------------------
@@ -512,9 +475,9 @@ jobs:
   # ------------------------------------------------------------------
   release:
     name: Publish GitHub release
-    needs: [linux, appimage, macos, windows]
+    needs: [package]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: warp-ubuntu-latest-x64-8x
+    runs-on: warp-ubuntu-latest-x64-32x
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -529,4 +492,3 @@ jobs:
           name: ${{ github.ref_name }}
           draft: false
           files: artifacts/*
-
