@@ -66,7 +66,10 @@ fn worker_bin() -> PathBuf {
 	PathBuf::from("oak-worker")
 }
 
-/// `(user, system)` CPU seconds of this process and its children.
+/// `(user, system)` CPU seconds of this process and its children (Unix
+/// `getrusage`; the benchmark's CPU accounting is Unix-only, the rest of
+/// the harness runs everywhere).
+#[cfg(unix)]
 fn cpu_times() -> (f64, f64) {
 	fn rusage(who: i32) -> (f64, f64) {
 		let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
@@ -79,6 +82,13 @@ fn cpu_times() -> (f64, f64) {
 	let self_times = rusage(libc::RUSAGE_SELF);
 	let children = rusage(libc::RUSAGE_CHILDREN);
 	(self_times.0 + children.0, self_times.1 + children.1)
+}
+
+/// Windows has no `getrusage`; the harness still builds and runs, it just
+/// reports zero CPU seconds (`cargo test` compiles examples on every OS).
+#[cfg(not(unix))]
+fn cpu_times() -> (f64, f64) {
+	(0.0, 0.0)
 }
 
 /// One footage ticket over the whole timeline.

@@ -913,10 +913,25 @@ fn pipeline_playback_prefetches_ahead_of_the_render() {
 		times.len() as u64,
 		"every playback post queued its footage prefetch"
 	);
-	assert_eq!(
+	// Each distinct frame is produced at least once. The hand-off LRU holds
+	// only `DECODE_LRU_CAP` (2) frames, so under scheduling pressure a
+	// request can miss the prefetched copy and re-run the producer; the
+	// eval-side cache still serves the pixels without touching the media,
+	// but the counter moves. Bound this to one production per command
+	// (prefetch + request) instead of asserting an exact count; the
+	// deterministic `pipeline_prefetch_is_the_frame_the_render_request_uses`
+	// pins that the read-ahead is actually used.
+	assert!(
+		stats.decodes >= times.len() as u64,
+		"each distinct frame is produced at least once ({} < {})",
 		stats.decodes,
-		times.len() as u64,
-		"each distinct frame decodes exactly once (prefetch or rendezvous)"
+		times.len()
+	);
+	assert!(
+		stats.decodes <= 2 * times.len() as u64,
+		"at most one production per prefetch and per request ({} > {})",
+		stats.decodes,
+		2 * times.len()
 	);
 	// Note: `procpool::main_heap_frame_copies` only counts the shm path,
 	// which the thread pipeline never touches, so asserting it here would

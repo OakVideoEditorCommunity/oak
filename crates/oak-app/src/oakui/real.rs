@@ -12576,6 +12576,13 @@ mod tests {
 	/// (early return / Err / empty data source) without panicking.
 	#[gpui::test]
 	async fn engine_without_a_project_hits_the_guard_paths(cx: &mut gpui::TestAppContext) {
+		// The library guards below depend on the process-global storage
+		// config: serialize with the config tests (the shared lock) and pin
+		// the backend OFF so a concurrent test's transient "sqlite" cannot
+		// make `library_create_project` succeed mid-assertion.
+		let _guard = crate::oakui::graphops::test_lock();
+		let _backend = ConfigRestore::of(CONFIG_KEY_STORAGE_BACKEND);
+		crate::oakui::real::config_set_string(CONFIG_KEY_STORAGE_BACKEND, "");
 		let engine = cx.update(|cx| cx.new(RealEngine::create));
 
 		// Data sources on an empty engine.

@@ -801,7 +801,16 @@ mod tests {
 	use crate::render::VideoParams;
 
 	/// GL 不可用时 skip（无 GPU 无头环境）；可用时返回 guard。
+	///
+	/// macOS 的真实 CGL 验收与集成 GL 测试同一门禁：CI 无头且用例并行，
+	/// 默认只做可用性探测；设 `OAK_GPU_TESTS=1` 才跑真实 GL 用例
+	/// （`crates/oak-plugin/tests/gl_render_test.rs` 同约定）。
 	fn maybe_gl() -> Option<GlGuard> {
+		#[cfg(target_os = "macos")]
+		if std::env::var_os("OAK_GPU_TESTS").is_none() {
+			println!("SKIP: 真实 GL 桥用例需 OAK_GPU_TESTS（本机 GPU 验收；CI 一律跳过）");
+			return None;
+		}
 		match acquire() {
 			Ok(g) => Some(g),
 			Err(e) => {
