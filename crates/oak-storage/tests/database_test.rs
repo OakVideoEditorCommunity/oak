@@ -1090,6 +1090,28 @@ fn invalid_uri_matrix() {
 	);
 }
 
+/// Linux CI containers run as root, which bypasses the file permission bits
+/// (`CAP_DAC_OVERRIDE`), so the read-only failure paths cannot be exercised
+/// there.
+#[cfg(target_os = "linux")]
+fn running_as_root() -> bool {
+	std::fs::read_to_string("/proc/self/status")
+		.ok()
+		.and_then(|status| {
+			status
+				.lines()
+				.find(|line| line.starts_with("Uid:"))
+				.and_then(|line| line.split_whitespace().nth(1).map(str::to_string))
+		})
+		.map(|uid| uid == "0")
+		.unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn running_as_root() -> bool {
+	false
+}
+
 /// Write failures surface as errors, not panics or silent corruption:
 /// (a) read-only database files, (b) an out-of-range undo target, and
 /// (c) concurrent writers on one file.
@@ -1120,8 +1142,15 @@ fn failure_paths_report_cleanly() {
 		std::fs::set_permissions(f, p).unwrap();
 	}
 	let fresh = DatabaseBackend::new();
-	let err = save_project(&fresh, &project, &uri).err().unwrap();
-	assert_eq!(err.code(), OAKSTORAGE_E_IO, "read-only library write must fail");
+	let result = save_project(&fresh, &project, &uri);
+	if running_as_root() {
+		// The openKylin CI container runs as root: the read-only bits do not
+		// stop the write, so the failure cannot be asserted here.
+		println!("SKIP: read-only library write check needs an unprivileged user");
+	} else {
+		let err = result.err().expect("read-only library write must fail");
+		assert_eq!(err.code(), OAKSTORAGE_E_IO, "read-only library write must fail");
+	}
 	for (f, p) in targets.iter().zip(saved) {
 		std::fs::set_permissions(f, p).unwrap();
 	}

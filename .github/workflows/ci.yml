@@ -340,6 +340,10 @@ jobs:
           "FFMPEG_DIR=$prefix" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$prefix\lib\pkgconfig" >> $env:GITHUB_ENV
           "$prefix\tools\pkgconf" >> $env:GITHUB_PATH
+          # The test binaries link vcpkg's dynamic DLLs (ffmpeg and its
+          # codecs): without this the runner reports STATUS_DLL_NOT_FOUND
+          # when the first test executable starts.
+          "$prefix\bin" >> $env:GITHUB_PATH
           # Bundled OCIO: ocio-sys' vendored sources build with the MSVC
           # toolchain (what they need — the MSYS2 package was the
           # workaround, not the preference), so no OCIO_INSTALL_DIR and
