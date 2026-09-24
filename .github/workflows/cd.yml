@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+# Release packages are built from scratch: CD uses no vcpkg/cargo caches.
+# A restored vcpkg_installed or target tree has masked packaging problems
+# before (stale ports, missing tools); a release build must not depend on
+# restored state.
 jobs:
   # ------------------------------------------------------------------
   # Linux: deb + AppImage + pacman in one job. cargo-packager does not
@@ -147,7 +151,8 @@ jobs:
           esac
 
       # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
+      # vcpkg (manifest mode) — built from scratch, no caches (see the
+      # policy note at the top of this file)
       # ------------------------------------------------------------------
       - name: Bootstrap vcpkg
         run: |
@@ -155,21 +160,6 @@ jobs:
           .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Cache vcpkg artifacts
-        uses: actions/cache@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          # The distro and triplet prefixes matter: one Ubuntu-runner
-          # cache scope backs several containers, and the openKylin arm64
-          # build must never restore the x64 binaries.
-          key: vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-
-          save-always: true
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet ${{ matrix.triplet }}
@@ -188,12 +178,6 @@ jobs:
           echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: oak-${{ matrix.distro }}-${{ matrix.arch }}
-          cache-on-failure: true
 
       - name: Build (release)
         run: cargo build --release --locked
@@ -266,7 +250,8 @@ jobs:
             autoconf autoconf-archive automake libtool
 
       # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
+      # vcpkg (manifest mode) — built from scratch, no caches (see the
+      # policy note at the top of this file)
       # ------------------------------------------------------------------
       - name: Bootstrap vcpkg
         run: |
@@ -279,18 +264,6 @@ jobs:
           echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
 
-      - name: Cache vcpkg artifacts
-        uses: actions/cache@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-appimage-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-appimage-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-appimage-
-          save-always: true
-
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet x64-linux
 
@@ -301,12 +274,6 @@ jobs:
           echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: oak-appimage
-          cache-on-failure: true
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -352,7 +319,8 @@ jobs:
           brew install cmake pkg-config nasm librsvg nasm autoconf automake libtool autoconf-archive
 
       # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
+      # vcpkg (manifest mode) — built from scratch, no caches (see the
+      # policy note at the top of this file)
       # ------------------------------------------------------------------
       - name: Bootstrap vcpkg
         run: |
@@ -360,18 +328,6 @@ jobs:
           .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
-
-      - name: Cache vcpkg artifacts
-        uses: actions/cache@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
-          save-always: true
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet arm64-osx
@@ -385,12 +341,6 @@ jobs:
           echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: oak-workspace
-          cache-on-failure: true
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
@@ -488,11 +438,11 @@ jobs:
 
       # vcpkg.json at the repo root pins the dependency set (FFmpeg with
       # every free codec + hwaccel, pkgconf, librsvg); the resolved tree
-      # lands in vcpkg_installed/ and is keyed on the manifest. The
-      # binary-cache archives dir makes a manifest bump rebuild cheap.
-      # Bootstrap a fresh clone rather than leaning on whatever vcpkg the
-      # image carries: `builtin-baseline`/`overrides` are only honored by
-      # a recent vcpkg-tool, and every OS job must behave alike.
+      # lands in vcpkg_installed/ and is built from scratch (no cache, see
+      # the policy note at the top). Bootstrapping a fresh clone rather
+      # than leaning on whatever vcpkg the image carries: the
+      # `builtin-baseline`/`overrides` are only honored by a recent
+      # vcpkg-tool, and every OS job must behave alike.
       - name: Bootstrap vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git "$env:GITHUB_WORKSPACE\.cache\vcpkg"
@@ -500,18 +450,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_PATH
           "VCPKG_ROOT=$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_ENV
-
-      - name: Cache vcpkg artifacts
-        uses: actions/cache@v6
-        with:
-          path: |
-            vcpkg_installed
-            ~/AppData/Local/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-
-          save-always: true
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet x64-windows
@@ -529,12 +467,6 @@ jobs:
           "OCIO_RS_ENABLE_REAL=1" >> $env:GITHUB_ENV
           "OCIO_RS_LINK=static" >> $env:GITHUB_ENV
           vcpkg list
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: oak-workspace
-          cache-on-failure: true
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
