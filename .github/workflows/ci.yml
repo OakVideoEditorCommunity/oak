@@ -583,6 +583,13 @@ jobs:
       # parallel — 2 GiB used to run dry mid-suite (observed as an
       # intermittent SIGSEGV in the oak-render tests), so give it headroom.
       options: --shm-size=8g
+      # WarpCache authenticates with the runner's verification token, and
+      # a container does not inherit the runner's environment: pass it in
+      # explicitly (WarpBuilds/cache README, "Running inside a
+      # container"). Without it every cache step warns "Authentication
+      # token is invalid" and the cache is silently not restored/saved.
+      env:
+        WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -598,9 +605,12 @@ jobs:
     timeout-minutes: 90
     steps:
       # The image ships neither git nor curl (checkout and vcpkg need
-      # both). First step of the job, so the package lists are still fresh.
-      - name: Install git and curl
-        run: apt-get update && apt-get install -y git curl ca-certificates
+      # both); wget is what WarpCache uses to download cache segments
+      # inside a container (its README requires it), and without it the
+      # cache steps fail. First step of the job, so the package lists are
+      # still fresh.
+      - name: Install git, curl and wget
+        run: apt-get update && apt-get install -y git curl ca-certificates wget
 
       - name: Checkout
         uses: actions/checkout@v7
