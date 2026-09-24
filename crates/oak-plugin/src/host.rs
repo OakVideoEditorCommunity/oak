@@ -718,6 +718,13 @@ pub struct PluginCache {
 	binaries: Mutex<Vec<LoadedBinary>>,
 }
 
+/// 进程级串行化 dlopen + `OfxGetNumberOfPlugins`：OFX 二进制在首次
+/// 查询时会跑自身的全局初始化，而这个初始化不是线程安全的（CImg 的
+/// 静态 map 被两个线程同时进入时会损坏内存，见测试并发加载时的
+/// SIGSEGV/SIGABRT）。加载是启动期操作，锁的开销可忽略，却让任何
+/// 调用方（多个 `PluginCache` 实例、后台扫描线程）并发扫描也安全。
+static LOAD_LOCK: Mutex<()> = Mutex::new(());
+
 /// bundle 目录判定：目录名以 `.bundle` 或 `.plugin` 结尾。
 fn is_bundle_dir(path: &Path) -> bool {
 	let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -873,6 +880,8 @@ impl PluginCache {
 	/// 加载一个 bundle（幂等：按 bundle 路径去重）。每个早退分支都打
 	/// 诊断日志——静默失败会让效果库毫无线索地缺插件。
 	fn load_bundle(&self, bundle: &Path) {
+		// 串行化插件二进制的首次查询（见 [`LOAD_LOCK`]）。
+		let _load = LOAD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(binary) = find_binary_in_bundle(bundle) else {
 			eprintln!("[ofx] {}: no plugin binary in bundle", bundle.display());
 			return;
