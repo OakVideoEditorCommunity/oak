@@ -2647,7 +2647,7 @@ mod tests {
 		// reserve keeps interactive/audio tickets dispatchable (the
 		// playback-freeze regression guard).
 		let config = DispatcherConfig {
-			worker_bin: Some(std::path::PathBuf::from("/bin/true")),
+			worker_bin: Some(true_bin()),
 			workers: 3,
 			slots_per_worker: 4,
 			width: 64,
@@ -2740,7 +2740,7 @@ mod tests {
 	fn plugin_progress_line_forwards_to_callback() {
 		let _lock = pool_test_lock();
 		let config = DispatcherConfig {
-			worker_bin: Some(std::path::PathBuf::from("/bin/true")),
+			worker_bin: Some(true_bin()),
 			workers: 1,
 			slots_per_worker: 2,
 			width: 16,
@@ -2801,9 +2801,20 @@ mod tests {
 		format!("oak-procpool-ut-{}-{name}", std::process::id())
 	}
 
+	/// The immediate-exit worker binary used by the dispatcher tests:
+	/// macOS ships `true` in `/usr/bin` (there is no `/bin/true`), so
+	/// probe the usual locations before falling back to `PATH`.
+	fn true_bin() -> std::path::PathBuf {
+		["/usr/bin/true", "/bin/true"]
+			.into_iter()
+			.map(std::path::PathBuf::from)
+			.find(|p| p.exists())
+			.unwrap_or_else(|| std::path::PathBuf::from("true"))
+	}
+
 	fn test_config(workers: usize, slots: u32) -> DispatcherConfig {
 		DispatcherConfig {
-			worker_bin: Some(std::path::PathBuf::from("/bin/true")),
+			worker_bin: Some(true_bin()),
 			workers,
 			slots_per_worker: slots,
 			width: 16,
