@@ -8874,10 +8874,11 @@ mod tests {
 	async fn update_check_prompts_and_respects_the_preferences(cx: &mut TestAppContext) {
 		use std::sync::atomic::{AtomicU32, Ordering};
 
-		let _guard = crate::oakui::graphops::test_lock();
+		// Lock order: language -> config (see the preferences tests).
 		let _lang = crate::i18n::lang_test_lock()
 			.lock()
 			.unwrap_or_else(|e| e.into_inner());
+		let _guard = crate::oakui::graphops::test_lock();
 		crate::i18n::set_language_code("en-US");
 		let (_window, root) = mock_shell(cx);
 
