@@ -21,12 +21,12 @@
 #   export FFMPEG_DIR="$(pwd)/.cache/ffmpeg"
 #
 # Why a script instead of ffmpeg-next's `build` cargo feature: the
-# feature clones release/<crate-version>, and every such pairing is
-# broken upstream (9.0.0 -> FFmpeg 9.0 headers removed AVCodec fields;
-# 8.1.0 -> FFmpeg 8.1 added enum variants; 8.0.0 -> FFmpeg 8.0 renamed
-# FF_PROFILE_* to AV_PROFILE_*). The one known-good pairing is
-# ffmpeg-next 9.0.0 against FFmpeg 8.x headers, so this script builds
-# release/8.0.
+# feature clones release/<crate-version>, tying the FFmpeg version to the
+# crate version; the project pins its own (FFMPEG_VERSION below) and
+# ships a known-good pairing. ffmpeg-next 9.0.0 compiles against both the
+# FFmpeg 8.x and 9.x headers — verified locally with this script's builds
+# of release/8.1 and release/9.0 — so the version below is a project
+# choice, not a compatibility workaround.
 #
 # Oak is GPL, so the GPL-licensed parts of FFmpeg and every free-license
 # external codec library are enabled. Hardware acceleration is enabled
@@ -201,6 +201,10 @@ cd "$SRC"
 echo ">> make -j$JOBS"
 make -j"$JOBS"
 make install
+
+# Marker for the CI cache: a restored tree without it is incomplete (a
+# failed run's partial save) and is discarded/ rebuilt.
+touch "$PREFIX/.build-complete"
 
 cat <<EOF
 
