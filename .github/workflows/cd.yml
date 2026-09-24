@@ -192,7 +192,9 @@ jobs:
             mesa-libGL-devel mesa-vulkan-drivers \
             vulkan-headers vulkan-loader-devel \
             libxkbcommon-devel libxkbcommon-x11-devel \
-            rpm-build librsvg2-tools libdrm-devel perl-IPC-Cmd \
+            rpm-build librsvg2-tools libdrm-devel \
+            perl-IPC-Cmd perl-FindBin perl-File-Basename perl-File-Compare \
+            perl-File-Copy perl-File-Path perl-File-Temp perl-Time-Piece \
             xorg-x11-server-Xvfb xorg-x11-xauth gdb file \
             autoconf autoconf-archive automake libtool
 
