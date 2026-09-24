@@ -325,6 +325,10 @@ jobs:
           else
             rm -rf .cache/ffmpeg
             tooling/ffmpeg/build-ffmpeg.sh
+            # The cargo cache may hold ffmpeg-sys-next rlibs that bundled
+            # the previous archives (cargo does not track archive
+            # changes); flag a refresh so the build relinks the new one.
+            echo "FFMPEG_REBUILT=1" >> "$GITHUB_ENV"
           fi
 
       - name: Save FFmpeg (WarpCache)
@@ -413,6 +417,14 @@ jobs:
         with:
           shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
           cache-on-failure: true
+
+      # A freshly built FFmpeg must not keep linking the archives the
+      # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
+      # track them); drop just that package so the link picks up the new
+      # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
+      - name: Refresh the FFmpeg binding
+        if: matrix.platform != 'windows' && env.FFMPEG_REBUILT == '1'
+        run: cargo clean -p ffmpeg-sys-next
 
       # ------------------------------------------------------------------
       # Build & test
