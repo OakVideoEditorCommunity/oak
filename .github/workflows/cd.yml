@@ -274,7 +274,7 @@ jobs:
           # whole install — vcpkg refuses to retry that class of curl
           # error — so retry here.
           for attempt in 1 2 3; do
-            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release && exit 0
+            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release --overlay-ports tooling/vcpkg-ports && exit 0
             echo "vcpkg install failed (attempt $attempt); retrying"
             sleep 15
           done
@@ -285,7 +285,7 @@ jobs:
         shell: pwsh
         run: |
           for ($i = 1; $i -le 3; $i++) {
-            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release
+            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release --overlay-ports tooling/vcpkg-ports
             if ($LASTEXITCODE -eq 0) { exit 0 }
             Write-Host "vcpkg install failed (attempt $i); retrying"
             Start-Sleep -Seconds 15
