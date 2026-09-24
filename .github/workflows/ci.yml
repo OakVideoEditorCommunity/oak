@@ -250,6 +250,38 @@ jobs:
           # their own repo and build as path dependencies of oakapp.
           submodules: true
 
+      # Taste the disk before the toolchains land: Defender scans every file
+      # the vcpkg/cargo builds touch (tens of thousands of small writes),
+      # which dominates a cold Windows build. The runner is an ephemeral VM,
+      # so the scanner is turned off for the job (exclusions are kept as a
+      # fallback for images where real-time protection cannot be disabled).
+      - name: Disable Windows Defender scanning
+        shell: pwsh
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+            Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+            Set-MpPreference -DisableArchiveScanning $true -ErrorAction SilentlyContinue
+            Write-Host "Windows Defender real-time scanning disabled for this job"
+          } catch {
+            Write-Host "Windows Defender could not be disabled (non-fatal, falling back to exclusions): $_"
+          }
+          foreach ($path in @(
+            $env:GITHUB_WORKSPACE,
+            "$env:USERPROFILE\.cargo",
+            "$env:USERPROFILE\.rustup",
+            "$env:LOCALAPPDATA\vcpkg"
+          )) {
+            Add-MpPreference -ExclusionPath $path -ErrorAction SilentlyContinue
+          }
+          try {
+            Get-MpPreference |
+              Select-Object DisableRealtimeMonitoring, DisableScriptScanning, ExclusionPath |
+              Format-List
+          } catch {
+            Write-Host "Defender status unavailable: $_"
+          }
+
       - name: Install Rust (stable, MSVC)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -463,8 +495,11 @@ jobs:
       image: openkylin/openkylin:latest
       # A container's default /dev/shm is 64 MiB; the process pool reserves
       # >64 MiB per worker eagerly (posix_fallocate) and the render manager
-      # fails to start when the reservation is refused.
-      options: --shm-size=2g
+      # fails to start when the reservation is refused. The suite also runs
+      # the 512 MiB shared-memory spike and several worker pools in
+      # parallel — 2 GiB used to run dry mid-suite (observed as an
+      # intermittent SIGSEGV in the oak-render tests), so give it headroom.
+      options: --shm-size=8g
     strategy:
       fail-fast: false
       matrix:
@@ -627,3 +662,19 @@ jobs:
             echo "first pass failed; retrying once for worker-pool flakes"
             run_suite
           fi
+
+      # A crashing (SIGSEGV) test binary gives no Rust backtrace: rerun the
+      # big suites under gdb so the native stack lands in the log. gdb is
+      # installed with the system dependencies.
+      - name: Backtrace on test failure
+        if: failure()
+        run: |
+          for name in oak_render oakapp oak_plugin; do
+            BIN=$(ls -t target/debug/deps/$name-* 2>/dev/null | grep -v '\.d$' | head -1)
+            [ -n "$BIN" ] || continue
+            echo "===== $BIN ====="
+            timeout 900 xvfb-run -a gdb -batch \
+              -ex run \
+              -ex 'thread apply all bt' \
+              --args "$BIN" || true
+          done
