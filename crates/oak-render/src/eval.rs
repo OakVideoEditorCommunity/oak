@@ -1876,7 +1876,8 @@ static GPU_COMPOSITE_FAILED: std::sync::atomic::AtomicBool =
 /// Compositing always runs — even a single frame passes through the
 /// alpha-over over a transparent accumulator, which is the graph's
 /// premultiply step (an adjustment sweep's 0.5-opacity result must become
-/// 0.25 after its final composite).
+/// 0.25 after its final composite). Frames arrive topmost first; both
+/// paths composite the stack bottom-up (see [`composite_tracks_gpu`]).
 fn composite_tracks(frames: Vec<Texture>, size: (i32, i32)) -> Texture {
 	let (w, h) = size;
 	if w <= 0 || h <= 0 {
@@ -1896,12 +1897,25 @@ fn composite_tracks(frames: Vec<Texture>, size: (i32, i32)) -> Texture {
 		}
 	}
 	// CPU fallback: read every GPU frame back (the explicit boundary) and
-	// composite the CPU stack.
+	// composite the CPU stack bottom-up.
+	composite_tracks_cpu(&frames, (w, h))
+}
+
+/// The CPU half of [`composite_tracks`]: frames arrive topmost first
+/// (the render walk inserts each track's frame at the front), so the
+/// stack is composited from the bottom (last) up — exactly like
+/// [`composite_tracks_gpu`]. This is the path every machine without a
+/// working adapter runs, so the layer order must match the GPU pass.
+fn composite_tracks_cpu(frames: &[Texture], size: (i32, i32)) -> Texture {
+	let (w, h) = size;
+	if w <= 0 || h <= 0 {
+		return Texture::dummy();
+	}
 	let Ok(mut acc) = generate_frame(Rational::new(0, 1), (w, h), PixelFormat::F32) else {
 		return Texture::dummy();
 	};
 	let acc_stride = acc.linesize_bytes() as i32;
-	for texture in frames.iter() {
+	for texture in frames.iter().rev() {
 		let Ok(frame) = texture.to_frame() else {
 			continue;
 		};
@@ -4113,7 +4127,10 @@ mod tests {
         // bottom over transparent: (0.75, 0.75, 0.75, 0.75), then top over:
         // r = 0.5*0.5 + 0.75*0.5, g = 0.25*0.5 + 0.75*0.5,
         // b = 0.125*0.5 + 0.75*0.5, a = 0.5 + 0.75*0.5.
-        let out = composite_tracks(frames.clone(), (2, 1));
+        // The CPU fallback must match the GPU math (and the layer
+        // order); call it directly so the assertion never depends on
+        // whether some other test installed a shared GPU context.
+        let out = composite_tracks_cpu(&frames, (2, 1));
         let pixel = first_pixel(&out);
         for (got, want) in pixel.iter().zip(expected) {
             assert!((got - want).abs() < 1e-4, "CPU composite: expected {want}, got {got}");
