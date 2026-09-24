@@ -21,8 +21,10 @@
 # itself is built from source by tooling/ffmpeg/build-ffmpeg.sh (which
 # installs into .cache/ffmpeg) and is NOT installed here.
 #
-# This is the local-build path. CI/CD gets the same libraries from the
-# vcpkg manifest (root vcpkg.json) instead — see docs/build.md.
+# CI/CD runs this same script (see .github/workflows/ci.yml and
+# .github/workflows/cd.yml), so local builds and the release packages
+# share one dependency set; the Windows CI/CD jobs use the prebuilt
+# FFmpeg archive instead and never touch the MSYS2 branch.
 #
 # Supported: Homebrew (macOS), MSYS2 UCRT64 (Windows), Debian/Ubuntu,
 # Fedora, Arch. Run it yourself — nothing in the build invokes it
@@ -33,6 +35,14 @@
 set -euo pipefail
 
 run() { echo "+ $*"; "$@"; }
+
+# Containers (the CI/CD jobs) run as root without sudo; use sudo only when
+# the caller is not root.
+if [ "$(id -u)" = "0" ]; then
+	SUDO=()
+else
+	SUDO=(sudo)
+fi
 
 if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || -n "${MSYSTEM:-}" ]]; then
 	if [ "${MSYSTEM:-}" != "UCRT64" ]; then
@@ -68,39 +78,59 @@ fi
 
 case "$(uname -s)" in
 	Darwin)
-		run brew install pkg-config nasm \
+		run brew install cmake pkg-config nasm \
 			x264 x265 dav1d libvpx openh264 openjpeg theora webp \
 			lame opus libvorbis speex snappy libass freetype fribidi \
 			fontconfig gnutls
 		;;
 	Linux)
 		if command -v apt-get >/dev/null; then
-		run sudo apt-get update
-		run sudo apt-get install -y build-essential pkg-config nasm \
-			libx264-dev libx265-dev libdav1d-dev libvpx-dev \
-			libopenh264-dev libopenjp2-7-dev libtheora-dev libwebp-dev \
-			libmp3lame-dev libopus-dev libvorbis-dev libspeex-dev \
-			libsnappy-dev libass-dev libfreetype-dev libfribidi-dev \
-			libfontconfig-dev libgnutls28-dev \
+		run "${SUDO[@]}" apt-get update
+		PKGS=(
+			build-essential clang libclang-dev cmake python3 pkg-config nasm
+			libx264-dev libx265-dev libdav1d-dev libvpx-dev
+			libopenh264-dev libopenjp2-7-dev libtheora-dev libwebp-dev
+			libmp3lame-dev libopus-dev libvorbis-dev libspeex-dev
+			libsnappy-dev libass-dev libfreetype-dev libfribidi-dev
+			libfontconfig-dev libgnutls28-dev
+			libva-dev libdrm-dev
 			git
+		)
+		# A single unavailable package (e.g. Ubuntu's multiverse-only
+		# libopenh264-dev on images without that component) must not kill
+		# the whole install: the FFmpeg configure probes every optional
+		# piece, so degrade to installing the rest individually.
+		if ! run "${SUDO[@]}" apt-get install -y "${PKGS[@]}"; then
+			echo "Some packages are unavailable here; installing the rest individually" >&2
+			for pkg in "${PKGS[@]}"; do
+				"${SUDO[@]}" apt-get install -y "$pkg" >/dev/null 2>&1 ||
+					echo "skipping unavailable package: $pkg" >&2
+			done
+		fi
 		# ffnvcodec headers (NVDEC for the project FFmpeg build) are NOT
 		# in Debian/Ubuntu apt under a stable name: `libffnvcodec-dev`
 		# was dropped from noble. The headers are distribution-free, so
-		# install them from source (the Fedora branch does the same).
-		run sudo git clone --depth 1 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git /tmp/nv-codec-headers
-		run sudo make -C /tmp/nv-codec-headers install PREFIX=/usr
+		# install them from the official GitHub mirror (code.videolan.org
+		# serves git behind an anti-bot challenge that CI runners hit).
+		# Re-runs start from a clean checkout so the script stays
+		# idempotent.
+		rm -rf /tmp/nv-codec-headers
+		run "${SUDO[@]}" git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git /tmp/nv-codec-headers
+		run "${SUDO[@]}" make -C /tmp/nv-codec-headers install PREFIX=/usr
 		elif command -v dnf >/dev/null; then
-			run sudo dnf install -y gcc gcc-c++ pkgconf-pkg-config nasm \
+			run "${SUDO[@]}" dnf install -y --setopt=install_weak_deps=False \
+				--setopt=max_parallel_downloads=16 \
+				gcc gcc-c++ clang clang-devel cmake python3 pkgconf-pkg-config nasm \
 				x264-devel x265-devel dav1d-devel libvpx-devel \
 				openh264-devel openjpeg2-devel libtheora-devel libwebp-devel \
 				lame-devel opus-devel libvorbis-devel speex-devel \
 				snappy-devel libass-devel freetype-devel fribidi-devel \
-				fontconfig-devel gnutls-devel
+				fontconfig-devel gnutls-devel libva-devel libdrm-devel
 		elif command -v pacman >/dev/null; then
-			run sudo pacman -S --needed --noconfirm base-devel pkgconf nasm \
+			run "${SUDO[@]}" pacman -S --needed --noconfirm base-devel clang cmake python pkgconf nasm \
 				x264 x265 dav1d libvpx openh264 openjpeg2 libtheora libwebp \
 				lame opus libvorbis speex snappy libass freetype2 fribidi \
-				fontconfig gnutls ffnvcodec-headers
+				fontconfig gnutls ffnvcodec-headers libva libdrm
 		else
 			echo "Unsupported Linux distribution (need apt-get, dnf or pacman)." >&2
 			exit 1
