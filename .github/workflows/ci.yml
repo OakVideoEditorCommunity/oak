@@ -491,6 +491,19 @@ jobs:
           # their own repo and build as path dependencies of oakapp.
           submodules: true
 
+      # The container runs as root but Actions sets HOME=/github/home;
+      # rustup refuses the euid mismatch ("$HOME differs from
+      # euid-obtained home directory") and would install a toolchain the
+      # later steps cannot find under the Actions home. Pin the whole job
+      # to root's home so rustup/cargo and the toolchain agree.
+      - name: Pin HOME for rustup
+        run: |
+          {
+            echo "HOME=/root"
+            echo "CARGO_HOME=/root/.cargo"
+            echo "RUSTUP_HOME=/root/.rustup"
+          } >> "$GITHUB_ENV"
+
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
