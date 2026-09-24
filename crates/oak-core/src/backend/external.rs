@@ -459,8 +459,7 @@ impl GpuContext {
 		use objc2::runtime::ProtocolObject;
 		use objc2_io_surface::IOSurfaceRef;
 		use objc2_metal::{
-			MTLDevice as _, MTLPixelFormat, MTLStorageMode, MTLTextureDescriptor,
-			MTLTextureType, MTLTextureUsage,
+			MTLDevice as _, MTLStorageMode, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
 		};
 		use wgpu::hal;
 

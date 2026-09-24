@@ -252,13 +252,13 @@ mod imp {
 	const K_CGL_PFA_COLOR_SIZE: i32 = 8;
 	const K_CGL_PFA_ALPHA_SIZE: i32 = 11;
 
-	/// macOS：CGL + OpenGL 的 FFI 声明（直接链接 OpenGL.framework）。
-	///
-	/// # Safety
-	///
-	/// 全部是系统 framework 导出函数；指针参数语义见各函数注释。
-	/// CGL* 类型用 `*mut c_void` 表示不透明对象指针（CGLContextObj /
-	/// CGLPixelFormatObj）。
+	// macOS：CGL + OpenGL 的 FFI 声明（直接链接 OpenGL.framework）。
+	//
+	// # Safety
+	//
+	// 全部是系统 framework 导出函数；指针参数语义见各函数注释。
+	// CGL* 类型用 `*mut c_void` 表示不透明对象指针（CGLContextObj /
+	// CGLPixelFormatObj）。
 	#[link(name = "OpenGL", kind = "framework")]
 	unsafe extern "C" {
 		/// 按属性列表选像素格式（成功返回 kCGLNoError=0；`npix` 是
@@ -406,8 +406,8 @@ mod imp {
 		_ctx: Arc<GlContext>,
 	}
 
-	/// 当前线程的 acquire 嵌套深度。>0 = 本线程已持外层 guard（上下文
-	/// 已 current）；嵌套 acquire 只递增深度，不重取锁。
+	// 当前线程的 acquire 嵌套深度。>0 = 本线程已持外层 guard（上下文
+	// 已 current）；嵌套 acquire 只递增深度，不重取锁。
 	thread_local! {
 		static ACQUIRE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	}

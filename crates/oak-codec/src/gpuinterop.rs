@@ -516,7 +516,7 @@ fn d3d11_import(req: &HwImportRequest<'_>, ctx: &Arc<GpuContext>) -> ImportOutco
 // macOS: VideoToolbox CVPixelBuffer -> IOSurface -> Metal textures
 // ---------------------------------------------------------------------------
 
-/// `CVPixelBufferGetIOSurface` (CoreVideo).
+// `CVPixelBufferGetIOSurface` (CoreVideo).
 #[cfg(target_os = "macos")]
 #[link(name = "CoreVideo", kind = "framework")]
 extern "C" {
@@ -543,7 +543,8 @@ fn videotoolbox_import(req: &HwImportRequest<'_>, ctx: &Arc<GpuContext>) -> Impo
 		return ImportOutcome::Unsupported;
 	}
 	// SAFETY: `hw_frames_ctx` is an AVHWFramesContext for this frame.
-	let sw_format = unsafe { (*(*frames).data as *const sys::AVHWFramesContext).sw_format };
+	let hw_frames = unsafe { (*frames).data as *const sys::AVHWFramesContext };
+	let sw_format = unsafe { (*hw_frames).sw_format };
 	let format = match sw_format {
 		sys::AVPixelFormat::AV_PIX_FMT_NV12 => PlanarFormat::Nv12,
 		sys::AVPixelFormat::AV_PIX_FMT_P010LE | sys::AVPixelFormat::AV_PIX_FMT_P010BE => {
