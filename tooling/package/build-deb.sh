@@ -99,7 +99,7 @@ DEPS=$(cd "$DEPS_DIR" && for bin in "$STAGING_ABS"/usr/bin/*; do
 	dpkg-shlibdeps -O --ignore-missing-info "$bin" || exit 1
 done \
 	| sed 's/^shlibs:Depends=//' | tr ',' '\n' | sed 's/^ //;s/ $//' | sort -u \
-	| paste -sd', ' -)
+	| paste -sd, -)
 echo "declared deps: $DEPS"
 
 cat > "$STAGING/DEBIAN/control" <<EOF

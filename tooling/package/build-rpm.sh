@@ -26,21 +26,26 @@ TOP=$(pwd)/target/pkg/rpm
 rm -rf "$TOP"
 mkdir -p "$TOP"/{BUILD,RPMS,SOURCES,SPECS,BUILDROOT}
 
-ROOT="$TOP/BUILDROOT/oak-editor-$VERSION-1.x86_64"
-mkdir -p "$ROOT/usr/bin" "$ROOT/usr/share/applications" \
-	"$ROOT/usr/share/icons/hicolor/512x512/apps" "$ROOT/usr/share/oak/i18n" \
-	"$ROOT/usr/share/icons/hicolor/scalable/apps"
+# Stage the payload; the spec's %install copies it into rpmbuild's own
+# %{buildroot}. rpm 4.20+ (Fedora 43) computes the buildroot itself and
+# ignores a caller-supplied `buildroot` define, so the spec must install
+# through the macro.
+STAGE="$TOP/stage"
+mkdir -p "$STAGE/usr/bin" "$STAGE/usr/share/applications" \
+	"$STAGE/usr/share/icons/hicolor/512x512/apps" "$STAGE/usr/share/oak/i18n" \
+	"$STAGE/usr/share/icons/hicolor/scalable/apps"
 install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
-	"$ROOT/usr/bin/"
-install -m644 packaging/oak.desktop "$ROOT/usr/share/applications/oak.desktop"
-install -m644 icons/icon.png "$ROOT/usr/share/icons/hicolor/512x512/apps/oak.png"
-install -m644 Oak_Icon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/oak.svg"
-install -m644 assets/i18n/*.yaml "$ROOT/usr/share/oak/i18n/"
+	"$STAGE/usr/bin/"
+install -m644 packaging/oak.desktop "$STAGE/usr/share/applications/oak.desktop"
+install -m644 icons/icon.png "$STAGE/usr/share/icons/hicolor/512x512/apps/oak.png"
+install -m644 Oak_Icon.svg "$STAGE/usr/share/icons/hicolor/scalable/apps/oak.svg"
+install -m644 assets/i18n/*.yaml "$STAGE/usr/share/oak/i18n/"
 
 rpmbuild -bb \
 	--define "_topdir $TOP" \
 	--define "_version $VERSION" \
-	--define "buildroot $ROOT" \
+	--define "_oak_stage $STAGE" \
+	--define "source_date_epoch_from_changelog 0" \
 	--define "_binary_payload w6.zstdio" \
 	tooling/package/oak.spec
 

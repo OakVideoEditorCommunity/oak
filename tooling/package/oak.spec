@@ -29,9 +29,11 @@ Oak is a non-linear video editor written in Rust (OpenFX plug-in host,
 proxy editing, multicam, hardware decoding).
 
 %install
-# Everything is staged into %{buildroot} by the caller (build-rpm.sh);
-# nothing to compile here.
-true
+# The caller staged the payload in %{_oak_stage} (build-rpm.sh); rpm
+# 4.20+ computes %{buildroot} itself, so copy the tree in through the
+# macro instead of relying on a caller-supplied buildroot define.
+install -d %{buildroot}
+cp -a %{_oak_stage}/usr %{buildroot}/
 
 %files
 /usr/bin/oak-editor
@@ -43,3 +45,5 @@ true
 /usr/share/oak/i18n/
 
 %changelog
+* Thu Sep 24 2026 Oak Team <noreply@oakvideoeditor.org> - 0.5.0-1
+- Release build of the Rust rewrite.
