@@ -21,7 +21,7 @@ jobs:
     runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # gpui/ is a git submodule; its crates are workspace members of
           # their own repo and build as path dependencies of oakapp.
@@ -71,15 +71,20 @@ jobs:
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
 
       # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed. Same key scheme as the Windows job.
+      # rebuilds only what changed. Every run saves under a fresh key
+      # (so an existing cache is updated, never a save failure) and
+      # restores the newest matching entry through `restore-keys`.
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             vcpkg_installed
             ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet x64-linux
@@ -91,7 +96,7 @@ jobs:
       # (~40 min on Windows).
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             vcpkg_installed
@@ -144,6 +149,7 @@ jobs:
       # and no failure, so after 1800 s it dumps every hung process's
       # thread stacks and kills the suite.
       - name: Test
+        timeout-minutes: 40
         env:
           # lavapipe is present on this job: a missing adapter must fail
           # the GPU acceptance tests instead of silently skipping them.
@@ -244,7 +250,7 @@ jobs:
     runs-on: warp-windows-2025-vs2026-x64-32x
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # gpui/ is a git submodule; its crates are workspace members of
           # their own repo and build as path dependencies of oakapp.
@@ -309,12 +315,15 @@ jobs:
 
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             vcpkg_installed
             ~/AppData/Local/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet x64-windows
@@ -324,7 +333,7 @@ jobs:
       # for ~40 minutes on every run).
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             vcpkg_installed
@@ -372,6 +381,7 @@ jobs:
         run: cargo check --workspace --locked
 
       - name: Test
+        timeout-minutes: 40
         run: |
           cargo test --workspace --locked
           if ($LASTEXITCODE -ne 0) {
@@ -390,7 +400,7 @@ jobs:
     runs-on: warp-macos-26-arm64-12x
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # gpui/ is a git submodule; its crates are workspace members of
           # their own repo and build as path dependencies of oakapp.
@@ -422,22 +432,27 @@ jobs:
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
 
       # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed. Same key scheme as the Windows job.
+      # rebuilds only what changed. Every run saves under a fresh key
+      # (so an existing cache is updated, never a save failure) and
+      # restores the newest matching entry through `restore-keys`.
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             vcpkg_installed
             ~/.cache/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet arm64-osx
 
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             vcpkg_installed
@@ -480,6 +495,7 @@ jobs:
       # The runner's GUI session doubles as the display for the gpui
       # #[gpui::test] windows; wgpu renders through Metal.
       - name: Test
+        timeout-minutes: 40
         run: |
           # Retry once (same policy as the other platforms): worker-pool
           # startup under full-suite parallelism has flaked on Linux. A
@@ -524,7 +540,7 @@ jobs:
         run: apt-get update && apt-get install -y git curl ca-certificates
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # gpui/ is a git submodule; its crates are workspace members of
           # their own repo and build as path dependencies of oakapp.
@@ -581,21 +597,24 @@ jobs:
       # rebuilds only what changed.
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             vcpkg_installed
             ~/.cache/vcpkg/archives
           # The arch prefix matters here: both jobs run the same distro
           # image through the same cache scope, unlike the OS jobs.
-          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-
 
       - name: Install dependencies (vcpkg manifest)
         run: vcpkg install --triplet ${{ matrix.triplet }}
 
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             vcpkg_installed
