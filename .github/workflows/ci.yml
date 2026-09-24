@@ -89,7 +89,18 @@ jobs:
             vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet x64-linux
+        run: |
+          # Source tarballs come from third-party hosts (x264 lives on
+          # code.videolan.org); a transient connection failure aborts the
+          # whole install — vcpkg refuses to retry that class of curl
+          # error — so retry here. vcpkg resumes from its archive and
+          # download caches, so a repeat attempt is cheap.
+          for attempt in 1 2 3; do
+            vcpkg install --triplet x64-linux && exit 0
+            echo "vcpkg install failed (attempt $attempt); retrying"
+            sleep 15
+          done
+          exit 1
 
       # Explicit restore/save pair: the old `save-always: true` on the
       # combined step does not actually save on a failed job (the action
@@ -328,7 +339,16 @@ jobs:
             vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet x64-windows
+        run: |
+          # See the Linux job: transient source-download failures abort
+          # the manifest install; retry before giving up.
+          for ($i = 1; $i -le 3; $i++) {
+            vcpkg install --triplet x64-windows
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "vcpkg install failed (attempt $i); retrying"
+            Start-Sleep -Seconds 15
+          }
+          exit 1
 
       # Explicit restore/save pair (see the Linux job: `save-always` did
       # not save after a failed job, so Windows rebuilt FFmpeg from source
@@ -450,7 +470,15 @@ jobs:
             vcpkg-${{ runner.os }}-
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet arm64-osx
+        run: |
+          # See the Linux job: transient source-download failures abort
+          # the manifest install; retry before giving up.
+          for attempt in 1 2 3; do
+            vcpkg install --triplet arm64-osx && exit 0
+            echo "vcpkg install failed (attempt $attempt); retrying"
+            sleep 15
+          done
+          exit 1
 
       - name: Save vcpkg artifacts
         if: always()
@@ -647,7 +675,15 @@ jobs:
             vcpkg-${{ runner.os }}-${{ matrix.arch }}-openkylin-
 
       - name: Install dependencies (vcpkg manifest)
-        run: vcpkg install --triplet ${{ matrix.triplet }}
+        run: |
+          # See the Linux job: transient source-download failures abort
+          # the manifest install; retry before giving up.
+          for attempt in 1 2 3; do
+            vcpkg install --triplet ${{ matrix.triplet }} && exit 0
+            echo "vcpkg install failed (attempt $attempt); retrying"
+            sleep 15
+          done
+          exit 1
 
       - name: Save vcpkg artifacts
         if: always()
