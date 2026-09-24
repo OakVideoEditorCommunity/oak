@@ -109,7 +109,7 @@ jobs:
                 libasound2-dev libpulse-dev libsndfile1-dev \
                 libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
                 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev \
-                gdb xvfb librsvg2-bin autoconf autoconf-archive automake libtool
+                gdb xvfb libdrm-dev librsvg2-bin autoconf autoconf-archive automake libtool
               ;;
             fedora)
               dnf install -y \
@@ -205,8 +205,8 @@ jobs:
             rsvg-convert -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
           else
             # Defensive: some containers (openKylin) may not carry
-            # librsvg2-bin; the scalable icon still installs.
-            echo "::warning::rsvg-convert is unavailable; packaging the scalable icon only"
+            # librsvg2-bin; fall back to the committed 512x512 render.
+            cp assets/app-icon.png icons/icon.png
           fi
 
       - name: Package
@@ -541,8 +541,11 @@ jobs:
 
       - name: Generate app icon (PNG from Oak_Icon.svg)
         run: |
+          # vcpkg's librsvg port builds with -Drsvg-convert=disabled (it
+          # ships the library only and provides no rsvg-convert.exe), so
+          # use the committed 512x512 render of Oak_Icon.svg.
           New-Item -ItemType Directory -Force icons | Out-Null
-          & "vcpkg_installed\x64-windows\tools\librsvg\rsvg-convert.exe" -w 512 -h 512 Oak_Icon.svg -o icons/icon.png
+          Copy-Item assets/app-icon.png icons/icon.png
 
       - name: Build (release)
         run: |
