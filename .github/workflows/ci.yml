@@ -39,35 +39,35 @@ jobs:
             platform: linux
             distro: debian
             arch: x64
-            runner: warp-ubuntu-latest-x64-32x
+            runner: warp-ubuntu-latest-x64-8x
             triplet: x64-linux
             container: '{"image":"debian:12","options":"--shm-size=8g"}'
           - name: Fedora
             platform: linux
             distro: fedora
             arch: x64
-            runner: warp-ubuntu-latest-x64-32x
+            runner: warp-ubuntu-latest-x64-8x
             triplet: x64-linux
             container: '{"image":"fedora:41","options":"--shm-size=8g"}'
           - name: Arch
             platform: linux
             distro: arch
             arch: x64
-            runner: warp-ubuntu-latest-x64-32x
+            runner: warp-ubuntu-latest-x64-8x
             triplet: x64-linux
             container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
           - name: openKylin x64
             platform: linux
             distro: openkylin
             arch: x64
-            runner: warp-ubuntu-latest-x64-32x
+            runner: warp-ubuntu-latest-x64-8x
             triplet: x64-linux
             container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
           - name: openKylin arm64
             platform: linux
             distro: openkylin
             arch: arm64
-            runner: warp-ubuntu-latest-arm64-32x
+            runner: warp-ubuntu-latest-arm64-16x
             triplet: arm64-linux
             container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g"}'
           - name: macOS
