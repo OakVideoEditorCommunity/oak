@@ -1663,9 +1663,12 @@ impl<E: AppEngine> OakApp<E> {
 
 	/// Switches the UI language live: updates the [`i18n`] global, rebuilds
 	/// the menu bar (so the menu labels and the language checkmark move
-	/// immediately), and repaints the whole shell.
+	/// immediately), refreshes the docked panels' cached titles (the tab
+	/// strip snapshots them at registration), and repaints the whole shell.
 	fn switch_language(&mut self, code: &str, cx: &mut Context<Self>) {
 		crate::i18n::set_language_code(code);
+		self.dock
+			.update(cx, |dock, cx| dock.refresh_panel_titles(cx));
 		self.rebuild_menu_bar(cx);
 		cx.notify();
 	}
@@ -2229,7 +2232,11 @@ impl<E: AppEngine> OakApp<E> {
 						this.apply_dark(dark, cx);
 					}
 					crate::dialogs::PreferencesEvent::LanguageChanged => {
+						this.dock
+							.update(cx, |dock, cx| dock.refresh_panel_titles(cx));
 						this.rebuild_menu_bar(cx);
+						// The dialog's own labels are localized: repaint it too.
+						_content.update(cx, |_dialog, cx| cx.notify());
 						cx.notify();
 					}
 					crate::dialogs::PreferencesEvent::ShortcutsChanged => {
@@ -7602,6 +7609,9 @@ mod tests {
 			.lock()
 			.unwrap_or_else(|e| e.into_inner());
 		let _theme = ConfigGuard::pin(crate::oakui::real::CONFIG_KEY_THEME);
+		// Deterministic language for the tab-title refresh assertion below
+		// (the panels snapshot their localized titles at registration).
+		crate::i18n::set_language_code("en-US");
 		let (_window, root) = mock_shell(cx);
 		crate::actions::reset_all_custom_shortcuts();
 
@@ -7628,8 +7638,27 @@ mod tests {
 		cx.run_until_parked();
 		assert!(cx.read(|app| root.read(app).dark));
 
-		// LanguageChanged rebuilds the menu bar.
+		// LanguageChanged rebuilds the menu bar and refreshes the docked
+		// panels' cached (localized) titles: the tab strip renders the
+		// snapshot taken at registration, not the live `DockPanel::title`.
 		let menu_before = cx.read(|app| root.read(app).menu_bar.entity_id());
+		let project_title = |cx: &mut TestAppContext| {
+			cx.read(|app| {
+				root.read(app)
+					.dock
+					.read(app)
+					.panel(crate::panels::ids::PROJECT)
+					.expect("the project panel is docked")
+					.title()
+					.clone()
+			})
+		};
+		assert_eq!(
+			project_title(cx).as_ref(),
+			crate::i18n::tr("panel.project"),
+			"the tab starts in the shell's registration language"
+		);
+		crate::i18n::set_language_code("zh-CN");
 		cx.update(|app| {
 			content.update(app, |_content, cx| {
 				cx.emit(crate::dialogs::PreferencesEvent::LanguageChanged)
@@ -7640,6 +7669,14 @@ mod tests {
 			cx.read(|app| root.read(app).menu_bar.entity_id()),
 			menu_before
 		);
+		let refreshed = project_title(cx);
+		assert_eq!(
+			refreshed.as_ref(),
+			crate::i18n::tr("panel.project"),
+			"the cached tab title follows the new language"
+		);
+		assert_ne!(refreshed.as_ref(), "Project", "the stale English label is gone");
+		crate::i18n::set_language_code("en-US");
 
 		// ShortcutsChanged re-binds the key map and rebuilds the menu bar.
 		crate::actions::set_custom_shortcut("snapping", vec!["f5".to_string()]);
