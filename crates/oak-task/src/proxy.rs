@@ -360,7 +360,14 @@ impl ProxyTask {
 		if threads > 0 {
 			args.extend(["-threads".to_string(), threads.to_string()]);
 		}
-		args.extend(["-hwaccel".to_string(), "auto".to_string()]);
+		// Hardware decode only rides along with a hardware encoder: a
+		// d3d11va/vaapi-decoded surface cannot feed libx264 directly (it
+		// would need an explicit hwdownload/format filter chain), so the
+		// software path stays fully software — which is also what makes it
+		// portable across machines without decode support.
+		if enc != HwEncoder::Software {
+			args.extend(["-hwaccel".to_string(), "auto".to_string()]);
+		}
 		// base 以 -y -nostats 开头，跳过这两个，余下的按序接上；编码
 		// 器参数（-c:v 起）在 hw 时整段替换。
 		let mut rest = base[2..].to_vec();
@@ -509,11 +516,21 @@ impl TaskBehavior for ProxyTask {
 			}
 		};
 
-		// Drain stderr in a thread so a chatty ffmpeg cannot block us.
+		// Drain stderr in a thread so a chatty ffmpeg cannot block us; keep
+		// the tail so the failure message says *why* the transcode failed
+		// (ffmpeg explains it there, and users see it in the task error).
 		let stderr = child.stderr.take();
+		let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 		if let Some(stderr) = stderr {
+			let tail = stderr_tail.clone();
 			std::thread::spawn(move || {
-				let _ = BufReader::new(stderr).lines().count();
+				for line in BufReader::new(stderr).lines().map_while(|line| line.ok()) {
+					let mut tail = tail.lock().unwrap_or_else(|e| e.into_inner());
+					if tail.len() == 8 {
+						tail.remove(0);
+					}
+					tail.push(line);
+				}
 			});
 		}
 
@@ -546,8 +563,18 @@ impl TaskBehavior for ProxyTask {
 		let exit_status = child.wait();
 		if !matches!(exit_status, Ok(status) if status.success()) {
 			let _ = std::fs::remove_file(&working_filename);
-			task.set_error("ffmpeg failed to generate proxy");
-			return Err(Error::Failed("ffmpeg failed to generate proxy".to_string()));
+			let detail = stderr_tail
+				.lock()
+				.map(|tail| tail.join("; "))
+				.unwrap_or_default();
+			let message = if detail.is_empty() {
+				"ffmpeg failed to generate proxy".to_string()
+			} else {
+				format!("ffmpeg failed to generate proxy: {detail}")
+			};
+			eprintln!("{message}");
+			task.set_error(&message);
+			return Err(Error::Failed(message));
 		}
 
 		if !std::path::Path::new(&working_filename).exists() {
@@ -611,8 +638,9 @@ mod tests {
 		}
 	}
 
-	/// 软件路径 = parity 参数 + 解码 hwaccel/线程前缀；编码器参数
-	/// 原样（libx264 + preset + crf）。
+	/// 软件路径 = parity 参数 + 线程前缀（全软件流水线：`-hwaccel auto`
+	/// 会让硬解出的 surface 喂不进 libx264）；编码器参数原样
+	/// （libx264 + preset + crf）。
 	#[test]
 	fn transcode_arguments_software_keeps_parity_body() {
 		let args = ProxyTask::build_transcode_arguments(
@@ -623,14 +651,17 @@ mod tests {
 			HwEncoder::Software,
 			4,
 		);
-		assert!(args.windows(2).any(|w| w == ["-hwaccel", "auto"]));
+		assert!(
+			!args.iter().any(|a| a == "-hwaccel"),
+			"the software path must not request hardware decoding: {args:?}"
+		);
 		assert!(args.windows(2).any(|w| w == ["-threads", "4"]));
 		assert!(args.windows(2).any(|w| w == ["-c:v", "libx264"]));
 		assert!(args.windows(2).any(|w| w == ["-crf", "23"]));
-		// -threads/-hwaccel 在 -i 之前（解码侧选项）。
+		// -threads 在 -i 之前（解码侧选项）。
 		let i_pos = args.iter().position(|a| a == "-i").unwrap();
-		let hw_pos = args.iter().position(|a| a == "-hwaccel").unwrap();
-		assert!(hw_pos < i_pos);
+		let threads_pos = args.iter().position(|a| a == "-threads").unwrap();
+		assert!(threads_pos < i_pos);
 	}
 
 	/// 硬件编码器整段替换 -c:v 段（不再出现 libx264/crf），各自的
@@ -660,6 +691,8 @@ mod tests {
 		assert!(nv.windows(2).any(|w| w == ["-c:v", "h264_nvenc"]));
 		assert!(nv.windows(2).any(|w| w == ["-preset", "p3"]));
 		assert!(nv.windows(2).any(|w| w == ["-cq", "23"]));
+		// 硬编路径保留解码侧 hwaccel。
+		assert!(nv.windows(2).any(|w| w == ["-hwaccel", "auto"]));
 
 		let qsv = ProxyTask::build_transcode_arguments(
 			"/src.mov",
