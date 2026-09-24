@@ -563,6 +563,39 @@ fn range_property(param: &EffectParam, key: &str) -> Option<f64> {
 		.filter(|v| v.is_finite())
 }
 
+/// One vector component's `(min, max, step)` for the four-spin controls:
+/// the node's `min`/`max` property (a scalar or a per-component vector)
+/// when present, else the value anchored on the node's `base` step —
+/// without it a bound-less component (OCIO's grading `pivot`/`offset`)
+/// would fall back to the wide ±10000 default and a single drag could
+/// hurl the value thousands of units away.
+fn component_range_and_step(param: &EffectParam, channel: usize, value: f64) -> (f64, f64, f64) {
+	let base = range_property(param, "base")
+		.filter(|v| *v > 0.0)
+		.unwrap_or(0.001);
+	let component_bound = |key: &str| -> Option<f64> {
+		param
+			.properties
+			.iter()
+			.find(|(k, _)| k == key)
+			.and_then(|(_, v)| match v {
+				NodeValue::Vec2(vec) if channel < 2 => Some(vec[channel]),
+				NodeValue::Vec3(vec) if channel < 3 => Some(vec[channel]),
+				NodeValue::Vec4(vec) if channel < 4 => Some(vec[channel]),
+				NodeValue::Float(f) => Some(*f),
+				NodeValue::Int(i) => Some(*i as f64),
+				_ => None,
+			})
+			.filter(|v| v.is_finite())
+	};
+	match (component_bound("min"), component_bound("max")) {
+		(Some(lo), Some(hi)) => (lo.min(hi), lo.max(hi), base),
+		(Some(lo), None) => (lo, value.max(lo) + 100.0 * base, base),
+		(None, Some(hi)) => (value.min(hi) - 100.0 * base, hi, base),
+		(None, None) => (value - 100.0 * base, value + 100.0 * base, base),
+	}
+}
+
 /// The slider range and step of an int/float parameter: `(min, max, step)`.
 ///
 /// The OFX translation only attaches min/max to colour inputs, but the
@@ -621,6 +654,14 @@ fn slider_range_and_step(param: &EffectParam) -> (f64, f64, f64) {
 				1.0
 			};
 			(max - 200.0 * step, max, step)
+		}
+		// Neither bound: a node that declares only its `base` step (the
+		// OCIO grading parameters) gets a value-anchored range around it —
+		// the wide default would turn one drag into a thousands-unit jump.
+		(None, None) if range_property(param, "base").is_some_and(|v| v > 0.0) => {
+			let base = range_property(param, "base").unwrap_or(0.001);
+			let v = if value.is_finite() { value } else { 0.0 };
+			(v - 100.0 * base, v + 100.0 * base, base)
 		}
 		// Both bounds, or neither (the wide default range): one step over
 		// the whole range, rounded so the value lands on the grid.
@@ -784,6 +825,24 @@ fn build_control<E: AppEngine>(
 					.unwrap_or(0.0)
 					.clamp(min, max);
 				let model = SliderModel::new(ValueKind::Float, min, max, 0.001, value);
+				let spin = cx.new(|cx| SpinBox::new(*next_id, model, window, cx));
+				*next_id += 1;
+				spins.push((spin, channel));
+			}
+			ControlKind::Spin(spins)
+		}
+		ValueType::Vec4 => {
+			// OCIO grading primaries carry a master component plus R/G/B
+			// (x = master, y/z/w = red/green/blue). Four spins, each bounded
+			// by the component's `min`/`max` property (the node may attach a
+			// vec4 bound) and stepped by the node's `base` (C++
+			// `RationalSlider` semantics) when no explicit bound exists.
+			let components = value_components(&param.value);
+			let mut spins = Vec::new();
+			for channel in 0..4 {
+				let value = components.get(channel).copied().unwrap_or(0.0);
+				let (min, max, step) = component_range_and_step(param, channel, value);
+				let model = SliderModel::new(ValueKind::Float, min, max, step, value);
 				let spin = cx.new(|cx| SpinBox::new(*next_id, model, window, cx));
 				*next_id += 1;
 				spins.push((spin, channel));
@@ -3856,6 +3915,68 @@ mod tests {
 		assert_eq!(combo_index_for(&p), 0, "negative indices clamp to 0");
 		let p = mk_param("c", ValueType::Combo, NodeValue::Float(2.9), Vec::new());
 		assert_eq!(combo_index_for(&p), 2);
+	}
+
+	/// The OCIO grading primaries are vec4 inputs (x = master, y/z/w =
+	/// RGB): they must build a four-spin control, and a bound-less
+	/// component must use the node's `base` step instead of the wide
+	/// ±10000 default (the `pivot` 0.18 → −7399 drag regression).
+	#[test]
+	fn vec4_grading_components_build_four_spins_with_sane_ranges() {
+		let mut param = mk_param(
+			"contrast_in",
+			ValueType::Vec4,
+			NodeValue::Vec4([1.0, 1.0, 1.0, 1.0]),
+			vec![
+				("min", NodeValue::Vec4([0.01, 0.01, 0.01, 0.01])),
+				("base", NodeValue::Float(0.01)),
+			],
+		);
+		assert_eq!(
+			component_range_and_step(&param, 0, 1.0),
+			(0.01, 2.0, 0.01),
+			"a per-component vec4 min bounds the master component"
+		);
+		param.properties.push(("max".to_string(), NodeValue::Float(4.0)));
+		assert_eq!(component_range_and_step(&param, 1, 3.0), (0.01, 4.0, 0.01));
+
+		// A bound-less vec4 (offset/exposure) anchors on the value.
+		let mut free = mk_param(
+			"offset_in",
+			ValueType::Vec4,
+			NodeValue::Vec4([0.0, 0.0, 0.0, 0.0]),
+			vec![("base", NodeValue::Float(0.01))],
+		);
+		assert_eq!(component_range_and_step(&free, 0, 0.0), (-1.0, 1.0, 0.01));
+		free.properties.clear();
+		assert_eq!(
+			component_range_and_step(&free, 2, 0.5),
+			(0.4, 0.6, 0.001),
+			"no base falls back to the fine default step"
+		);
+	}
+
+	/// A scalar float with only a `base` step (the OCIO grading `pivot`,
+	/// `clampBlack`/`clampWhite`) gets a value-anchored slider range.
+	#[test]
+	fn base_only_float_sliders_anchor_on_the_value() {
+		let pivot = mk_param(
+			"pivot_in",
+			ValueType::Float,
+			NodeValue::Float(0.18),
+			vec![("base", NodeValue::Float(0.01))],
+		);
+		let (lo, hi, step) = slider_range_and_step(&pivot);
+		assert!(
+			(lo + 0.82).abs() < 1e-9 && (hi - 1.18).abs() < 1e-9 && step == 0.01,
+			"the pivot slider spans ±100 base steps around the value (got {lo}, {hi}, {step})"
+		);
+
+		// Without a base the wide default is kept (e.g. a node that only
+		// exposes a raw numeric box with no declared domain).
+		let wide = mk_param("wide_in", ValueType::Float, NodeValue::Float(0.5), Vec::new());
+		let (lo, hi, _) = slider_range_and_step(&wide);
+		assert!(lo <= -1000.0 && hi >= 1000.0);
 	}
 
 	/// `value_components`: vectors and colours flatten, everything else is
