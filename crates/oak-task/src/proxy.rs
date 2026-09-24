@@ -234,11 +234,42 @@ impl ProxyTask {
 			]
 		};
 		for (name, enc) in preference {
-			if has(name) {
+			// `-encoders` lists every compiled-in encoder — a full build
+			// advertises h264_nvenc/qsv/amf even on machines without the
+			// matching hardware — so a one-frame null encode decides
+			// whether the candidate can actually initialize. Failures fall
+			// through to the next candidate and finally to software (the
+			// old list-only check made proxy generation fail outright on
+			// GPU-less Windows machines with such a build).
+			if has(name) && Self::encoder_usable(ffmpeg_path, name) {
 				return *enc;
 			}
 		}
 		HwEncoder::Software
+	}
+
+	/// Whether `encoder` can initialize and encode one tiny frame; see the
+	/// caller for why the `-encoders` list is not enough.
+	fn encoder_usable(ffmpeg_path: &str, encoder: &str) -> bool {
+		let out = Command::new(ffmpeg_path)
+			.args([
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-f",
+				"lavfi",
+				"-i",
+				"color=size=64x64:rate=1:duration=1",
+				"-frames:v",
+				"1",
+				"-c:v",
+				encoder,
+				"-f",
+				"null",
+				"-",
+			])
+			.output();
+		matches!(out, Ok(out) if out.status.success())
 	}
 
 	/// libx264 预设名 → NVENC p1..p7（NVENC 预设是编号）。
