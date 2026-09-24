@@ -50,7 +50,7 @@ fn main() {
 	assert!(
 		pc_dir.exists(),
 		"FFMPEG_DIR={dir} has no lib/pkgconfig — point it at a full install prefix \
-		 (the output of tooling/ffmpeg/build-ffmpeg.sh)"
+		 (the output of tooling/ffmpeg/build-ffmpeg.sh, or the prebuilt archive on Windows)"
 	);
 	println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -100,9 +100,24 @@ fn main() {
 		Some(custom) => run(&custom).expect("PKG_CONFIG points at a program that failed to run"),
 		None => match run("pkg-config") {
 			Ok(output) => output,
-			Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-				run("pkgconf").expect("pkg-config/pkgconf is required when FFMPEG_DIR is set")
-			}
+			Err(e) if e.kind() == std::io::ErrorKind::NotFound => match run("pkgconf") {
+				Ok(output) => output,
+				Err(pkgconf_err) if pkgconf_err.kind() == std::io::ErrorKind::NotFound => {
+					// Windows CI/CD links the prebuilt SHARED FFmpeg (the
+					// BtbN archive, see the workflows): its import libraries
+					// carry canonical names and the archive is
+					// self-contained, so the fixed link line replaces
+					// pkg-config there (no pkg-config is installed).
+					#[cfg(target_os = "windows")]
+					{
+						link_prebuilt_shared(&dir);
+						return;
+					}
+					#[cfg(not(target_os = "windows"))]
+					panic!("pkg-config/pkgconf is required when FFMPEG_DIR is set");
+				}
+				Err(pkgconf_err) => panic!("failed to run pkgconf: {pkgconf_err}"),
+			},
 			Err(e) => panic!("failed to run pkg-config: {e}"),
 		},
 	};
@@ -170,6 +185,29 @@ fn main() {
 		if std::path::Path::new(prefix).exists() {
 			println!("cargo:rustc-link-search=native={prefix}");
 		}
+	}
+}
+
+/// Emit the link directives for the prebuilt SHARED FFmpeg archive the
+/// Windows CI/CD jobs use (BtbN's build): the seven FFmpeg import
+/// libraries with their canonical MSVC names. The archive is
+/// self-contained — its `.pc` files carry no external `Libs.private` — so
+/// no pkg-config resolution is needed (and no pkg-config binary is
+/// installed there). MSYS2 local builds keep using pkg-config because
+/// theirs is a static FFmpeg with the full transitive codec list.
+#[cfg(target_os = "windows")]
+fn link_prebuilt_shared(dir: &str) {
+	let libdir = PathBuf::from(dir).join("lib");
+	assert!(
+		libdir.join("avcodec.lib").exists(),
+		"FFMPEG_DIR={dir} has no lib/avcodec.lib — point it at the prebuilt shared \
+		 archive (ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip)"
+	);
+	println!("cargo:rustc-link-search=native={}", libdir.display());
+	for lib in [
+		"avformat", "avcodec", "avfilter", "avdevice", "avutil", "swscale", "swresample",
+	] {
+		println!("cargo:rustc-link-lib={lib}");
 	}
 }
 

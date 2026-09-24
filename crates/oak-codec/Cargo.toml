@@ -14,17 +14,18 @@ oak-core = { path = "../oak-core" }
 # Real media decode/encode. The C++ ffmpeg_bridge library existed only to
 # absorb FFmpeg API churn; the Rust crate calls ffmpeg-next directly.
 #
-# ffmpeg-next 9.x pairs with FFmpeg 8.x headers, which most distros do
-# not ship yet — build a matching GPL FFmpeg (all free-license codecs +
-# per-OS hardware acceleration, static+PIC) with
+# ffmpeg-next 9.x compiles against the FFmpeg 8.x and 9.x headers (both
+# verified locally with the project FFmpeg build), but most distros do
+# not ship a matching prebuilt library yet — build one (all free-license
+# codecs + per-OS hardware acceleration, static+PIC) with
 # tooling/ffmpeg/build-ffmpeg.sh and point cargo at it via FFMPEG_DIR
 # (see docs/build.md). The `static` feature makes the linker prefer the
-# archives.
+# archives. CI/CD uses the same script on Linux/macOS and BtbN's
+# prebuilt shared archive on Windows.
 #
-# ffmpeg-next's own `build` feature is NOT usable: it clones
-# release/<crate-version>, and every such pairing is broken upstream
-# (9.0.0 -> FFmpeg 9.0 removed AVCodec fields; 8.1.0 -> FFmpeg 8.1 added
-# enum variants; 8.0.0 -> FFmpeg 8.0 renamed FF_PROFILE_*).
+# ffmpeg-next's own `build` cargo feature is still not what we use: it
+# clones release/<crate-version>, tying the FFmpeg version to the crate
+# version instead of the project-pinned one.
 ffmpeg-next = { version = "9", features = ["static"] }
 # `std::error::Error` impls for the crate-internal error enum.
 thiserror = "2"
