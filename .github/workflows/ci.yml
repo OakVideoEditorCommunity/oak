@@ -90,7 +90,7 @@ jobs:
       # no binary cache and the next run rebuilt FFmpeg from source
       # (~40 min on Windows).
       - name: Save vcpkg artifacts
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: |
@@ -241,7 +241,7 @@ jobs:
 
   windows:
     name: Build & test (Windows)
-    runs-on: warp-windows-2025-vs2026-x64-16x
+    runs-on: warp-windows-2025-vs2026-x64-32x
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -291,7 +291,7 @@ jobs:
       # not save after a failed job, so Windows rebuilt FFmpeg from source
       # for ~40 minutes on every run).
       - name: Save vcpkg artifacts
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: |
@@ -351,7 +351,7 @@ jobs:
 
   macos:
     name: Build & test (macOS)
-    runs-on: warp-macos-26-arm64-6x
+    runs-on: warp-macos-26-arm64-12x
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -400,7 +400,7 @@ jobs:
         run: vcpkg install --triplet arm64-osx
 
       - name: Save vcpkg artifacts
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: |
@@ -524,7 +524,8 @@ jobs:
             libasound2-dev libpulse-dev libsndfile1-dev \
             libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
             libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            gdb file autoconf autoconf-archive automake libtool
+            gdb file autoconf autoconf-archive automake libtool \
+            fonts-dejavu-core
 
       # ------------------------------------------------------------------
       # vcpkg (manifest mode) + caches
@@ -554,7 +555,7 @@ jobs:
         run: vcpkg install --triplet ${{ matrix.triplet }}
 
       - name: Save vcpkg artifacts
-        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: |
