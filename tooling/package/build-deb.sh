@@ -39,6 +39,7 @@ STAGING=target/pkg/deb
 rm -rf "$STAGING"
 mkdir -p "$STAGING/usr/bin" "$STAGING/usr/share/applications" \
 	"$STAGING/usr/share/icons/hicolor/512x512/apps" "$STAGING/usr/share/oak/i18n" \
+	"$STAGING/usr/share/oak/icons" \
 	"$STAGING/usr/share/icons/hicolor/scalable/apps" "$STAGING/DEBIAN"
 
 install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
@@ -53,6 +54,9 @@ else
 fi
 install -m644 Oak_Icon.svg "$STAGING/usr/share/icons/hicolor/scalable/apps/oak.svg"
 install -m644 assets/i18n/*.yaml "$STAGING/usr/share/oak/i18n/"
+# The theme-aware UI glyphs (resolved at runtime from
+# /usr/share/oak/icons; see crates/oak-app/src/oakui/icons.rs).
+cp -a assets/icons/. "$STAGING/usr/share/oak/icons/"
 
 # vcpkg's libva/libva-drm are shared libraries that FFmpeg links
 # dynamically. Debian 12 / openKylin carry an older libva than FFmpeg 8

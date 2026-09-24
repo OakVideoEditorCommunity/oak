@@ -40,4 +40,12 @@ package() {
     for f in "$OAK_ROOT"/assets/i18n/*.yaml; do
         install -Dm644 "$f" "$pkgdir/usr/share/oak/i18n/$(basename "$f")"
     done
+    # The theme-aware UI glyphs (resolved at runtime from
+    # /usr/share/oak/icons; see crates/oak-app/src/oakui/icons.rs).
+    for d in "$OAK_ROOT"/assets/icons/*/; do
+        fam=$(basename "$d")
+        for f in "$d"*.png; do
+            install -Dm644 "$f" "$pkgdir/usr/share/oak/icons/$fam/$(basename "$f")"
+        done
+    done
 }

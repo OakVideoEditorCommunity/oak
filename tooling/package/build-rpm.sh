@@ -33,6 +33,7 @@ mkdir -p "$TOP"/{BUILD,RPMS,SOURCES,SPECS,BUILDROOT}
 STAGE="$TOP/stage"
 mkdir -p "$STAGE/usr/bin" "$STAGE/usr/share/applications" \
 	"$STAGE/usr/share/icons/hicolor/512x512/apps" "$STAGE/usr/share/oak/i18n" \
+	"$STAGE/usr/share/oak/icons" \
 	"$STAGE/usr/share/icons/hicolor/scalable/apps"
 install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
 	"$STAGE/usr/bin/"
@@ -40,6 +41,9 @@ install -m644 packaging/oak.desktop "$STAGE/usr/share/applications/oak.desktop"
 install -m644 icons/icon.png "$STAGE/usr/share/icons/hicolor/512x512/apps/oak.png"
 install -m644 Oak_Icon.svg "$STAGE/usr/share/icons/hicolor/scalable/apps/oak.svg"
 install -m644 assets/i18n/*.yaml "$STAGE/usr/share/oak/i18n/"
+# The theme-aware UI glyphs (resolved at runtime from
+# /usr/share/oak/icons; see crates/oak-app/src/oakui/icons.rs).
+cp -a assets/icons/. "$STAGE/usr/share/oak/icons/"
 
 rpmbuild -bb \
 	--define "_topdir $TOP" \

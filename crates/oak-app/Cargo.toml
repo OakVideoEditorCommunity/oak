@@ -147,12 +147,16 @@ category = "Video"
 icons = ["../../icons/icon.png"]
 # The UI string tables (language packs); users can drop extra
 # <lang>.yaml files into the installed i18n directory.
+# The theme-aware UI glyphs (dark/ + light/), resolved at runtime by
+# crates/oak-app/src/oakui/icons.rs from `<exe dir>/icons` (Windows/Linux
+# packages) or `Contents/Resources/icons` (macOS bundle).
 # The Windows DLL staging dir is filled by
 # tooling/package/bundle-dylibs-windows.sh before `cargo packager` runs
 # (NSIS/WiX place resources next to the executable, which is exactly
 # where Windows resolves DLLs from). Empty locally = no bundled DLLs.
 resources = [
     "../../assets/i18n",
+    "../../assets/icons",
     { src = "../../target/pkg/win-dlls/*.dll", target = "." },
 ]
 binaries = [

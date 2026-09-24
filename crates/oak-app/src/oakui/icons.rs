@@ -49,8 +49,12 @@ pub const ICON_NEXT: &str = "next";
 pub const ICON_REW: &str = "rew";
 pub const ICON_FF: &str = "ff";
 
-/// The theme-dependent filesystem path of an icon (`assets/icons/{dark,light}`
-/// under the crate root). Absolute, so it works from any working directory.
+/// The theme-dependent filesystem path of an icon. The icons root is
+/// resolved at runtime — the packagers install `assets/icons` next to the
+/// binary (Windows/Linux packages), into `Contents/Resources` (macOS
+/// bundle) or `/usr/share/oak` (deb/rpm/pacman system installs) — with
+/// the dev checkout as a fallback. Absolute, so it works from any working
+/// directory.
 pub fn icon_path(name: &str, cx: &App) -> PathBuf {
 	let theme = gpui_widgets::theme::current_theme(cx);
 	let family = if theme.name == "Olive Dark" {
@@ -58,10 +62,36 @@ pub fn icon_path(name: &str, cx: &App) -> PathBuf {
 	} else {
 		"light"
 	};
-	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-		.join("../../assets/icons")
-		.join(family)
-		.join(format!("{name}.png"))
+	icon_root().join(family).join(format!("{name}.png"))
+}
+
+/// The first icons directory that exists, in precedence order (mirrors the
+/// i18n pack search in `crate::i18n`). Cached: one process resolves one
+/// directory.
+fn icon_root() -> &'static PathBuf {
+	static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+	ROOT.get_or_init(|| {
+		let dev = || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons");
+		let mut candidates = vec![dev()];
+		if let Ok(exe) = std::env::current_exe() {
+			if let Some(dir) = exe.parent() {
+				candidates.push(dir.join("icons"));
+				candidates.push(dir.join("assets/icons"));
+				if let Some(contents) = dir.parent() {
+					candidates.push(contents.join("Resources/icons"));
+					candidates.push(contents.join("Resources/assets/icons"));
+					// cargo-packager deb/AppImage: <exe>/../lib/oak-editor/icons.
+					candidates.push(contents.join("lib/oak-editor/icons"));
+					candidates.push(contents.join("share/oak/icons"));
+				}
+			}
+		}
+		candidates.push(PathBuf::from("assets/icons"));
+		candidates
+			.into_iter()
+			.find(|dir| dir.join("dark").is_dir())
+			.unwrap_or_else(dev)
+	})
 }
 
 /// Registers the app's icon resolver, so widget-crate consumers (the viewer

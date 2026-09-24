@@ -219,6 +219,8 @@ fn pack_dirs() -> Vec<std::path::PathBuf> {
 			if let Some(contents) = dir.parent() {
 				// macOS bundle: <exe>/../Resources/i18n.
 				dirs.push(contents.join("Resources/i18n"));
+				// cargo-packager deb/AppImage: <exe>/../lib/oak-editor/i18n.
+				dirs.push(contents.join("lib/oak-editor/i18n"));
 				// System install (deb/rpm/pkg): <exe>/../share/oak/i18n.
 				dirs.push(contents.join("share/oak/i18n"));
 			}
