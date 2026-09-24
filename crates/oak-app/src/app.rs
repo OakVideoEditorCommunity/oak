@@ -150,6 +150,8 @@ mod modal_ids {
 	pub const NEW_PROJECT: usize = 20;
 	/// The save-as dialog (文件 → 另存为).
 	pub const SAVE_AS: usize = 21;
+	/// The update-available prompt (the startup update check).
+	pub const UPDATE_AVAILABLE: usize = 22;
 }
 
 /// What a picked platform-dialog path should do.
@@ -222,6 +224,11 @@ enum ModalState<E: AppEngine> {
 	About {
 		modal: Entity<Modal>,
 	},
+	/// The update-available prompt (the startup check; the dialog itself
+	/// carries the version and notes).
+	UpdateAvailable {
+		modal: Entity<Modal>,
+	},
 	/// The new-sequence dialog (File > New > Sequence…).
 	NewSequence {
 		modal: Entity<Modal>,
@@ -291,6 +298,7 @@ impl<E: AppEngine> ModalState<E> {
 			| ModalState::ActionSearch { modal, .. }
 			| ModalState::ProjectProperties { modal, .. }
 			| ModalState::About { modal }
+			| ModalState::UpdateAvailable { modal }
 			| ModalState::NewSequence { modal, .. }
 			| ModalState::SequenceProperties { modal, .. }
 			| ModalState::DropSequenceChoice { modal, .. }
@@ -454,6 +462,13 @@ pub struct OakApp<E: AppEngine> {
 	show_all: bool,
 	/// 视图 → Full Screen is on (placeholder state for the checkmark).
 	full_screen: bool,
+	/// A checked-but-unshown newer release: the startup check can finish
+	/// while another modal (the project manager) is up, so the prompt is
+	/// stashed and opens when the modal layer frees up.
+	pending_update: Option<crate::update::LatestRelease>,
+	/// The transport the startup update check fetches through (tests inject
+	/// a scripted one; production uses the real HTTPS client).
+	update_transport: Arc<dyn crate::update::UpdateTransport>,
 }
 
 /// The dock panels the shell builds up front, kept for focused-panel command
@@ -895,6 +910,8 @@ impl<E: AppEngine> OakApp<E> {
 			loop_playback: false,
 			show_all: false,
 			full_screen: false,
+			pending_update: None,
+			update_transport: Arc::new(crate::update::HttpTransport),
 		};
 
 		// Open the CLI-provided project once the shell is up.
@@ -1305,6 +1322,7 @@ impl<E: AppEngine> OakApp<E> {
 			| A::MulticamSwitchNoSplit9 => {}
 			// --- Help --------------------------------------------------------
 			A::ActionSearch => self.open_action_search(cx),
+			A::BugReport => cx.open_url(crate::update::BUG_REPORT_URL),
 			A::About => self.open_about(cx),
 			// --- everything else is a placeholder --------------------------
 			other => println!(
@@ -1977,6 +1995,11 @@ impl<E: AppEngine> OakApp<E> {
 	pub fn close_modal(&mut self, cx: &mut Context<Self>) {
 		self.modal = ModalState::None;
 		cx.notify();
+		// A checked update prompt deferred while another modal was up (the
+		// project manager at startup) opens now that the layer is free.
+		if let Some(release) = self.pending_update.take() {
+			self.open_update_available(release, cx);
+		}
 	}
 
 	/// Builds a modal on the main window, subscribes it to
@@ -2376,6 +2399,87 @@ impl<E: AppEngine> OakApp<E> {
 			});
 			ModalState::About { modal }
 		});
+	}
+
+	/// Starts the startup update check unless the preferences disable it
+	/// (`CheckForUpdates`): the blocking HTTPS fetch runs on the background
+	/// executor and the prompt opens from its completion, so the first frame
+	/// never waits on the network. Failures are logged and dropped.
+	fn start_update_check(&mut self, cx: &mut Context<Self>) {
+		if !crate::update::check_enabled() {
+			return;
+		}
+		let transport = self.update_transport.clone();
+		let executor = cx.background_executor().clone();
+		cx.spawn(async move |this, cx| {
+			let result = executor
+				.spawn(async move { crate::update::fetch_latest(transport.as_ref()) })
+				.await;
+			let _ = this.update(cx, |this, cx| this.on_update_checked(result, cx));
+		})
+		.detach();
+	}
+
+	/// Applies one finished check: a newer release opens (or defers) the
+	/// prompt; an equal/older release and transport failures are silent.
+	fn on_update_checked(
+		&mut self,
+		result: Result<crate::update::LatestRelease, String>,
+		cx: &mut Context<Self>,
+	) {
+		match result {
+			Ok(release) if crate::update::should_notify(&release) => {
+				println!(
+					"[update] {} is available (running {})",
+					release.version,
+					crate::update::current_version()
+				);
+				self.open_update_available(release, cx);
+			}
+			Ok(_) => {}
+			Err(error) => println!("[update] check failed: {error}"),
+		}
+	}
+
+	/// Opens the update-available prompt; when another modal is up (the
+	/// project manager on a fresh start) the release is stashed and shown by
+	/// [`Self::close_modal`] once the modal layer frees up.
+	fn open_update_available(
+		&mut self,
+		release: crate::update::LatestRelease,
+		cx: &mut Context<Self>,
+	) {
+		if !matches!(self.modal, ModalState::None) {
+			self.pending_update = Some(release);
+			return;
+		}
+		let version = release.version.clone();
+		let notes = release.notes.clone();
+		self.spawn_modal(cx, move |window, app| {
+			let content = app.new(|_cx| crate::dialogs::UpdateDialogContent::new(&version, &notes));
+			let modal = app.new(|cx| {
+				Modal::new(
+					modal_ids::UPDATE_AVAILABLE,
+					ModalOptions::new(crate::i18n::tr("update.title"), px(520.0))
+						.with_button(DialogButton::primary(crate::i18n::tr("update.download")))
+						.with_button(DialogButton::new(
+							crate::i18n::tr("update.later"),
+							gpui_widgets::dialog::DialogButtonRole::Secondary,
+						)),
+					window,
+					cx,
+				)
+				.with_content(content)
+			});
+			ModalState::UpdateAvailable { modal }
+		});
+	}
+
+	/// Test seam: replaces the update transport so tests can script the
+	/// endpoint response without touching the network.
+	#[cfg(test)]
+	fn set_update_transport(&mut self, transport: Arc<dyn crate::update::UpdateTransport>) {
+		self.update_transport = transport;
 	}
 
 	/// Opens the proxy settings dialog (Tools > Proxy Settings; the C++
@@ -3107,6 +3211,14 @@ impl<E: AppEngine> OakApp<E> {
 					}
 				}
 				modal_ids::ABOUT => self.close_modal(cx),
+				modal_ids::UPDATE_AVAILABLE => {
+					// Primary opens the downloads page in the user's
+					// browser; the secondary (and the mask) just dismisses.
+					if *button == 0 {
+						cx.open_url(crate::update::DOWNLOAD_URL);
+					}
+					self.close_modal(cx);
+				}
 				modal_ids::PROJECT_PROPERTIES => {
 					if let ModalState::ProjectProperties { content, .. } = &self.modal {
 						let content = content.clone();
@@ -3688,6 +3800,7 @@ fn make_menus(state: MenuState) -> Vec<MenuBarEntry> {
 			tr("menu.help"),
 			Menu::new(vec![
 				menu_item(A::ActionSearch),
+				menu_item(A::BugReport),
 				menu_item(A::Feedback).separated(),
 				menu_item(A::About),
 			]),
@@ -3919,6 +4032,13 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 			if let Some(root) = &root_slot {
 				root.update(cx, |app, cx| app.show_project_manager(cx));
 			}
+		}
+
+		// Startup update check (unless disabled in the preferences): the
+		// fetch is async and the prompt defers behind the project manager
+		// when that is up.
+		if let Some(root) = &root_slot {
+			root.update(cx, |app, cx| app.start_update_check(cx));
 		}
 
 		cx.activate(true);
@@ -8742,6 +8862,165 @@ mod tests {
 		);
 		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
 		cx.run_until_parked();
+	}
+
+	/// The startup update check end to end: a scripted transport returning a
+	/// newer release opens the prompt and the primary button opens the
+	/// downloads page; an equal release and a transport failure stay silent;
+	/// the preferences toggle skips the fetch entirely; a release found while
+	/// another modal is up waits for the layer; and the Bug Report action
+	/// opens the report site.
+	#[gpui::test]
+	async fn update_check_prompts_and_respects_the_preferences(cx: &mut TestAppContext) {
+		use std::sync::atomic::{AtomicU32, Ordering};
+
+		let _guard = crate::oakui::graphops::test_lock();
+		let _lang = crate::i18n::lang_test_lock()
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		crate::i18n::set_language_code("en-US");
+		let (_window, root) = mock_shell(cx);
+
+		/// A scripted transport: every call records itself and returns the
+		/// canned body/error.
+		struct Scripted {
+			body: Result<String, String>,
+			calls: AtomicU32,
+		}
+		impl crate::update::UpdateTransport for Scripted {
+			fn get(&self, url: &str) -> Result<String, String> {
+				assert_eq!(url, crate::update::UPDATE_ENDPOINT);
+				self.calls.fetch_add(1, Ordering::SeqCst);
+				self.body.clone()
+			}
+		}
+		let set_transport = |cx: &mut TestAppContext, transport: Arc<Scripted>| {
+			cx.update(|app| {
+				root.update(app, |app, _cx| app.set_update_transport(transport));
+			});
+		};
+
+		// A newer release prompts; the primary button opens the downloads
+		// page and dismisses the dialog.
+		let newer = Arc::new(Scripted {
+			body: Ok(r#"{"version":"v9.9.9","notes":"New things"}"#.to_string()),
+			calls: AtomicU32::new(0),
+		});
+		set_transport(cx, newer.clone());
+		cx.update(|app| root.update(app, |app, cx| app.start_update_check(cx)));
+		cx.run_until_parked();
+		assert_eq!(newer.calls.load(Ordering::SeqCst), 1, "one fetch");
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::UpdateAvailable { .. })),
+			"a newer release opens the prompt"
+		);
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_modal(
+					&ModalEvent::ButtonClicked {
+						control: modal_ids::UPDATE_AVAILABLE,
+						button: 0,
+					},
+					cx,
+				)
+			})
+		});
+		cx.run_until_parked();
+		assert_eq!(
+			cx.opened_url().as_deref(),
+			Some(crate::update::DOWNLOAD_URL),
+			"the primary button sends the user to the downloads page"
+		);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// The running version (and a failing transport) stay silent.
+		let current = Arc::new(Scripted {
+			body: Ok(format!(
+				r#"{{"version":"{}"}}"#,
+				crate::update::current_version()
+			)),
+			calls: AtomicU32::new(0),
+		});
+		set_transport(cx, current.clone());
+		cx.update(|app| root.update(app, |app, cx| app.start_update_check(cx)));
+		cx.run_until_parked();
+		assert_eq!(current.calls.load(Ordering::SeqCst), 1);
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::None)),
+			"the current release does not prompt"
+		);
+
+		let failing = Arc::new(Scripted {
+			body: Err("offline".to_string()),
+			calls: AtomicU32::new(0),
+		});
+		set_transport(cx, failing.clone());
+		cx.update(|app| root.update(app, |app, cx| app.start_update_check(cx)));
+		cx.run_until_parked();
+		assert_eq!(failing.calls.load(Ordering::SeqCst), 1);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+
+		// Preferences off: the startup path does not even fetch.
+		let previous =
+			crate::oakui::real::config_get_string(crate::update::CONFIG_KEY_CHECK_UPDATES);
+		crate::oakui::real::config_set_string(crate::update::CONFIG_KEY_CHECK_UPDATES, "false");
+		let disabled = Arc::new(Scripted {
+			body: Ok(r#"{"version":"v9.9.9"}"#.to_string()),
+			calls: AtomicU32::new(0),
+		});
+		set_transport(cx, disabled.clone());
+		cx.update(|app| root.update(app, |app, cx| app.start_update_check(cx)));
+		cx.run_until_parked();
+		assert_eq!(
+			disabled.calls.load(Ordering::SeqCst),
+			0,
+			"the toggle off skips the request"
+		);
+		assert!(cx.read(|app| matches!(root.read(app).modal, ModalState::None)));
+		crate::oakui::real::config_set_string(
+			crate::update::CONFIG_KEY_CHECK_UPDATES,
+			&previous,
+		);
+
+		// A release checked while another modal is up is deferred until the
+		// modal layer frees.
+		cx.update(|app| root.update(app, |app, cx| app.open_about(cx)));
+		cx.run_until_parked();
+		let release = crate::update::LatestRelease {
+			version: "v9.9.9".to_string(),
+			tag_name: "v9.9.9".to_string(),
+			notes: "New things".to_string(),
+			is_prerelease: false,
+			published_at: "2026-09-20T08:00:00+00:00".to_string(),
+			download_url: "/api/v1/releases/7/download?asset_id=12".to_string(),
+		};
+		cx.update(|app| {
+			root.update(app, |app, cx| app.on_update_checked(Ok(release), cx))
+		});
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::About { .. })),
+			"the open modal stays on top"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+		assert!(
+			cx.read(|app| matches!(root.read(app).modal, ModalState::UpdateAvailable { .. })),
+			"the deferred prompt opens once the layer is free"
+		);
+		cx.update(|app| root.update(app, |app, cx| app.close_modal(cx)));
+		cx.run_until_parked();
+
+		// Help → Report a Bug opens the report form.
+		cx.update(|app| {
+			root.update(app, |app, cx| {
+				app.on_action_dispatched(ActionId::BugReport, cx)
+			})
+		});
+		assert_eq!(
+			cx.opened_url().as_deref(),
+			Some(crate::update::BUG_REPORT_URL)
+		);
 	}
 
 	/// The new-sequence dialog's OK path (the mock has no create command,

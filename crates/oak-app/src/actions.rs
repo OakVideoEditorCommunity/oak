@@ -275,6 +275,7 @@ define_actions! {
 	// --- Help ---------------------------------------------------------------
 	ActionSearch { cpp: "actionsearch", i18n: "menu.help.action_search", keys: ["/"], route: Global, menu_id: 1120 };
 	Feedback { cpp: "feedback", i18n: "menu.help.feedback", keys: [], route: Global, menu_id: 1121 };
+	BugReport { cpp: "bugreport", i18n: "menu.help.bug_report", keys: [], route: Global, menu_id: 1122 };
 	About { cpp: "about", i18n: "menu.help.about", keys: [], route: Global, menu_id: 801 };
 }
 

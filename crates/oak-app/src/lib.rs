@@ -64,6 +64,7 @@ pub mod logging;
 pub mod manager;
 pub mod oakui;
 pub mod panels;
+pub mod update;
 
 /// The application entry point (called from `main.rs`).
 pub fn run() {

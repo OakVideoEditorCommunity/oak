@@ -113,6 +113,9 @@ pub struct PreferencesContent {
 	display_bit_depth: Entity<ComboBox>,
 	language: Entity<ComboBox>,
 	theme: Entity<ComboBox>,
+	/// 常规 General: check for a newer release on startup (config
+	/// `CheckForUpdates`; the startup path reads the key live).
+	check_updates: Entity<CheckBox>,
 	cache_dir: Entity<PathField>,
 	cache_ahead: Entity<SpinBox>,
 	use_proxy: Entity<CheckBox>,
@@ -254,6 +257,32 @@ impl PreferencesContent {
 		theme.update(cx, |combo, cx| {
 			combo.set_selected(Some(if theme_is_dark() { 0 } else { 1 }), cx)
 		});
+
+		// --- 常规 General: the startup update check -------------------------
+		// On by default; off skips the startup request entirely (the config
+		// key is read when the check would start, no restart needed).
+		let check_updates = cx.new(|cx| {
+			CheckBox::new(
+				45,
+				if crate::update::check_enabled() {
+					CheckState::Checked
+				} else {
+					CheckState::Unchecked
+				},
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("preferences.check_updates"))
+		});
+		cx.subscribe(
+			&check_updates,
+			|_this, check, event: &CheckBoxEvent, cx| {
+				let CheckBoxEvent::Toggled { state, .. } = event;
+				crate::update::set_check_enabled(*state == CheckState::Checked);
+				check.update(cx, |check, cx| check.set_state(*state, cx));
+			},
+		)
+		.detach();
 
 		// --- 缓存 Cache: the disk cache directory --------------------------
 		let cache_dir = cx.new(|cx| {
@@ -533,6 +562,7 @@ impl PreferencesContent {
 			display_bit_depth,
 			language,
 			theme,
+			check_updates,
 			cache_dir,
 			cache_ahead,
 			use_proxy,
@@ -740,6 +770,7 @@ impl Render for PreferencesContent {
 				i18n::tr("preferences.theme").into(),
 				self.theme.clone(),
 			))
+			.child(self.check_updates.clone())
 			// 渲染 Rendering
 			.child(section_header(
 				&colors,
@@ -3224,6 +3255,59 @@ impl AboutContent {
 	}
 }
 
+/// The update-available prompt: the remote version, the running build and
+/// the release notes (rendered as plain text — the API sends Markdown).
+pub struct UpdateDialogContent {
+	version: SharedString,
+	notes: SharedString,
+}
+
+impl UpdateDialogContent {
+	/// Builds the content from one latest-release response.
+	pub fn new(version: &str, notes: &str) -> Self {
+		let notes = notes.trim();
+		let notes = if notes.is_empty() {
+			i18n::tr("update.no_notes").to_string()
+		} else {
+			notes.to_string()
+		};
+		Self {
+			version: version.to_string().into(),
+			notes: notes.into(),
+		}
+	}
+}
+
+impl Render for UpdateDialogContent {
+	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+		let colors = cx.default_colors().clone();
+		let available = i18n::tr("update.available")
+			.replace("{version}", self.version.as_ref())
+			.replace("{current}", crate::update::current_version());
+		div()
+			.id("update-dialog-content")
+			.flex()
+			.flex_col()
+			.gap_2()
+			.w_full()
+			.child(div().text_color(colors.text).child(available))
+			.child(
+				div()
+					.text_color(colors.disabled)
+					.text_xs()
+					.child(i18n::tr("update.notes")),
+			)
+			.child(
+				div()
+					.id("update-dialog-notes")
+					.max_h(px(220.0))
+					.overflow_y_scroll()
+					.text_color(colors.text)
+					.child(self.notes.clone()),
+			)
+	}
+}
+
 impl Render for AboutContent {
 	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		let colors = cx.default_colors().clone();
@@ -4612,8 +4696,10 @@ mod tests {
 		let _snapshot = ConfigRestore::of(CONFIG_KEY_SNAPSHOT_INTERVAL_SEC);
 		let _transition = ConfigRestore::of(CONFIG_KEY_DEFAULT_TRANSITION_SEC);
 		let _storage = ConfigRestore::of(CONFIG_KEY_STORAGE_BACKEND);
+		let _updates = ConfigRestore::of(crate::update::CONFIG_KEY_CHECK_UPDATES);
 
 		// Pin known starting values so the seeded rows are deterministic.
+		config_set_string(crate::update::CONFIG_KEY_CHECK_UPDATES, "true");
 		config_set_string(CONFIG_KEY_RENDERER_BACKEND, "opengl");
 		config_set_string(CONFIG_KEY_DISPLAY_BIT_DEPTH, "10");
 		config_set_string(crate::oakui::real::CONFIG_KEY_THEME, "dark");
@@ -4790,6 +4876,35 @@ mod tests {
 			})
 		});
 		assert_eq!(config_get_string("HardwareDecoding"), "false");
+
+		// The startup update check: the toggle writes the config key the
+		// startup path reads.
+		cx.update(|cx| {
+			content.update(cx, |content, cx| {
+				content.check_updates.update(cx, |_check, cx| {
+					cx.emit(CheckBoxEvent::Toggled {
+						control: 45,
+						state: CheckState::Unchecked,
+					})
+				})
+			})
+		});
+		assert_eq!(
+			config_get_string(crate::update::CONFIG_KEY_CHECK_UPDATES),
+			"false"
+		);
+		assert!(!crate::update::check_enabled());
+		cx.update(|cx| {
+			content.update(cx, |content, cx| {
+				content.check_updates.update(cx, |_check, cx| {
+					cx.emit(CheckBoxEvent::Toggled {
+						control: 45,
+						state: CheckState::Checked,
+					})
+				})
+			})
+		});
+		assert!(crate::update::check_enabled());
 
 		// Proxy divider: the selected option's divider value is persisted.
 		let dividers = cx.read(|cx| content.read(cx).dividers.clone());

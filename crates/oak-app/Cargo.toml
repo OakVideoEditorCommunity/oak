@@ -61,6 +61,12 @@ gpui_elements = { path = "../../gpui/crates/gpui_elements" }
 # runtime (bundled with the app, user-extensible) with the compiled-in
 # English table as the fallback.
 serde_yaml = "0.9"
+# The startup update check and the external oakvideoeditor.org links: a
+# blocking, bounded HTTPS GET (rustls) plus JSON response parsing. The
+# fetch runs on the gpui background executor, never on the UI thread.
+ureq = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # The gpui/wgpu stack logs through the `log` facade; the app installs the
 # stderr backend (see oakapp::logging) so validation errors and warnings
 # are actually visible (RUST_LOG selects the verbosity).
