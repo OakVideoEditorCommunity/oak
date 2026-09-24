@@ -60,7 +60,7 @@ jobs:
       # vcpkg (manifest mode) + caches
       # ------------------------------------------------------------------
       # The runner has no vcpkg preinstalled; bootstrap a fresh clone.
-      # The manifest at the repo root pins the dependency set (FFmpeg 9.0.1
+      # The manifest at the repo root pins the dependency set (FFmpeg 8.1.2
       # via `overrides`, everything else via `builtin-baseline`) and the
       # resolved tree lands in vcpkg_installed/.
       - name: Bootstrap vcpkg

@@ -1,7 +1,7 @@
 {
 	"name": "oak",
 	"version": "0.5.0",
-	"$comment": "FFmpeg (+ pkgconf, librsvg on Windows) for every desktop platform CI/CD builds — Linux, macOS and Windows — with the project's feature set (every free codec + hwaccel, mirroring tooling/ffmpeg/build-ffmpeg.sh's configure switches). Local builds may keep using tooling/install-deps.sh + tooling/ffmpeg/build-ffmpeg.sh. ffmpeg is pinned to 9.0.1#1 via overrides; builtin-baseline pins the rest of the port tree.",
+	"$comment": "FFmpeg (+ pkgconf, librsvg on Windows) for every desktop platform CI/CD builds — Linux, macOS and Windows — with the project's feature set (every free codec + hwaccel, mirroring tooling/ffmpeg/build-ffmpeg.sh's configure switches). Local builds may keep using tooling/install-deps.sh + tooling/ffmpeg/build-ffmpeg.sh. ffmpeg is pinned to 8.1.2#3 via overrides (matching the ffmpeg-next 8.x binding); builtin-baseline pins the rest of the port tree.",
 	"builtin-baseline": "771b0a2e7c473c3a6bee56553be4d5bb32bb653c",
 	"dependencies": [
 		{
@@ -15,7 +15,7 @@
 				"vpx",
 				"openh264",
 				"openjpeg",
-				"png",
+				"zlib",
 				"theora",
 				"webp",
 				"mp3lame",

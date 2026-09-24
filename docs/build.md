@@ -39,7 +39,7 @@ macOS, Linux, and Windows. For the Chinese version see
 - **CI/CD uses the vcpkg manifest instead of `build-ffmpeg.sh`.** Every
   desktop job runs `vcpkg install --triplet <x64-windows | x64-linux |
   arm64-osx | arm64-linux>` against the repo-root `vcpkg.json`, which
-  pins FFmpeg to **9.0.1#1** (`overrides`) and every other port through
+  pins FFmpeg to **8.1.2#3** (`overrides`) and every other port through
   `builtin-baseline`; the tree lands in `vcpkg_installed/<triplet>` and
   jobs point `FFMPEG_DIR`/`PKG_CONFIG_PATH` at it. The C/C++ libraries
   outside that set (OCIO is vendored, the rest come from the system
@@ -97,7 +97,7 @@ cargo test  --workspace         # Linux: see "headless tests" below
 
 > **CI/CD note**: the GitHub Windows CI/CD no longer uses this path — it
 > builds MSVC-ABI on `warp-windows-2025-vs2026-x64-16x` with vcpkg
-> manifest mode (`vcpkg.json` at the repo root: FFmpeg 9.0.1 with every
+> manifest mode (`vcpkg.json` at the repo root: FFmpeg 8.1.2 with every
 > free codec + hwaccel, pkgconf, librsvg, all pinned by
 > `overrides`/`builtin-baseline`) and the vendored static OCIO. The
 > MSYS2 flow below remains the documented local-build alternative.
