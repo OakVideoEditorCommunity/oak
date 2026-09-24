@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 # One matrix, seven platforms: the three Linux-family packaging distros
-# (Debian 12, Fedora 41, Arch), openKylin on x64 and arm64, macOS and
+# (Debian 12, Fedora 43, Arch), openKylin on x64 and arm64, macOS and
 # Windows. The environments match .github/workflows/cd.yml exactly (same
 # container images, same dependency lists, same runner sizes), so a
 # "passes CI, fails CD" dependency drift is caught here first.
@@ -48,7 +48,7 @@ jobs:
             arch: x64
             runner: warp-ubuntu-latest-x64-8x
             triplet: x64-linux
-            container: '{"image":"fedora:41","options":"--shm-size=8g"}'
+            container: '{"image":"fedora:43","options":"--shm-size=8g"}'
           - name: Arch
             platform: linux
             distro: arch
@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.distro }}" in
-            fedora) dnf install -y git curl wget which ;;
+            fedora) dnf install -y --setopt=install_weak_deps=False --setopt=max_parallel_downloads=16 git curl wget which ;;
             arch) pacman -Sy --noconfirm git curl wget which ;;
             debian|openkylin) apt-get update && apt-get install -y git curl ca-certificates wget ;;
           esac
@@ -187,7 +187,11 @@ jobs:
         if: matrix.distro == 'fedora'
         shell: bash
         run: |
-          dnf install -y \
+          # Fedora 41 is EOL (its mirrors moved to the slow archive), so
+          # the matrix uses the current release; weak dependencies (docs,
+          # fonts, optional tooling) are skipped and downloads run wide.
+          dnf install -y --setopt=install_weak_deps=False \
+            --setopt=max_parallel_downloads=16 \
             gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
             git curl zip unzip tar python3 patch xz which \
             pipewire-devel jack-audio-connection-kit-devel \
