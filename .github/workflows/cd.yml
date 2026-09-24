@@ -119,7 +119,7 @@ jobs:
                 alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
                 mesa-libGL-devel mesa-vulkan-drivers \
                 vulkan-headers vulkan-loader-devel \
-                libxkbcommon-devel libxkbcommon-x11-devel \ 
+                libxkbcommon-devel libxkbcommon-x11-devel \
                 rpm-build librsvg2-tools libdrm-devel autoconf autoconf-archive automake libtool
               ;;
             arch)
@@ -270,7 +270,11 @@ jobs:
       # ------------------------------------------------------------------
       - name: Bootstrap vcpkg
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git .cache/vcpkg
+          # Full clone (no --depth): the manifest pins a builtin-baseline
+          # and port trees, and a shallow vcpkg cannot check them out
+          # ("failed to unpack tree object ... Try again with a full
+          # vcpkg clone").
+          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
           .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
           echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
