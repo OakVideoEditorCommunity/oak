@@ -798,6 +798,11 @@ python3 tooling/coverage_report.py --json target/coverage.json
   （gpui 子模块提交见 `oak-gpui`。）
 - **OCIO 参数面板**：Vec4 评分参数（对比度/偏移/曝光）建 4 个 SpinBox，
   `base` 步长锚定范围（pivot 不再一拖就飞出 ±10000）。
+- **拖放覆盖修复**：`TrackRippleRemoveAreaCommand::prepare` 补"范围起点落在
+  块间空洞"分支（C++ 布局连续、无此情形）——此前该情形下既不裁剪后面的
+  重叠块、又把新块插到它前面，导致"起点在空白、终点压在别的 clip 上"时
+  新 clip 被压在下层而不是覆盖。现在统一与起点在 clip 上时一致：重叠部分
+  被移除、新块在前。`domain_test` 与 `graphops` 各补一条回归断言。
 
 ## 8. 风险与对策
 

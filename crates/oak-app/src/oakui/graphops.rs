@@ -6660,4 +6660,61 @@ mod gap_coverage_tests {
 		let _ = std::fs::remove_file(&media);
 		oak_undo::global::clear().unwrap();
 	}
+
+	/// Dropping a new clip whose in-point lands in EMPTY track space still
+	/// overwrites the clip its tail covers (the start-on-a-clip behavior):
+	/// the covered head is removed and the placed clip lands before the
+	/// overlapped clip in track order. The stored model allows holes between
+	/// blocks; the place command used to leave the overlapped clip untouched
+	/// and insert the new one before it, sliding it UNDER the clip it
+	/// covered.
+	#[test]
+	fn place_clip_from_empty_space_overwrites_the_overlapped_clip() {
+		let _g = test_lock();
+		oak_undo::global::clear().unwrap();
+		let (project, seq, footage, media) = project_with_footage("place_from_empty");
+		let track = video_track_of(&project, seq);
+		let head = place_clip(&project, seq, footage, 0, 40);
+		let tail = place_clip(&project, seq, footage, 100, 200);
+
+		// Drop a 100-frame clip at 50: its tail covers the tail clip's head.
+		let placed = place_clip(&project, seq, footage, 50, 150);
+
+		let tb = {
+			let g = lock(&project);
+			sequence_time_base(&g.graph, seq).expect("time base")
+		};
+		let span = |id: NodeId| {
+			let g = lock(&project);
+			clip_range(&g.graph, id).map(|r| (r.0, r.1))
+		};
+		assert_eq!(
+			clip_ids(&lock(&project).graph, track),
+			vec![head, placed, tail],
+			"the placed clip lands before the clip it covers"
+		);
+		assert_eq!(
+			span(head),
+			Some((Rational::new(0, 1), ts_to_rational(40, tb)))
+		);
+		assert_eq!(
+			span(placed),
+			Some((ts_to_rational(50, tb), ts_to_rational(150, tb)))
+		);
+		assert_eq!(
+			span(tail),
+			Some((ts_to_rational(150, tb), ts_to_rational(200, tb))),
+			"the covered head is removed"
+		);
+
+		oak_undo::global::undo().unwrap();
+		assert_eq!(
+			span(tail),
+			Some((ts_to_rational(100, tb), ts_to_rational(200, tb)))
+		);
+		assert_eq!(clip_ids(&lock(&project).graph, track), vec![head, tail]);
+
+		let _ = std::fs::remove_file(&media);
+		oak_undo::global::clear().unwrap();
+	}
 }

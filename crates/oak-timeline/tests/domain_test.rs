@@ -483,6 +483,61 @@ fn place_block_splice_round_trip() {
 	);
 }
 
+/// `TrackPlaceBlockCommand` starting in EMPTY SPACE between blocks (the
+/// stored model allows holes; the C++ layout is contiguous) must still
+/// overwrite what it covers: the following clip is head-trimmed at the
+/// placed block's out point and the placed block lands BEFORE it in track
+/// order. Missing this used to leave the overlapped clip untouched and
+/// insert the placed block before it, so the drop slid UNDER the clip it
+/// covered instead of overwriting it.
+#[test]
+fn place_block_from_empty_space_overwrites_the_overlapped_clip() {
+	let project = make_project();
+	let (_seq, list) = sequence_and_list(&project);
+	let track = TimelineAddTrackCommand::run_immediately(list.clone());
+	let head = add_clip(&track, Rational::new(0, 1), Rational::new(40, 1));
+	let tail = add_clip(&track, Rational::new(100, 1), Rational::new(200, 1));
+	let placed = add_clip(&track, Rational::new(0, 1), Rational::new(100, 1));
+	track_ripple_remove_block(&track, &placed);
+
+	let mut cmd = oak_timeline::undopointer::TrackPlaceBlockCommand::new(
+		list.clone(),
+		0,
+		placed.clone(),
+		Rational::new(50, 1),
+	);
+	cmd.redo();
+	assert_eq!(track_block_count(&track), 3);
+	assert_eq!(track_block_at(&track, 0).unwrap().id, head.id);
+	assert_eq!(
+		track_block_at(&track, 1).unwrap().id,
+		placed.id,
+		"the placed block lands before the clip it covers"
+	);
+	assert_eq!(
+		span_of(&placed),
+		Some((Rational::new(50, 1), Rational::new(150, 1)))
+	);
+	assert_eq!(
+		span_of(&tail),
+		Some((Rational::new(150, 1), Rational::new(200, 1))),
+		"the covered head is removed"
+	);
+	assert_eq!(
+		span_of(&head),
+		Some((Rational::new(0, 1), Rational::new(40, 1))),
+		"the block before the hole is untouched"
+	);
+
+	cmd.undo();
+	assert_eq!(track_block_count(&track), 2);
+	assert_eq!(span_of(&head), Some((Rational::new(0, 1), Rational::new(40, 1))));
+	assert_eq!(
+		span_of(&tail),
+		Some((Rational::new(100, 1), Rational::new(200, 1)))
+	);
+}
+
 /// `TrackListInsertGaps` splits a block at the insertion point and
 /// inserts a gap of the requested length after it; undo removes the gap
 /// and re-joins the block.

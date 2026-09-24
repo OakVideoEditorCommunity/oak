@@ -42,7 +42,7 @@ use crate::util::{
 	block_add_to_graph, block_gap_create, block_in, block_kind, block_length, block_next,
 	block_out, block_previous, block_remove_from_graph, block_set_in,
 	block_set_length_and_media_in, block_set_length_and_media_out, block_set_length_keeping_out,
-	block_track, sequence_all_tracks, sequence_track_list,
+	block_track, sequence_all_tracks, sequence_track_list, track_block_at,
 	track_insert_block_after, track_locked, track_nearest_block_after_or_at,
 	track_nearest_block_before_or_at, track_prepend_block, track_ripple_remove_block,
 	tracklist_track_at, tracklist_track_count, BlockKind, NodeRef,
@@ -229,11 +229,35 @@ impl TrackRippleRemoveAreaCommand {
 		let in_ = self.range.in_();
 		let out = self.range.out();
 
-		// CPP-PARITY timelineundoripple.cpp:57-64
-		let Some(first_block) = nearest_block_before_or_at(&track, in_) else {
-			return;
+		// C++'s track layout is contiguous (gaps fill the holes), so the
+		// nearest block before-or-at `in_` always spans it. The stored-range
+		// model allows genuine holes BETWEEN blocks: the helper can instead
+		// return the last block that merely ENDS at/before `in_` (or
+		// nothing at all), with blocks after the hole still overlapping the
+		// range. There is nothing to trim on the left in that case: the
+		// replacement goes after that block and the trailing scan starts at
+		// its successor. Missing this branch left the overlapped clips
+		// untouched AND inserted the replacement before them, so a drop
+		// whose in-point landed in empty space slid UNDER the clip it
+		// covered instead of overwriting it.
+		let first = nearest_block_before_or_at(&track, in_);
+		let starts_in_a_hole = match &first {
+			Some(fb) => block_out(fb) <= in_,
+			None => true,
 		};
-		let fb = first_block;
+		if starts_in_a_hole {
+			self.insert_previous_ = first.clone();
+			let start = match &first {
+				Some(fb) => block_next(fb),
+				None => track_block_at(&track, 0),
+			};
+			self.scan_successors(start, out);
+			self.prepared = true;
+			return;
+		}
+
+		// CPP-PARITY timelineundoripple.cpp:57-64
+		let fb = first.expect("the hole case returned early");
 
 		// Determine if this first block is getting trimmed or removed
 		let first_block_is_out_trimmed = block_in(&fb) < in_;
@@ -285,41 +309,45 @@ impl TrackRippleRemoveAreaCommand {
 			// If the first block is getting in trimmed, we're already at the
 			// end of our range
 			if !first_block_is_in_trimmed {
-				let mut next = block_next(&fb);
-				while let Some(nx) = next {
-					// The module world allows gaps BETWEEN blocks (their
-					// in/out points are stored, unlike Olive's contiguous
-					// track ordering), so a successor starting at/after the
-					// region does not overlap it and must not be touched.
-					if block_in(&nx) >= out {
-						break;
-					}
-					let trimming = block_out(&nx) > out;
-
-					if trimming {
-						self.trim_in_ = Some(TrimOperation {
-							block: nx.clone(),
-							old_length: block_length(&nx),
-							new_length: block_length(&nx) - (out - block_in(&nx)),
-						});
-						break;
-					} else {
-						self.removals_.push(RemoveOperation {
-							block: nx.clone(),
-							before: block_previous(&nx),
-						});
-
-						if block_out(&nx) == out {
-							break;
-						}
-					}
-
-					next = block_next(&nx);
-				}
+				self.scan_successors(block_next(&fb), out);
 			}
 		}
 
 		self.prepared = true;
+	}
+
+	/// Remove the blocks fully inside `[_, out)` and head-trim the first one
+	/// reaching past it — the shared trailing scan of [`Self::prepare`].
+	fn scan_successors(&mut self, mut next: Option<NodeRef>, out: Rational) {
+		while let Some(nx) = next {
+			// The module world allows gaps BETWEEN blocks (their in/out
+			// points are stored, unlike Olive's contiguous track ordering),
+			// so a successor starting at/after the region does not overlap
+			// it and must not be touched.
+			if block_in(&nx) >= out {
+				break;
+			}
+			let trimming = block_out(&nx) > out;
+
+			if trimming {
+				self.trim_in_ = Some(TrimOperation {
+					block: nx.clone(),
+					old_length: block_length(&nx),
+					new_length: block_length(&nx) - (out - block_in(&nx)),
+				});
+				break;
+			}
+			self.removals_.push(RemoveOperation {
+				block: nx.clone(),
+				before: block_previous(&nx),
+			});
+
+			if block_out(&nx) == out {
+				break;
+			}
+
+			next = block_next(&nx);
+		}
 	}
 
 	/// `redo`: apply the ripple removal.
