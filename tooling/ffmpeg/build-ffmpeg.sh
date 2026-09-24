@@ -138,11 +138,14 @@ if [ -d /opt/homebrew/lib/pkgconfig/openjpeg ]; then
 	export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:/opt/homebrew/lib/pkgconfig/openjpeg"
 fi
 enable_if_pkg libopenjp2 libopenjpeg
-# openh264 is redundant for us (decode: FFmpeg's native h264; encode:
-# x264) and snappy only feeds the hap encoder; neither MinGW package
-# satisfies the static link — skip both on Windows.
+# snappy only feeds the hap encoder and the MinGW package does not
+# satisfy the static link — skip it on Windows. openh264 is deliberately
+# not probed anywhere: it is redundant (decode: FFmpeg's native h264;
+# encode: libx264) and every external FFmpeg links dynamically turns
+# into a runtime dependency on the distributor's soname package
+# (libopenh264-7 vs -8 across releases), which is exactly the kind of
+# dependency the editor should not carry for an unused codec.
 if [ -z "${MSYSTEM:-}" ]; then
-	enable_if_pkg openh264 libopenh264
 	enable_if_pkg snappy libsnappy
 fi
 enable_if_pkg webp libwebp

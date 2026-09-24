@@ -59,7 +59,7 @@ if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || -n "${MSYSTEM:-}" ]]; then
 			mingw-w64-ucrt-x86_64-nasm \
 			mingw-w64-ucrt-x86_64-x264 mingw-w64-ucrt-x86_64-x265 \
 			mingw-w64-ucrt-x86_64-dav1d mingw-w64-ucrt-x86_64-libvpx \
-			mingw-w64-ucrt-x86_64-openh264 mingw-w64-ucrt-x86_64-openjpeg2 \
+			mingw-w64-ucrt-x86_64-openjpeg2 \
 			mingw-w64-ucrt-x86_64-libtheora mingw-w64-ucrt-x86_64-libwebp \
 			mingw-w64-ucrt-x86_64-lame mingw-w64-ucrt-x86_64-opus \
 			mingw-w64-ucrt-x86_64-libvorbis mingw-w64-ucrt-x86_64-speex \
@@ -79,7 +79,7 @@ fi
 case "$(uname -s)" in
 	Darwin)
 		run brew install cmake pkg-config nasm \
-			x264 x265 dav1d libvpx openh264 openjpeg theora webp \
+			x264 x265 dav1d libvpx openjpeg theora webp \
 			lame opus libvorbis speex snappy libass freetype fribidi \
 			fontconfig gnutls
 		;;
@@ -89,17 +89,17 @@ case "$(uname -s)" in
 		PKGS=(
 			build-essential clang libclang-dev cmake python3 pkg-config nasm
 			libx264-dev libx265-dev libdav1d-dev libvpx-dev
-			libopenh264-dev libopenjp2-7-dev libtheora-dev libwebp-dev
+			libopenjp2-7-dev libtheora-dev libwebp-dev
 			libmp3lame-dev libopus-dev libvorbis-dev libspeex-dev
 			libsnappy-dev libass-dev libfreetype-dev libfribidi-dev
 			libfontconfig-dev libgnutls28-dev
 			libva-dev libdrm-dev
 			git
 		)
-		# A single unavailable package (e.g. Ubuntu's multiverse-only
-		# libopenh264-dev on images without that component) must not kill
-		# the whole install: the FFmpeg configure probes every optional
-		# piece, so degrade to installing the rest individually.
+		# A single unavailable package (e.g. a codec library a minimal
+		# image does not carry) must not kill the whole install: the
+		# FFmpeg configure probes every optional piece, so degrade to
+		# installing the rest individually.
 		if ! run "${SUDO[@]}" apt-get install -y "${PKGS[@]}"; then
 			echo "Some packages are unavailable here; installing the rest individually" >&2
 			for pkg in "${PKGS[@]}"; do
@@ -130,7 +130,7 @@ case "$(uname -s)" in
 			DNFPKGS=(
 				gcc gcc-c++ clang clang-devel cmake python3 pkgconf-pkg-config nasm
 				x264-devel x265-devel libdav1d-devel libvpx-devel
-				openh264-devel openjpeg-devel libtheora-devel libwebp-devel
+				openjpeg-devel libtheora-devel libwebp-devel
 				lame-devel opus-devel libvorbis-devel speex-devel
 				snappy-devel libass-devel freetype-devel fribidi-devel
 				fontconfig-devel gnutls-devel libva-devel libdrm-devel
@@ -144,7 +144,7 @@ case "$(uname -s)" in
 			fi
 		elif command -v pacman >/dev/null; then
 			run "${SUDO[@]}" pacman -S --needed --noconfirm base-devel clang cmake python pkgconf nasm \
-				x264 x265 dav1d libvpx openh264 openjpeg2 libtheora libwebp \
+				x264 x265 dav1d libvpx openjpeg2 libtheora libwebp \
 				lame opus libvorbis speex snappy libass freetype2 fribidi \
 				fontconfig gnutls ffnvcodec-headers libva libdrm
 		else
