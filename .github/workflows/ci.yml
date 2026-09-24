@@ -179,7 +179,7 @@ jobs:
             libasound2-dev libpulse-dev libsndfile1-dev \
             libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
             libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            icc-profiles-free gdb file librsvg2-bin patchelf \
+            icc-profiles-free gdb file librsvg2-bin patchelf fonts-dejavu-core \
             autoconf autoconf-archive automake libtool
 
       - name: Install system dependencies (Fedora)
@@ -201,7 +201,7 @@ jobs:
             rpm-build librsvg2-tools libdrm-devel \
             perl-IPC-Cmd perl-FindBin perl-File-Basename perl-File-Compare \
             perl-File-Copy perl-File-Path perl-File-Temp perl-Time-Piece \
-            xorg-x11-server-Xvfb xorg-x11-xauth gdb file \
+            xorg-x11-server-Xvfb xorg-x11-xauth gdb file dejavu-sans-fonts \
             autoconf autoconf-archive automake libtool
 
       - name: Install system dependencies (Arch)
@@ -214,7 +214,7 @@ jobs:
             pipewire jack2 alsa-lib libpulse libsndfile \
             mesa vulkan-headers vulkan-icd-loader \
             libxkbcommon libxkbcommon-x11 librsvg libdrm \
-            xorg-server-xvfb xorg-xauth gdb file \
+            xorg-server-xvfb xorg-xauth gdb file ttf-dejavu \
             autoconf autoconf-archive automake libtool
 
       - name: Install system dependencies (openKylin)
