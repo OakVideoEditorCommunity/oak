@@ -29,7 +29,7 @@ jobs:
     # (actions/runner#265 allows an empty container value).
     container: ${{ matrix.container != '' && fromJSON(matrix.container) || '' }}
     # The Test step's watchdog caps a hung suite at 30 min; leave a cold
-    # vcpkg install + full compile room beyond that.
+    # FFmpeg build + full compile room beyond that.
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -87,7 +87,7 @@ jobs:
 
     steps:
       # The container images are bare (Fedora/Arch even lack git);
-      # checkout and vcpkg need git/curl, and WarpCache needs wget inside
+      # checkout needs git/curl, and WarpCache needs wget inside
       # a container (its README requires it). First step of the job, so
       # the package lists are still fresh.
       - name: Bootstrap container (git, curl, wget)
@@ -108,7 +108,7 @@ jobs:
           submodules: true
 
       # Taste the disk before the toolchains land: Defender scans every
-      # file the vcpkg/cargo builds touch (tens of thousands of small
+      # file the cargo/FFmpeg builds touch (tens of thousands of small
       # writes), which dominates a cold Windows build. The runner is an
       # ephemeral VM, so the scanner is turned off for the job
       # (exclusions are kept as a fallback for images where real-time
@@ -128,8 +128,7 @@ jobs:
           foreach ($path in @(
             $env:GITHUB_WORKSPACE,
             "$env:USERPROFILE\.cargo",
-            "$env:USERPROFILE\.rustup",
-            "$env:LOCALAPPDATA\vcpkg"
+            "$env:USERPROFILE\.rustup"
           )) {
             Add-MpPreference -ExclusionPath $path -ErrorAction SilentlyContinue
           }
@@ -160,7 +159,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           # The Windows build is MSVC-ABI (the runner carries VS 2026):
-          # vcpkg's FFmpeg and the vendored OCIO build both want it.
+          # The prebuilt FFmpeg and the vendored OCIO build both want it.
           toolchain: ${{ matrix.platform == 'windows' && 'stable-x86_64-pc-windows-msvc' || 'stable' }}
 
       # ------------------------------------------------------------------
@@ -237,9 +236,9 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           # Homebrew's pkgconf installs a `pkg-config` symlink, which is
-          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what
-          # vcpkg's ffmpeg port requires to build (FFmpeg libraries come
-          # from the vcpkg manifest). librsvg is CD's icon renderer.
+          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what the
+          # project FFmpeg build (tooling/ffmpeg/build-ffmpeg.sh) requires.
+          # librsvg is CD's icon renderer.
           brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
 
       # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
@@ -249,8 +248,8 @@ jobs:
       # links these builds). Downloaded from his release page and
       # verified against the checksums.sha256 published in the same
       # release; nothing is mirrored here, so provenance stays upstream.
-      # The alternative — a cold vcpkg FFmpeg build — costs ~40 minutes
-      # per run on this platform.
+      # The alternative — a source build — costs ~40 minutes per run on
+      # this platform.
       - name: Install prebuilt FFmpeg (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -274,39 +273,25 @@ jobs:
           Move-Item $inner.FullName "$root\ffmpeg"
 
       # ------------------------------------------------------------------
-      # vcpkg (manifest mode) + caches
+      # FFmpeg + caches
       # ------------------------------------------------------------------
-      # Bootstrap a fresh clone rather than leaning on whatever vcpkg the
-      # image carries: `builtin-baseline`/`overrides` are only honored by
-      # a recent vcpkg-tool, and every platform must behave alike.
-      - name: Bootstrap vcpkg
+      # The Linux/macOS jobs build the project FFmpeg from source with the
+      # distro's codec packages — the same path local builds use
+      # (tooling/install-deps.sh + tooling/ffmpeg/build-ffmpeg.sh; the
+      # latter also drives the vendored static OCIO). Windows uses the
+      # prebuilt archive downloaded above.
+      - name: Install FFmpeg dependencies
         if: matrix.platform != 'windows'
         shell: bash
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git .cache/vcpkg
-          .cache/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          echo "$PWD/.cache/vcpkg" >> "$GITHUB_PATH"
-          echo "VCPKG_ROOT=$PWD/.cache/vcpkg" >> "$GITHUB_ENV"
+        run: tooling/install-deps.sh
 
-      - name: Bootstrap vcpkg (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git "$env:GITHUB_WORKSPACE\.cache\vcpkg"
-          & "$env:GITHUB_WORKSPACE\.cache\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_PATH
-          "VCPKG_ROOT=$env:GITHUB_WORKSPACE\.cache\vcpkg" >> $env:GITHUB_ENV
-
-      # The archives dir is vcpkg's binary cache: a manifest bump then
-      # rebuilds only what changed. Every run saves under a fresh key (so
-      # an existing cache is updated, never a save failure) and restores
-      # the newest matching entry through `restore-keys`. WarpBuild's
-      # cache service backs the Linux jobs (the GitHub Actions cache
-      # quota is full); macOS/Windows keep actions/cache.
-      - name: Restore vcpkg artifacts (WarpCache)
+      # The built FFmpeg is cached as a whole (keyed on the script, distro
+      # and arch): a cache hit skips the ~10 minute build. The
+      # `.build-complete` marker distinguishes a finished build from a
+      # partial cache save; without it the tree is rebuilt.
+      - name: Restore FFmpeg (WarpCache)
         if: matrix.platform == 'linux'
-        id: vcpkg-cache
+        id: ffmpeg-cache
         uses: WarpBuilds/cache/restore@v2
         # A job container does not inherit the runner environment;
         # WarpCache authenticates with this token (README: "Running
@@ -314,80 +299,49 @@ jobs:
         env:
           WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
         with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ matrix.distro }}-${{ matrix.triplet }}-
+            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-
+            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-
 
-      - name: Restore vcpkg artifacts (GitHub)
-        if: matrix.platform != 'linux'
-        id: vcpkg-cache-github
+      - name: Restore FFmpeg (GitHub)
+        if: matrix.platform == 'macos'
+        id: ffmpeg-cache-github
         uses: actions/cache/restore@v6
         with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-            ~/AppData/Local/vcpkg/archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
+            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-
+            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-
 
-      - name: Install dependencies (vcpkg manifest)
+      - name: Build FFmpeg
         if: matrix.platform != 'windows'
         shell: bash
         run: |
-          # Source tarballs come from third-party hosts (x264 lives on
-          # code.videolan.org); a transient connection failure aborts the
-          # whole install — vcpkg refuses to retry that class of curl
-          # error — so retry here. vcpkg resumes from its archive and
-          # download caches, so a repeat attempt is cheap.
-          for attempt in 1 2 3; do
-            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release --overlay-ports tooling/vcpkg-ports && exit 0
-            echo "vcpkg install failed (attempt $attempt); retrying"
-            sleep 15
-          done
-          exit 1
+          if [ -f .cache/ffmpeg/.build-complete ]; then
+            echo "FFmpeg restored from cache; skipping the build"
+          else
+            rm -rf .cache/ffmpeg
+            tooling/ffmpeg/build-ffmpeg.sh
+          fi
 
-      - name: Install dependencies (vcpkg manifest, Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          for ($i = 1; $i -le 3; $i++) {
-            vcpkg install --triplet ${{ matrix.triplet }} --overlay-triplets tooling/vcpkg-triplets/release --overlay-ports tooling/vcpkg-ports
-            if ($LASTEXITCODE -eq 0) { exit 0 }
-            Write-Host "vcpkg install failed (attempt $i); retrying"
-            Start-Sleep -Seconds 15
-          }
-          exit 1
-
-      # Explicit restore/save pair: the old `save-always: true` on the
-      # combined step does not actually save on a failed job (the action
-      # deprecation warning), so a run that failed after the install left
-      # no binary cache and the next run rebuilt FFmpeg from source.
-      - name: Save vcpkg artifacts (WarpCache)
+      - name: Save FFmpeg (WarpCache)
         if: always() && matrix.platform == 'linux'
         uses: WarpBuilds/cache/save@v2
         env:
           WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
         with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+          path: .cache/ffmpeg
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
 
-      - name: Save vcpkg artifacts (GitHub)
-        if: always() && matrix.platform != 'linux'
+      - name: Save FFmpeg (GitHub)
+        if: always() && matrix.platform == 'macos'
         uses: actions/cache/save@v6
         with:
-          path: |
-            vcpkg_installed
-            ~/.cache/vcpkg/archives
-            ~/AppData/Local/vcpkg/archives
-          key: ${{ steps.vcpkg-cache-github.outputs.cache-primary-key }}
+          path: .cache/ffmpeg
+          key: ${{ steps.ffmpeg-cache-github.outputs.cache-primary-key }}
 
       # ------------------------------------------------------------------
       # Build environment
@@ -406,20 +360,9 @@ jobs:
             echo "CXX=clang++"
           } >> "$GITHUB_ENV"
           bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
-          # vcpkg's libva/libva-drm are shared libraries that FFmpeg links
-          # dynamically; without this path the loader picks a system libva
-          # that may predate symbols FFmpeg uses (undefined vaMapBuffer2).
-          echo "LD_LIBRARY_PATH=$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-          # The packaging tools resolve the ELF needs through ldd as well
-          # (dpkg-shlibdeps, linuxdeploy): register the vcpkg libs with the
-          # dynamic linker so `libva-drm.so.2` is found when a package is
-          # assembled.
-          echo "$prefix/lib" > /etc/ld.so.conf.d/oak-vcpkg.conf
-          ldconfig
+          ffmpeg="$PWD/.cache/ffmpeg"
+          echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -428,19 +371,15 @@ jobs:
           # Vendored static OCIO (same as every non-Windows platform via
           # tooling/ocio-env.sh); no OCIO_INSTALL_DIR override.
           bash tooling/ocio-env.sh >> "$GITHUB_ENV"
-          prefix="$PWD/vcpkg_installed/${{ matrix.triplet }}"
-          echo "FFMPEG_DIR=$prefix" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "$prefix/tools/pkgconf" >> "$GITHUB_PATH"
+          ffmpeg="$PWD/.cache/ffmpeg"
+          echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          # FFmpeg comes from the prebuilt archive extracted above (the
-          # manifest no longer installs it on Windows); vcpkg only
-          # provides pkgconf for oak-ffmpeg-link's build script.
-          $prefix = "$env:GITHUB_WORKSPACE\vcpkg_installed\${{ matrix.triplet }}"
+          # FFmpeg comes from the prebuilt archive extracted above.
           $ffmpeg = "$env:GITHUB_WORKSPACE\.cache\ffmpeg"
           "FFMPEG_DIR=$ffmpeg" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$ffmpeg\lib\pkgconfig" >> $env:GITHUB_ENV
@@ -448,16 +387,12 @@ jobs:
           # runner reports STATUS_DLL_NOT_FOUND when the first test
           # executable starts.
           "$ffmpeg\bin" >> $env:GITHUB_PATH
-          "$prefix\tools\pkgconf" >> $env:GITHUB_PATH
           # Bundled OCIO: ocio-sys' vendored sources build with the MSVC
           # toolchain (what they need — the MSYS2 package was the
           # workaround, not the preference), so no OCIO_INSTALL_DIR and
           # no OCIO_RS_NO_MSVC_INCLUDES anywhere.
           "OCIO_RS_ENABLE_REAL=1" >> $env:GITHUB_ENV
           "OCIO_RS_LINK=static" >> $env:GITHUB_ENV
-          # Record the resolved versions in the build log (the manifest
-          # pins them via overrides + builtin-baseline).
-          vcpkg list
 
       # ------------------------------------------------------------------
       # Cargo caches: whole target/ dir plus ~/.cargo, shared per

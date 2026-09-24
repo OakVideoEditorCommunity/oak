@@ -36,15 +36,14 @@ macOS, Linux, and Windows. For the Chinese version see
   config entry is the only machine-agnostic way). The `oak-ffmpeg-link`
   build script panics without it; run `build-ffmpeg.sh` once before the
   first `cargo build`.
-- **CI/CD uses the vcpkg manifest instead of `build-ffmpeg.sh`.** Every
-  desktop job runs `vcpkg install --triplet <x64-windows | x64-linux |
-  arm64-osx | arm64-linux>` against the repo-root `vcpkg.json`, which
-  pins FFmpeg to **8.1.2#3** (`overrides`) and every other port through
-  `builtin-baseline`; the tree lands in `vcpkg_installed/<triplet>` and
-  jobs point `FFMPEG_DIR`/`PKG_CONFIG_PATH` at it. The C/C++ libraries
-  outside that set (OCIO is vendored, the rest come from the system
-  package manager) are unchanged. The local-build path above remains
-  valid and is what the docs below describe.
+- **CI/CD follows the same path.** The Linux/macOS jobs run
+  `tooling/install-deps.sh` and `tooling/ffmpeg/build-ffmpeg.sh`, so the
+  release binaries and local builds share one FFmpeg configuration (the
+  built tree is cached in CI and rebuilt from scratch in CD). The
+  Windows jobs download a prebuilt FFmpeg — BtbN's shared GPL build, the
+  one ffmpeg.org links as the official Windows option — from its release
+  page, verify it against the published `checksums.sha256` and point
+  `FFMPEG_DIR` at it (no MSYS2 or vcpkg toolchain in CI).
 
 ## Quick start (macOS / Linux)
 
@@ -96,11 +95,10 @@ cargo test  --workspace         # Linux: see "headless tests" below
 ## Windows (MSYS2 UCRT64)
 
 > **CI/CD note**: the GitHub Windows CI/CD no longer uses this path — it
-> builds MSVC-ABI on `warp-windows-2025-vs2026-x64-16x` with vcpkg
-> manifest mode (`vcpkg.json` at the repo root: FFmpeg 8.1.2 with every
-> free codec + hwaccel, pkgconf, librsvg, all pinned by
-> `overrides`/`builtin-baseline`) and the vendored static OCIO. The
-> MSYS2 flow below remains the documented local-build alternative.
+> builds MSVC-ABI on `warp-windows-2025-vs2026-x64-32x` with BtbN's
+> prebuilt shared FFmpeg (downloaded from the release page and verified
+> against its sha256) and the vendored static OCIO. The MSYS2 flow below
+> remains the documented local-build alternative.
 
 The Windows build targets **x86_64-pc-windows-gnu** with MSYS2's own
 Rust; the MSVC toolchain is not supported (the build scripts emit
