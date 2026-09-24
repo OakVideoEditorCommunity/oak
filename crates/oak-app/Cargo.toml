@@ -142,7 +142,7 @@ description = "Oak Video Editor"
 longDescription = "Oak Video Editor: a free, open-source non-linear video editor written in Rust."
 authors = ["Oak Team"]
 copyright = "Copyright (C) 2026 Oak Team"
-licenseFile = "LICENSE"
+licenseFile = "../../LICENSE"
 category = "Video"
 icons = ["../../icons/icon.png"]
 # The UI string tables (language packs); users can drop extra
