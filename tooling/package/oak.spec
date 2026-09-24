@@ -43,6 +43,7 @@ cp -a %{_oak_stage}/usr %{buildroot}/
 /usr/share/icons/hicolor/512x512/apps/oak.png
 /usr/share/icons/hicolor/scalable/apps/oak.svg
 /usr/share/oak/i18n/
+/usr/share/oak/icons/
 
 %changelog
 * Thu Sep 24 2026 Oak Team <noreply@oakvideoeditor.org> - 0.5.0-1
