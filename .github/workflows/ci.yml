@@ -74,9 +74,11 @@ jobs:
       # rebuilds only what changed. Every run saves under a fresh key
       # (so an existing cache is updated, never a save failure) and
       # restores the newest matching entry through `restore-keys`.
+      # WarpBuild's cache service backs this job (the GitHub Actions
+      # cache quota is full); macOS/Windows keep actions/cache.
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v6
+        uses: WarpBuilds/cache/restore@v2
         with:
           path: |
             vcpkg_installed
@@ -96,7 +98,7 @@ jobs:
       # (~40 min on Windows).
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v6
+        uses: WarpBuilds/cache/save@v2
         with:
           path: |
             vcpkg_installed
@@ -129,7 +131,7 @@ jobs:
       # Covers the whole target/ dir plus ~/.cargo; shared across branches
       # of the same OS.
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: WarpBuilds/rust-cache@v2
         with:
           shared-key: oak-ci-linux
           cache-on-failure: true
@@ -606,9 +608,11 @@ jobs:
 
       # The archives dir is vcpkg's binary cache: a manifest bump then
       # rebuilds only what changed.
+      # WarpBuild's cache service backs this job (the GitHub Actions
+      # cache quota is full); macOS/Windows keep actions/cache.
       - name: Restore vcpkg artifacts
         id: vcpkg-cache
-        uses: actions/cache/restore@v6
+        uses: WarpBuilds/cache/restore@v2
         with:
           path: |
             vcpkg_installed
@@ -625,7 +629,7 @@ jobs:
 
       - name: Save vcpkg artifacts
         if: always()
-        uses: actions/cache/save@v6
+        uses: WarpBuilds/cache/save@v2
         with:
           path: |
             vcpkg_installed
@@ -651,7 +655,7 @@ jobs:
 
       # Covers the whole target/ dir plus ~/.cargo.
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: WarpBuilds/rust-cache@v2
         with:
           shared-key: oak-ci-openkylin-${{ matrix.arch }}
           cache-on-failure: true
