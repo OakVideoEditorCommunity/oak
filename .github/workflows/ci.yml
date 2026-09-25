@@ -285,10 +285,17 @@ jobs:
         shell: bash
         run: tooling/install-deps.sh
 
-      # The built FFmpeg is cached as a whole (keyed on the script, distro
-      # and arch): a cache hit skips the ~10 minute build. The
-      # `.build-complete` marker distinguishes a finished build from a
-      # partial cache save; without it the tree is rebuilt.
+      # The built FFmpeg is cached as a whole, keyed on distro, arch and
+      # BOTH configure inputs — build-ffmpeg.sh and install-deps.sh (the
+      # enable_if_pkg probes depend on which packages that script
+      # installed). There is deliberately no bare distro/arch restore-key:
+      # it once restored an openh264-linked FFmpeg after the codec was
+      # dropped, and the `always()` save re-saved that stale tree under
+      # the new key, breaking every later macOS link (`-lopenh264` not
+      # found). A changed configure input must cost a ~10 minute rebuild,
+      # never a mismatched cache. The `.build-complete` marker
+      # distinguishes a finished build from a partial cache save; without
+      # it the tree is rebuilt.
       - name: Restore FFmpeg (WarpCache)
         if: matrix.platform == 'linux'
         id: ffmpeg-cache
@@ -300,10 +307,9 @@ jobs:
           WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-
-            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-
+            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-
 
       - name: Restore FFmpeg (GitHub)
         if: matrix.platform == 'macos'
@@ -311,10 +317,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh') }}-
-            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-
+            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-
 
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
