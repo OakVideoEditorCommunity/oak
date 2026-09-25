@@ -133,7 +133,7 @@ Windows 构建目标是 **x86_64-pc-windows-gnu**，使用 MSYS2 自带 Rust；
 发行版包在容器中构建（宿主机只需要 Docker/Podman）：
 
 ```sh
-tooling/package/build-deb.sh  # Debian 12  → .deb
+tooling/package/build-deb.sh  # Debian 13  → .deb
 tooling/package/build-rpm.sh  # Fedora 41  → .rpm
 tooling/package/build-pkg.sh  # Arch Linux → .pkg.tar.zst
 ```

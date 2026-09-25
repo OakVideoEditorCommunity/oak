@@ -151,7 +151,7 @@ Distribution packages are built in containers (no host dependencies
 beyond Docker/Podman):
 
 ```sh
-tooling/package/build-deb.sh  # Debian 12  → .deb
+tooling/package/build-deb.sh  # Debian 13  → .deb
 tooling/package/build-rpm.sh  # Fedora 41  → .rpm
 tooling/package/build-pkg.sh  # Arch Linux → .pkg.tar.zst
 ```

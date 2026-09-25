@@ -59,8 +59,9 @@ install -m644 assets/i18n/*.yaml "$STAGING/usr/share/oak/i18n/"
 cp -a assets/icons/. "$STAGING/usr/share/oak/icons/"
 
 # vcpkg's libva/libva-drm are shared libraries that FFmpeg links
-# dynamically. Debian 12 / openKylin carry an older libva than FFmpeg 8
-# expects (vaMapBuffer2), so ship vcpkg's copies next to the app and give
+# dynamically. openKylin carries an older libva than FFmpeg 8 expects
+# (vaMapBuffer2; Debian 13's 2.22 is new enough), so ship vcpkg's copies
+# next to the app and give
 # the executables a relative RUNPATH (`$ORIGIN`) — a system libva can then
 # not shadow them. `VCPKG_LIB` is the vcpkg_installed/<triplet>/lib dir
 # (CD passes it; a local build without it just skips the bundle).

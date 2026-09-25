@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 # One matrix, seven platforms, the same environments CI tests in (see
-# .github/workflows/ci.yml): Debian 12 / Fedora 43 / Arch / openKylin x64
+# .github/workflows/ci.yml): Debian 13 / Fedora 43 / Arch / openKylin x64
 # and arm64 containers plus the macOS and Windows hosts. Every package is
 # built from scratch — no FFmpeg/cargo caches: a restored tree has
 # masked packaging problems before (stale ports, missing tools), and a
@@ -36,7 +36,7 @@ jobs:
             runner: warp-ubuntu-latest-x64-32x
             triplet: x64-linux
             artifact: linux-debian
-            container: '{"image":"debian:12","options":"--shm-size=8g"}'
+            container: '{"image":"debian:13","options":"--shm-size=8g"}'
           - name: Fedora
             platform: linux
             distro: fedora
@@ -170,11 +170,11 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
+            build-essential clang libclang-dev cmake pkgconf nasm \
             git curl zip unzip tar python3 dpkg-dev \
             libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
             libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
+            libgl-dev libglvnd-dev libgl1-mesa-dri mesa-vulkan-drivers \
             libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
             icc-profiles-free gdb file librsvg2-bin patchelf fonts-dejavu-core \
             autoconf autoconf-archive automake libtool
