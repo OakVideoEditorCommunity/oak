@@ -273,6 +273,52 @@ fn ripple_remove_area_gap_splitting_flag() {
 	assert_eq!(span_of(&gap), Some((Rational::new(0, 1), Rational::new(100, 1))));
 }
 
+/// The splice re-links the second half to the original's link partners:
+/// the graph copy that produces it carries no links, so without the
+/// explicit re-link an overwrite through the middle of a linked clip
+/// drops the rear half out of the link group (the covered clip's
+/// remainder silently unlinking from its A/V partner).
+#[test]
+fn ripple_remove_area_splice_preserves_links() {
+	let project = make_project();
+	let (_seq, list) = sequence_and_list(&project);
+	let track = TimelineAddTrackCommand::run_immediately(list.clone());
+	let other = TimelineAddTrackCommand::run_immediately(list);
+	let clip = add_clip(&track, Rational::new(0, 1), Rational::new(100, 1));
+	let partner = add_clip(&other, Rational::new(0, 1), Rational::new(100, 1));
+	link_blocks(&project, &clip, &partner);
+
+	let mut cmd = TrackRippleRemoveAreaCommand::new(
+		track.clone(),
+		TimeRange::new(Rational::new(25, 1), Rational::new(50, 1)),
+	);
+	cmd.redo();
+
+	let spliced = cmd.get_spliced_block().expect("range split the block");
+	assert!(
+		blocks_are_linked(&project, &clip, &partner),
+		"the first half keeps its link"
+	);
+	assert!(
+		blocks_are_linked(&project, &spliced, &partner),
+		"the second half is re-linked to the original's partner"
+	);
+
+	cmd.undo();
+	assert!(blocks_are_linked(&project, &clip, &partner));
+	{
+		let p = project.lock().unwrap();
+		assert!(
+			!p.graph.links_of(partner.id).contains(&spliced.id),
+			"undo leaves no dangling back-reference to the detached half"
+		);
+	}
+
+	// The redo after undo repairs the partner's back-reference.
+	cmd.redo();
+	assert!(blocks_are_linked(&project, &spliced, &partner));
+}
+
 /// `TrackRippleRemoveAreaCommand`: undo before any redo leaves the graph
 /// untouched (the trim operations are only applied by redo).
 #[test]

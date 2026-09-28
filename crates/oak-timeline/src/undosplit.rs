@@ -254,6 +254,12 @@ impl BlockSplitCommand {
 		self.new_block.clone()
 	}
 
+	/// The block this command splits (`block_`), for callers that must
+	/// re-link the second half into the original's link group.
+	pub fn original(&self) -> NodeRef {
+		self.block.clone()
+	}
+
 	/// Wrap as an oakundo command value.
 	pub fn to_command(self) -> UndoCommand {
 		crate::undocommon::box_command(self)

@@ -373,6 +373,24 @@ impl TrackRippleRemoveAreaCommand {
 				let new_len =
 					block_length(&split) - (self.range.out() - block_in(&split));
 				block_set_length_keeping_out(&split, new_len);
+
+				// The graph copy that produced the second half carries no
+				// links (`copy_node_and_dependency_graph_minus_items` clears
+				// them, leaving the re-link to the split's callers), so
+				// without this an overwrite through the middle of a linked
+				// clip drops the remainder out of the link group — it
+				// silently unlinks from its A/V partner. Link the half to
+				// every partner of the original. Idempotent: after an undo
+				// (`take_node` stripped the partners' back-references)
+				// `link` repairs the missing direction.
+				let original = cmd.original();
+				let project = self.track.project.clone();
+				let mut p = project
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner());
+				for partner in p.graph.links_of(original.id) {
+					p.graph.link(split.id, partner);
+				}
 			}
 		} else {
 			if let Some(t) = &self.trim_out_ {
