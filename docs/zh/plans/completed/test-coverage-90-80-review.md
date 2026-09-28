@@ -2,10 +2,10 @@
 
 > 审查对象：工作区全部未提交改动（HEAD `800011ef7`，2026-09-20 快照；
 > 63 个修改文件 + 11 个新测试文件，+38180 / −254 行）。
-> 审查重点（用户指定）：**假测试**、**修改实现语义以匹配测试的行为**。
+> 审查重点（用户指定）： **假测试**、 **修改实现语义以匹配测试的行为**。
 > 报告落笔：2026-09-22。配套计划文档：[`test-coverage-90-80.md`](test-coverage-90-80.md)。
 >
-> 标注约定：**[实证]** = 审查会话直接核对过代码原文/手算过数值；
+> 标注约定： **[实证]** = 审查会话直接核对过代码原文/手算过数值；
 > **[子代理]** = 深查子代理报告、审查会话抽样复核过关键链条。
 
 ## 0. 结论摘要
@@ -209,7 +209,7 @@ program-window、display、source-window 三个验收测试均新增
 - `procpool.rs:2402` `resolve_worker_bin` 对 `OAK_WORKER_BIN` **不检查
   存在性**直接采用 → spawn 失败 → 槽位恒空 → 跳过路径必然触发；
 - 即普通 CI（`cargo test --workspace` 会把 oak-worker 建到
-  `target/debug`）能真跑，**coverage job 里这组验收测试静默空转**——
+  `../../../../target/debug`）能真跑， **coverage job 里这组验收测试静默空转**——
   恰好在产出覆盖率数字的那次运行里。
 
 对照：`procpool.rs:2922` 测试侧 `find_real_worker` 对 env 覆盖做了
@@ -396,7 +396,7 @@ M4 的平台/真机 job。
 契约同时记入模块文档）。
 
 **修复落地（2026-09-24）**。存储 range 模型定为三个原语
-（`crates/oak-node/src/block.rs`），各调用点按上表逐点选择：
+（`../../../../crates/oak-node/src/block.rs`），各调用点按上表逐点选择：
 
 - `set_length_and_media_out`：**in 固定、out 移动，media 不动**
   （Resize / TrimOut / 缺口向右生长）；

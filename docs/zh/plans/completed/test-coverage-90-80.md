@@ -146,10 +146,10 @@ cargo +"$COVERAGE_NIGHTLY" llvm-cov --branch --workspace --locked \
 python3 tooling/coverage_report.py --json target/coverage.json
 ```
 
-- `cargo-llvm-cov` 默认已排除：`tests/`/`examples/`/`benches/` 目录、
+- `cargo-llvm-cov` 默认已排除：`tests/`/`../../../../examples`/`benches/` 目录、
   `*_tests.rs`、`tests.rs`、`target/`、`CARGO_HOME`/`RUSTUP_HOME`、
   vendored 依赖。`--fail-under-lines`/`--fail-under-regions`/
-  `--fail-under-functions` 可用；**没有 `--fail-under-branches`**，
+  `--fail-under-functions` 可用； **没有 `--fail-under-branches`**，
   分支门禁由 `tooling/coverage_report.py` 解析 JSON 实现。
 
 ### 3.2 生产代码口径（主口径）
@@ -160,7 +160,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`，
   所有内联 `#[cfg(test)] mod tests` 与其辅助模块加
   `#[cfg_attr(coverage_nightly, coverage(off))]`（M0 机械改造）；
-  workspace 根 `Cargo.toml` 加
+  workspace 根 `../../../../Cargo.toml` 加
   `[lints.rust] unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }`。
 - M0 同时测量并留档两个口径：
   - **主口径（gate）**：排除内联测试后的生产代码；
@@ -273,7 +273,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   `#[gpui::test]`（seed/iterations/retries）都已可用，仓库已有 110 个
   `#[gpui::test]` 先例（`app.rs`、`real.rs`、`mock.rs`、panels）。
 - **进程/协议边界**：`oak-worker/tests/ofx_host.rs`（真实宿主 + 崩溃钩子）、
-  `crates/oak-plugin/tests/fixtures/build_fixture.sh` + `scan_probe`
+  `../../../../crates/oak-plugin/tests/fixtures/build_fixture.sh` + `scan_probe`
   （CI 已接线）、`oak-render/tests/render_threads_test.rs`（线程管线）、
   `oak-worker/tests/procpool_integration.rs`。
 - **媒体**：`oak_codec::testmedia::write_test_clip[_solid]`（MPEG-2，确定性）。
@@ -440,7 +440,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
 
 1. 聚合地板升到 **行 ≥90%、分支 ≥80%**；
 2. 逐 crate 地板按 §7 表锁定；PR diff coverage ≥90%/85% 硬门禁；
-3. 冻结 `coverage-thresholds.toml` 并写 `docs/zh/build.md`（本地怎么跑、
+3. 冻结 `coverage-thresholds.toml` 并写 `../../build.md`（本地怎么跑、
    怎么看报告、豁免怎么登记）；
 4. 收官报告 `docs/zh/plans/coverage/final-<date>.{json,txt}` 归档，
    与 M5 的 `render-pipeline-threads-m5-branch-coverage.txt` 并列。
@@ -841,7 +841,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   超过 2×；coverage job 目标 ≤45 分钟。
 - **豁免有账**：`unit-exemptions.md`、`exclusions.md`、边界清单三本账
   是验收物，缺登记视为未完成。
-- **文档同步**：`docs/zh/build.md` 增加覆盖率章节；`docs/zh/plans/README.md`
+- **文档同步**：`../../build.md` 增加覆盖率章节；`docs/zh/plans/README.md`
   收录本计划与 `coverage/` 归档目录。
 
 ## 10. 交付物清单
@@ -855,4 +855,4 @@ python3 tooling/coverage_report.py --json target/coverage.json
    `unit-exemptions.md`、`exclusions.md`、`final-<date>.{json,txt}`、
    `merged-<date>.txt`（可选）；
 4. 新增测试：层 1 单测与层 2 边界测试（按 §6 里程碑分批）；
-5. 本计划文档与 `docs/zh/plans/README.md` 索引更新。
+5. 本计划文档与 `../README.md` 索引更新。

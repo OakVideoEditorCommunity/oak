@@ -1,39 +1,37 @@
 # Oak Video Editor ![CI](https://github.com/OakVideoEditorCommunity/oak/actions/workflows/ci.yml/badge.svg)
  [中文](docs/zh/README.md)
 
-Oak Video Editor is a free non-linear video editor for Windows, macOS, and Linux.
+Oak Video Editor is a renamed fork of Olive, aiming to deliver a more complete and user-friendly editing experience.
 
-This project is a community-maintained fork of Olive Video Editor.
-![screen](https://olivevideoeditor.org/img/020-2.png)
+## Screenshots
+
+![screenshot](docs/imgs/screenshot.png)
 
 
-**NOTE: Oak Video Editor is alpha software and is considered highly unstable. While we highly appreciate users testing and providing usage information, please use at your own risk.**
+# Features
 
-## Binaries
+- Premiere-like keyboard shortcut experience
+- OpenFX plugin support — the plugin system used by DaVinci Resolve
+- End-to-end color management support
+- 10-bit display output
+- OCIO LUT support
+- Proxy editing workflow
+- Timeline interchange with DaVinci Resolve, Premiere Pro, and Final Cut Pro via OpenTimelineIO and Final Cut Pro XML
 
-The binary can be downloaded here:
+## Download
 
-[v0.4.2](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.4.2-alpha)
+[v0.5.0](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.5.0-alpha2)
 
-[v0.4.1](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.4.1-alpha)
+## Build Instructions
 
-[v0.4.0](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.4.0-alpha)
-
-## Building from Source
-
-See [`docs/build.md`](docs/build.md) for build instructions on Windows (MSYS2), Linux (Debian/Ubuntu, Fedora, Arch Linux), and macOS.
-
-## Documentation
-
-- [Project Storage Architecture](docs/project-storage.md) ([中文](docs/zh/project-storage.md)) — database write-through persistence, node-granular journal, persistent undo
-- [Build guide](docs/build.md) · [工程文件格式](docs/zh/project-file-reference.md)
+See the [Build Guide](docs/build.md).
 
 ## Roadmap
 
-| Version | Theme | Core Deliverables | Boundary Notes |
-|:--------|:--|:--|:--|
-| **0.3** | **Plugin Architecture Milestone** | Production-ready OpenFX host support | Not about quantity of plugins, but "any OFX plugin loads without crashing" |
-| **0.4** | **Color, Audio & Performance** | `.cube`/`.3dl` support, scopes (waveform/vectorscope/histogram), three-way color wheels, waveform auto-sync, BWF timecode sync, audio meters (LUFS/VU), proxy media workflow, hardware-accelerated export (NVENC/VideoToolbox), batch render queue | Combines the previous 0.4-0.6 scope into one usability milestone: color workflow, audio sync, and 4K/8K performance |
-| **0.5** | **Animation, Tracking & Collaboration** | Bézier keyframe curve editor, basic point tracking, image stabilizer, full multicam angle switching, OpenTimelineIO, EDL/XML import/export | Combines the previous 0.7-0.8 scope into one timeline/interchange milestone |
-| **0.6** | **Stability Milestone** | Project file format freeze (backward compatibility promise), crash recovery, autosave, memory optimization | "Feature freeze" testing period before 1.0 |
-| **1.0** | **Production Ready** | Complete documentation, installers, known issues list, community support channels | Declared "ready for serious projects" |
+| Version | Theme | Core Deliverables |
+|:--|:--|:--|
+| **0.5 (current)** | **Rust Rewrite** | Oak rewritten in Rust |
+| **0.6** | **Color, Audio & Performance** | AI video editing, scopes (waveform/vectorscope/histogram), three-way color wheel panel, multicam editing support, BWF timecode sync, audio meters (LUFS/VU), batch render queue |
+| **0.7** | **Animation, Tracking & Collaboration** | Bézier keyframe curve editor, basic point tracking, image stabilizer |
+| **0.8** | **Stability Milestone** | Project file format freeze (backward compatibility promise) — the "feature freeze" testing period before 1.0 |
+| **1.0** | **Production Ready** | Complete documentation, installers, known issues list, community support channels — declared "ready for serious projects" |

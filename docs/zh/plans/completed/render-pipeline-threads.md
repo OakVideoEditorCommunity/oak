@@ -56,10 +56,10 @@
 - `crates/oak-render/src/procpool.rs:1-40`：TicketArena → ProcessDispatcher →
   N 个 WorkerHandle，stdio NDJSON 控制面 + shm FrameSlotPool 数据面；worker 崩溃
   后已认领帧重新入队并重生进程（有界重启）。
-- `crates/oak-worker/src/worker.rs`：子进程是单线程 NDJSON 循环，
+- `../../../../crates/oak-worker/src/worker.rs`：子进程是单线程 NDJSON 循环，
   `handle_render_batch_stream` 在循环线程上同步渲染整批 ticket——worker 内部
   **没有**任何渲染线程，并行只来自进程池。
-- `crates/oak-render/src/scheduler.rs`：预览帧调度（交错分片认领）；自动缓存由
+- `../../../../crates/oak-render/src/scheduler.rs`：预览帧调度（交错分片认领）；自动缓存由
   `autocacher.rs` 驱动。
 
 ### 2.2 帧传输是 CPU/shm，显示前再上传 GPU
@@ -233,7 +233,7 @@
 - 对上层（oak-app/oak-cli）**ticket API 不变**：RenderManager 仍是唯一入口，
   完成仍走 exactly-once 的 TicketPayload。
 - 对内，ticket 变成队列项：三条 SPSC/MPSC 环（decode/render/present），
-  复用 `crates/oak-render/src/ipc.rs` 已有的无锁环实现；取消仍走
+  复用 `../../../../crates/oak-render/src/ipc.rs` 已有的无锁环实现；取消仍走
   `cancelatom`（Olive 的 CancelAtom 对应物）。
 - 优先级：交互（seek/单帧刷新）> 播放预取 > 导出 > 自动缓存。调度层
   （scheduler.rs）从"分片给 N 个进程"改为"按优先级与依赖关系投队列"。
@@ -587,7 +587,7 @@ fallback。** 解码上传与上屏共用一层 `gpuinteop` 抽象，按后端�
    - 两节点**默认相连、不可删除、不可复制**（图模型层强约束：新建图
      自带这对节点；`remove_node`/`duplicate` 对它们拒绝；序列化把它们
      作为图的固定端点写入/读出）。
-   - **要在节点编辑器里显示出来**（`crates/oak-app/src/panels/node_editor.rs`）：
+   - **要在节点编辑器里显示出来**（`../../../../crates/oak-app/src/panels/node_editor.rs`）：
      与普通节点同等的渲染与连线交互，但禁删、禁复制、禁改名；样式上
      与真节点区分（固定标题/图标），连线规则校验（输入节点不接受入线、
      输出节点不接受出线）。
@@ -639,13 +639,13 @@ gpui/ocio/标准库）TOTAL = 区域 53.60% / 函数 49.90% / 行 53.15% /
 **分支 27.94%**；关键文件分支覆盖率：`pipeline.rs` 45.37%、`backend.rs`
 45.51%、`texture.rs` 54.17%、`eval.rs` 43.53%、`gpuinterop.rs` 50.00%
 （硬件导入的真机分支；平台错误回退分支单机走不到）。完整报告与采集/合并
-命令见 `docs/zh/plans/render-pipeline-threads-m5-branch-coverage.txt`。
+命令见 `render-pipeline-threads-m5-branch-coverage.txt`。
 **该轮采集早于 2026-09-17 审计修复（montage/计数器/驻留），且
 Windows/macOS 行尚未在对应平台编译——它是阶段性质量快照，不构成 M5
 收官证明；M5 关闭以平台编译与真机平台测试完成为准，届时重测。**
 另经 2026-09-17 复查：该留档的多对象合并被**陈旧测试二进制**拉低
 （同文件多对象 51% vs 干净对象 95%），干净重测的基线是
-**行 81.72% / 分支 55.45%**（见 `test-coverage-90-80.md` §4.1 勘误）；
+**行 81.72% / 分支 55.45%**（见 `completed/test-coverage-90-80.md` §4.1 勘误）；
 覆盖率门禁以干净对象集为准。
 
 ## 5. 不变量与边界
