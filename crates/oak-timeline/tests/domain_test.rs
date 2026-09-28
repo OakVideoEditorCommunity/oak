@@ -465,13 +465,24 @@ fn place_block_splice_round_trip() {
 		Rational::new(25, 1),
 	);
 	cmd.redo();
-	// host split to [0,25), remainder trimmed to [25,90), placed at [25,35).
+	// host split to [0,25), the placed block covers [25,35), and the
+	// spliced remainder is out-anchored to [35,100).
 	assert_eq!(track_block_count(&track), 3);
 	assert_eq!(track_block_at(&track, 0).unwrap().id, host.id);
 	assert_eq!(track_block_at(&track, 1).unwrap().id, placed.id);
 	assert_eq!(
 		span_of(&host),
 		Some((Rational::new(0, 1), Rational::new(25, 1)))
+	);
+	assert_eq!(
+		span_of(&placed),
+		Some((Rational::new(25, 1), Rational::new(35, 1)))
+	);
+	let remainder = track_block_at(&track, 2).unwrap();
+	assert_ne!(remainder.id, host.id);
+	assert_eq!(
+		span_of(&remainder),
+		Some((Rational::new(35, 1), Rational::new(100, 1)))
 	);
 
 	cmd.undo();

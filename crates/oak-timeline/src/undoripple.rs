@@ -363,15 +363,16 @@ impl TrackRippleRemoveAreaCommand {
 			let cmd = self.splice_split_command_.as_mut().unwrap();
 			cmd.redo();
 
-			// Trim the in of the split: the second half produced by the
-			// split keeps the original out point, so removing the first
-			// `range.length()` of it keeps the timeline in fixed at the
-			// range out and advances the media window past the removed
-			// content (in-anchored, media in moves with the length).
+			// Trim the in of the split: the split anchored the second half
+			// at [point, original out), so the head trim must keep the OUT
+			// point fixed — the in point shifts to the range out and the
+			// media window advances past the removed content (out-anchored,
+			// like `trim_in_` below; an in-anchored setter would leave the
+			// half covering the cleared area).
 			if let Some(split) = cmd.new_block() {
 				let new_len =
 					block_length(&split) - (self.range.out() - block_in(&split));
-				block_set_length_and_media_in(&split, new_len);
+				block_set_length_keeping_out(&split, new_len);
 			}
 		} else {
 			if let Some(t) = &self.trim_out_ {

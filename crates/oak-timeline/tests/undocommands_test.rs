@@ -227,7 +227,7 @@ fn ripple_remove_area_splices_cutting_block() {
 	assert_eq!(track_block_count(&track), 2);
 	assert_eq!(track_block_at(&track, 0).unwrap().id, clip.id);
 	assert_eq!(span_of(&clip), Some((Rational::new(0, 1), Rational::new(25, 1))));
-	assert_eq!(span_of(&spliced), Some((Rational::new(25, 1), Rational::new(75, 1))));
+	assert_eq!(span_of(&spliced), Some((Rational::new(50, 1), Rational::new(100, 1))));
 
 	cmd.undo();
 	assert_eq!(track_block_count(&track), 1);
@@ -267,7 +267,7 @@ fn ripple_remove_area_gap_splitting_flag() {
 	let spliced = cmd.get_spliced_block().expect("gap split allowed");
 	assert_eq!(block_kind(&spliced), BlockKind::Gap);
 	assert_eq!(span_of(&gap), Some((Rational::new(0, 1), Rational::new(25, 1))));
-	assert_eq!(span_of(&spliced), Some((Rational::new(25, 1), Rational::new(75, 1))));
+	assert_eq!(span_of(&spliced), Some((Rational::new(50, 1), Rational::new(100, 1))));
 	cmd.undo();
 	assert_eq!(track_block_count(&track), 1);
 	assert_eq!(span_of(&gap), Some((Rational::new(0, 1), Rational::new(100, 1))));
