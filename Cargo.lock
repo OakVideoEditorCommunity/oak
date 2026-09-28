@@ -4630,7 +4630,7 @@ dependencies = [
 
 [[package]]
 name = "oak-app"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "embed-resource",
  "gpui",
@@ -4660,7 +4660,7 @@ dependencies = [
 
 [[package]]
 name = "oak-audio"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cpal",
  "ffmpeg-next",
@@ -4672,7 +4672,7 @@ dependencies = [
 
 [[package]]
 name = "oak-cli"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "clap",
  "oak-codec",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "oak-codec"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ffmpeg-next",
  "oak-core",
@@ -4696,7 +4696,7 @@ dependencies = [
 
 [[package]]
 name = "oak-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ash",
  "half",
@@ -4717,11 +4717,11 @@ dependencies = [
 
 [[package]]
 name = "oak-ffmpeg-link"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "oak-node"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "oak-codec",
  "oak-core",
@@ -4731,7 +4731,7 @@ dependencies = [
 
 [[package]]
 name = "oak-otio"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "oak-core",
  "quick-xml 0.41.0",
@@ -4742,7 +4742,7 @@ dependencies = [
 
 [[package]]
 name = "oak-plugin"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cc",
  "oak-core",
@@ -4754,7 +4754,7 @@ dependencies = [
 
 [[package]]
 name = "oak-render"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cosmic-text",
  "libc",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "oak-storage"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "oak-core",
@@ -4787,7 +4787,7 @@ dependencies = [
 
 [[package]]
 name = "oak-task"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "oak-codec",
  "oak-core",
@@ -4800,7 +4800,7 @@ dependencies = [
 
 [[package]]
 name = "oak-timeline"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "oak-core",
  "oak-node",
@@ -4810,14 +4810,14 @@ dependencies = [
 
 [[package]]
 name = "oak-undo"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "oak-worker"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "libc",
  "oak-codec",
