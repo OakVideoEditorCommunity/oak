@@ -174,7 +174,7 @@ case "$(uname -s)" in
 				pipewire jack2 alsa-lib libpulse libsndfile \
 				mesa vulkan-headers vulkan-icd-loader \
 				libxkbcommon libxkbcommon-x11 \
-				xorg-server-xvfb xorg-x11-xauth gdb file ttf-dejavu \
+				xorg-server-xvfb xorg-xauth gdb file ttf-dejavu \
 				librsvg \
 				ffnvcodec-headers libva libdrm
 		else
