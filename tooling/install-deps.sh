@@ -87,7 +87,7 @@ case "$(uname -s)" in
 		# (rsvg-convert). The autotools cover any source tarball whose
 		# shipped configure needs regenerating.
 		run brew install git curl cmake meson ninja nasm pkg-config \
-			librsvg autoconf automake libtool autoconf-archive
+			librsvg autoconf automake libtool autoconf-archive gperf
 		;;
 	Linux)
 		if command -v apt-get >/dev/null; then
@@ -106,7 +106,7 @@ case "$(uname -s)" in
 		PKGS=(
 			build-essential clang libclang-dev cmake meson ninja-build
 			python3 pkgconf pkg-config nasm curl git zip unzip tar patch
-			xz-utils autoconf autoconf-archive automake libtool
+			xz-utils autoconf autoconf-archive automake libtool gperf
 			libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev
 			libasound2-dev libpulse-dev libsndfile1-dev
 			libgl-dev libglvnd-dev libgl1-mesa-dev libgl1-mesa-dri
@@ -148,6 +148,7 @@ case "$(uname -s)" in
 				gcc gcc-c++ clang clang-devel cmake meson ninja-build
 				python3 pkgconf-pkg-config nasm curl git zip unzip tar
 				patch xz which autoconf autoconf-archive automake libtool
+				gperf
 				perl-IPC-Cmd perl-FindBin perl-File-Basename perl-File-Compare
 				perl-File-Copy perl-File-Path perl-File-Temp perl-Time-Piece
 				pipewire-devel jack-audio-connection-kit-devel
@@ -170,7 +171,7 @@ case "$(uname -s)" in
 			run "${SUDO[@]}" pacman -S --needed --noconfirm \
 				base-devel clang cmake meson ninja \
 				python pkgconf nasm curl git zip unzip tar patch xz which \
-				autoconf autoconf-archive automake libtool \
+				autoconf autoconf-archive automake libtool gperf \
 				pipewire jack2 alsa-lib libpulse libsndfile \
 				mesa vulkan-headers vulkan-icd-loader \
 				libxkbcommon libxkbcommon-x11 \
