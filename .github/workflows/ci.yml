@@ -12,8 +12,9 @@ permissions:
 # One matrix, seven platforms: the three Linux-family packaging distros
 # (Debian 13, Fedora 43, Arch), openKylin on x64 and arm64, macOS and
 # Windows. The environments match .github/workflows/cd.yml exactly (same
-# container images, same dependency lists, same runner sizes), so a
-# "passes CI, fails CD" dependency drift is caught here first.
+# container images, same tooling/install-deps.sh dependency step, same
+# runner sizes), so a "passes CI, fails CD" dependency drift is caught
+# here first.
 jobs:
   build-test:
     name: Build & test (${{ matrix.name }})
@@ -157,83 +158,16 @@ jobs:
           toolchain: ${{ matrix.platform == 'windows' && 'stable-x86_64-pc-windows-msvc' || 'stable' }}
 
       # ------------------------------------------------------------------
-      # System dependencies — one list per distro, byte-for-byte the same
-      # lists CD uses (see .github/workflows/cd.yml): a package a CD build
-      # needs cannot be missing here.
+      # System dependencies — tooling/install-deps.sh is the single
+      # dependency list for every Linux distro and macOS (build tools,
+      # workspace system libraries, test stack, packaging tools); local
+      # builds run the same script, and CD cannot drift from CI because
+      # there is nothing left to duplicate.
       # ------------------------------------------------------------------
-      - name: Install system dependencies (Debian)
-        if: matrix.distro == 'debian'
+      - name: Install dependencies
+        if: matrix.platform != 'windows'
         shell: bash
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential clang libclang-dev cmake pkgconf nasm \
-            git curl zip unzip tar python3 dpkg-dev \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl-dev libglvnd-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            icc-profiles-free gdb file librsvg2-bin patchelf fonts-dejavu-core \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (Fedora)
-        if: matrix.distro == 'fedora'
-        shell: bash
-        run: |
-          # Fedora 41 is EOL (its mirrors moved to the slow archive), so
-          # the matrix uses the current release; weak dependencies (docs,
-          # fonts, optional tooling) are skipped and downloads run wide.
-          dnf install -y --setopt=install_weak_deps=False \
-            --setopt=max_parallel_downloads=16 \
-            gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
-            git curl zip unzip tar python3 patch xz which \
-            pipewire-devel jack-audio-connection-kit-devel \
-            alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
-            mesa-libGL-devel mesa-vulkan-drivers \
-            vulkan-headers vulkan-loader-devel \
-            libxkbcommon-devel libxkbcommon-x11-devel \
-            rpm-build librsvg2-tools libdrm-devel \
-            perl-IPC-Cmd perl-FindBin perl-File-Basename perl-File-Compare \
-            perl-File-Copy perl-File-Path perl-File-Temp perl-Time-Piece \
-            xorg-x11-server-Xvfb xorg-x11-xauth gdb file dejavu-sans-fonts \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (Arch)
-        if: matrix.distro == 'arch'
-        shell: bash
-        run: |
-          pacman -S --needed --noconfirm \
-            base-devel clang cmake pkgconf nasm \
-            git curl zip unzip tar python patch xz which \
-            pipewire jack2 alsa-lib libpulse libsndfile \
-            mesa vulkan-headers vulkan-icd-loader \
-            libxkbcommon libxkbcommon-x11 librsvg libdrm \
-            xorg-server-xvfb xorg-xauth gdb file ttf-dejavu \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (openKylin)
-        if: matrix.distro == 'openkylin'
-        shell: bash
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
-            git curl zip unzip tar python3 patch xz-utils dpkg-dev \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            gdb file patchelf fonts-dejavu-core \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
-          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what the
-          # project FFmpeg build (tooling/ffmpeg/build-ffmpeg.sh) requires.
-          # librsvg is CD's icon renderer.
-          brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
+        run: tooling/install-deps.sh
 
       # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
       # ships include/, MSVC import libs (.lib), pkg-config files and the
@@ -269,24 +203,20 @@ jobs:
       # ------------------------------------------------------------------
       # FFmpeg + caches
       # ------------------------------------------------------------------
-      # The Linux/macOS jobs build the project FFmpeg from source with the
-      # distro's codec packages — the same path local builds use
-      # (tooling/install-deps.sh + tooling/ffmpeg/build-ffmpeg.sh; the
-      # latter also drives the vendored static OCIO). Windows uses the
-      # prebuilt archive downloaded above.
-      - name: Install FFmpeg dependencies
-        if: matrix.platform != 'windows'
-        shell: bash
-        run: tooling/install-deps.sh
-
+      # The Linux/macOS jobs build the project FFmpeg from source — every
+      # codec library included, statically, by
+      # tooling/ffmpeg/build-deps.sh — the same path local builds use
+      # (tooling/install-deps.sh, which ran above, plus
+      # tooling/ffmpeg/build-ffmpeg.sh). Windows uses the prebuilt
+      # archive downloaded above.
       # The built FFmpeg is cached as a whole, keyed on distro, arch and
-      # BOTH configure inputs — build-ffmpeg.sh and install-deps.sh (the
-      # enable_if_pkg probes depend on which packages that script
-      # installed). There is deliberately no bare distro/arch restore-key:
+      # ALL THREE configure inputs — build-ffmpeg.sh, build-deps.sh (the
+      # from-source dependency set) and install-deps.sh (the tool set).
+      # There is deliberately no bare distro/arch restore-key:
       # it once restored an openh264-linked FFmpeg after the codec was
       # dropped, and the `always()` save re-saved that stale tree under
       # the new key, breaking every later macOS link (`-lopenh264` not
-      # found). A changed configure input must cost a ~10 minute rebuild,
+      # found). A changed configure input must cost a rebuild,
       # never a mismatched cache. The `.build-complete` marker
       # distinguishes a finished build from a partial cache save; without
       # it the tree is rebuilt.
@@ -301,9 +231,9 @@ jobs:
           WARPBUILD_RUNNER_VERIFICATION_TOKEN: ${{ env.WARPBUILD_RUNNER_VERIFICATION_TOKEN }}
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-
+            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
 
       - name: Restore FFmpeg (GitHub)
         if: matrix.platform == 'macos'
@@ -311,9 +241,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/install-deps.sh') }}-
+            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
 
       - name: Build FFmpeg
         if: matrix.platform != 'windows'

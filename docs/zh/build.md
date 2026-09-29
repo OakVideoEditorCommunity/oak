@@ -18,16 +18,20 @@
   cd oak
   # 已有克隆则：git submodule update --init --recursive
   ```
-- **Rust stable**（通过 [rustup](https://rustup.rs/) 安装；Windows
-  请改用 MSYS2 自带 Rust——见 Windows 章节）。
-- **C 工具链 + cmake + pkg-config + nasm** —— cmake 和 C++ 编译器
-  用于 vendored OpenColorIO 构建（Linux/macOS），nasm 用于 FFmpeg
-  汇编。
+- **Rust stable**（通过 [rustup](https://rustup.rs/) 安装；Windows 使用
+  默认的 `x86_64-pc-windows-msvc` 工具链——见 Windows 章节）。
+- **系统依赖由一个脚本统一安装。** `tooling/install-deps.sh` 安装所有
+  包管理器提供的依赖：构建工具（C/C++ 工具链；cmake + C++ 编译器用于
+  vendored OpenColorIO 构建；meson/ninja/nasm 用于 FFmpeg 依赖构建）、
+  workspace 链接的系统库（cpal 的 PipeWire/JACK/ALSA/PulseAudio/sndfile
+  音频后端，wgpu 窗口栈的 GL/Vulkan/XKB)、无头测试栈（xvfb、Mesa 软件
+  Vulkan、字体）以及打包工具。
 - **FFmpeg 8.1，由项目脚本构建。** 发行版自带版本对 `ffmpeg-next` 9
   来说太旧，刻意不使用：
   ```sh
-  tooling/install-deps.sh        # 编解码/滤镜库 + 构建工具
-  tooling/ffmpeg/build-ffmpeg.sh # 克隆 release/8.1，安装到 .cache/ffmpeg
+  tooling/install-deps.sh        # 全部包管理器依赖
+  tooling/ffmpeg/build-ffmpeg.sh # 先从源码构建全部编解码库（build-deps.sh），
+                                 # 再克隆 release/8.1；全部安装到 .cache/ffmpeg
   ```
   `FFMPEG_DIR` 无需手动导出：仓库内提交的 `.cargo/config.toml` 已按
   workspace 根的相对路径设置（`ffmpeg-sys-next` 的构建脚本读不了
@@ -39,7 +43,7 @@
 
 ```sh
 tooling/install-deps.sh         # Homebrew / apt / dnf / pacman
-tooling/ffmpeg/build-ffmpeg.sh  # 约 10–20 分钟，只需一次
+tooling/ffmpeg/build-ffmpeg.sh  # 依赖 + FFmpeg，约 20–40 分钟，只需一次
 cargo build --workspace
 cargo test  --workspace         # Linux：见下文"无头测试"
 ```
@@ -50,67 +54,72 @@ cargo test  --workspace         # Linux：见下文"无头测试"
 
 - macOS 12+、Xcode Command Line Tools（`xcode-select --install`）、Homebrew。
 - ```sh
-  brew install cmake pkg-config
-  tooling/install-deps.sh
+  tooling/install-deps.sh         # brew：构建工具 + librsvg + autotools
   tooling/ffmpeg/build-ffmpeg.sh
   cargo build --workspace
   cargo test  --workspace
   ```
 - OpenColorIO 由 vendored 2.5.2 源码编译并静态链接——不需要
-  `brew install opencolorio`（但需要 cmake）。
+  `brew install opencolorio`（cmake 由 `install-deps.sh` 安装）。
 - GPU 相关测试（OFX GL 叠加层、硬件解码）仅在设置 `OAK_GPU_TESTS=1`
   时运行。
 
 ## Linux
 
-- `tooling/install-deps.sh` 支持 Debian/Ubuntu、Fedora、Arch。
-  另外需要安装：
-  ```sh
-  # Debian/Ubuntu
-  sudo apt-get install -y cmake \
-    libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-    libasound2-dev libpulse-dev libsndfile1-dev \
-    libgl1-mesa-dev libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev
-  ```
-  （PipeWire/JACK/ALSA/PulseAudio/sndfile 开发包是 cpal 的音频后端；
-  GL/Vulkan/XKB 是 wgpu 窗口栈。）
+- `tooling/install-deps.sh`（支持 Debian/Ubuntu/openKylin、Fedora、Arch）
+  会装齐全部依赖，包括 PipeWire/JACK/ALSA/PulseAudio/sndfile 开发包
+  （cpal 音频后端）、GL/Vulkan/XKB 开发包（wgpu 窗口栈）以及下面的
+  无头测试栈。
 - **无头测试：** 部分 gpui/UI 测试会通过 wgpu 在 Mesa 软件 Vulkan
-  （lavapipe）上打开真实窗口。无显示环境下请运行：
+  （lavapipe）上打开真实窗口（xvfb 和 Mesa Vulkan 驱动已由
+  `install-deps.sh` 安装）。无显示环境下请运行：
   ```sh
-  sudo apt-get install -y xvfb mesa-vulkan-drivers
   xvfb-run -a -s "-screen 0 1920x1080x24" cargo test --workspace
   ```
 - OpenColorIO 与 macOS 相同，使用 vendored 静态构建。
 
-## Windows（MSYS2 UCRT64）
+## Windows（MSVC）
 
-Windows 构建目标是 **x86_64-pc-windows-gnu**，使用 MSYS2 自带 Rust；
-不支持 MSVC 工具链（构建脚本会发出 MSVC 链接器不接受的 Unix 风格
-链接参数）。
+Windows 构建目标是 **x86_64-pc-windows-msvc**（rustup 在 Windows 上的
+默认工具链），搭配 BtbN 预编译的 shared FFmpeg 和 vendored 静态 OCIO。
+这与 CI 在 `warp-windows-2025-vs2026-x64-32x` 上的做法完全一致
+（见 `.github/workflows/ci.yml`）；旧的 MSYS2/UCRT64 流程不再受支持。
 
-1. 安装 [MSYS2](https://www.msys2.org/)，打开 **UCRT64** 终端。
-2. ```sh
-   pacman -Syu
-   pacman -S --needed mingw-w64-ucrt-x86_64-rust \
-     mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-opencolorio
-   tooling/install-deps.sh        # 必须在 UCRT64 终端内运行
-   tooling/ffmpeg/build-ffmpeg.sh
+1. 安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/)
+   （VS 2022 或更新），勾选**使用 C++ 的桌面开发**工作负载——它提供
+   MSVC 链接器，以及 vendored OCIO 构建所需的 C++ 编译器和 CMake。
+2. 通过 [rustup](https://rustup.rs/) 安装 Rust；默认 host 工具链即
+   `stable-x86_64-pc-windows-msvc`。
+3. 下载 BtbN 预编译 FFmpeg（GPL、shared——ffmpeg.org 官方链接的
+   Windows 构建，基于 release/8.1 分支），对照发布页的
+   `checksums.sha256` 校验后解压到 `.cache/ffmpeg`（PowerShell，
+   在 workspace 根目录执行）：
+   ```powershell
+   $base  = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+   $asset = "ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
+   Invoke-WebRequest "$base/checksums.sha256" -OutFile "$env:TEMP\checksums.sha256"
+   $expected = (Select-String -Path "$env:TEMP\checksums.sha256" `
+     -Pattern ([regex]::Escape($asset) + "\s*$")).Line.Split()[0]
+   Invoke-WebRequest "$base/$asset" -OutFile "$env:TEMP\$asset"
+   if ((Get-FileHash "$env:TEMP\$asset").Hash -ne $expected.ToUpper()) {
+     throw "FFmpeg checksum mismatch"
+   }
+   Expand-Archive "$env:TEMP\$asset" .cache\ffmpeg-extract -Force
+   Move-Item (Get-ChildItem .cache\ffmpeg-extract -Directory).FullName .cache\ffmpeg
    ```
-3. 环境变量（写入 shell rc 或每次会话导出）：
-   ```sh
-   # vendored OCIO 源码含有仅 MSVC 可编译的构造，Windows 改为动态链接
-   # MSYS2 的 OpenColorIO 2.5.2：
-   export OCIO_RS_ENABLE_REAL=1 OCIO_INSTALL_DIR=/ucrt64 OCIO_RS_LINK=dynamic
-   # mingw-w64（2025 年 11 月后）把 _assert 转发到 libmingwex.a 里的
-   # __msvcrt_assert，而 rustc 的链接顺序把 -lmingwex 放在最后；末尾
-   # 追加 -lmsvcrt 让链接器再扫一遍 CRT 导入库
-   # （否则报 undefined _fileno/_setmode/__imp___msvcrt_assert）。
-   export RUSTFLAGS="-C link-args=-lmsvcrt"
-   # 如果 shell 继承了 MSVC 的 INCLUDE/LIB（某些 CI runner 会向每个
-   # 步骤注入），务必清除——它们会污染 MinGW 编译：
-   unset INCLUDE LIB
+4. 环境变量（PowerShell，按会话设置或写入用户环境变量）：
+   ```powershell
+   # .cargo/config.toml 已把 FFMPEG_DIR 指向 .cache/ffmpeg；测试程序
+   # 要加载 FFmpeg DLL，所以 bin/ 必须在 PATH 里（否则首个测试进程
+   # 会以 STATUS_DLL_NOT_FOUND 退出）：
+   $env:PATH = "$PWD\.cache\ffmpeg\bin;$env:PATH"
+   $env:PKG_CONFIG_PATH = "$PWD\.cache\ffmpeg\lib\pkgconfig"
+   # vendored 静态 OCIO——当初用 MSYS2 包只是权宜之计；无需
+   # OCIO_INSTALL_DIR：
+   $env:OCIO_RS_ENABLE_REAL = "1"
+   $env:OCIO_RS_LINK = "static"
    ```
-4. ```sh
+5. ```powershell
    cargo build --workspace
    cargo test  --workspace
    ```
@@ -122,11 +131,11 @@ Windows 构建目标是 **x86_64-pc-windows-gnu**，使用 MSYS2 自带 Rust；
 | 平台 | 来源 | 链接方式 | 备注 |
 |------|------|----------|------|
 | Linux / macOS | vendored 2.5.2（`ocio-sys` 的 `bundled` 特性，默认开启） | 静态 | 需要 cmake + C++ 编译器 |
-| Windows | MSYS2 `mingw-w64-ucrt-x86_64-opencolorio` | 动态 | 设置 `OCIO_INSTALL_DIR=/ucrt64`、`OCIO_RS_LINK=dynamic` |
+| Windows | vendored 2.5.2（同一个 `bundled` 特性） | 静态 | 需要 VS Build Tools（MSVC C++ + CMake）；设置 `OCIO_RS_ENABLE_REAL=1`、`OCIO_RS_LINK=static` |
 
 既没有 `bundled` 特性也没有 `OCIO_RS_ENABLE_REAL=1` 时，`ocio-sys`
 构建为 stub，所有色彩测试直接跳过。`oak-render` 无条件启用 bundled
-特性，因此在 Linux/macOS 上直接 `cargo build` 就会得到真实 OCIO。
+特性，因此直接 `cargo build` 就会得到真实 OCIO。
 
 ## 打包
 
@@ -152,13 +161,12 @@ tooling/package/build-pkg.sh  # Arch Linux → .pkg.tar.zst
   IDE 可以在 workspace 根放一个 git 忽略的 `.env`，写入
   `FFMPEG_DIR=...`（编解码库在自定义前缀时再加
   `PKG_CONFIG_PATH=...`）。
-- **pacman 报 "Operation too slow"** —— MSYS2 镜像偶尔卡顿；
-  `install-deps.sh` 会自动重试三次，手动重跑也会借助 `--needed`
-  断点续装。
-- **Windows：`undefined reference to _fileno/_setmode/__imp___msvcrt_assert`**
-  —— 设置 `RUSTFLAGS="-C link-args=-lmsvcrt"`（见 Windows 章节）。
-- **Windows：出现 MSVC 风格的链接错误** —— 你用的是 MSVC 版 Rust；
-  请改用 MSYS2 自带 Rust（`x86_64-pc-windows-gnu`）。
+- **Windows：`FFMPEG_DIR` 已设置但链接器找不到 FFmpeg 导入库** ——
+  把 BtbN 压缩包解压到 `.cache/ffmpeg`（见 Windows 章节），并将
+  `PKG_CONFIG_PATH` 指向 `.cache\ffmpeg\lib\pkgconfig`。
+- **Windows：测试启动即报 `STATUS_DLL_NOT_FOUND`** —— FFmpeg 运行时
+  DLL 不在 `PATH` 里；把 `.cache\ffmpeg\bin` 加入 `PATH`（见 Windows
+  章节）。
 - **`gpui/` 目录为空** —— `git submodule update --init --recursive`。
 - **Linux 测试开窗口卡死/失败** —— 使用 Linux 章节的 `xvfb-run`
   命令。

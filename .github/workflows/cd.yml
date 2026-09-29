@@ -160,84 +160,14 @@ jobs:
           toolchain: ${{ matrix.platform == 'windows' && 'stable-x86_64-pc-windows-msvc' || 'stable' }}
 
       # ------------------------------------------------------------------
-      # System dependencies — one list per distro, byte-for-byte the same
-      # lists CI uses (see .github/workflows/ci.yml): what compiles there
-      # compiles here.
+      # System dependencies — tooling/install-deps.sh is the single
+      # dependency list for every Linux distro and macOS; CI runs the same
+      # step, so what compiles there compiles here.
       # ------------------------------------------------------------------
-      - name: Install system dependencies (Debian)
-        if: matrix.distro == 'debian'
+      - name: Install dependencies
+        if: matrix.platform != 'windows'
         shell: bash
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential clang libclang-dev cmake pkgconf nasm \
-            git curl zip unzip tar python3 dpkg-dev \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl-dev libglvnd-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            icc-profiles-free gdb file librsvg2-bin patchelf fonts-dejavu-core \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (Fedora)
-        if: matrix.distro == 'fedora'
-        shell: bash
-        run: |
-          # Fedora 41 is EOL (its mirrors moved to the slow archive), so
-          # the matrix uses the current release; weak dependencies (docs,
-          # fonts, optional tooling) are skipped and downloads run wide.
-          dnf install -y --setopt=install_weak_deps=False \
-            --setopt=max_parallel_downloads=16 \
-            gcc gcc-c++ clang clang-devel cmake pkgconf-pkg-config nasm \
-            git curl zip unzip tar python3 patch xz which \
-            pipewire-devel jack-audio-connection-kit-devel \
-            alsa-lib-devel pulseaudio-libs-devel libsndfile-devel \
-            mesa-libGL-devel mesa-vulkan-drivers \
-            vulkan-headers vulkan-loader-devel \
-            libxkbcommon-devel libxkbcommon-x11-devel \
-            rpm-build librsvg2-tools libdrm-devel \
-            perl-IPC-Cmd perl-FindBin perl-File-Basename perl-File-Compare \
-            perl-File-Copy perl-File-Path perl-File-Temp perl-Time-Piece \
-            xorg-x11-server-Xvfb xorg-x11-xauth gdb file dejavu-sans-fonts \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (Arch)
-        if: matrix.distro == 'arch'
-        shell: bash
-        run: |
-          pacman -S --needed --noconfirm \
-            base-devel clang cmake pkgconf nasm \
-            git curl zip unzip tar python patch xz which \
-            pipewire jack2 alsa-lib libpulse libsndfile \
-            mesa vulkan-headers vulkan-icd-loader \
-            libxkbcommon libxkbcommon-x11 librsvg libdrm \
-            xorg-server-xvfb xorg-xauth gdb file ttf-dejavu \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (openKylin)
-        if: matrix.distro == 'openkylin'
-        shell: bash
-        run: |
-          apt-get update
-          apt-get install -y \
-            build-essential clang libclang-dev cmake pkg-config nasm \
-            git curl zip unzip tar python3 patch xz-utils dpkg-dev \
-            libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-            libasound2-dev libpulse-dev libsndfile1-dev \
-            libgl1-mesa-dev libgl1-mesa-dri mesa-vulkan-drivers \
-            libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev xvfb libdrm-dev \
-            gdb file patchelf fonts-dejavu-core \
-            autoconf autoconf-archive automake libtool
-
-      - name: Install system dependencies (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          # Homebrew's pkgconf installs a `pkg-config` symlink, which is
-          # the name crates/oak-ffmpeg-link/build.rs invokes; nasm is what the
-          # project FFmpeg build (tooling/ffmpeg/build-ffmpeg.sh) requires.
-          # librsvg stays for rsvg-convert (app icon) and is bundled into
-          # the .app by the dylib script.
-          brew install cmake pkg-config nasm librsvg autoconf automake libtool autoconf-archive
+        run: tooling/install-deps.sh
 
       # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
       # ships include/, MSVC import libs (.lib), pkg-config files and the
@@ -271,18 +201,14 @@ jobs:
           Move-Item $inner.FullName "$root\ffmpeg"
 
       # ------------------------------------------------------------------
-      # FFmpeg — built from source with the distro's codec packages
-      # (Linux/macOS) or the prebuilt archive (Windows), no caches
+      # FFmpeg — built from source, every codec library included
+      # statically (Linux/macOS), or the prebuilt archive (Windows);
+      # no caches
       # ------------------------------------------------------------------
-      # The Linux/macOS jobs follow the local-build path
-      # (tooling/install-deps.sh + tooling/ffmpeg/build-ffmpeg.sh); the
-      # release policy is a from-scratch build, so nothing is restored
-      # from a cache here.
-      - name: Install FFmpeg dependencies
-        if: matrix.platform != 'windows'
-        shell: bash
-        run: tooling/install-deps.sh
-
+      # The Linux/macOS jobs follow the local-build path (install-deps.sh
+      # ran above; tooling/ffmpeg/build-ffmpeg.sh below); the release
+      # policy is a from-scratch build, so nothing is restored from a
+      # cache here.
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
         shell: bash

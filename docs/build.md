@@ -19,16 +19,22 @@ macOS, Linux, and Windows. For the Chinese version see
   cd oak
   # or, on an existing clone: git submodule update --init --recursive
   ```
-- **Rust stable** (via [rustup](https://rustup.rs/); on Windows use the
-  MSYS2 toolchain instead — see the Windows section).
-- **C toolchain + cmake + pkg-config + nasm** — cmake and a C++ compiler
-  are needed by the vendored OpenColorIO build (Linux/macOS), nasm by
-  the FFmpeg assembly.
+- **Rust stable** via [rustup](https://rustup.rs/) (on Windows the default
+  `x86_64-pc-windows-msvc` host toolchain — see the Windows section).
+- **System dependencies via one script.** `tooling/install-deps.sh`
+  installs everything a package manager provides: the build tools (C/C++
+  toolchain, cmake + a C++ compiler for the vendored OpenColorIO build,
+  meson/ninja/nasm for the FFmpeg dependency builds), the workspace's
+  system libraries (PipeWire/JACK/ALSA/PulseAudio/sndfile for cpal,
+  GL/Vulkan/XKB for the wgpu windowing stack), the headless-test stack
+  (xvfb, Mesa software Vulkan, fonts) and the packaging tools.
 - **FFmpeg 8.1, built by the project script.** Distro packages are too
   old for `ffmpeg-next` 9 and are deliberately not used:
   ```sh
-  tooling/install-deps.sh        # codec/filter libraries + build tools
-  tooling/ffmpeg/build-ffmpeg.sh # clones release/8.1, installs into .cache/ffmpeg
+  tooling/install-deps.sh        # every package-manager dependency
+  tooling/ffmpeg/build-ffmpeg.sh # builds every codec library from source
+                                 # (build-deps.sh), then clones release/8.1;
+                                 # everything installs into .cache/ffmpeg
   ```
   `FFMPEG_DIR` does not need exporting: the committed
   `.cargo/config.toml` sets it relative to the workspace root
@@ -37,19 +43,20 @@ macOS, Linux, and Windows. For the Chinese version see
   build script panics without it; run `build-ffmpeg.sh` once before the
   first `cargo build`.
 - **CI/CD follows the same path.** The Linux/macOS jobs run
-  `tooling/install-deps.sh` and `tooling/ffmpeg/build-ffmpeg.sh`, so the
-  release binaries and local builds share one FFmpeg configuration (the
-  built tree is cached in CI and rebuilt from scratch in CD). The
-  Windows jobs download a prebuilt FFmpeg — BtbN's shared GPL build, the
-  one ffmpeg.org links as the official Windows option — from its release
-  page, verify it against the published `checksums.sha256` and point
-  `FFMPEG_DIR` at it (no MSYS2 or vcpkg toolchain in CI).
+  `tooling/install-deps.sh` (the single dependency step in both
+  workflows) and `tooling/ffmpeg/build-ffmpeg.sh`, so the release
+  binaries and local builds share one dependency set and one FFmpeg
+  configuration (the built tree is cached in CI and rebuilt from scratch
+  in CD). The Windows jobs download a prebuilt FFmpeg — BtbN's shared GPL
+  build, the one ffmpeg.org links as the official Windows option — from
+  its release page, verify it against the published `checksums.sha256`
+  and point `FFMPEG_DIR` at it (no MSYS2 or vcpkg toolchain in CI).
 
 ## Quick start (macOS / Linux)
 
 ```sh
 tooling/install-deps.sh         # Homebrew / apt / dnf / pacman
-tooling/ffmpeg/build-ffmpeg.sh  # ~10–20 min, once
+tooling/ffmpeg/build-ffmpeg.sh  # deps + FFmpeg, ~20–40 min, once
 cargo build --workspace
 cargo test  --workspace         # Linux: see "headless tests" below
 ```
@@ -60,73 +67,75 @@ cargo test  --workspace         # Linux: see "headless tests" below
 
 - macOS 12+, Xcode Command Line Tools (`xcode-select --install`), Homebrew.
 - ```sh
-  brew install cmake pkg-config
-  tooling/install-deps.sh
+  tooling/install-deps.sh         # brew: tools + librsvg + autotools
   tooling/ffmpeg/build-ffmpeg.sh
   cargo build --workspace
   cargo test  --workspace
   ```
 - OpenColorIO is compiled from the vendored 2.5.2 sources and linked
-  statically — no `brew install opencolorio` needed (cmake is required).
+  statically — no `brew install opencolorio` needed (cmake is installed
+  by `install-deps.sh`).
 - The GPU-gated tests (OFX GL overlay, hardware decode) run only with
   `OAK_GPU_TESTS=1`.
 
 ## Linux
 
-- Debian/Ubuntu, Fedora and Arch are supported by
-  `tooling/install-deps.sh`. Additionally install:
-  ```sh
-  # Debian/Ubuntu
-  sudo apt-get install -y cmake \
-    libpipewire-0.3-dev libspa-0.2-dev libjack-jackd2-dev \
-    libasound2-dev libpulse-dev libsndfile1-dev \
-    libgl1-mesa-dev libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev
-  ```
-  (the PipeWire/JACK/ALSA/PulseAudio/sndfile dev packages are cpal's
-  audio backends; GL/Vulkan/XKB are the wgpu windowing stack).
+- `tooling/install-deps.sh` (Debian/Ubuntu/openKylin, Fedora, Arch)
+  installs the full set, including the PipeWire/JACK/ALSA/PulseAudio/
+  sndfile dev packages (cpal's audio backends), the GL/Vulkan/XKB dev
+  packages (the wgpu windowing stack) and the headless-test stack below.
 - **Headless tests:** several gpui/UI tests open real windows through
-  wgpu on Mesa's software Vulkan. Under a display-less session run:
+  wgpu on Mesa's software Vulkan (xvfb and the Mesa Vulkan drivers are
+  installed by `install-deps.sh`). Under a display-less session run:
   ```sh
-  sudo apt-get install -y xvfb mesa-vulkan-drivers
   xvfb-run -a -s "-screen 0 1920x1080x24" cargo test --workspace
   ```
 - OpenColorIO is the vendored static build, as on macOS.
 
-## Windows (MSYS2 UCRT64)
+## Windows (MSVC)
 
-> **CI/CD note**: the GitHub Windows CI/CD no longer uses this path — it
-> builds MSVC-ABI on `warp-windows-2025-vs2026-x64-32x` with BtbN's
-> prebuilt shared FFmpeg (downloaded from the release page and verified
-> against its sha256) and the vendored static OCIO. The MSYS2 flow below
-> remains the documented local-build alternative.
+The Windows build targets **x86_64-pc-windows-msvc** — the rustup default
+on Windows — with BtbN's prebuilt shared FFmpeg and the vendored static
+OCIO. This is exactly what CI does on `warp-windows-2025-vs2026-x64-32x`
+(`.github/workflows/ci.yml`); the old MSYS2/UCRT64 flow is no longer
+supported.
 
-The Windows build targets **x86_64-pc-windows-gnu** with MSYS2's own
-Rust; the MSVC toolchain is not supported (the build scripts emit
-Unix-style link args the MSVC linker rejects).
-
-1. Install [MSYS2](https://www.msys2.org/) and open the **UCRT64** shell.
-2. ```sh
-   pacman -Syu
-   pacman -S --needed mingw-w64-ucrt-x86_64-rust \
-     mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-opencolorio
-   tooling/install-deps.sh        # must run inside the UCRT64 shell
-   tooling/ffmpeg/build-ffmpeg.sh
+1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/)
+   (VS 2022 or later) with the **Desktop development with C++** workload —
+   it provides the MSVC linker plus the C++ compiler and CMake the
+   vendored OCIO build needs.
+2. Install Rust via [rustup](https://rustup.rs/); the default host
+   toolchain is already `stable-x86_64-pc-windows-msvc`.
+3. Download BtbN's prebuilt FFmpeg (GPL, shared — the build ffmpeg.org
+   links as the official Windows option, from the release/8.1 branch),
+   verify it against the release's `checksums.sha256` and unpack it into
+   `.cache/ffmpeg` (PowerShell, from the workspace root):
+   ```powershell
+   $base  = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+   $asset = "ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
+   Invoke-WebRequest "$base/checksums.sha256" -OutFile "$env:TEMP\checksums.sha256"
+   $expected = (Select-String -Path "$env:TEMP\checksums.sha256" `
+     -Pattern ([regex]::Escape($asset) + "\s*$")).Line.Split()[0]
+   Invoke-WebRequest "$base/$asset" -OutFile "$env:TEMP\$asset"
+   if ((Get-FileHash "$env:TEMP\$asset").Hash -ne $expected.ToUpper()) {
+     throw "FFmpeg checksum mismatch"
+   }
+   Expand-Archive "$env:TEMP\$asset" .cache\ffmpeg-extract -Force
+   Move-Item (Get-ChildItem .cache\ffmpeg-extract -Directory).FullName .cache\ffmpeg
    ```
-3. Environment (put in your shell rc or export per session):
-   ```sh
-   # The vendored OCIO sources contain MSVC-only constructs, so Windows
-   # links MSYS2's OpenColorIO 2.5.2 dynamically instead:
-   export OCIO_RS_ENABLE_REAL=1 OCIO_INSTALL_DIR=/ucrt64 OCIO_RS_LINK=dynamic
-   # mingw-w64 (Nov 2025+) forwards _assert to __msvcrt_assert inside
-   # libmingwex.a while rustc's link order leaves -lmingwex last; the
-   # trailing -lmsvcrt re-scans the CRT import library afterwards
-   # (otherwise: undefined _fileno/_setmode/__imp___msvcrt_assert).
-   export RUSTFLAGS="-C link-args=-lmsvcrt"
-   # If your shell inherits the MSVC INCLUDE/LIB (some CI runners inject
-   # them into every step), clear them — they poison the MinGW compiles:
-   unset INCLUDE LIB
+4. Environment (PowerShell, per session or in the user environment):
+   ```powershell
+   # .cargo/config.toml already points FFMPEG_DIR at .cache/ffmpeg; the
+   # test binaries load the FFmpeg DLLs, so bin/ must be on PATH
+   # (otherwise the first test exits with STATUS_DLL_NOT_FOUND):
+   $env:PATH = "$PWD\.cache\ffmpeg\bin;$env:PATH"
+   $env:PKG_CONFIG_PATH = "$PWD\.cache\ffmpeg\lib\pkgconfig"
+   # Vendored static OCIO — the MSYS2 package was the workaround, not the
+   # preference; no OCIO_INSTALL_DIR needed:
+   $env:OCIO_RS_ENABLE_REAL = "1"
+   $env:OCIO_RS_LINK = "static"
    ```
-4. ```sh
+5. ```powershell
    cargo build --workspace
    cargo test  --workspace
    ```
@@ -138,12 +147,12 @@ Unix-style link args the MSVC linker rejects).
 | Platform | Source | Linkage | Notes |
 |----------|--------|---------|-------|
 | Linux / macOS | vendored 2.5.2 (`ocio-sys` `bundled` feature, on by default) | static | needs cmake + C++ compiler |
-| Windows | MSYS2 `mingw-w64-ucrt-x86_64-opencolorio` | dynamic | set `OCIO_INSTALL_DIR=/ucrt64`, `OCIO_RS_LINK=dynamic` |
+| Windows | vendored 2.5.2 (same `bundled` feature) | static | needs VS Build Tools (MSVC C++ + CMake); set `OCIO_RS_ENABLE_REAL=1`, `OCIO_RS_LINK=static` |
 
 Without the `bundled` feature and without `OCIO_RS_ENABLE_REAL=1`,
 `ocio-sys` builds a stub and every colour test early-returns. The
 bundled feature is enabled unconditionally by `oak-render`, so a plain
-`cargo build` always gets the real thing on Linux/macOS.
+`cargo build` always gets the real thing.
 
 ## Packaging
 
@@ -170,14 +179,13 @@ libraries; see `docs/project-storage.md` for what lands where.
   environment variables into cargo can read a git-ignored `.env` at the
   workspace root with `FFMPEG_DIR=...` (and `PKG_CONFIG_PATH=...` if
   your codec libraries live in a custom prefix).
-- **pacman stalls with "Operation too slow"** — MSYS2 mirrors hiccup;
-  `install-deps.sh` retries three times, re-running it resumes via
-  `--needed`.
-- **Windows: `undefined reference to _fileno/_setmode/__imp___msvcrt_assert`**
-  — set `RUSTFLAGS="-C link-args=-lmsvcrt"` (see the Windows section).
-- **Windows: `AddInstanceForFactory: No factory registered` / MSVC-flavoured
-  errors** — you are on the MSVC Rust toolchain; switch to MSYS2's Rust
-  (`x86_64-pc-windows-gnu`).
+- **Windows: `FFMPEG_DIR` is set but the linker cannot find the FFmpeg
+  import libraries** — unpack the BtbN archive into `.cache/ffmpeg`
+  (see the Windows section) and point `PKG_CONFIG_PATH` at
+  `.cache\ffmpeg\lib\pkgconfig`.
+- **Windows: tests exit immediately with `STATUS_DLL_NOT_FOUND`** — the
+  FFmpeg runtime DLLs are not on `PATH`; add `.cache\ffmpeg\bin` (see
+  the Windows section).
 - **Empty `gpui/` directory** — `git submodule update --init --recursive`.
 - **Linux tests open windows and hang/fail** — use the `xvfb-run` line
   from the Linux section.

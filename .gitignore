@@ -1,6 +1,4 @@
 # CMake artifacts
-/cmake-build-*
-build
 # Doxygen
 
 # Visual Studio (Code)
@@ -76,7 +74,6 @@ ui_*.h
 *.qmlc
 *.jsc
 Makefile*
-*build-*
 !tooling/ffmpeg/build-ffmpeg.sh
 *.qm
 *.prl

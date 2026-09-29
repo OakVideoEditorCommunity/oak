@@ -28,12 +28,18 @@
 # of release/8.1 and release/9.0 — so the version below is a project
 # choice, not a compatibility workaround.
 #
-# Oak is GPL, so the GPL-licensed parts of FFmpeg and every free-license
-# external codec library are enabled. Hardware acceleration is enabled
-# per host OS, and every optional piece (external libraries, VAAPI/VDPAU,
-# ffnvcodec, ...) is probed first — anything the machine does not provide
-# is silently left out, so the script works on a bare macOS/Linux box.
-# Install the external libraries with tooling/install-deps.sh first.
+# The build is fully self-contained: tooling/ffmpeg/build-deps.sh first
+# builds every external codec/filter library from source as static-only
+# archives into the SAME prefix, and FFmpeg is configured against that
+# prefix only — no Homebrew/distro codec package appears on the final
+# link line, so a package-manager upgrade can never break the link from
+# under the build. The enabled set is FIXED (no opportunistic pkg-config
+# probes), so every machine produces the same FFmpeg. TLS/network is
+# disabled: an editor has no network inputs, and dropping the network
+# stack drops the whole TLS (gnutls) dependency with it. Hardware
+# acceleration still uses the OS/driver interfaces (VideoToolbox, VAAPI,
+# libdrm, ffnvcodec), probed per host. Build tools come from
+# tooling/install-deps.sh.
 #
 # Usage: tooling/ffmpeg/build-ffmpeg.sh [-j N] [--shared]
 #   -j N       parallel make jobs (default: nproc/sysctl)
@@ -56,32 +62,16 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# --- Helpers ---------------------------------------------------------------
-
 have_pkg() { pkg-config --exists "$1" 2>/dev/null; }
-
-# Adds `--enable-<flag>` when pkg-config finds <package>.
-COND_LIBS=()
-enable_if_pkg() { # <pkg-config name> <configure flag>
-	if have_pkg "$1"; then
-		COND_LIBS+=("--enable-$2")
-		echo "  + $2 (found $1)"
-	else
-		echo "  - $2 (no $1, skipped)"
-	fi
-}
 
 OS="$(uname -s)"
 
-# Homebrew keeps everything under its own prefix, off the compiler's
-# default search paths; several .pc files (lame, snappy, theora's ogg
-# link line) are not self-sufficient, so add the prefix globally.
-if [ "$OS" = Darwin ]; then
-	BREW_PREFIX="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
-	FLAGS_EXTRA=("--extra-cflags=-I$BREW_PREFIX/include" "--extra-ldflags=-L$BREW_PREFIX/lib")
-else
-	FLAGS_EXTRA=()
-fi
+# --- External libraries --------------------------------------------------------
+# Builds into the same prefix and self-gates on its stamp: a missing or
+# stale stamp wipes the prefix (including this script's .build-complete
+# marker, which is what forces the FFmpeg rebuild below), an up-to-date
+# one is a no-op.
+"$(dirname "$0")/build-deps.sh"
 
 # --- Source ----------------------------------------------------------------
 
@@ -94,6 +84,11 @@ fi
 
 # --- Configure flags --------------------------------------------------------
 
+# Resolve the external libraries against the private prefix FIRST (they
+# are all there); the system pkg-config path stays appended for the
+# driver/OS interface probes below (libva, vdpau, libdrm, ffnvcodec).
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 FLAGS=(
 	"--prefix=$PREFIX"
 	--enable-gpl
@@ -101,74 +96,47 @@ FLAGS=(
 	--disable-doc
 	--disable-debug
 	--disable-programs
+	# An editor has no network inputs; --disable-network removes every
+	# network protocol and with it any need for a TLS library (gnutls).
+	--disable-network
 	--enable-avcodec --enable-avformat --enable-avfilter
 	--enable-avutil --enable-swscale --enable-swresample
+	# Static closure: probe with --static so the installed .pc files
+	# carry the full transitive link line (Libs.private) that
+	# crates/oak-ffmpeg-link/build.rs forwards to cargo.
+	--pkg-config-flags=--static
+	# lame ships no .pc file; every external lives in this prefix.
+	"--extra-cflags=-I$PREFIX/include"
+	"--extra-ldflags=-L$PREFIX/lib"
+	# Fixed codec/filter set — deterministic across machines (the old
+	# opportunistic probes are gone):
+	--enable-libx264 --enable-libx265 --enable-libdav1d --enable-libvpx
+	--enable-libopus --enable-libvorbis --enable-libtheora
+	--enable-libmp3lame --enable-libspeex
+	--enable-libopenjpeg --enable-libwebp --enable-libsnappy
+	# Subtitles / text rendering:
+	--enable-libfreetype --enable-libfribidi --enable-libass
+	# xcbgrab (X11 screen capture) is an input the editor never uses,
+	# and wherever a package manager happens to ship libxcb it drags
+	# -lxcb/-lX11 onto the link line as system libraries.
+	--disable-indev=xcbgrab
+	# xlib/libxcb are [autodetect] even with xcbgrab disabled: on a macOS
+	# host with Homebrew's libx11/libxcb installed, configure enables them
+	# and stamps absolute Cellar -L paths into libavutil.pc. The editor
+	# displays through its own UI and uses VAAPI via DRM on Linux, so X11
+	# glue is never needed.
+	--disable-xlib --disable-libxcb
 )
 if [ "$SHARED" = 1 ]; then
 	FLAGS+=(--enable-shared --disable-static)
 else
 	FLAGS+=(--enable-static --disable-shared --enable-pic)
 fi
-FLAGS+=("${FLAGS_EXTRA[@]}")
-
-echo ">> external codec/filter libraries (enabled when found):"
-# Free-license external encoders/decoders. GPL-compatible only; the
-# non-free ones (fdk-aac, OpenSSL in some jurisdictions, ...) stay off.
-enable_if_pkg x264 libx264
-enable_if_pkg x265 libx265
-enable_if_pkg svt-av1 libsvtav1
-enable_if_pkg dav1d libdav1d
-enable_if_pkg vpx libvpx
-enable_if_pkg opus libopus
-enable_if_pkg vorbis libvorbis
-enable_if_pkg theora libtheora
-enable_if_pkg lame libmp3lame
-# Homebrew's lame.pc points its include dir at include/lame while FFmpeg
-# includes <lame/lame.h>, and its library dir is off the default search
-# path; pass both explicitly.
-if have_pkg lame; then
-	FLAGS+=("--extra-cflags=-I$(pkg-config --variable=includedir lame)")
-	FLAGS+=("--extra-ldflags=-L$(pkg-config --variable=libdir lame)")
+if [ "$OS" = Linux ]; then
+	# libass' font provider on Linux (macOS uses CoreText, Windows
+	# DirectWrite; both are OS-provided).
+	FLAGS+=(--enable-libfontconfig)
 fi
-enable_if_pkg twolame libtwolame
-enable_if_pkg speex libspeex
-# Homebrew's openjpeg installs libopenjp2.pc outside the default
-# pkg-config search path.
-if [ -d /opt/homebrew/lib/pkgconfig/openjpeg ]; then
-	export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:/opt/homebrew/lib/pkgconfig/openjpeg"
-fi
-enable_if_pkg libopenjp2 libopenjpeg
-# snappy only feeds the hap encoder and the MinGW package does not
-# satisfy the static link — skip it on Windows. openh264 is deliberately
-# not probed anywhere: it is redundant (decode: FFmpeg's native h264;
-# encode: libx264) and every external FFmpeg links dynamically turns
-# into a runtime dependency on the distributor's soname package
-# (libopenh264-7 vs -8 across releases), which is exactly the kind of
-# dependency the editor should not carry for an unused codec.
-if [ -z "${MSYSTEM:-}" ]; then
-	enable_if_pkg snappy libsnappy
-fi
-enable_if_pkg webp libwebp
-enable_if_pkg xvid libxvid
-enable_if_pkg kvazaar libkvazaar
-enable_if_pkg shine libshine
-enable_if_pkg gsm libgsm
-enable_if_pkg opencore-amrnb libopencore-amrnb
-enable_if_pkg opencore-amrwb libopencore-amrwb
-enable_if_pkg ilbc libilbc
-# Subtitles / text rendering (free).
-enable_if_pkg freetype2 libfreetype
-enable_if_pkg fribidi libfribidi
-enable_if_pkg fontconfig libfontconfig
-enable_if_pkg libass libass
-# TLS for network protocols (GPL-compatible).
-if have_pkg gnutls; then
-	COND_LIBS+=("--enable-gnutls")
-	echo "  + gnutls"
-else
-	echo "  - gnutls (skipped)"
-fi
-FLAGS+=("${COND_LIBS[@]}")
 
 echo ">> hardware acceleration:"
 case "$OS" in
@@ -180,7 +148,7 @@ case "$OS" in
 	Linux)
 		if have_pkg libva; then FLAGS+=(--enable-vaapi); echo "  + vaapi"; else echo "  - vaapi (no libva)"; fi
 		if have_pkg vdpau; then FLAGS+=(--enable-vdpau); echo "  + vdpau"; else echo "  - vdpau (no vdpau)"; fi
-		if have_pkg libdrm; then FLAGS+=(--enable-libdrm); echo "  + libdrm"; else echo "  - libdrm"; fi
+		if have_pkg libdrm; then FLAGS+=(--enable-libdrm); echo "  + libdrm"; else echo "  - libdrm (no libdrm)"; fi
 		;;
 	MINGW*|MSYS*|CYGWIN*)
 		FLAGS+=(--enable-d3d11va --enable-dxva2 --enable-mediafoundation)

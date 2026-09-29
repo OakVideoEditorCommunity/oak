@@ -147,6 +147,12 @@ fn main() {
 			if lib == "dl" {
 				continue;
 			}
+			// FFmpeg's configure hardcodes -lstdc++ for C++ externals
+			// (libsnappy), but Apple's toolchain only ships libc++ (the
+			// libstdc++ stub was removed from the SDK) — remap to the
+			// runtime that actually exists.
+			#[cfg(target_os = "macos")]
+			let lib = if lib == "stdc++" { "c++" } else { lib };
 			// System libs (m, z, bz2, iconv, ...) and externals alike; the
 			// linker picks .a or .dylib per -L search order.
 			println!("cargo:rustc-link-lib={lib}");

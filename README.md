@@ -1,7 +1,7 @@
 # Oak Video Editor ![CI](https://github.com/OakVideoEditorCommunity/oak/actions/workflows/ci.yml/badge.svg)
  [中文](docs/zh/README.md)
 
-Oak Video Editor is a renamed fork of Olive, aiming to deliver a more complete and user-friendly editing experience.
+Oak Video Editor is based on Olive, aiming to deliver a more complete and user-friendly editing experience.
 
 ## Screenshots
 
