@@ -4643,6 +4643,7 @@ dependencies = [
  "oak-audio",
  "oak-codec",
  "oak-core",
+ "oak-engine",
  "oak-node",
  "oak-ofx-plugin",
  "oak-render",
@@ -4714,6 +4715,28 @@ dependencies = [
  "wgpu",
  "wgpu-types",
 ]
+
+[[package]]
+name = "oak-engine"
+version = "0.5.1"
+dependencies = [
+ "oak-audio",
+ "oak-codec",
+ "oak-core",
+ "oak-ffmpeg-link",
+ "oak-node",
+ "oak-ofx-plugin",
+ "oak-otio",
+ "oak-render",
+ "oak-storage",
+ "oak-task",
+ "oak-timeline",
+ "oak-undo",
+]
+
+[[package]]
+name = "oak-extensions"
+version = "0.5.1"
 
 [[package]]
 name = "oak-ffmpeg-link"

@@ -1,0 +1,22 @@
+[package]
+name = "oak-engine"
+edition = "2024"
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+oak-audio = { path = "../oak-audio" }
+oak-codec = { path = "../oak-codec" }
+oak-core = { path = "../oak-core" }
+oak-ffmpeg-link = { path = "../oak-ffmpeg-link" }
+oak-node = { path = "../oak-node" }
+oak-ofx-plugin = { path = "../oak-ofx-plugin" }
+oak-otio = { path = "../oak-otio" }
+oak-render = { path = "../oak-render" }
+oak-storage = { path = "../oak-storage" }
+oak-task = { path = "../oak-task" }
+oak-timeline = { path = "../oak-timeline" }
+oak-undo = { path = "../oak-undo" }

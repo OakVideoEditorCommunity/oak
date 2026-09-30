@@ -1,6 +1,10 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * *'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -39,49 +43,49 @@ jobs:
             platform: linux
             distro: debian
             arch: x64
-            runner: warp-ubuntu-latest-x64-8x
+            runner: ubuntu-24.04
             triplet: x64-linux
             container: '{"image":"debian:13","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: Fedora
             platform: linux
             distro: fedora
             arch: x64
-            runner: warp-ubuntu-latest-x64-8x
+            runner: ubuntu-24.04
             triplet: x64-linux
             container: '{"image":"fedora:43","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: Arch
             platform: linux
             distro: arch
             arch: x64
-            runner: warp-ubuntu-latest-x64-8x
+            runner: ubuntu-24.04
             triplet: x64-linux
             container: '{"image":"archlinux:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: openKylin x64
             platform: linux
             distro: openkylin
             arch: x64
-            runner: warp-ubuntu-latest-x64-8x
+            runner: ubuntu-24.04
             triplet: x64-linux
             container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: openKylin arm64
             platform: linux
             distro: openkylin
             arch: arm64
-            runner: warp-ubuntu-latest-arm64-16x
+            runner: ubuntu-24.04-arm
             triplet: arm64-linux
             container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: macOS
             platform: macos
             distro: macos
             arch: arm64
-            runner: warp-macos-26-arm64-12x
+            runner: macos-26
             triplet: arm64-osx
             container: ''
           - name: Windows
             platform: windows
             distro: windows
             arch: x64
-            runner: warp-windows-2025-vs2026-x64-32x
+            runner: windows-2025-vs2026
             triplet: x64-windows
             container: ''
 
@@ -225,18 +229,7 @@ jobs:
       # never a mismatched cache. The `.build-complete` marker
       # distinguishes a finished build from a partial cache save; without
       # it the tree is rebuilt.
-      - name: Restore FFmpeg (WarpCache)
-        if: matrix.platform == 'linux'
-        id: ffmpeg-cache
-        uses: WarpBuilds/cache/restore@v2
-        with:
-          path: .cache/ffmpeg
-          key: ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            ffmpeg-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
-
-      - name: Restore FFmpeg (GitHub)
-        if: matrix.platform == 'macos'
+      - name: Restore FFmpeg
         id: ffmpeg-cache-github
         uses: actions/cache/restore@v6
         with:
@@ -260,15 +253,7 @@ jobs:
             echo "FFMPEG_REBUILT=1" >> "$GITHUB_ENV"
           fi
 
-      - name: Save FFmpeg (WarpCache)
-        if: always() && matrix.platform == 'linux'
-        uses: WarpBuilds/cache/save@v2
-        with:
-          path: .cache/ffmpeg
-          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
-
-      - name: Save FFmpeg (GitHub)
-        if: always() && matrix.platform == 'macos'
+      - name: Save FFmpeg
         uses: actions/cache/save@v6
         with:
           path: .cache/ffmpeg
@@ -329,15 +314,7 @@ jobs:
       # Cargo caches: whole target/ dir plus ~/.cargo, shared per
       # distro+arch (WarpCache for Linux, GitHub for macOS/Windows).
       # ------------------------------------------------------------------
-      - name: Cache cargo artifacts (WarpCache)
-        if: matrix.platform == 'linux'
-        uses: WarpBuilds/rust-cache@v2
-        with:
-          shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
-          cache-on-failure: true
-
-      - name: Cache cargo artifacts (GitHub)
-        if: matrix.platform != 'linux'
+      - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}

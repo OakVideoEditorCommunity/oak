@@ -65,6 +65,7 @@ pub mod manager;
 pub mod oakui;
 pub mod panels;
 pub mod update;
+mod handle;
 
 /// The application entry point (called from `main.rs`).
 pub fn run() {

@@ -72,14 +72,7 @@ serde_json = "1"
 # are actually visible (RUST_LOG selects the verbosity).
 log = "0.4"
 
-# M14 R3: the app is a PURE module-crate consumer — every engine call is a
-# direct Rust call into the oak* rlibs (oak-node for the project graph,
-# oak-timeline/oak-undo for the edit commands and the global undo stack,
-# oak-render for the ticket arena, oak-codec for the export formats/test
-# media, oak-task for the export/interchange tasks, oak-audio for the
-# manager/waveforms, oak-common/oak-core for the config store and shared
-# value types, oak-storage for the write-through library). No liboakengine
-# dylib, no C ABI, no build.rs link step, no host shims.
+
 oak-audio = { path = "../oak-audio" }
 oak-codec = { path = "../oak-codec" }
 oak-core = { path = "../oak-core" }
@@ -90,7 +83,7 @@ oak-storage = { path = "../oak-storage" }
 oak-task = { path = "../oak-task" }
 oak-timeline = { path = "../oak-timeline" }
 oak-undo = { path = "../oak-undo" }
-
+oak-engine = { path = "../oak-engine" }
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by
