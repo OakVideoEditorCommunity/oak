@@ -5,9 +5,19 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+  schedule:
+    # 02:23 UTC (10:23 CST): daily nightly build, off the top-of-hour
+    # peak when scheduled workflows get delayed for tens of minutes.
+    - cron: '23 2 * * *'
 
 permissions:
   contents: write
+
+# Nightly runs are disposable: a stuck or superseded one is not worth
+# keeping (tag releases never cancel each other).
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'schedule' }}
 
 # One matrix, seven platforms, the same environments CI tests in (see
 # .github/workflows/ci.yml): Debian 13 / Fedora 43 / Arch / openKylin x64
@@ -357,6 +367,15 @@ jobs:
       # ------------------------------------------------------------------
       # Upload
       # ------------------------------------------------------------------
+      # Nightly (scheduled) builds get a dated artifact name so they are
+      # easy to find on the Actions run page, and a shorter retention —
+      # they are superseded every day. Tag/manual builds keep the clean
+      # names the release job downloads.
+      - name: Compute nightly artifact suffix
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: echo "NIGHTLY_SUFFIX=-nightly-$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
       - name: Stage artifacts
         if: matrix.platform != 'windows'
         shell: bash
@@ -380,13 +399,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: oak-${{ matrix.artifact }}
+          name: oak-${{ matrix.artifact }}${{ env.NIGHTLY_SUFFIX }}
           path: dist/*
           if-no-files-found: error
+          retention-days: ${{ github.event_name == 'schedule' && 14 || 90 }}
 
   # ------------------------------------------------------------------
   # Publish: attach every platform package to the v* tag's GitHub release
-  # (skipped on workflow_dispatch, which only uploads artifacts).
+  # (skipped on workflow_dispatch and schedule, which only uploads artifacts).
   # ------------------------------------------------------------------
   release:
     name: Publish GitHub release
