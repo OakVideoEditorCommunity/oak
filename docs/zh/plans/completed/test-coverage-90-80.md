@@ -49,7 +49,7 @@ M0a–M5 的测试策略是"每个里程碑配验收测试"，没有统一的质
 全量覆盖 90%/80% 的工作量估算（按 2026-09-17 干净基线）：
 **需要新增覆盖约 1.15 万可执行行、约 3.5 千个分支**；其中 `oak-app`
 独占约 1.15 万行缺口（占全部缺口的 45%），`oak-task`/`oak-timeline`/
-`oak-plugin`/`oak-storage` 合计约 7 千行，是最大的两块。
+`oak-ofx-plugin`/`oak-storage` 合计约 7 千行，是最大的两块。
 
 ## 2. 测试分层规范（硬性）
 
@@ -223,7 +223,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
 | oak-timeline | 5039 | 69.9% | 828 | 41.7% |
 | oak-app | 39937 | 71.2% | 4199 | 44.3% |
 | oak-storage | 5133 | 75.5% | 292 | 51.0% |
-| oak-plugin | 10938 | 78.4% | 1244 | 50.6% |
+| oak-ofx-plugin | 10938 | 78.4% | 1244 | 50.6% |
 | oak-worker | 3165 | 80.8% | 338 | 52.1% |
 | oak-cli | 1765 | 81.9% | 274 | 51.8% |
 | oak-audio | 2547 | 87.7% | 408 | 62.3% |
@@ -273,7 +273,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   `#[gpui::test]`（seed/iterations/retries）都已可用，仓库已有 110 个
   `#[gpui::test]` 先例（`app.rs`、`real.rs`、`mock.rs`、panels）。
 - **进程/协议边界**：`oak-worker/tests/ofx_host.rs`（真实宿主 + 崩溃钩子）、
-  `../../../../crates/oak-plugin/tests/fixtures/build_fixture.sh` + `scan_probe`
+  `../../../../crates/oak-ofx-plugin` + `scan_probe`
   （CI 已接线）、`oak-render/tests/render_threads_test.rs`（线程管线）、
   `oak-worker/tests/procpool_integration.rs`。
 - **媒体**：`oak_codec::testmedia::write_test_clip[_solid]`（MPEG-2，确定性）。
@@ -299,7 +299,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
 | oak-task | `export`、`render`、`nodeops`、`conform`、`proxy`、`precache`、`customcache`、`manager` | 导出格式矩阵 + 失败清理、坏工程、取消、缓存写坏 |
 | oak-timeline | `undogeneral`/`undosplit`/`undoripple`/`undotrack`/`undopointer`、`marker`、`multicam`、`workarea` | 撤销/重做边界（空栈/不可撤销/交叉操作）、时间线非法区间 |
 | oak-storage | `session`、`backend`/`backends`、`registry`、`uri`、`writethrough`、`nodeutil` | session 生命周期、损坏数据库、写失败透传、URI 解析坏值 |
-| oak-plugin | `host`、`instance`、`suites`、`param`、`render`/`render_driver`、`gl_bridge`、`image`、`node`、`progress` | 插件缺失/加载失败/崩溃、参数类型矩阵、进度/取消、GPU 插件降级 |
+| oak-ofx-plugin | `host`、`instance`、`suites`、`param`、`render`/`render_driver`、`gl_bridge`、`image`、`node`、`progress` | 插件缺失/加载失败/崩溃、参数类型矩阵、进度/取消、GPU 插件降级 |
 | oak-worker | NDJSON 控制面（worker.rs 全部消息类型）、ofx-host 模式 | 未知消息、半包/坏包、EOF、重启、崩溃钩子 |
 | oak-cli | 子命令（参数解析、退出码） | 缺参/坏参、文件缺失、导出失败退出码 |
 | oak-otio | `fcpxml`、`model` | 导入/导出往返、坏 XML、缺字段 |
@@ -462,7 +462,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
 | oak-task | 54.2% | **95%** | 39.8% | **88%** | export/render/nodeops（1+2） |
 | oak-timeline | 69.9% | **95%** | 41.7% | **88%** | 撤销族（1+2） |
 | oak-storage | 75.5% | **93%** | 51.0% | **88%** | session/backend 错误（2） |
-| oak-plugin | 78.4% | **93%** | 50.6% | **88%** | host/suites/param（2） |
+| oak-ofx-plugin | 78.4% | **93%** | 50.6% | **88%** | host/suites/param（2） |
 | oak-worker | 80.8% | **93%** | 52.1% | **88%** | NDJSON 协议（2） |
 | oak-cli | 81.9% | **95%** | 51.8% | **88%** | 退出码/错误路径（2） |
 | oak-audio | 87.7% | **95%** | 62.3% | **90%** | 设备缺失回退、波形（2） |
@@ -533,7 +533,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   mtime、`set_uuid` 磁盘重载、`load_state` mtime 守卫与强制重载、
   `save_state` 建目录失败、passthrough 快照（帧哈希才继承时基）、
   passthrough 保存落盘、帧路径（时基/整秒回退）、owner 计数单调。
-- **oak-plugin `node_factory.rs`** 内联 6 个：属性读取辅助（类型回退、
+- **oak-ofx-plugin `node_factory.rs`** 内联 6 个：属性读取辅助（类型回退、
   越界/缺失归零）、所有标量参数类型的默认值（含 CUSTOM/BYTES/
   PushButton/未知/裸 Parametric → None）、颜色与向量默认值
   （RGB/RGBA/2D/3D）、坐标系统规范化对默认值的缩放（工程尺寸 +
@@ -574,7 +574,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   - oak-storage 75.5% → **82.7%** / 51.0% → **65.2%**
   - oak-codec 89.7% → **91.4%** / 65.4% → **68.6%**
   - oak-render 89.5% → **90.0%** / 63.1% → **63.9%**
-  - oak-plugin 78.4% → **79.2%** / 50.6% → **51.7%**
+  - oak-ofx-plugin 78.4% → **79.2%** / 50.6% → **51.7%**
 
 ### 第三批（oak-app 专项，2026-09-18）
 
@@ -620,7 +620,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   - oak-task 85.8% → **86.1%** / 57.9% → **58.4%**
   - oak-storage 82.7% → **82.8%** / 65.2% → **66.4%**
   - oak-codec 91.4% / 68.7%；oak-timeline 90.3% / 60.3%；
-    oak-plugin 79.2% / 51.7%
+    oak-ofx-plugin 79.2% / 51.7%
 - oak-app 剩余缺口（约 5.9k 行）集中在 `oakui/real.rs`（710）、
   `panels/ofx_params.rs`（625）、`panels/timeline.rs`（532）、
   `oakui/mock.rs`（466）、`app.rs`（403）、`oakui/graphops.rs`（351）、
@@ -662,8 +662,8 @@ python3 tooling/coverage_report.py --json target/coverage.json
 - 各 crate 行/分支：oak-app **92.5%** / 67.7%；oak-render 92.7% /
   67.7%；oak-codec 93.9% / 74.4%；oak-task 87.7% / 61.5%；
   oak-timeline 90.6% / 61.3%；oak-storage 82.7% / 65.5%；
-  oak-plugin 79.2% / 51.7%（非 app 最大缺口）。
-- 下一步：分支 80% 目标还差 ~14pp。优先 oak-plugin
+  oak-ofx-plugin 79.2% / 51.7%（非 app 最大缺口）。
+- 下一步：分支 80% 目标还差 ~14pp。优先 oak-ofx-plugin
   （node_factory 222 / suites/property 165 / host 104 / instance 222 /
   render_driver 163 / clip 90）、oak-app（real.rs 712、app.rs 403、
   renderops 270、program_viewer 262、controls 230、nodegraph 213）与
@@ -673,13 +673,13 @@ python3 tooling/coverage_report.py --json target/coverage.json
 
 - **227 个新测试**（全 workspace 非插桩：104 个目标、**3069 passed /
   0 failed / 7 ignored**——ignored 为既有 GPU 门控）：
-  - oak-plugin 核心合计 46 个（`node_factory`/`instance`/`host` 三文件的
+  - oak-ofx-plugin 核心合计 46 个（`node_factory`/`instance`/`host` 三文件的
     组合计，非单文件计数）：`node_factory`（用 build.rs 测试插件
     bundle 的确定性布局覆盖 build_core 组/页/颜色/组合框表、命名与
     派发、执行器分支）、`instance`（编辑事务、clip 偏好、RoD/RoI、
     渲染/GL 路径、序列渲染、interact）、`host`（dlopen、bundle 扫描、
     PluginCache 去重、build_plugin 上下文协商、实例存活计数）。
-  - oak-plugin 套件/驱动合计 62 个（`render_driver`/`clip`/
+  - oak-ofx-plugin 套件/驱动合计 62 个（`render_driver`/`clip`/
     `suites/property`/`suites/gl_render` 四文件的组合计，非单文件计数）：
     `render_driver`（CPU/GL 帧渲染、组件与深度矩阵、参数覆盖、输出写回
     与上传失败）、`clip`（fetch/store 转换矩阵与协商）、`suites/property`
@@ -696,7 +696,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
     构建/连接/编辑）、`project_explorer`（事件/菜单/重命名/删除）与
     `mock`/`controls`/`inspector`（效果事件、指针与键盘路径、上下文
     与添加菜单）。
-- 生产缺陷修复（oak-plugin `clip.rs`）：`store_output_image` 此前把像素
+- 生产缺陷修复（oak-ofx-plugin `clip.rs`）：`store_output_image` 此前把像素
   写入 `texture_get_frame` 返回的深拷贝（CPU 纹理的写入被丢弃）；现在
   CPU 直接回写 `f.data`、GPU 走上传、Planar 明确报错（与
   `render_driver::write_output_frame` 的既有修复一致），新测试固化。
@@ -706,7 +706,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   procpool 测试全绿。
 - 聚合（干净对象集，同口径）：区域 **93.11%**、函数 **88.99%**、行
   **92.62%**（162596/175544）、分支 **70.09%**（11024/15729）。
-- 各 crate 行/分支：oak-app **94.5%** / 71.0%；oak-plugin 79.2% →
+- 各 crate 行/分支：oak-app **94.5%** / 71.0%；oak-ofx-plugin 79.2% →
   **90.9%** / 51.7% → **75.7%**；oak-render 94.3% / 70.4%；
   oak-core 93.5% / 75.4%；oak-worker 80.8% → **90.3%** / 52.1% →
   **70.3%**；oak-codec 93.9% / 74.4%；oak-task 87.7% / 61.3%；
@@ -741,7 +741,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
 - 各 crate 行/分支：oak-app **96.0%** / **76.6%**；oak-core 94.8% /
   77.5%；oak-render 95.0% / 69.7%；oak-codec 94.2% / 75.1%；
   oak-worker 91.9% / 70.7%；oak-task 88.8% / 62.8%；oak-timeline
-  90.6% / 61.3%；oak-plugin 90.9% / 75.7%；oak-storage 82.7% / 65.5%。
+  90.6% / 61.3%；oak-ofx-plugin 90.9% / 75.7%；oak-storage 82.7% / 65.5%。
 - 下一步：分支 80% 还差 ~8pp（约 1.3k 分支）。剩余热点：`real.rs`
   （321）、`eval.rs`（228）、`oak-task/render.rs`（136）、`ffmpeg.rs`
   （110）、`color.rs`（110）、`worker.rs`（108）、`graphops.rs`（82）、
@@ -769,7 +769,7 @@ python3 tooling/coverage_report.py --json target/coverage.json
   **93.49%**（180742/193331）、分支 **71.58%**（11805/16491）。分支较第六批
   微降 0.37pp：本批以测试质量换掉了若干"容忍型/同义反复"执行路径（例如
   §3.3 的交付即失败、M3 的效果夹具更换），属预期代价而非回归。
-- 各 crate 行/分支：oak-app 96.0% / 76.3%；oak-plugin 90.8% / 76.1%；
+- 各 crate 行/分支：oak-app 96.0% / 76.3%；oak-ofx-plugin 90.8% / 76.1%；
   oak-render 94.9% / 69.4%；oak-core 94.2% / 75.5%；oak-codec 94.2% /
   75.1%；oak-worker 92.7% / 70.4%；oak-timeline 91.0% / 60.2%；
   oak-task 89.5% / 62.8%；oak-storage 82.9% / 66.6%。

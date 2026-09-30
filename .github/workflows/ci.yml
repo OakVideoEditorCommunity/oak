@@ -348,7 +348,6 @@ jobs:
       # track them); drop just that package so the link picks up the new
       # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
       - name: Refresh the FFmpeg binding
-        if: matrix.platform != 'windows' && env.FFMPEG_REBUILT == '1'
         run: cargo clean -p ffmpeg-sys-next
 
       # ------------------------------------------------------------------
@@ -505,7 +504,7 @@ jobs:
         if: failure() && matrix.platform == 'linux' && matrix.distro != 'debian'
         shell: bash
         run: |
-          for name in oak_render oakapp oak_plugin; do
+          for name in oak_render oakapp oak_ofx_plugin; do
             BIN=$(ls -t target/debug/deps/$name-* 2>/dev/null | grep -v '\.d$' | head -1)
             [ -n "$BIN" ] || continue
             echo "===== $BIN ====="
@@ -537,15 +536,15 @@ jobs:
       # only discovery.
       - name: Build OFX fixture plugin
         if: matrix.distro == 'debian'
-        run: crates/oak-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
+        run: crates/oak-ofx-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
 
       - name: Probe OFX plugin discovery
         if: matrix.distro == 'debian'
         run: |
           OFX_PLUGIN_PATH="$PWD/.cache/ofx-fixture" \
-            cargo run --locked -p oak-plugin --example scan_probe > probe.log 2>&1
+            cargo run --locked -p oak-ofx-plugin --example scan_probe > probe.log 2>&1
           grep -q 'type_id=rs.oak.CiTestPlugin' probe.log
           # A project carrying a plugin node must survive save/load (the
           # serializer resolves plugin types via the dynamic factory).
           OAK_OFX_FIXTURE_DIR="$PWD/.cache/ofx-fixture" \
-            cargo test --locked -p oak-plugin --test ofx_roundtrip
+            cargo test --locked -p oak-ofx-plugin --test ofx_roundtrip

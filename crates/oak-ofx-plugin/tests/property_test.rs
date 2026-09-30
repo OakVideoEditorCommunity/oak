@@ -23,8 +23,8 @@ mod common;
 use std::ffi::{c_void, CString};
 use std::sync::Arc;
 
-use oak_plugin::error::Error;
-use oak_plugin::property::{PropertySet, Value};
+use oak_ofx_plugin::error::Error;
+use oak_ofx_plugin::property::{PropertySet, Value};
 
 /// `Value` 未实现 PartialEq（Pointer 无法比较），测试用 Debug 串
 /// 比较做值相等断言（同进程内指针的 Debug 输出确定）。

@@ -54,7 +54,7 @@
 | `oak-codec/hwdecode.rs`：Linux 设备顺序 CUDA 优先 → VAAPI 优先 | **有意行为变更** [实证] | CUDA/NVDEC 表面无公开句柄导出，零拷贝只能走 VAAPI DMA-BUF；`render-pipeline-threads.md` M5 回填记录了真机（RTX 5070 Ti + nvidia-vaapi-driver）验证 |
 | `oak-codec/ffmpeg.rs`：hw transfer / 色彩范围判定 / 帧缓存删除 | **等价重构 + 真修复** [实证] | 范围判定抽成 `frame_colorimetry`（force 优先、YUVJ 判定、`AVCOL_RANGE_JPEG` 分支逐一保留，CPU/GPU 两路共享）；`RefFrame`（`av_frame_ref` 语义）修复 ffmpeg-next `Video::clone` 用 `av_frame_copy` 深拷、丢失硬件表面引用（克隆 VAAPI 帧 transfer 报 EINVAL）的真 bug |
 | `oak-task/render.rs`：`ForceParams` 去 derive、手写 `Default` | **真 bug 修复** [实证] | `derive(Default)` 给出 `force_format = 0`（= `PixelFormat::U8`），违反文档契约 `-1 = off`，会把 F32 管线推向 U8 并在 footage 帧上 panic；测试断言的是文档契约（`render_test.rs:348-351`，注释明示 "not 0 = U8"），非实现现状 |
-| `oak-plugin/clip.rs`：`store_output_image` 重写 | **真 bug 修复** [实证] | 原实现把像素写入 `texture_get_frame` 的深拷贝，CPU 纹理的插件输出被静默丢弃；现在 CPU 直接回写 `f.data`、GPU 走 upload、Planar 显式报错，与 `render_driver::write_output_frame` 既有修复一致 |
+| `oak-ofx-plugin/clip.rs`：`store_output_image` 重写 | **真 bug 修复** [实证] | 原实现把像素写入 `texture_get_frame` 的深拷贝，CPU 纹理的插件输出被静默丢弃；现在 CPU 直接回写 `f.data`、GPU 走 upload、Planar 显式报错，与 `render_driver::write_output_frame` 既有修复一致 |
 | `oak-render/eval.rs`：`DECODED_FRAMES` LRU 值类型 `Frame`→`Texture`、`render_footage_frame_inner`→`_opts(allow_import)` | **M5 功能** [实证] | planar 条目独立上限 4（硬件表面驻留约束）；resolve 失败按帧回退 CPU staging（解码器会话缓存兜底，不重解码） |
 | `oak-render/pipeline.rs`：`DecodeRequest.allow_import` | **M5 功能** [实证] | montage 合成器（CPU 消费者）`false`、footage 路径 `true`，且入缓存键——正面落实计划 §5.2 "staged 请求不得命中导入缓存" 的 M5 审计项 |
 | `oak-app/dialogs.rs` 测试期望 180→184 | **合法期望修正** [实证] | 高度 SpinBox 的 `SliderModel`（gpui_widgets）以 step=8、min=120 建网格，180 恰在 176/184 中点、向上吸附；控件自身测试已固化 "snapped to the model's step" 契约（`controls.rs:1654/1720`） |
@@ -500,7 +500,7 @@ M4 的平台/真机 job。
 ### 验证
 
 - 各 crate：oak-task 133、oak-storage 74、oak-core 456+12、oak-render 全部、
-  oak-worker 全部、oak-plugin 208+、oak-app lib 544（含 `OAK_STRICT_PLAYBACK=1`
+  oak-worker 全部、oak-ofx-plugin 208+、oak-app lib 544（含 `OAK_STRICT_PLAYBACK=1`
   一次）、oak-timeline 全部。
 - 全 workspace 终验（2026-09-22）：**104 个测试目标、3179 passed / 0 failed /
   7 ignored**（ignored 为既有 GPU 门控）。
@@ -514,7 +514,7 @@ M4 的平台/真机 job。
 > 触发：§9 修复完成后，用户要求全量复审。范围：全部未提交改动
 > （66 文件，+38731/−281），含第七批修复自身。方法：五个深查子代理
 > 分区逐行通读（oak-app 面板群 19 文件、real.rs/renderops、
-> oak-render/oak-worker 269 个测试、oak-plugin/oak-codec 约 250 个测试、
+> oak-render/oak-worker 269 个测试、oak-ofx-plugin/oak-codec 约 250 个测试、
 > oak-task/core/timeline/storage），审查会话对全部高危论断与 24 条修复
 > 声称的关键链条做了原文实证。标注约定同前（[实证]/[子代理]）。
 

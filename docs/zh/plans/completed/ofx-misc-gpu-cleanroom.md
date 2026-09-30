@@ -78,7 +78,7 @@
 HSVTool（色相替换+keyer 能力）、Quantize（海报化/抖动）、Log2Lin/PLogLin、
 ClipTest（斑马纹超范围指示）、Matrix3x3/Matrix5x5（通用卷积）、GodRays（径向
 辉光，迭代采样）、ColorLookup（分通道曲线——**复用现有曲线编辑器**
-`gpui_widgets::curve_editor` + `oak_plugin::param_curve` 的 JSON 模型，参数为 Text）。
+`gpui_widgets::curve_editor` + `oak_ofx_plugin::param_curve` 的 JSON 模型，参数为 Text）。
 
 ### Tier 3（明确不做，写明理由）
 

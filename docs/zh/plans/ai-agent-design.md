@@ -40,17 +40,17 @@
 
 ### 2.1 插件进程内部分层
 
-插件名 **`oak-plugin-ai`**（Python 3，实现语言与发行形态的论证见 §2.3；
+插件名 **`oak-ofx-plugin-ai`**（Python 3，实现语言与发行形态的论证见 §2.3；
 参考实现即插件系统的 `examples/plugin-roughcut` 的完整版）：
 
 ```
 ┌─ Oak 主进程 ────────────────────────────────┐
-│  oak-plugin-host（P1–P4 提供）               │
+│  oak-ofx-plugin-host（P1–P4 提供）               │
 │   ├ OPP/1 控制面（JSON-RPC over stdio）      │
 │   └ shm down/up 区域                         │
 └───────┬─────────────────────────────────────┘
         │ stdio + shm
-┌───────┴─── oak-plugin-ai（独立进程）────────┐
+┌───────┴─── oak-ofx-plugin-ai（独立进程）────────┐
 │ ⑤ LLMProvider：Claude/GPT │ llama.cpp 本地    │
 │ ④ Agent 编排：对话 loop、工具调用、视觉闭环    │
 │ ③ 工具适配层：OPP 方法 → LLM tool schema     │
@@ -113,7 +113,7 @@ python-build-standalone），`.oakplugin` 单包交付，用户无需自行安�
                   直接 import)     core 本地服务)
 ```
 
-   - Oak 适配层 = oakxp SDK（OPP/1），即本文的 `oak-plugin-ai`；
+   - Oak 适配层 = oakxp SDK（OPP/1），即本文的 `oak-ofx-plugin-ai`；
    - Resolve 适配层直接 import core（Python 母语，零成本复用）；
    - Premiere 用 UXP 面板做壳，经 localhost 与本机 core 进程通信。
 3. **生态**：主流 LLM SDK（anthropic / openai / llama.cpp 绑定）均为 Python
@@ -182,7 +182,7 @@ column
   `/v1/chat/completions` 的服务（自建代理、企业网关等）——为后续接入
   托管服务预留通用通路，不绑定特定厂商。
 
-API key 存**插件自己的配置文件**（如 `~/.oak/plugins/oak-plugin-ai/config.toml`），
+API key 存**插件自己的配置文件**（如 `~/.oak/plugins/oak-ofx-plugin-ai/config.toml`），
 面板提供密钥输入框（`text_input`），用户无需手配环境变量；环境变量只作
 CI/无头场景的覆盖项（优先级：环境变量 > 配置文件）。配置文件权限 0600、
 不进版本库。存插件自己的配置是插件的内部事务，Oak 不感知——铁律 4 约束的
@@ -202,7 +202,7 @@ capabilities = ["project.read", "media.read", "media.import",
 双层确认，职责分清：
 
 1. **Oak 协议层**（§7.3）：`timeline.edit` 等确认类方法默认弹窗
-   "插件 oak-plugin-ai 请求：split_clip …"。用户可选"本会话内允许"。
+   "插件 oak-ofx-plugin-ai 请求：split_clip …"。用户可选"本会话内允许"。
 2. **插件会话层**：Agent 把 LLM 规划出的整段动作先列入 `#pending` 清单，
    用户点"执行"才发事务——这是体验层确认，与协议层弹窗不冲突：
    建议插件引导用户在 Oak 侧对本插件设"本会话允许"，确认交互集中在面板内。

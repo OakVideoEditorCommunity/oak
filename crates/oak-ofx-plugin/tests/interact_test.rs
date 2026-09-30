@@ -35,7 +35,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use oak_plugin::suites::{interact::Interact, status};
+use oak_ofx_plugin::suites::{interact::Interact, status};
 
 const INTERACT_PLUGIN_ID: &str = "org.oak.test-plugin.interact";
 const BASE_PLUGIN_ID: &str = "org.oak.test-plugin";
@@ -48,11 +48,11 @@ fn scan_and_register() -> bool {
 		common::skip("最小测试插件未构建");
 		return false;
 	};
-	if oak_plugin::host::Host::global().cache.scan_path(&dir).is_err() {
+	if oak_ofx_plugin::host::Host::global().cache.scan_path(&dir).is_err() {
 		common::skip("测试插件扫描失败");
 		return false;
 	}
-	oak_plugin::node_factory::register_plugin_nodes();
+	oak_ofx_plugin::node_factory::register_plugin_nodes();
 	true
 }
 
@@ -82,14 +82,14 @@ fn base_plugin_has_no_interact() {
 		if !scan_and_register() {
 			return;
 		}
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(BASE_PLUGIN_ID, None)
 			.expect("base 插件实例应可建");
 		assert!(
 			inst.value.new_interact().is_none(),
 			"无 interact 的插件 new_interact 应为 None"
 		);
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	});
 }
 
@@ -105,7 +105,7 @@ fn interact_lifecycle_and_events() {
 		let _ = std::fs::remove_file(&marker);
 		unsafe { std::env::set_var(MARKER_ENV, &marker) };
 
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact 变体实例应可建");
 
@@ -122,10 +122,10 @@ fn interact_lifecycle_and_events() {
 		assert_eq!(interact.pen_down((30.0, 40.0), 5.0), status::OK);
 		assert_eq!(interact.pen_up((30.0, 40.0), 5.0), status::OK);
 		assert_eq!(
-			interact.key_down(oak_plugin::host::KEY_A, "a", 5.0),
+			interact.key_down(oak_ofx_plugin::host::KEY_A, "a", 5.0),
 			status::OK
 		);
-		assert_eq!(interact.key_up(oak_plugin::host::KEY_A, "a", 5.0), status::OK);
+		assert_eq!(interact.key_up(oak_ofx_plugin::host::KEY_A, "a", 5.0), status::OK);
 		assert_eq!(interact.idle(), status::OK);
 		interact.destroy();
 
@@ -177,7 +177,7 @@ fn interact_lifecycle_and_events() {
 			"idle 未记录：{lines:?}"
 		);
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	});
 }
 
@@ -193,13 +193,13 @@ fn interact_passthrough_plugin_status() {
 		let _ = std::fs::remove_file(&marker);
 		unsafe { std::env::set_var(MARKER_ENV, &marker) };
 
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact 变体实例应可建");
 		let interact = inst.value.new_interact().expect("interact 应可建");
 
 		// Escape 的 key_down：插件返回 ReplyDefault → 宿主透传。
-		let st = interact.key_down(oak_plugin::host::KEY_ESCAPE, "", 0.0);
+		let st = interact.key_down(oak_ofx_plugin::host::KEY_ESCAPE, "", 0.0);
 		assert_eq!(st, status::REPLY_DEFAULT, "插件 Escape → ReplyDefault 应透传");
 
 		unsafe { std::env::remove_var(MARKER_ENV) };
@@ -210,7 +210,7 @@ fn interact_passthrough_plugin_status() {
 			"Escape key_down 应真实到达插件：{lines:?}"
 		);
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	});
 }
 
@@ -226,7 +226,7 @@ fn instance_destroy_cleans_up_interact() {
 		let _ = std::fs::remove_file(&marker);
 		unsafe { std::env::set_var(MARKER_ENV, &marker) };
 
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact 变体实例应可建");
 		let _interact = inst.value.new_interact().expect("interact 应可建");
@@ -242,7 +242,7 @@ fn instance_destroy_cleans_up_interact() {
 			"实例销毁应连带 interact destroy：{lines:?}"
 		);
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	});
 }
 
@@ -263,7 +263,7 @@ fn interact_draw_renders_plugin_colours() {
 			common::skip("GL 测试需 OAK_GPU_TESTS");
 			return;
 		}
-		if !oak_plugin::gl_bridge::gl_available() {
+		if !oak_ofx_plugin::gl_bridge::gl_available() {
 			common::skip("本机无可用 GL 上下文");
 			return;
 		}
@@ -274,32 +274,32 @@ fn interact_draw_renders_plugin_colours() {
 		let _ = std::fs::remove_file(&marker);
 		unsafe { std::env::set_var(MARKER_ENV, &marker) };
 
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact 变体实例应可建");
 		let interact = inst.value.new_interact().expect("interact 应可建");
 
 		let (w, h) = (64i32, 64i32);
-		let params = oak_plugin::render::VideoParams {
+		let params = oak_ofx_plugin::render::VideoParams {
 			width: w,
 			height: h,
-			format: oak_plugin::render::PIXEL_FORMAT_F32,
+			format: oak_ofx_plugin::render::PIXEL_FORMAT_F32,
 			..Default::default()
 		};
 		// 一次 acquire 覆盖 FBO 装配 → draw（内部嵌套 acquire）→ 回读。
-		let _guard = oak_plugin::gl_bridge::acquire().expect("acquire 应成功");
-		let tex = oak_plugin::gl_bridge::create_output_texture(w, h, &params)
+		let _guard = oak_ofx_plugin::gl_bridge::acquire().expect("acquire 应成功");
+		let tex = oak_ofx_plugin::gl_bridge::create_output_texture(w, h, &params)
 			.expect("输出纹理应可建");
-		let fbo = oak_plugin::gl_bridge::create_fbo(tex, w, h).expect("FBO 应完整");
-		oak_plugin::gl_bridge::bind_fbo(fbo);
-		oak_plugin::gl_bridge::set_viewport(w, h);
+		let fbo = oak_ofx_plugin::gl_bridge::create_fbo(tex, w, h).expect("FBO 应完整");
+		oak_ofx_plugin::gl_bridge::bind_fbo(fbo);
+		oak_ofx_plugin::gl_bridge::set_viewport(w, h);
 
 		let st = interact.draw((64.0, 64.0), (1.0, 1.0), 5.0, None);
 		assert_eq!(st, status::OK, "draw 应返回插件 OK");
 
-		let img = oak_plugin::gl_bridge::read_pixels_to_image(w, h, &params).expect("回读应成功");
-		oak_plugin::gl_bridge::delete_fbo(fbo);
-		oak_plugin::gl_bridge::delete_gl_texture(tex);
+		let img = oak_ofx_plugin::gl_bridge::read_pixels_to_image(w, h, &params).expect("回读应成功");
+		oak_ofx_plugin::gl_bridge::delete_fbo(fbo);
+		oak_ofx_plugin::gl_bridge::delete_gl_texture(tex);
 		drop(_guard);
 
 		unsafe { std::env::remove_var(MARKER_ENV) };
@@ -369,6 +369,6 @@ fn interact_draw_renders_plugin_colours() {
 		);
 		assert_eq!(rect_n + clear_n, (w * h) as usize, "整帧应为背景+矩形两色");
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	});
 }

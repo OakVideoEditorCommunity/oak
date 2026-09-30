@@ -2393,7 +2393,7 @@ mod tests {
 		} else {
 			"Linux-x86-64"
 		};
-		let dir = std::env::temp_dir().join(format!("oak-plugin-unit-fixture-{}", std::process::id()));
+		let dir = std::env::temp_dir().join(format!("oak-ofx-plugin-unit-fixture-{}", std::process::id()));
 		let bin_dir = dir
 			.join("oak-test-plugin.ofx.bundle/Contents")
 			.join(platform);

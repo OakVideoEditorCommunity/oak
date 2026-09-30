@@ -26,7 +26,7 @@
 //!
 //! All per-plugin data (inputs, defaults, properties, labels) is
 //! discovered at runtime from the plugin descriptor by the oakplugin
-//! discovery pass (`oak_plugin::node_factory`), which builds the
+//! discovery pass (`oak_ofx_plugin::node_factory`), which builds the
 //! [`NodeCore`] inputs, constructs [`PluginNode`]s and registers one
 //! factory entry per discovered plugin (the C++
 //! `factory.cpp::register_plugin_nodes` + `PluginNode::PluginNode`
@@ -368,7 +368,7 @@ impl NodeBehavior for PluginNode {
 /// Constructor (C++ `PluginNode::PluginNode(instance)`): the real
 /// construction (instance creation + the OFX param/clip -> input
 /// translation) belongs to the oakplugin discovery pass
-/// (`oak_plugin::node_factory`), which registers one factory entry per
+/// (`oak_ofx_plugin::node_factory`), which registers one factory entry per
 /// discovered plugin. This placeholder (null instance, empty cached
 /// metadata) stays for the static-registration surface and tests.
 pub fn create() -> (NodeCore, Box<dyn NodeBehavior>) {

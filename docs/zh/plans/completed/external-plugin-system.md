@@ -2,9 +2,9 @@
 
 > 本文是 Oak **功能性插件系统**的总体设计，面向没有当前对话记忆的执行者，自包含。
 >
-> **定位**：与 `oak-plugin`（OpenFX 宿主）正交。OFX 管"效果/滤镜"这类图像处理插件；
-> 本系统管"功能/工作流"插件——插件可以**调用 Oak 内部功能**（建工程、导入素材、
-> 时间线编辑、加效果、取帧、导出）并**绘制自己的 UI 面板**。旗舰用例是 AI 剪辑插件：
+> **定位**：与 `oak-ofx-plugin`（OpenFX 宿主）正交。OFX 管"效果/滤镜"这类图像处理插件；
+> 本系统管"功能/工作流"插件——插件可以 **调用 Oak 内部功能**（建工程、导入素材、
+> 时间线编辑、加效果、取帧、导出）并 **绘制自己的 UI 面板**。旗舰用例是 AI 剪辑插件：
 > 给多模态 AI 一组工具，让它自己"看"视频（取帧回喂）并执行剪辑——外部程序因此
 > 必须能完整操作 Oak。
 >
@@ -33,7 +33,7 @@
 - **A. 插件即进程**：每个插件是一个独立可执行文件（Python 插件则是
   `python3 main.py` 这样的启动命令），Oak 按清单（manifest）spawn，经 stdio 说话。
   即 LSP / MCP 模型。
-- **B. 插件即库 + 通用宿主进程**：插件编译成动态库，由一个 `oak-plugin-host`
+- **B. 插件即库 + 通用宿主进程**：插件编译成动态库，由一个 `oak-ofx-plugin-host`
   进程 dlopen 它，宿主进程再与 Oak 通信。
 
 **定为 A**，理由：
@@ -112,7 +112,7 @@ backoff_ms = 1000
 ```
 
 发现路径（对齐 OFX 的发现习惯）：`~/.oak/plugins/`、应用内 `plugins/`、
-环境变量 `OAK_PLUGIN_PATH`。Oak 启动时扫描 → 展示在"插件管理器"面板 →
+环境变量 `oak_ofx_plugin_PATH`。Oak 启动时扫描 → 展示在"插件管理器"面板 →
 用户启用后才 spawn（不自动启动未启用插件）。
 
 ### 2.2 握手与心跳
@@ -133,7 +133,7 @@ Oak ◄── {"result":{"name":"ai-cut","api":1,"capabilities":[...],
 
 ### 2.3 Oak 侧组件
 
-新增叶子 crate **`oak-plugin-host`**（与 `oak-worker` 平级的消费者角色，
+新增叶子 crate **`oak-ofx-plugin-host`**（与 `oak-worker` 平级的消费者角色，
 不动引擎模块）：
 
 - `PluginHost`：spawn/管道/NDJSON 读写（独立 IO 线程，`std::sync::mpsc` 与
@@ -237,7 +237,7 @@ AI 剪辑插件的聊天面板、操作日志、确认按钮，这套完全够�
                    x,y,button,modifiers,dpi_scale} ◄── gpui 事件转发
 ```
 
-- 这是既有 **OFX Interact GL-overlay 路径**（`oak_plugin::gl_bridge` +
+- 这是既有 **OFX Interact GL-overlay 路径**（`oak_ofx_plugin::gl_bridge` +
   `oakui/ofx.rs::forward_interact_pointer/key` + `program_viewer` 合成）的
   进程外泛化：把"插件 GL 离屏 + readback 合成 + 事件转发"换成
   "插件进程离屏 + shm + 事件经 IPC 转发"，事件模型照抄 interact 的。
@@ -309,7 +309,7 @@ M15（渲染进程隔离）完成后，更优路径是：**AI 能力不进引擎
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| **P1 传输与生命周期** | `oak-plugin-host`：spawn/握手/心跳/崩溃检测/有界重启；JSON-RPC 双向收发；`oakxp-c` 最小 SDK；echo 插件跑通 `project.get_info` | 杀掉插件进程：Oak 不崩、面板显示崩溃徽标、可重启；握手超时路径有测试 |
+| **P1 传输与生命周期** | `oak-ofx-plugin-host`：spawn/握手/心跳/崩溃检测/有界重启；JSON-RPC 双向收发；`oakxp-c` 最小 SDK；echo 插件跑通 `project.get_info` | 杀掉插件进程：Oak 不崩、面板显示崩溃徽标、可重启；握手超时路径有测试 |
 | **P2 宿主 API 核心** | `edit.*` 事务 + `project/media/timeline/node` 方法族 + 能力检查 | 插件完成"导入素材→铺轨→切开→波纹删除→加效果→改参数"，逐步可在历史面板撤销；越权调用被拒 |
 | **P3 取帧与导出** | `render.*` shm 数据面、`export.*` 事件、限流 | 黄金帧校验（复用 render-worker 端到端 harness）：插件取到的帧与 viewer 一致；连续取帧不拖垮进程池 |
 | **P4 声明式 UI** | `PluginPanel` + 动态 panel 注册 + `ui.*` 控件集 | echo 插件面板交互全通；控件树快照测试 |
@@ -323,7 +323,7 @@ P1–P3 是系统地基，任何插件都依赖；P4/P5 可并行；P6 随时可
 
 ## 8. 明确不做（边界）
 
-- **不**取代 OFX：图像处理节点仍走 `oak-plugin`（渲染在 worker 进程内已有
+- **不**取代 OFX：图像处理节点仍走 `oak-ofx-plugin`（渲染在 worker 进程内已有
   隔离）。功能插件如需注册新节点类型，v2 再评估（机制上是现成的
   `Factory::register_dynamic`）。
 - **不**做插件沙箱、签名、商店（§5）。

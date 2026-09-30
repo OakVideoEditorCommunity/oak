@@ -247,7 +247,7 @@ impl<E: AppEngine> OfxParamsView<E> {
 					// an identical curve (sync_values runs per render).
 					let curves = match &param.value {
 						NodeValue::Text(json) => {
-							oak_plugin::param_curve::curves_from_json(json).unwrap_or_default()
+							oak_ofx_plugin::param_curve::curves_from_json(json).unwrap_or_default()
 						}
 						_ => Vec::new(),
 					};
@@ -280,7 +280,7 @@ impl<E: AppEngine> OfxParamsView<E> {
 /// (LUT-style params), else the data extent with a 10% pad.
 fn curve_domain(
 	param: &EffectParam,
-	curves: &[oak_plugin::param_curve::Curve],
+	curves: &[oak_ofx_plugin::param_curve::Curve],
 ) -> (f64, f64, f64, f64) {
 	let (mut lo, mut hi) = (0.0, 1.0);
 	if let Some((_, oak_node::value::NodeValue::Vec2(v))) = param
@@ -324,8 +324,8 @@ fn curve_domain(
 /// handle offsets; a point without an explicit slope edits gets linear
 /// handles).
 fn curve_point_to_editor(
-	p: &oak_plugin::param_curve::ControlPoint,
-	points: &[oak_plugin::param_curve::ControlPoint],
+	p: &oak_ofx_plugin::param_curve::ControlPoint,
+	points: &[oak_ofx_plugin::param_curve::ControlPoint],
 	domain: (f64, f64, f64, f64),
 ) -> gpui_widgets::curve_editor::CurvePoint {
 	use gpui_widgets::curve_editor::{CurvePoint, CurveVec2};
@@ -361,11 +361,11 @@ fn curve_point_to_editor(
 fn curve_from_editor(
 	points: &[gpui_widgets::curve_editor::CurvePoint],
 	domain: (f64, f64, f64, f64),
-) -> oak_plugin::param_curve::Curve {
+) -> oak_ofx_plugin::param_curve::Curve {
 	let (lo, hi, vmin, vmax) = domain;
 	let (sx, sy) = (hi - lo, vmax - vmin);
 	let n = points.len();
-	let mut out = oak_plugin::param_curve::Curve::empty();
+	let mut out = oak_ofx_plugin::param_curve::Curve::empty();
 	for (i, p) in points.iter().enumerate() {
 		let key = lo + p.x * sx;
 		let value = vmin + p.y * sy;
@@ -420,7 +420,7 @@ fn curve_from_editor(
 				_ => 0.0,
 			}
 		});
-		out.points.push(oak_plugin::param_curve::ControlPoint {
+		out.points.push(oak_ofx_plugin::param_curve::ControlPoint {
 			key,
 			value,
 			slope: m_norm * sy / sx,
@@ -869,7 +869,7 @@ fn build_control<E: AppEngine>(
 			// JSON mirror of the curves (the input's Text value).
 			let curves = match &param.value {
 				NodeValue::Text(json) => {
-					oak_plugin::param_curve::curves_from_json(json).unwrap_or_default()
+					oak_ofx_plugin::param_curve::curves_from_json(json).unwrap_or_default()
 				}
 				_ => Vec::new(),
 			};
@@ -1079,14 +1079,14 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 								| E::HandleMoved { .. }
 								| E::PointAdded { .. } => {}
 							}
-							let curves: Vec<oak_plugin::param_curve::Curve> = editors_all
+							let curves: Vec<oak_ofx_plugin::param_curve::Curve> = editors_all
 								.iter()
 								.map(|e| {
 									let points = e.read(cx).points().to_vec();
 									curve_from_editor(&points, domain)
 								})
 								.collect();
-							let json = oak_plugin::param_curve::curves_to_json(&curves);
+							let json = oak_ofx_plugin::param_curve::curves_to_json(&curves);
 							engine.update(cx, |engine, cx| {
 								if let Err(err) = engine.set_effect_param(
 									effect,
@@ -3583,7 +3583,7 @@ mod tests {
 	/// with a 10% pad (a unit span for flat data).
 	#[test]
 	fn curve_domain_defaults_to_unit_and_pads_non_unit_data() {
-		use oak_plugin::param_curve::{ControlPoint, Curve};
+		use oak_ofx_plugin::param_curve::{ControlPoint, Curve};
 		let cp = |key: f64, value: f64| ControlPoint { key, value, slope: 0.0 };
 		let curve = |points: Vec<ControlPoint>| Curve { points };
 		let text = || NodeValue::Text(String::new());
@@ -3643,7 +3643,7 @@ mod tests {
 	/// to the first control point for the handle lookup.
 	#[test]
 	fn curve_point_to_editor_normalizes_keys_values_and_slopes() {
-		use oak_plugin::param_curve::ControlPoint;
+		use oak_ofx_plugin::param_curve::ControlPoint;
 		let real = |key: f64, value: f64, slope: f64| ControlPoint { key, value, slope };
 		let points = vec![
 			real(0.0, 0.0, 0.0),
@@ -4467,8 +4467,8 @@ mod tests {
 			mk_param(
 				"curves_in",
 				ValueType::Parametric,
-				NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
-					oak_plugin::param_curve::Curve::identity(0.0, 1.0),
+				NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
+					oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
 				])),
 				vec![
 					("parametric_range", NodeValue::Vec2([0.0, 1.0])),
@@ -4892,9 +4892,9 @@ mod tests {
 			mk_param(
 				"render_curves_in",
 				ValueType::Parametric,
-				NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
-					oak_plugin::param_curve::Curve::identity(0.0, 1.0),
-					oak_plugin::param_curve::Curve::from_pairs(&[(0.0, 0.0), (1.0, 0.5)]),
+				NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
+					oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
+					oak_ofx_plugin::param_curve::Curve::from_pairs(&[(0.0, 0.0), (1.0, 0.5)]),
 				])),
 				vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
 			),
@@ -5067,8 +5067,8 @@ mod tests {
 				mk_param(
 					"wire_curves_in",
 					ValueType::Parametric,
-					NodeValue::Text(oak_plugin::param_curve::curves_to_json(&[
-						oak_plugin::param_curve::Curve::identity(0.0, 1.0),
+					NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
+						oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
 					])),
 					vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
 				),

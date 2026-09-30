@@ -24,7 +24,7 @@
 //! test skips silently when the variable is unset so plain `cargo test`
 //! runs stay hermetic. The CI workflow builds the fixture and sets it.
 
-use oak_plugin::host::Host;
+use oak_ofx_plugin::host::Host;
 
 /// The fixture plugin's type id (tests/fixtures/ci_test_plugin.c).
 const FIXTURE_TYPE_ID: &str = "rs.oak.CiTestPlugin";
@@ -39,7 +39,7 @@ fn plugin_node_survives_save_load_roundtrip() {
 	host.cache
 		.scan_path(std::path::Path::new(&fixture_dir))
 		.expect("fixture dir scans");
-	let registered = oak_plugin::node_factory::register_plugin_nodes();
+	let registered = oak_ofx_plugin::node_factory::register_plugin_nodes();
 	assert!(
 		registered.iter().any(|id| id == FIXTURE_TYPE_ID),
 		"the fixture plugin registered (got {registered:?})"

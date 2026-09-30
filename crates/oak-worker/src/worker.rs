@@ -169,7 +169,7 @@ struct WorkerProgressReporter {
 	message: String,
 }
 
-impl oak_plugin::progress::UiProgressReporter for WorkerProgressReporter {
+impl oak_ofx_plugin::progress::UiProgressReporter for WorkerProgressReporter {
 	fn update(&mut self, progress: f64) -> bool {
 		push_worker_progress(progress, &self.label, &self.message);
 		!WORKER_PLUGIN_CANCEL.load(Ordering::Relaxed)
@@ -186,7 +186,7 @@ impl oak_plugin::progress::UiProgressReporter for WorkerProgressReporter {
 /// [`WorkerSession::initialize_runtime`]; mirrors the main-process factory
 /// (a fresh progressStart resets the sticky cancel flag).
 fn install_worker_progress_factory() {
-	oak_plugin::progress::set_reporter_factory(Some(Arc::new(|label, message| {
+	oak_ofx_plugin::progress::set_reporter_factory(Some(Arc::new(|label, message| {
 		// A fresh render begins: reset the sticky cancel flag.
 		WORKER_PLUGIN_CANCEL.store(false, Ordering::Relaxed);
 		push_worker_progress(0.0, label, message);
@@ -375,19 +375,19 @@ impl WorkerSession {
 		// §3.6). oakplugin installs its render driver into the oakrender
 		// executor slot.
 		log_error("runtime: installing oakplugin render executor");
-		oak_plugin::node_factory::install_render_executor();
+		oak_ofx_plugin::node_factory::install_render_executor();
 		// M15 S2: graphs carrying OFX plugin nodes deserialize/evaluate in
 		// the worker too, so the per-process node factory must register the
 		// discovered plugins exactly like the main process. A failed scan is
 		// non-fatal: the worker stays up for plugin-free graphs.
 		log_error("runtime: scanning and registering OFX plugins");
-		if let Err(e) = oak_plugin::host::Host::global().cache.scan() {
+		if let Err(e) = oak_ofx_plugin::host::Host::global().cache.scan() {
 			log_error(&format!(
 				"runtime: OFX plugin scan failed ({e}); continuing"
 			));
 		}
-		let discovered = oak_plugin::host::Host::global().cache.count();
-		let registered = oak_plugin::node_factory::register_plugin_nodes();
+		let discovered = oak_ofx_plugin::host::Host::global().cache.count();
+		let registered = oak_ofx_plugin::node_factory::register_plugin_nodes();
 		log_error(&format!(
 			"runtime: discovered {} OFX plugin(s), registered {} node type(s)",
 			discovered,
@@ -2476,16 +2476,16 @@ mod tests {
 		WORKER_PLUGIN_CANCEL.store(false, Ordering::Relaxed);
 		install_worker_progress_factory();
 		assert!(
-			oak_plugin::progress::has_reporter_factory(),
+			oak_ofx_plugin::progress::has_reporter_factory(),
 			"the worker factory must be installed for the plugin progress suite"
 		);
 		// Drive progressStart -> worker factory -> update -> progressEnd
 		// through the plugin progress suite, exactly like a real render.
-		oak_plugin::suites::progress::set_current(Some(
-			oak_plugin::progress::ProgressReporter::silent(),
+		oak_ofx_plugin::suites::progress::set_current(Some(
+			oak_ofx_plugin::progress::ProgressReporter::silent(),
 		));
-		let v2 = oak_plugin::suites::progress::suite_v2();
-		let v1 = oak_plugin::suites::progress::suite_v1();
+		let v2 = oak_ofx_plugin::suites::progress::suite_v2();
+		let v1 = oak_ofx_plugin::suites::progress::suite_v1();
 		let label = std::ffi::CString::new("render").unwrap();
 		let message = std::ffi::CString::new("frame 1").unwrap();
 		// SAFETY: the suite takes the null handle by contract; the C strings
@@ -2493,19 +2493,19 @@ mod tests {
 		unsafe {
 			assert_eq!(
 				(v2.start)(std::ptr::null_mut(), label.as_ptr(), message.as_ptr()),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 			assert_eq!(
 				(v2.update)(std::ptr::null_mut(), 0.25),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 			// progressEnd is forwarded by the v1 suite (v2's end is a no-op).
 			assert_eq!(
 				(v1.end)(std::ptr::null_mut()),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 		}
-		oak_plugin::suites::progress::set_current(None);
+		oak_ofx_plugin::suites::progress::set_current(None);
 
 		let mut out: Vec<u8> = Vec::new();
 		flush_worker_progress(&mut out);
@@ -3260,7 +3260,7 @@ mod tests {
 		assert!(s.initialize_runtime(), "the runtime always initializes");
 		assert!(s.runtime_initialized);
 		assert!(
-			oak_plugin::progress::has_reporter_factory(),
+			oak_ofx_plugin::progress::has_reporter_factory(),
 			"the worker progress factory is installed"
 		);
 		// The second call short-circuits before re-installing anything.

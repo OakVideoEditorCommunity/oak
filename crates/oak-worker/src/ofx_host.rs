@@ -23,7 +23,7 @@
 //! [`FrameSlotPool`]s announced by the handshake. Each job is resolved to
 //! a host-local instance by the plugin **identifier** (the cross-process
 //! stable key) and rendered through the same in-process executor the
-//! workers used to install ([`oak_plugin::node_factory::install_render_executor`]).
+//! workers used to install ([`oak_ofx_plugin::node_factory::install_render_executor`]).
 //!
 //! Progress is flushed to stdout immediately (the main process's reader
 //! forwards it to the plugin-progress dialog), and `plugin_cancel` sets
@@ -83,7 +83,7 @@ struct HostProgressReporter {
 	message: String,
 }
 
-impl oak_plugin::progress::UiProgressReporter for HostProgressReporter {
+impl oak_ofx_plugin::progress::UiProgressReporter for HostProgressReporter {
 	fn update(&mut self, progress: f64) -> bool {
 		emit(
 			&PluginProgressMsg {
@@ -112,7 +112,7 @@ impl oak_plugin::progress::UiProgressReporter for HostProgressReporter {
 /// cancel (the protocol's "a fresh render starts uncancelled") and emits
 /// the fraction-0 start event. The reporter factory installed with the
 /// progress suite calls this; tests call it directly.
-fn host_progress_reporter(label: &str, message: &str) -> Box<dyn oak_plugin::progress::UiProgressReporter> {
+fn host_progress_reporter(label: &str, message: &str) -> Box<dyn oak_ofx_plugin::progress::UiProgressReporter> {
 	OFX_CANCEL.store(false, Ordering::Relaxed);
 	emit(
 		&PluginProgressMsg {
@@ -130,7 +130,7 @@ fn host_progress_reporter(label: &str, message: &str) -> Box<dyn oak_plugin::pro
 
 /// Install the reporter factory (`progressStart` → [`host_progress_reporter`]).
 fn install_progress_factory() {
-	oak_plugin::progress::set_reporter_factory(Some(Arc::new(host_progress_reporter)));
+	oak_ofx_plugin::progress::set_reporter_factory(Some(Arc::new(host_progress_reporter)));
 }
 
 /// Read stdin on its own thread. `plugin_cancel` is handled inline (sets
@@ -434,8 +434,8 @@ pub fn ofx_host_main(args: &[String]) -> i32 {
 	// The same plugin runtime the render workers install: the executor
 	// (so `plugin_executor` is callable) and the identifier-keyed instance
 	// factory (so jobs resolve their own instances).
-	oak_plugin::node_factory::install_render_executor();
-	if let Err(err) = oak_plugin::host::Host::global().cache.scan() {
+	oak_ofx_plugin::node_factory::install_render_executor();
+	if let Err(err) = oak_ofx_plugin::host::Host::global().cache.scan() {
 		eprintln!("ofx-host: plugin scan failed: {err}");
 	}
 	install_progress_factory();
@@ -644,15 +644,15 @@ mod tests {
 		OFX_CANCEL.store(false, Ordering::Relaxed);
 		install_progress_factory();
 		assert!(
-			oak_plugin::progress::has_reporter_factory(),
+			oak_ofx_plugin::progress::has_reporter_factory(),
 			"the host factory must be installed for the plugin progress suite"
 		);
 		// Drive the installed factory through the progress suite
 		// (progressStart -> host_progress_reporter, update, end).
-		oak_plugin::suites::progress::set_current(Some(
-			oak_plugin::progress::ProgressReporter::silent(),
+		oak_ofx_plugin::suites::progress::set_current(Some(
+			oak_ofx_plugin::progress::ProgressReporter::silent(),
 		));
-		let v2 = oak_plugin::suites::progress::suite_v2();
+		let v2 = oak_ofx_plugin::suites::progress::suite_v2();
 		let label = std::ffi::CString::new("render").unwrap();
 		let message = std::ffi::CString::new("frame 1").unwrap();
 		// SAFETY: the suite takes the null handle by contract; the strings
@@ -660,18 +660,18 @@ mod tests {
 		unsafe {
 			assert_eq!(
 				(v2.start)(std::ptr::null_mut(), label.as_ptr(), message.as_ptr()),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 			assert_eq!(
 				(v2.update)(std::ptr::null_mut(), 0.5),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 			assert_eq!(
 				(v2.end)(std::ptr::null_mut()),
-				oak_plugin::suites::status::OK
+				oak_ofx_plugin::suites::status::OK
 			);
 		}
-		oak_plugin::suites::progress::set_current(None);
+		oak_ofx_plugin::suites::progress::set_current(None);
 	}
 
 	#[test]

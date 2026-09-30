@@ -19,7 +19,7 @@
 //! 单库化（M14 R5）后 crate 内部不再传 CHandle——原 CHandle 装拆
 //! （`make_owned`/`make_borrowed`/`get`）、panic 兜底（`guard`/
 //! `guard_handle`/`guard_void`）与身份注册表（`Registry`）均已删除。
-//! [`oak_plugin::handle::RefBox`] 仅作为 `Host::create_instance` 的
+//! [`oak_ofx_plugin::handle::RefBox`] 仅作为 `Host::create_instance` 的
 //! 边界返回类型保留（`Arc<RefBox<Instance>>`，oakengine test_support
 //! 消费）；此处验证其基本契约。每个测试只验一条规则，命名即规约。
 
@@ -28,7 +28,7 @@ mod common;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use oak_plugin::handle::RefBox;
+use oak_ofx_plugin::handle::RefBox;
 
 /// 析构标志：以"被析构次数"断言对象的销毁时机（Arc 生命周期语义的
 /// 行为探针）。

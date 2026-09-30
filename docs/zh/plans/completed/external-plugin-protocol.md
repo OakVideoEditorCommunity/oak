@@ -2,12 +2,12 @@
 
 > 本文是 [`external-plugin-system.md`](external-plugin-system.md) 的**协议全文**，
 > 冻结到可实现、可写 SDK 的粒度：传输分帧、消息信封、握手、全部 RPC 方法与事件、
-> 错误码、shm 数据面布局、UI 协议。实现（`oak-plugin-host`、`oakxp-c`、`oakxp`
+> 错误码、shm 数据面布局、UI 协议。实现（`oak-ofx-plugin-host`、`oakxp-c`、`oakxp`
 > Python 包）以本文为准；与设计文档冲突时**以本文为准**。
 >
 > **版本**：协议主版本 `1`（`"api": 1`）。同一主版本内只增不删（§13）。
 >
-> **面向**：`oak-plugin-host` 实现者、插件 SDK 作者、插件作者。
+> **面向**：`oak-ofx-plugin-host` 实现者、插件 SDK 作者、插件作者。
 
 ---
 

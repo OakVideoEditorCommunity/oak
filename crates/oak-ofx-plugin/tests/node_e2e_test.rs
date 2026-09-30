@@ -34,7 +34,7 @@ use oak_node::graph::Graph;
 use oak_node::node::{NodeBehavior, NodeCore};
 use oak_node::traverser::{EvalRequest, Traverser};
 use oak_node::value::{NodeValue, ValueType};
-use oak_plugin::host::Host;
+use oak_ofx_plugin::host::Host;
 
 const PLUGIN_ID: &str = "org.oak.test-plugin";
 const IDENTITY_ID: &str = "org.oak.test-plugin.identity";
@@ -93,7 +93,7 @@ fn scan_and_register() -> bool {
 		common::skip("测试插件扫描失败");
 		return false;
 	}
-	oak_plugin::node_factory::register_plugin_nodes();
+	oak_ofx_plugin::node_factory::register_plugin_nodes();
 	true
 }
 
@@ -294,21 +294,21 @@ fn param_overrides_reach_instance() {
 		let inst = Host::global()
 			.create_instance(PLUGIN_ID, None)
 			.expect("实例");
-		let id = oak_plugin::node_factory::register_instance(inst.clone());
+		let id = oak_ofx_plugin::node_factory::register_instance(inst.clone());
 
 		// 数值覆盖（gain = 1.25）。
 		let job_values = [("gain".to_string(), oak_node::value::NodeValue::Float(1.25))];
-		let pod: Vec<(String, oak_plugin::node::Value)> = job_values
+		let pod: Vec<(String, oak_ofx_plugin::node::Value)> = job_values
 			.iter()
 			.filter_map(|(k, v)| {
-				oak_plugin::node::Value::from_node_value(v).map(|p| (k.clone(), p))
+				oak_ofx_plugin::node::Value::from_node_value(v).map(|p| (k.clone(), p))
 			})
 			.collect();
 		let dst = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
 			.unwrap();
 		let src = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
 			.unwrap();
-		let job = oak_plugin::render_driver::RenderJob {
+		let job = oak_ofx_plugin::render_driver::RenderJob {
 			time: 0.0,
 			dst: Texture::wrap_frame(dst),
 			src: Some(Texture::wrap_frame(src)),
@@ -319,20 +319,20 @@ fn param_overrides_reach_instance() {
 			clear_destination: false,
 			interactive: false,
 		};
-		oak_plugin::render_driver::render_frame(&inst.value, &job).expect("render_frame 应成功");
+		oak_ofx_plugin::render_driver::render_frame(&inst.value, &job).expect("render_frame 应成功");
 		let gain = inst.value.params.find("gain").unwrap().get();
 		assert_eq!(
 			gain,
-			oak_plugin::param::ParamValue::Double([1.25, 0.0, 0.0], 1)
+			oak_ofx_plugin::param::ParamValue::Double([1.25, 0.0, 0.0], 1)
 		);
 
 		// NaN 覆盖回退默认（gain 默认 0.0）。
-		let pod_nan = vec![("gain".to_string(), oak_plugin::node::Value::float(f64::NAN))];
+		let pod_nan = vec![("gain".to_string(), oak_ofx_plugin::node::Value::float(f64::NAN))];
 		let dst = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
 			.unwrap();
 		let src = oak_render::eval::generate_frame(Rational::new(0, 1), (2, 2), PixelFormat::F32)
 			.unwrap();
-		let job = oak_plugin::render_driver::RenderJob {
+		let job = oak_ofx_plugin::render_driver::RenderJob {
 			time: 0.0,
 			dst: Texture::wrap_frame(dst),
 			src: Some(Texture::wrap_frame(src)),
@@ -343,13 +343,13 @@ fn param_overrides_reach_instance() {
 			clear_destination: false,
 			interactive: false,
 		};
-		oak_plugin::render_driver::render_frame(&inst.value, &job).expect("NaN 覆盖不应失败");
+		oak_ofx_plugin::render_driver::render_frame(&inst.value, &job).expect("NaN 覆盖不应失败");
 		assert_eq!(
 			inst.value.params.find("gain").unwrap().get(),
-			oak_plugin::param::ParamValue::Double([0.0, 0.0, 0.0], 1)
+			oak_ofx_plugin::param::ParamValue::Double([0.0, 0.0, 0.0], 1)
 		);
 
-		oak_plugin::node_factory::unregister_instance(id);
+		oak_ofx_plugin::node_factory::unregister_instance(id);
 		Host::global().shutdown();
 	});
 }

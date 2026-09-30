@@ -8,7 +8,7 @@ Oak Video Editor is based on Olive, aiming to deliver a more complete and user-f
 ![screenshot](docs/imgs/screenshot.png)
 
 
-# Features
+## Features
 
 - Premiere-like keyboard shortcut experience
 - OpenFX plugin support — the plugin system used by DaVinci Resolve

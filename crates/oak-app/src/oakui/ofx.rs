@@ -19,7 +19,7 @@
 //! The app is the only place that holds both the oakplugin host and the UI
 //! services the OFX suites consult at runtime, so the wiring lives here:
 //!
-//! - [`init`] scans the standard plugin paths ([`oak_plugin::host::Host`]
+//! - [`init`] scans the standard plugin paths ([`oak_ofx_plugin::host::Host`]
 //!   default path set, `host.rs:440-449`), registers every discovered
 //!   plugin into the node factory (the effect library and the add-effect
 //!   menu consume those entries), installs the render executor and the
@@ -51,10 +51,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui::{Keystroke, Point, RenderImage, Size};
-use oak_plugin::progress::{ReporterFactory, UiProgressReporter};
-use oak_plugin::suites::interact::Interact;
-use oak_plugin::suites::status;
-use oak_plugin::suites::timeline::{ActiveViewerProvider, ViewerTimeInfo};
+use oak_ofx_plugin::progress::{ReporterFactory, UiProgressReporter};
+use oak_ofx_plugin::suites::interact::Interact;
+use oak_ofx_plugin::suites::status;
+use oak_ofx_plugin::suites::timeline::{ActiveViewerProvider, ViewerTimeInfo};
 
 /// One progress event a plugin reporter pushed to the app channel (drained
 /// by the app tick, which drives a progress dialog).
@@ -136,7 +136,7 @@ pub fn update_viewer_time(time: f64, range_min: f64, range_max: f64) {
 pub fn update_project_extent(width: f64, height: f64) {
 	let (w, h) = (width.max(1.0), height.max(1.0));
 	*extent_slot().lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
-	oak_plugin::node_factory::set_project_extent(w, h);
+	oak_ofx_plugin::node_factory::set_project_extent(w, h);
 }
 
 /// Requests cancellation of the running plugin render (the progress
@@ -210,16 +210,16 @@ pub fn init() -> usize {
 	//    plus the OLIVE_OFX_PLUGIN_PATH / OLIVE_PLUGIN_PATH /
 	//    OFX_PLUGIN_PATH environment variables). A scan failure only
 	//    logs — plugins are optional.
-	if let Err(e) = oak_plugin::host::Host::global().cache.scan() {
+	if let Err(e) = oak_ofx_plugin::host::Host::global().cache.scan() {
 		eprintln!("[ofx] plugin scan failed: {e}");
 	}
 	// 2. Register discovered plugins into the node factory (idempotent;
 	//    also installs the render executor and the plugin-node duplicator).
-	let registered = oak_plugin::node_factory::register_plugin_nodes();
+	let registered = oak_ofx_plugin::node_factory::register_plugin_nodes();
 	// 3. Progress reporter factory -> the app progress channel.
-	oak_plugin::progress::set_reporter_factory(Some(reporter_factory()));
+	oak_ofx_plugin::progress::set_reporter_factory(Some(reporter_factory()));
 	// 4. Active-viewer time provider (timeline suite fallback).
-	oak_plugin::suites::timeline::set_active_viewer_provider(Some(viewer_provider()));
+	oak_ofx_plugin::suites::timeline::set_active_viewer_provider(Some(viewer_provider()));
 	// 5. Worker-forwarded plugin progress (the render workers run plugin
 	//    renders in their own process and stream `plugin_progress` NDJSON
 	//    events over the control plane; the dispatcher hands them to this
@@ -236,7 +236,7 @@ pub fn init() -> usize {
 	// 6. Project extent (the engine refreshes it whenever the sequence
 	//    changes; keep the oakplugin side in sync with the default).
 	let (w, h) = *extent_slot().lock().unwrap_or_else(|e| e.into_inner());
-	oak_plugin::node_factory::set_project_extent(w, h);
+	oak_ofx_plugin::node_factory::set_project_extent(w, h);
 	registered.len()
 }
 
@@ -272,7 +272,7 @@ impl InteractViewport {
 
 /// The app-side holder of the selected effect's live interact.
 ///
-/// The interact is created on the *main process* `oak_plugin::Instance` of
+/// The interact is created on the *main process* `oak_ofx_plugin::Instance` of
 /// the selected plugin effect node (the same registry the inspector's
 /// push-button path uses), distinct from the worker-process render
 /// instances — OFX allows a plugin to have several instances, and the
@@ -330,7 +330,7 @@ pub fn sync_active_interact(instance: Option<u64>) {
 	let Some(id) = instance else {
 		return;
 	};
-	let Some(inst) = oak_plugin::node_factory::instance_from_id(id) else {
+	let Some(inst) = oak_ofx_plugin::node_factory::instance_from_id(id) else {
 		// The node/instance is gone (effect deleted): nothing to attach to.
 		return;
 	};
@@ -408,7 +408,7 @@ fn bgra_image_to_f32_rgba(img: &RenderImage) -> Option<(u32, u32, Vec<f32>)> {
 }
 
 /// Reads an `oakplugin` F32 RGBA image into a tightly packed `Vec<f32>`.
-fn read_image_f32(img: &oak_plugin::image::Image) -> Vec<f32> {
+fn read_image_f32(img: &oak_ofx_plugin::image::Image) -> Vec<f32> {
 	img.pixels()
 		.as_chunks::<4>()
 		.0
@@ -488,27 +488,27 @@ pub fn draw_interact_composite(
 	if bw != w as u32 || bh != h as u32 {
 		return None;
 	}
-	let mut params = oak_plugin::render::VideoParams::default();
+	let mut params = oak_ofx_plugin::render::VideoParams::default();
 	params.width = w;
 	params.height = h;
-	params.format = oak_plugin::render::PIXEL_FORMAT_F32;
+	params.format = oak_ofx_plugin::render::PIXEL_FORMAT_F32;
 
-	let _guard = oak_plugin::gl_bridge::acquire().ok()?;
-	let tex = oak_plugin::gl_bridge::create_output_texture(w, h, &params).ok()?;
-	let fbo = match oak_plugin::gl_bridge::create_fbo(tex, w, h) {
+	let _guard = oak_ofx_plugin::gl_bridge::acquire().ok()?;
+	let tex = oak_ofx_plugin::gl_bridge::create_output_texture(w, h, &params).ok()?;
+	let fbo = match oak_ofx_plugin::gl_bridge::create_fbo(tex, w, h) {
 		Ok(fbo) => fbo,
 		Err(_) => {
-			oak_plugin::gl_bridge::delete_gl_texture(tex);
+			oak_ofx_plugin::gl_bridge::delete_gl_texture(tex);
 			return None;
 		}
 	};
-	oak_plugin::gl_bridge::bind_fbo(fbo);
-	oak_plugin::gl_bridge::set_viewport(w, h);
+	oak_ofx_plugin::gl_bridge::bind_fbo(fbo);
+	oak_ofx_plugin::gl_bridge::set_viewport(w, h);
 	// Clear to transparent black: the plugin's strokes composite "over"
 	// nothing, so the readback holds straight alpha (see
 	// [`composite_overlay`]).
-	oak_plugin::gl_bridge::gl_clear_color(0.0, 0.0, 0.0, 0.0);
-	oak_plugin::gl_bridge::gl_clear();
+	oak_ofx_plugin::gl_bridge::gl_clear_color(0.0, 0.0, 0.0, 0.0);
+	oak_ofx_plugin::gl_bridge::gl_clear();
 
 	let st = interact.draw(
 		(viewport.width, viewport.height),
@@ -519,9 +519,9 @@ pub fn draw_interact_composite(
 		// composited on the app side afterwards).
 		None,
 	);
-	let overlay = oak_plugin::gl_bridge::read_pixels_to_image(w, h, &params);
-	oak_plugin::gl_bridge::delete_fbo(fbo);
-	oak_plugin::gl_bridge::delete_gl_texture(tex);
+	let overlay = oak_ofx_plugin::gl_bridge::read_pixels_to_image(w, h, &params);
+	oak_ofx_plugin::gl_bridge::delete_fbo(fbo);
+	oak_ofx_plugin::gl_bridge::delete_gl_texture(tex);
 	let (Ok(overlay), st) = (overlay, st) else {
 		return None;
 	};
@@ -567,15 +567,15 @@ pub fn viewport_pixel_to_pen(
 }
 
 /// Maps a gpui keystroke to the OFX key symbol (`ofxKeySyms.h` values from
-/// `oak_plugin::host::KEY_*`) and the key-string character
+/// `oak_ofx_plugin::host::KEY_*`) and the key-string character
 /// (`kOfxPropKeyString`: the UTF-8 character, empty for keys without one).
 ///
 /// Covers the common keys — alphanumerics, the arrows, return, escape,
 /// backspace/delete, tab, home/end, page up/down and the function keys;
-/// anything else maps to [`oak_plugin::host::KEY_UNKNOWN`] with an empty
+/// anything else maps to [`oak_ofx_plugin::host::KEY_UNKNOWN`] with an empty
 /// string.
 pub fn key_symbol(keystroke: &Keystroke) -> (i32, String) {
-	use oak_plugin::host as ofx_key;
+	use oak_ofx_plugin::host as ofx_key;
 	let key = keystroke.key.as_str();
 	let named = match key {
 		"space" => Some(ofx_key::KEY_SPACE),
@@ -722,7 +722,7 @@ mod tests {
 	/// single characters carry their ASCII symbol + the character string.
 	#[test]
 	fn key_symbol_maps_common_keys() {
-		use oak_plugin::host as ofx_key;
+		use oak_ofx_plugin::host as ofx_key;
 		let ks = |key: &str| gpui::Keystroke::parse(key).unwrap();
 		// Alphanumerics: symbol = ASCII code, string = the char.
 		assert_eq!(key_symbol(&ks("a")), (ofx_key::KEY_A, "a".to_string()));
@@ -908,7 +908,7 @@ mod tests {
 			println!("SKIP: minimal test plugin not built");
 			return false;
 		};
-		if oak_plugin::host::Host::global()
+		if oak_ofx_plugin::host::Host::global()
 			.cache
 			.scan_path(&dir)
 			.is_err()
@@ -916,7 +916,7 @@ mod tests {
 			println!("SKIP: test plugin scan failed");
 			return false;
 		}
-		oak_plugin::node_factory::register_plugin_nodes();
+		oak_ofx_plugin::node_factory::register_plugin_nodes();
 		true
 	}
 
@@ -952,10 +952,10 @@ mod tests {
 		// (1) app-layer creation: `sync_active_interact` on the plugin
 		// instance handle creates the interact (new_interact → describe →
 		// create_instance).
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_plugin::node_factory::register_instance(inst);
+		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
 		sync_active_interact(Some(handle));
 
 		let (active_handle, interact, _viewport) =
@@ -976,11 +976,11 @@ mod tests {
 
 		// (3) keys and idle.
 		assert_eq!(
-			interact.key_down(oak_plugin::host::KEY_A, "a", 5.0),
+			interact.key_down(oak_ofx_plugin::host::KEY_A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(
-			interact.key_up(oak_plugin::host::KEY_A, "a", 5.0),
+			interact.key_up(oak_ofx_plugin::host::KEY_A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(interact.idle(), status::OK);
@@ -1051,7 +1051,7 @@ mod tests {
 			"idle not recorded: {lines:?}"
 		);
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	}
 
 	/// End-to-end overlay: the plugin's draw action really renders into the
@@ -1071,10 +1071,10 @@ mod tests {
 		let _ = std::fs::remove_file(&marker);
 		let _marker_env = MarkerEnvGuard::set(&marker);
 
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_plugin::node_factory::register_instance(inst);
+		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
 		sync_active_interact(Some(handle));
 		let (_, interact, _) = active_interact().expect("active interact created");
 
@@ -1130,7 +1130,7 @@ mod tests {
 		);
 
 		sync_active_interact(None);
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1158,8 +1158,8 @@ mod tests {
 	/// bytes.
 	#[test]
 	fn read_image_f32_unpacks_native_float_samples() {
-		use oak_plugin::image::{BitDepth, Components, Image};
-		use oak_plugin::instance::OfxRectD;
+		use oak_ofx_plugin::image::{BitDepth, Components, Image};
+		use oak_ofx_plugin::instance::OfxRectD;
 		let mut img = Image::allocate(
 			BitDepth::Float,
 			Components::Rgba,
@@ -1196,7 +1196,7 @@ mod tests {
 	/// suffixes fall through to the unknown symbol.
 	#[test]
 	fn key_symbol_function_keys_and_unknown_multi_char_keys() {
-		use oak_plugin::host as ofx_key;
+		use oak_ofx_plugin::host as ofx_key;
 		let ks = |key: &str| gpui::Keystroke::parse(key).unwrap();
 		assert_eq!(
 			key_symbol(&ks("f35")),
@@ -1230,7 +1230,7 @@ mod tests {
 	fn sync_active_interact_missing_instance_is_a_noop() {
 		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		assert!(
-			oak_plugin::node_factory::instance_from_id(u64::MAX - 7).is_none(),
+			oak_ofx_plugin::node_factory::instance_from_id(u64::MAX - 7).is_none(),
 			"the probe handle is not registered"
 		);
 		// The node/instance is gone: nothing to attach.
@@ -1251,7 +1251,7 @@ mod tests {
 			"a second init must not register duplicates (the first registered {first} plugin type(s))"
 		);
 		assert!(
-			oak_plugin::progress::has_reporter_factory(),
+			oak_ofx_plugin::progress::has_reporter_factory(),
 			"init installs the progress reporter factory"
 		);
 	}
@@ -1271,10 +1271,10 @@ mod tests {
 		if !scan_interact_plugin() {
 			return;
 		}
-		let inst = oak_plugin::host::Host::global()
+		let inst = oak_ofx_plugin::host::Host::global()
 			.create_instance(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_plugin::node_factory::register_instance(inst);
+		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
 		sync_active_interact(Some(handle));
 
 		// Re-targeting the same instance keeps the live interact (the
@@ -1324,16 +1324,16 @@ mod tests {
 
 		// A plugin that does not declare an overlay interact reports
 		// `new_interact() == None` and stays inert.
-		let plain = oak_plugin::host::Host::global()
+		let plain = oak_ofx_plugin::host::Host::global()
 			.create_instance("org.oak.test-plugin", None)
 			.expect("plain effect variant instance");
-		let plain_handle = oak_plugin::node_factory::register_instance(plain);
+		let plain_handle = oak_ofx_plugin::node_factory::register_instance(plain);
 		sync_active_interact(Some(plain_handle));
 		assert!(
 			active_interact().is_none(),
 			"a plugin without an interact installs nothing"
 		);
 
-		oak_plugin::host::Host::global().shutdown();
+		oak_ofx_plugin::host::Host::global().shutdown();
 	}
 }

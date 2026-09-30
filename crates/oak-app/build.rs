@@ -49,12 +49,12 @@ fn main() {
 	}
 	// --- OFX interact end-to-end test plugin ---------------------------------
 	// The app-side interact tests (src/oakui/ofx.rs) drive the *real*
-	// minimal test plugin (../../crates/oak-plugin/cbits/oak_test_plugin.c) through
+	// minimal test plugin (../../crates/oak-ofx-plugin/cbits/oak_test_plugin.c) through
 	// the app's interact wiring. oakplugin compiles the same C file into its
 	// own OUT_DIR, but build-script env vars do not cross crates, so compile
 	// it here too — the test assembles a plugin bundle from the app's
 	// OUT_DIR.
-	println!("cargo:rerun-if-changed=../../crates/oak-plugin/cbits/oak_test_plugin.c");
+	println!("cargo:rerun-if-changed=../../crates/oak-ofx-plugin/cbits/oak_test_plugin.c");
 	build_test_plugin(&os);
 }
 
@@ -73,8 +73,8 @@ fn build_test_plugin(os: &str) {
 	};
 	let mut args = vec![
 		"-fPIC".to_string(),
-		"-I../../crates/oak-plugin/ofx".to_string(),
-		"../../crates/oak-plugin/cbits/oak_test_plugin.c".to_string(),
+		"-I../../crates/oak-ofx-plugin/ofx".to_string(),
+		"../../crates/oak-ofx-plugin/cbits/oak_test_plugin.c".to_string(),
 		link_flag.to_string(),
 		"-o".to_string(),
 		format!("{out}/oak_test_plugin.{ext}"),

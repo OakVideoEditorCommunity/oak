@@ -29,9 +29,9 @@ mod common;
 
 use std::sync::Arc;
 
-use oak_plugin::handle::RefBox;
-use oak_plugin::host::Host;
-use oak_plugin::instance::Instance;
+use oak_ofx_plugin::handle::RefBox;
+use oak_ofx_plugin::host::Host;
+use oak_ofx_plugin::instance::Instance;
 
 const TEST_PLUGIN_ID: &str = "org.oak.test-plugin";
 
@@ -108,7 +108,7 @@ fn region_of_definition_default_and_override() {
 		};
 		let rod = inst
 			.value
-			.get_region_of_definition(0.0, oak_plugin::instance::RenderScale { x: 1.0, y: 1.0 })
+			.get_region_of_definition(0.0, oak_ofx_plugin::instance::RenderScale { x: 1.0, y: 1.0 })
 			.expect("getRoD 应成功");
 		assert_eq!((rod.x1, rod.y1, rod.x2, rod.y2), (0.0, 0.0, 1920.0, 1080.0));
 		Host::global().shutdown();
@@ -125,7 +125,7 @@ fn regions_of_interest_writeback() {
 			Host::global().shutdown();
 			return;
 		};
-		let region = oak_plugin::instance::OfxRectD {
+		let region = oak_ofx_plugin::instance::OfxRectD {
 			x1: 10.0,
 			y1: 20.0,
 			x2: 100.0,
@@ -135,7 +135,7 @@ fn regions_of_interest_writeback() {
 			.value
 			.get_regions_of_interest(
 				0.0,
-				oak_plugin::instance::RenderScale { x: 1.0, y: 1.0 },
+				oak_ofx_plugin::instance::RenderScale { x: 1.0, y: 1.0 },
 				region,
 			)
 			.expect("getRoI 应成功");
@@ -194,7 +194,7 @@ fn field_passthrough() {
 #[test]
 fn sequence_render_brackets() {
 	common::with_host(|| {
-		use oak_plugin::instance::OfxRangeD;
+		use oak_ofx_plugin::instance::OfxRangeD;
 		let Some(inst) = create_instance() else {
 			Host::global().shutdown();
 			return;

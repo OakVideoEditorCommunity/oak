@@ -39,7 +39,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// directory that contains it (`OFX_PLUGIN_PATH`). `None` when the test
 /// plugin was not built (release builds).
 fn bundle_parent(tag: &str) -> Option<PathBuf> {
-	let lib = oak_plugin::bundled_test_plugin()?;
+	let lib = oak_ofx_plugin::bundled_test_plugin()?;
 	let root = std::env::temp_dir().join(format!(
 		"oak-ofx-host-{tag}-{}",
 		std::process::id()

@@ -26,20 +26,20 @@ mod common;
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
 
-use oak_plugin::descriptor::EffectDescriptor;
-use oak_plugin::instance::Instance;
-use oak_plugin::param::{ParamInstance, ParamSetInstance};
-use oak_plugin::property::{PropertySet, Value};
-use oak_plugin::suites::fetch_suite;
-use oak_plugin::suites::image_effect::suite_v1 as image_effect_suite;
-use oak_plugin::suites::memory::suite_v1 as memory_suite;
-use oak_plugin::suites::message::suite_v1 as message_suite_v1;
-use oak_plugin::suites::multithread::suite_v1 as multithread_suite;
-use oak_plugin::suites::param::suite_v1 as param_suite;
-use oak_plugin::suites::progress::suite_v1 as progress_suite;
-use oak_plugin::suites::property::suite_v1 as property_suite;
-use oak_plugin::suites::tag;
-use oak_plugin::suites::timeline::suite_v1 as timeline_suite;
+use oak_ofx_plugin::descriptor::EffectDescriptor;
+use oak_ofx_plugin::instance::Instance;
+use oak_ofx_plugin::param::{ParamInstance, ParamSetInstance};
+use oak_ofx_plugin::property::{PropertySet, Value};
+use oak_ofx_plugin::suites::fetch_suite;
+use oak_ofx_plugin::suites::image_effect::suite_v1 as image_effect_suite;
+use oak_ofx_plugin::suites::memory::suite_v1 as memory_suite;
+use oak_ofx_plugin::suites::message::suite_v1 as message_suite_v1;
+use oak_ofx_plugin::suites::multithread::suite_v1 as multithread_suite;
+use oak_ofx_plugin::suites::param::suite_v1 as param_suite;
+use oak_ofx_plugin::suites::progress::suite_v1 as progress_suite;
+use oak_ofx_plugin::suites::property::suite_v1 as property_suite;
+use oak_ofx_plugin::suites::tag;
+use oak_ofx_plugin::suites::timeline::suite_v1 as timeline_suite;
 
 /// OFX 状态码的本地别名（SDK ofxCore.h）。
 const OK: c_int = 0;
@@ -58,7 +58,7 @@ fn props_handle(s: &PropertySet) -> *mut c_void {
 }
 
 /// 假插件（仅喂给 Instance；describe 之外的字段不被触碰）。
-fn dummy_plugin(descriptor: EffectDescriptor) -> std::sync::Arc<oak_plugin::host::Plugin> {
+fn dummy_plugin(descriptor: EffectDescriptor) -> std::sync::Arc<oak_ofx_plugin::host::Plugin> {
 	unsafe extern "C" fn dummy_entry(
 		_: *const c_char,
 		_: *const c_void,
@@ -67,7 +67,7 @@ fn dummy_plugin(descriptor: EffectDescriptor) -> std::sync::Arc<oak_plugin::host
 	) -> c_int {
 		OK
 	}
-	std::sync::Arc::new(oak_plugin::host::Plugin {
+	std::sync::Arc::new(oak_ofx_plugin::host::Plugin {
 		identifier: "test.plugin".into(),
 		version: (1, 0),
 		bundle_path: std::path::PathBuf::new(),
@@ -122,7 +122,7 @@ fn make_instance() -> (std::sync::Arc<Instance>, *mut c_void) {
 		sequence_range: std::sync::Mutex::new(None),
 		progress_cb: std::sync::Mutex::new(None),
 		cancel: std::sync::atomic::AtomicBool::new(false),
-		edit: std::sync::Mutex::new(oak_plugin::instance::EditTransaction::new()),
+		edit: std::sync::Mutex::new(oak_ofx_plugin::instance::EditTransaction::new()),
 		render_lock: std::sync::Mutex::new(()),
 		interact: std::sync::Mutex::new(None),
 	});
@@ -249,7 +249,7 @@ fn memory_suite_ledger() {
 /// 属性读写；实例期 clipGetHandle。
 ///
 /// clipGetImage/clipReleaseImage 配对经
-/// [`oak_plugin::clip::ClipInstance::fetch_image`] 与存活表记账验证。
+/// [`oak_ofx_plugin::clip::ClipInstance::fetch_image`] 与存活表记账验证。
 #[test]
 fn image_effect_clip_image_pairing() {
 	let desc = EffectDescriptor::new();
@@ -290,7 +290,7 @@ fn image_effect_clip_image_pairing() {
 	}
 
 	// 实例期 clipGetHandle（手工构造实例 + clip 实例）。
-	let clip_desc = oak_plugin::descriptor::ClipDescriptor {
+	let clip_desc = oak_ofx_plugin::descriptor::ClipDescriptor {
 		props: PropertySet::new(),
 		name: "Source".into(),
 	};
@@ -299,7 +299,7 @@ fn image_effect_clip_image_pairing() {
 		plugin: dummy_plugin(EffectDescriptor::new()),
 		context: "OfxImageEffectContextFilter".into(),
 		params: ParamSetInstance { params: vec![] },
-		clips: vec![Box::new(oak_plugin::clip::ClipInstance::from_descriptor(
+		clips: vec![Box::new(oak_ofx_plugin::clip::ClipInstance::from_descriptor(
 			&clip_desc,
 		))],
 		node_identity: std::sync::atomic::AtomicUsize::new(0),
@@ -307,7 +307,7 @@ fn image_effect_clip_image_pairing() {
 		sequence_range: std::sync::Mutex::new(None),
 		progress_cb: std::sync::Mutex::new(None),
 		cancel: std::sync::atomic::AtomicBool::new(false),
-		edit: std::sync::Mutex::new(oak_plugin::instance::EditTransaction::new()),
+		edit: std::sync::Mutex::new(oak_ofx_plugin::instance::EditTransaction::new()),
 		render_lock: std::sync::Mutex::new(()),
 		interact: std::sync::Mutex::new(None),
 	});
@@ -378,7 +378,7 @@ fn image_effect_clip_image_pairing() {
 /// setValue/getValue round-trip；AtTime == 当前值。
 ///
 /// 声明含"paramSetValue 触发 instanceChanged"：通知走
-/// [`oak_plugin::param::notify_instance_changed`]，插件自改经 undo
+/// [`oak_ofx_plugin::param::notify_instance_changed`]，插件自改经 undo
 /// 命令写回绑定节点的输入。
 #[test]
 fn param_suite_roundtrip_and_change_action() {
@@ -540,7 +540,7 @@ fn param_keyframe_family() {
 /// （`// TODO(plugin)`）。
 #[test]
 fn message_suite_v1_v2() {
-	use oak_plugin::suites::message::set_handler;
+	use oak_ofx_plugin::suites::message::set_handler;
 
 	unsafe extern "C" fn capture(
 		type_: *const c_char,
@@ -634,8 +634,8 @@ fn message_suite_v1_v2() {
 /// 回调返回 false 时 update 向插件返回取消状态。
 #[test]
 fn progress_suite_forwarding() {
-	use oak_plugin::progress::ProgressReporter;
-	use oak_plugin::suites::progress::set_current;
+	use oak_ofx_plugin::progress::ProgressReporter;
+	use oak_ofx_plugin::suites::progress::set_current;
 
 	unsafe extern "C" fn capture_progress(p: f64, userdata: *mut c_void) -> c_int {
 		let v = unsafe { &mut *(userdata as *mut Vec<f64>) };
@@ -674,8 +674,8 @@ fn progress_suite_forwarding() {
 /// 无上下文 → 0 / (0,0) 的 headless 默认。
 #[test]
 fn timeline_suite_values() {
-	use oak_plugin::instance::{OfxRangeD, RenderScale};
-	use oak_plugin::suites::{set_render_ctx, RenderCtx};
+	use oak_ofx_plugin::instance::{OfxRangeD, RenderScale};
+	use oak_ofx_plugin::suites::{set_render_ctx, RenderCtx};
 
 	let s = timeline_suite();
 	let handle = 0x10usize as *mut c_void;

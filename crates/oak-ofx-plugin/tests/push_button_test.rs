@@ -27,7 +27,7 @@
 
 mod common;
 
-use oak_plugin::host::Host;
+use oak_ofx_plugin::host::Host;
 
 const PLUGIN_ID: &str = "org.oak.test-plugin";
 
@@ -45,7 +45,7 @@ fn push_button_press_routes_instance_changed() {
 		let inst = Host::global()
 			.create_instance(PLUGIN_ID, None)
 			.expect("实例");
-		let id = oak_plugin::node_factory::register_instance(inst.clone());
+		let id = oak_ofx_plugin::node_factory::register_instance(inst.clone());
 
 		// The C plugin appends one line per instanceChanged("button") to the
 		// marker file; the assertion reads it back.
@@ -55,16 +55,16 @@ fn push_button_press_routes_instance_changed() {
 
 		// The button param exists and is a push button.
 		let p = inst.value.params.find("button").expect("button 参数");
-		assert_eq!(p.def.ofx_type, oak_plugin::param::TYPE_PUSHBUTTON);
+		assert_eq!(p.def.ofx_type, oak_ofx_plugin::param::TYPE_PUSHBUTTON);
 
 		// First press: set + routed to the plugin.
-		assert!(oak_plugin::node_factory::push_button_clicked(id, "button"));
+		assert!(oak_ofx_plugin::node_factory::push_button_clicked(id, "button"));
 		// Unknown / non-button params are rejected without touching the entry.
-		assert!(!oak_plugin::node_factory::push_button_clicked(id, "gain"));
-		assert!(!oak_plugin::node_factory::push_button_clicked(id, "nope"));
-		assert!(!oak_plugin::node_factory::push_button_clicked(u64::MAX, "button"));
+		assert!(!oak_ofx_plugin::node_factory::push_button_clicked(id, "gain"));
+		assert!(!oak_ofx_plugin::node_factory::push_button_clicked(id, "nope"));
+		assert!(!oak_ofx_plugin::node_factory::push_button_clicked(u64::MAX, "button"));
 		// Second press on the real button: routed again.
-		assert!(oak_plugin::node_factory::push_button_clicked(id, "button"));
+		assert!(oak_ofx_plugin::node_factory::push_button_clicked(id, "button"));
 
 		// Exactly the two real presses reached the plugin's instanceChanged.
 		let log = std::fs::read_to_string(&marker).expect("marker 文件应存在");
@@ -73,7 +73,7 @@ fn push_button_press_routes_instance_changed() {
 
 		std::env::remove_var("OAK_TEST_PLUGIN_INSTANCECHANGED_MARKER");
 		let _ = std::fs::remove_file(&marker);
-		oak_plugin::node_factory::unregister_instance(id);
+		oak_ofx_plugin::node_factory::unregister_instance(id);
 		Host::global().shutdown();
 	});
 }

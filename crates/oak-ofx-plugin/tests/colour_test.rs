@@ -25,10 +25,10 @@ mod common;
 
 use std::sync::Arc;
 
-use oak_plugin::handle::RefBox;
-use oak_plugin::host::Host;
-use oak_plugin::instance::Instance;
-use oak_plugin::property::Value;
+use oak_ofx_plugin::handle::RefBox;
+use oak_ofx_plugin::host::Host;
+use oak_ofx_plugin::instance::Instance;
+use oak_ofx_plugin::property::Value;
 
 const TEST_PLUGIN_ID: &str = "org.oak.test-plugin";
 
@@ -44,7 +44,7 @@ fn scan_and_create(id: &str) -> Option<Arc<RefBox<Instance>>> {
 	host.create_instance(id, None).ok()
 }
 
-fn prop_str(props: &oak_plugin::property::PropertySet, name: &str) -> Option<String> {
+fn prop_str(props: &oak_ofx_plugin::property::PropertySet, name: &str) -> Option<String> {
 	match props.get(name, 0)? {
 		Value::String(s) => Some(s.to_string_lossy().into_owned()),
 		_ => None,

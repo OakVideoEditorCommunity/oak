@@ -16,7 +16,7 @@
 
 //! GL 渲染桥端到端：真实 CGL 离屏上下文 + 输出纹理/FBO + 回读。
 //!
-//! 链路（方案 B，见 [`oak_plugin::gl_bridge`] 模块文档）：扫描最小测试
+//! 链路（方案 B，见 [`oak_ofx_plugin::gl_bridge`] 模块文档）：扫描最小测试
 //! 插件的 GL 变体（org.oak.test-plugin.gl，声明 OpenGLRenderSupported=
 //! "true" + F32）→ 用 GL 后端渲染器（fake `GpuContextLike`，kind=Gl）
 //! 构造 RenderJob → `render_frame` 的 use_opengl 决策命中 → 桥建 CGL
@@ -40,8 +40,8 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::Arc;
 
 use oak_core::{PixelFormat, Rational};
-use oak_plugin::host::Host;
-use oak_plugin::render::{Renderer, Texture};
+use oak_ofx_plugin::host::Host;
+use oak_ofx_plugin::render::{Renderer, Texture};
 use oak_core::backend::{BackendKind, GpuContextLike};
 use oak_core::texture::Frame;
 
@@ -112,7 +112,7 @@ fn scan_and_register() -> bool {
 		common::skip("测试插件扫描失败");
 		return false;
 	}
-	oak_plugin::node_factory::register_plugin_nodes();
+	oak_ofx_plugin::node_factory::register_plugin_nodes();
 	true
 }
 
@@ -128,7 +128,7 @@ fn gl_plugin_renders_through_real_gl_path() {
 			common::skip("GL 测试需 OAK_GPU_TESTS（本机 GPU 验收；CI 一律跳过）");
 			return;
 		}
-		if !oak_plugin::gl_bridge::gl_available() {
+		if !oak_ofx_plugin::gl_bridge::gl_available() {
 			common::skip("本机无可用 GL 上下文");
 			return;
 		}
@@ -137,7 +137,7 @@ fn gl_plugin_renders_through_real_gl_path() {
 		}
 
 		let mut captured: Vec<(String, String)> = Vec::new();
-		oak_plugin::suites::message::set_handler(
+		oak_ofx_plugin::suites::message::set_handler(
 			Some(capture_msg),
 			&mut captured as *mut _ as *mut c_void,
 		);
@@ -145,14 +145,14 @@ fn gl_plugin_renders_through_real_gl_path() {
 		let inst = Host::global()
 			.create_instance(GL_PLUGIN_ID, None)
 			.expect("GL 变体实例应可建");
-		let reg = oak_plugin::node_factory::register_instance(inst.clone());
+		let reg = oak_ofx_plugin::node_factory::register_instance(inst.clone());
 
 		let dst = oak_render::eval::generate_frame(Rational::new(0, 1), (4, 4), PixelFormat::F32)
 			.unwrap();
 		let src = oak_render::eval::generate_frame(Rational::new(0, 1), (4, 4), PixelFormat::F32)
 			.unwrap();
 		let renderer: Renderer = Arc::new(FakeGlRenderer);
-		let job = oak_plugin::render_driver::RenderJob {
+		let job = oak_ofx_plugin::render_driver::RenderJob {
 			time: 0.0,
 			dst: Texture::wrap_frame(dst),
 			src: Some(Texture::wrap_frame(src)),
@@ -163,11 +163,11 @@ fn gl_plugin_renders_through_real_gl_path() {
 			clear_destination: false,
 			interactive: false,
 		};
-		let (out, _rois) = oak_plugin::render_driver::render_frame(&inst.value, &job)
+		let (out, _rois) = oak_ofx_plugin::render_driver::render_frame(&inst.value, &job)
 			.expect("GL render_frame 应成功");
 
-		oak_plugin::node_factory::unregister_instance(reg);
-		oak_plugin::suites::message::set_handler(None, std::ptr::null_mut());
+		oak_ofx_plugin::node_factory::unregister_instance(reg);
+		oak_ofx_plugin::suites::message::set_handler(None, std::ptr::null_mut());
 		Host::global().shutdown();
 
 		// 1. 输出像素 = 插件 GL 清屏色（CPU 路径恒 0.5，可区分）。
@@ -215,7 +215,7 @@ fn gl_plugin_falls_back_to_cpu_without_gl_renderer() {
 			return;
 		}
 		let mut captured: Vec<(String, String)> = Vec::new();
-		oak_plugin::suites::message::set_handler(
+		oak_ofx_plugin::suites::message::set_handler(
 			Some(capture_msg),
 			&mut captured as *mut _ as *mut c_void,
 		);
@@ -223,13 +223,13 @@ fn gl_plugin_falls_back_to_cpu_without_gl_renderer() {
 		let inst = Host::global()
 			.create_instance(GL_PLUGIN_ID, None)
 			.expect("GL 变体实例应可建");
-		let reg = oak_plugin::node_factory::register_instance(inst.clone());
+		let reg = oak_ofx_plugin::node_factory::register_instance(inst.clone());
 
 		let dst = oak_render::eval::generate_frame(Rational::new(0, 1), (4, 4), PixelFormat::F32)
 			.unwrap();
 		let src = oak_render::eval::generate_frame(Rational::new(0, 1), (4, 4), PixelFormat::F32)
 			.unwrap();
-		let job = oak_plugin::render_driver::RenderJob {
+		let job = oak_ofx_plugin::render_driver::RenderJob {
 			time: 0.0,
 			dst: Texture::wrap_frame(dst),
 			src: Some(Texture::wrap_frame(src)),
@@ -240,11 +240,11 @@ fn gl_plugin_falls_back_to_cpu_without_gl_renderer() {
 			clear_destination: false,
 			interactive: false,
 		};
-		let (out, _rois) = oak_plugin::render_driver::render_frame(&inst.value, &job)
+		let (out, _rois) = oak_ofx_plugin::render_driver::render_frame(&inst.value, &job)
 			.expect("CPU 回退 render_frame 应成功");
 
-		oak_plugin::node_factory::unregister_instance(reg);
-		oak_plugin::suites::message::set_handler(None, std::ptr::null_mut());
+		oak_ofx_plugin::node_factory::unregister_instance(reg);
+		oak_ofx_plugin::suites::message::set_handler(None, std::ptr::null_mut());
 		Host::global().shutdown();
 
 		let px = first_pixel(&out);

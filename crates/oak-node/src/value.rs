@@ -105,7 +105,7 @@ pub enum ValueType {
 	PushButton,
 	/// Parametric curve (OpenFX parametric param; the value payload is a
 	/// [`NodeValue::Text`] JSON document, see
-	/// `oak_plugin::param_curve::curves_to_json` — string-carried like
+	/// `oak_ofx_plugin::param_curve::curves_to_json` — string-carried like
 	/// [`ValueType::Text`]).
 	Parametric,
 }

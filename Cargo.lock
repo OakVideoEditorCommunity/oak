@@ -4644,7 +4644,7 @@ dependencies = [
  "oak-codec",
  "oak-core",
  "oak-node",
- "oak-plugin",
+ "oak-ofx-plugin",
  "oak-render",
  "oak-storage",
  "oak-task",
@@ -4730,18 +4730,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oak-otio"
-version = "0.5.1"
-dependencies = [
- "oak-core",
- "quick-xml 0.41.0",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-plugin"
+name = "oak-ofx-plugin"
 version = "0.5.1"
 dependencies = [
  "cc",
@@ -4749,6 +4738,17 @@ dependencies = [
  "oak-node",
  "oak-render",
  "oak-undo",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "oak-otio"
+version = "0.5.1"
+dependencies = [
+ "oak-core",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
@@ -4823,7 +4823,7 @@ dependencies = [
  "oak-codec",
  "oak-core",
  "oak-node",
- "oak-plugin",
+ "oak-ofx-plugin",
  "oak-render",
  "serde",
  "serde_json",

@@ -1,5 +1,5 @@
 [package]
-name = "oak-plugin"
+name = "oak-ofx-plugin"
 version.workspace = true
 edition = "2021"
 description = "Oak Video Editor plugin module: self-contained OFX host and plugin bridge (Rust)"
