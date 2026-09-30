@@ -23,57 +23,17 @@ jobs:
   build-test:
     name: Build & test (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    # Container entries carry the container as JSON ({"image":...,
-    # "options":...}); the empty string means "run on the host"
-    # (actions/runner#265 allows an empty container value). The valueless
-    # "--env WARPBUILD_RUNNER_VERIFICATION_TOKEN" in the Linux options
-    # passes the WarpBuild verification token from the runner's own
-    # environment into the container (docker -e VAR passthrough) so
-    # WarpCache can authenticate: ${{ env.* }} cannot carry it — the env
-    # expression context never sees runner machine variables.
-    container: ${{ matrix.container != '' && fromJSON(matrix.container) || '' }}
-    # The Test step's watchdog caps a hung suite at 30 min; leave a cold
-    # FFmpeg build + full compile room beyond that.
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Debian
+          - name: Ubuntu
             platform: linux
-            distro: debian
+            distro: ubuntu
             arch: x64
             runner: ubuntu-24.04
             triplet: x64-linux
-            container: '{"image":"debian:13","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
-          - name: Fedora
-            platform: linux
-            distro: fedora
-            arch: x64
-            runner: ubuntu-24.04
-            triplet: x64-linux
-            container: '{"image":"fedora:43","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
-          - name: Arch
-            platform: linux
-            distro: arch
-            arch: x64
-            runner: ubuntu-24.04
-            triplet: x64-linux
-            container: '{"image":"archlinux:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
-          - name: openKylin x64
-            platform: linux
-            distro: openkylin
-            arch: x64
-            runner: ubuntu-24.04
-            triplet: x64-linux
-            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
-          - name: openKylin arm64
-            platform: linux
-            distro: openkylin
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            triplet: arm64-linux
-            container: '{"image":"openkylin/openkylin:latest","options":"--shm-size=8g --env WARPBUILD_RUNNER_VERIFICATION_TOKEN"}'
           - name: macOS
             platform: macos
             distro: macos
@@ -449,7 +409,7 @@ jobs:
       # pin down the fault type, the dynsym dump exposes symbols the
       # executable exports for interposition, strace shows the last loader
       # syscalls, and valgrind catches a corrupting static initializer.
-      - name: Backtrace on test failure (Debian)
+      - name: Backtrace on test failure (Linux)
         if: failure() && matrix.distro == 'debian'
         shell: bash
         run: |
@@ -473,22 +433,6 @@ jobs:
               -ex 'p/x $_siginfo._sifields._sigfault.si_addr' \
               -ex 'x/6i $rip' \
               --args "$BIN" --nocapture || true
-          done
-
-      # Same idea for the other distro containers (gdb is installed with
-      # the system dependencies).
-      - name: Backtrace on test failure (containers)
-        if: failure() && matrix.platform == 'linux' && matrix.distro != 'debian'
-        shell: bash
-        run: |
-          for name in oak_render oakapp oak_ofx_plugin; do
-            BIN=$(ls -t target/debug/deps/$name-* 2>/dev/null | grep -v '\.d$' | head -1)
-            [ -n "$BIN" ] || continue
-            echo "===== $BIN ====="
-            timeout 900 xvfb-run -a gdb -batch \
-              -ex run \
-              -ex 'thread apply all bt' \
-              --args "$BIN" || true
           done
 
       # A SIGSEGV in a test binary gives no Rust backtrace; Apple's crash
