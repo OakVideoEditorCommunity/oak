@@ -15,10 +15,8 @@
 //! — re-query the engine or `to_vec` instead. Mutation goes through
 //! `&mut self`.
 
-// The audio module's extern block already links the engine cdylib; this
-// empty block keeps vecs self-sufficient if it is ever used alone.
-#[link(name = "oak_engine")]
-unsafe extern "C" {}
+// The macro-generated extern blocks below carry their own #[link]
+// attribute, so each wrapper type is self-sufficient.
 
 /// Generates a safe wrapper for one of the engine's vector ABIs.
 /// The `String` arm must stay first: `String` would also match `$elem:ty`.
@@ -36,6 +34,8 @@ macro_rules! define_vec {
 		unsafe impl Sync for $name {}
 
 		const _: () = {
+			#[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
+			#[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
 			unsafe extern "C" {
 				#[link_name = concat!($prefix, "_init")]
 				fn init_raw() -> *mut std::ffi::c_void;
@@ -143,6 +143,8 @@ macro_rules! define_vec {
 		unsafe impl Sync for $name {}
 
 		const _: () = {
+			#[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
+			#[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
 			unsafe extern "C" {
 				#[link_name = concat!($prefix, "_init")]
 				fn init_raw() -> *mut std::ffi::c_void;

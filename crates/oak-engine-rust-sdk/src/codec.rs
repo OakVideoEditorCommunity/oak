@@ -6,7 +6,8 @@ use std::ffi::{CStr, CString, c_void};
 
 use crate::vecs::VecI32;
 
-#[link(name = "oak_engine")]
+#[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
+#[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
 unsafe extern "C" {
 	// exportcodec
 	fn oak_codec_codec_is_valid(codec: i32) -> bool;

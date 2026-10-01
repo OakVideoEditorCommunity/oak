@@ -8,9 +8,13 @@
 use std::ffi::c_void;
 
 // The engine cdylib: cargo builds it as a path dependency into the
-// dependency search path (target/<profile>/deps), so the plain name
-// resolves at link time on every platform (dylib/so/dll).
-#[link(name = "oak_engine")]
+// dependency search path (target/<profile>/deps). On Windows link its
+// MSVC import library verbatim: rustc's cdylib build produces
+// oak_engine.dll + oak_engine.dll.lib, while the default dylib link
+// would look for oak_engine.lib (LNK1181). +verbatim links the import
+// library under its real name; the DLL itself is found at runtime.
+#[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
+#[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
 unsafe extern "C" {
 	fn oak_audio_manager_create_instance() -> bool;
 	fn oak_audio_manager_destroy_instance();
