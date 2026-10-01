@@ -4643,7 +4643,6 @@ dependencies = [
  "oak-audio",
  "oak-codec",
  "oak-core",
- "oak-engine",
  "oak-node",
  "oak-ofx-plugin",
  "oak-render",
@@ -4732,6 +4731,14 @@ dependencies = [
  "oak-task",
  "oak-timeline",
  "oak-undo",
+]
+
+[[package]]
+name = "oak-engine-rust-sdk"
+version = "0.5.1"
+dependencies = [
+ "oak-engine",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

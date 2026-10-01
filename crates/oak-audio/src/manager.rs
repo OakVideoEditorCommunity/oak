@@ -224,7 +224,7 @@ impl ManagerInner {
 		Ok(())
 	}
 
-	/// Seconds of audio consumed by the output device since the last reset,
+	/// Seconds of audio consumed by the output devclear_buffered_outputice since the last reset,
 	/// compensated for output latency; negative when no stream is running.
 	///
 	/// `// CPP-PARITY: src/audio/src/audiomanager.cpp:169` — PortAudio's

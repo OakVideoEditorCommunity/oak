@@ -5,7 +5,7 @@ version.workspace = true
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 oak-audio = { path = "../oak-audio" }

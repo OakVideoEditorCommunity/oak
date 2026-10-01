@@ -83,7 +83,7 @@ oak-storage = { path = "../oak-storage" }
 oak-task = { path = "../oak-task" }
 oak-timeline = { path = "../oak-timeline" }
 oak-undo = { path = "../oak-undo" }
-oak-engine = { path = "../oak-engine" }
+# oak-engine = { path = "../oak-engine" }
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by

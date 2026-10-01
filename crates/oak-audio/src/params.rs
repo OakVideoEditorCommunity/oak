@@ -31,8 +31,7 @@ pub use oak_core::SampleFormat;
 
 /// Audio stream parameters, mirroring `olive::core::AudioParams`
 /// (core/include/olive/core/render/audioparams.h). A plain value type;
-/// never bridged through a C ABI handle — liboakcore owns the matching
-/// `oakcore_audioparams_*` wrapper and is out of scope here.
+/// never bridged through a C ABI handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AudioParams {
 	/// Sample rate in Hz.

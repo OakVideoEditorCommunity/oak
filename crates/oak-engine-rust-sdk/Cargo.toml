@@ -1,0 +1,15 @@
+[package]
+name = "oak-engine-rust-sdk"
+edition = "2024"
+version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+thiserror = "2"
+# The engine is a cdylib which the SDK links dynamically (`#[link]`) and
+# talks to only through its exported `extern "C"` symbols — no Rust API
+# of the engine is used. The dependency edge makes cargo build the dylib
+# into the dependency search path before anything links the SDK.
+oak-engine = { path = "../oak-engine" }
