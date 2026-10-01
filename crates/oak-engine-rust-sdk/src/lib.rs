@@ -6,4 +6,5 @@
 //! in idiomatic Rust types and error handling.
 
 pub mod audio;
+pub mod codec;
 pub mod vecs;

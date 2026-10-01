@@ -23,10 +23,10 @@
 //! managers call it whenever they need a task. With no callback, managers
 //! report work as unavailable — they never crash and never block.
 
-use std::ffi::{c_void, CString};
+use std::ffi::c_void;
 use std::sync::Mutex;
 
-use crate::error::{Error, OAKCODEC_OK};
+
 
 /// Kinds of background tasks oakcodec can request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,53 +70,11 @@ pub struct TaskRequest<'a> {
 /// queued), `Err` if the request was rejected.
 pub type TaskSubmitFn = dyn Fn(&TaskRequest, *mut std::ffi::c_void) -> crate::error::Result<()>;
 
-/// `OakCodecTaskRequest` — C ABI mirror of [`TaskRequest`] for the submit
-/// callback; see `include/codec/task.h`. Strings are borrowed C pointers,
-/// valid only for the duration of the call.
-#[repr(C)]
-pub struct OakCodecTaskRequest {
-	/// `TaskKind` value.
-	pub kind: i32,
-	/// Source media filename.
-	pub input_filename: *const std::ffi::c_char,
-	/// Final destination path.
-	pub output_filename: *const std::ffi::c_char,
-	/// Stream inside the source media.
-	pub stream_index: i32,
-	/// Conform: target sample rate.
-	pub sample_rate: i32,
-	/// Conform: target channel-layout mask.
-	pub channel_layout: u64,
-	/// Conform: target sample format (enum as int).
-	pub sample_format: i32,
-	/// Proxy: target width (0 = unspecified/divider-based).
-	pub proxy_width: i32,
-	/// Proxy: target height (0 = unspecified/divider-based).
-	pub proxy_height: i32,
-}
-
-/// `oakcodec_task_submit_fn` — the extern-C submit callback typedef; see
-/// `include/codec/task.h`. Returns `OAKCODEC_OK` on accept, else a
-/// negative `OAKCODEC_E_*` code.
-pub type OakCodecTaskSubmitFn =
-	unsafe extern "C" fn(req: *const OakCodecTaskRequest, userdata: *mut std::ffi::c_void) -> i32;
-
-/// One registered submit callback (extern-C from the host, or a crate
-/// Rust closure). Mirrors the C++ `g_task_cb`/`g_task_cb_userdata` pair.
+/// One registered submit callback. Mirrors the C++
+/// `g_task_cb`/`g_task_cb_userdata` pair.
 enum SubmitCb {
 	/// No callback registered.
 	None,
-	/// Extern-C callback registered via `oakcodec_set_task_submit_cb`.
-	///
-	/// Only constructed by the tests below and by the extern-C entry point
-	/// that the removed C ABI used to expose; kept for that lane.
-	#[allow(dead_code)]
-	Extern {
-		/// The C function pointer.
-		cb: OakCodecTaskSubmitFn,
-		/// Opaque userdata passed back on each call.
-		userdata: *mut c_void,
-	},
 	/// Crate-internal Rust closure registered via [`set_task_submit_cb`].
 	Rust {
 		/// Raw fat-pointer to the `&'static TaskSubmitFn` (kept `*const` so
@@ -127,11 +85,10 @@ enum SubmitCb {
 	},
 }
 
-// # Safety: the stored pointers (extern-C fn pointer, fat pointer to a
-// 'static closure, userdata) are only dereferenced/called while holding the
-// registry mutex; the Rust closure is 'static and the extern-C fn outlives
-// registration by contract. Moving the enum between threads under the lock
-// therefore cannot alias.
+// # Safety: the stored fat pointer to a 'static closure is only
+// dereferenced/called while holding the registry mutex, and the closure
+// outlives registration by contract. Moving the enum between threads under
+// the lock therefore cannot alias.
 unsafe impl Send for SubmitCb {}
 
 /// The global task submit callback registry. Only one callback is held at
@@ -152,22 +109,6 @@ pub fn set_task_submit_cb(cb: Option<&'static TaskSubmitFn>, userdata: *mut std:
 	};
 }
 
-/// Register an extern-C submit callback (used by `ffi::task`).
-///
-/// Mirrors `oakcodec_set_task_submit_cb`: a `None` pointer clears it.
-/// Only the tests below call it (the extern-C lane is exercised there).
-#[allow(dead_code)]
-pub(crate) fn set_task_submit_cb_extern(
-	cb: Option<OakCodecTaskSubmitFn>,
-	userdata: *mut std::ffi::c_void,
-) {
-	let mut g = TASK_SUBMIT.lock().unwrap();
-	*g = match cb {
-		Some(cb) => SubmitCb::Extern { cb, userdata },
-		None => SubmitCb::None,
-	};
-}
-
 /// Returns 1 if a submit callback is currently registered, else 0.
 /// Thread-safe.
 pub fn task_submit_is_registered() -> bool {
@@ -183,34 +124,6 @@ pub fn submit_task(req: &TaskRequest) -> crate::error::Result<bool> {
 	let g = TASK_SUBMIT.lock().unwrap();
 	match &*g {
 		SubmitCb::None => Ok(false),
-		SubmitCb::Extern { cb, userdata } => {
-			// Bind the C strings to locals so the temporaries outlive the
-			// callback call (their pointers feed the request struct).
-			let in_c = cstring_or_empty(req.input_filename);
-			let out_c = cstring_or_empty(req.output_filename);
-			let creq = OakCodecTaskRequest {
-				kind: req.kind as i32,
-				input_filename: in_c.as_ptr(),
-				output_filename: out_c.as_ptr(),
-				stream_index: req.stream_index,
-				sample_rate: req.sample_rate,
-				channel_layout: req.channel_layout,
-				sample_format: req.sample_format,
-				proxy_width: req.proxy_width,
-				proxy_height: req.proxy_height,
-			};
-			// # Safety: the callback is a C function we registered; passing a
-			// request whose string pointers are alive for the call duration.
-			let ret = unsafe { cb(&creq, *userdata) };
-			if ret == OAKCODEC_OK {
-				Ok(true)
-			} else {
-				Err(Error::Failed(format!(
-					"task submit rejected (code {})",
-					ret
-				)))
-			}
-		}
 		SubmitCb::Rust { cb, userdata } => {
 			// # Safety: the fat pointer was stored by set_task_submit_cb and
 			// points to a 'static closure that outlives this call.
@@ -223,12 +136,6 @@ pub fn submit_task(req: &TaskRequest) -> crate::error::Result<bool> {
 	}
 }
 
-/// Build a NUL-terminated C string from a Rust string; empty on embedded
-/// NUL (callers pass sane filenames, so this is defensive only).
-fn cstring_or_empty(s: &str) -> CString {
-	CString::new(s).unwrap_or_else(|_| CString::new("").unwrap())
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -236,13 +143,6 @@ mod tests {
 	// callback is process-global and every test that mutates it must
 	// serialize on the same mutex.
 	use crate::conformmanager::test_util::REG_LOCK;
-
-	unsafe extern "C" fn reject_cb(
-		_req: *const OakCodecTaskRequest,
-		_ud: *mut std::ffi::c_void,
-	) -> i32 {
-		-1 // rejected
-	}
 
 	#[test]
 	fn submit_via_rust_closure_and_clear() {
@@ -282,55 +182,6 @@ mod tests {
 		set_task_submit_cb(None, std::ptr::null_mut());
 		assert!(!task_submit_is_registered());
 		assert!(!submit_task(&req).unwrap());
-	}
-
-	#[test]
-	fn extern_cb_reject_maps_to_err() {
-		let _g = REG_LOCK.lock().unwrap();
-		set_task_submit_cb_extern(Some(reject_cb), std::ptr::null_mut());
-		let req = TaskRequest {
-			kind: TaskKind::Proxy,
-			input_filename: "in.mp4",
-			output_filename: "out.mp4",
-			stream_index: 0,
-			sample_rate: 0,
-			channel_layout: 0,
-			sample_format: 0,
-			proxy_width: 1280,
-			proxy_height: 720,
-		};
-		assert!(submit_task(&req).is_err());
-		set_task_submit_cb_extern(None, std::ptr::null_mut());
-	}
-
-	#[test]
-	fn extern_cb_accept_returns_ok() {
-		let _g = REG_LOCK.lock().unwrap();
-		set_task_submit_cb_extern(
-			Some(crate::conformmanager::test_util::accept_cb),
-			std::ptr::null_mut(),
-		);
-		let req = TaskRequest {
-			kind: TaskKind::Conform,
-			input_filename: "in.mp4",
-			output_filename: "out.pcm",
-			stream_index: 0,
-			sample_rate: 0,
-			channel_layout: 0,
-			sample_format: 0,
-			proxy_width: 0,
-			proxy_height: 0,
-		};
-		assert!(submit_task(&req).unwrap());
-		set_task_submit_cb_extern(None, std::ptr::null_mut());
-	}
-
-	#[test]
-	fn cstring_or_empty_handles_embedded_nul() {
-		// Embedded NUL -> empty string (defensive).
-		let c = cstring_or_empty("a\0b");
-		assert_eq!(c.as_c_str().to_bytes(), b"");
-		assert_eq!(cstring_or_empty("ok").as_c_str().to_bytes(), b"ok");
 	}
 
 	#[test]

@@ -105,16 +105,6 @@ impl ProxyParams {
 	}
 }
 
-/// `oakcodec_proxy_result` — POD result of [`ProxyManager::get_or_start`];
-/// see `include/codec/proxy.h`.
-#[repr(C)]
-pub struct OakCodecProxyResult {
-	/// `ProxyState` value.
-	pub state: i32,
-	/// Resulting proxy filename (may be empty).
-	pub filename: [u8; 1024],
-}
-
 /// `olive::ProxyManager` — stateless proxy query/generate manager.
 pub struct ProxyManager;
 
@@ -613,7 +603,7 @@ mod tests {
 	#[test]
 	fn get_or_start_missing_without_registrar() {
 		let _g = crate::conformmanager::test_util::REG_LOCK.lock().unwrap();
-		crate::task::set_task_submit_cb_extern(None, std::ptr::null_mut());
+		crate::conformmanager::test_util::clear_submit_cb();
 		let cache = temp_subdir("nostart");
 		let p = ProxyManager::proxy_params_default();
 		let (state, _f) = ProxyManager::instance()
@@ -639,16 +629,13 @@ mod tests {
 	#[test]
 	fn get_or_start_generating_when_registered() {
 		let _g = crate::conformmanager::test_util::REG_LOCK.lock().unwrap();
-		crate::task::set_task_submit_cb_extern(
-			Some(crate::conformmanager::test_util::accept_cb),
-			std::ptr::null_mut(),
-		);
+		crate::conformmanager::test_util::register_accept_cb();
 		let cache = temp_subdir("start");
 		let p = ProxyManager::proxy_params_default();
 		let (state, _f) = ProxyManager::instance()
 			.get_or_start(&cache, "media.mp4", 0, &p)
 			.unwrap();
-		crate::task::set_task_submit_cb_extern(None, std::ptr::null_mut());
+		crate::conformmanager::test_util::clear_submit_cb();
 		assert_eq!(state, ProxyState::Generating);
 	}
 

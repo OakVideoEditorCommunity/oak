@@ -20,7 +20,7 @@ Oak Video Editor is based on Olive, aiming to deliver a more complete and user-f
 
 ## Download
 
-[v0.5.0](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.5.0-alpha2)
+[v0.5.1](https://github.com/OakVideoEditorCommunity/oak/releases/tag/v0.5.1-alpha)
 
 ## Build Instructions
 

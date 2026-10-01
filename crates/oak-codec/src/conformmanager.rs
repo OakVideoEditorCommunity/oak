@@ -201,18 +201,25 @@ fn all_conforms_exist(filenames: &[String]) -> bool {
 /// registration) and provides a callback that accepts any task.
 #[cfg(test)]
 pub(crate) mod test_util {
-	use crate::error::OAKCODEC_OK;
-	use crate::task::OakCodecTaskRequest;
-
 	/// Serializes every test that mutates the task-submit registry.
 	pub static REG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 	/// A task-submit callback that accepts every request (no-op).
-	pub unsafe extern "C" fn accept_cb(
-		_req: *const OakCodecTaskRequest,
+	fn accept_cb(
+		_req: &crate::task::TaskRequest,
 		_ud: *mut std::ffi::c_void,
-	) -> i32 {
-		OAKCODEC_OK
+	) -> crate::error::Result<()> {
+		Ok(())
+	}
+
+	/// Registers `accept_cb` as the process-wide submit callback.
+	pub fn register_accept_cb() {
+		crate::task::set_task_submit_cb(Some(&accept_cb), std::ptr::null_mut());
+	}
+
+	/// Clears the process-wide submit callback.
+	pub fn clear_submit_cb() {
+		crate::task::set_task_submit_cb(None, std::ptr::null_mut());
 	}
 }
 
@@ -296,7 +303,7 @@ mod tests {
 	fn get_conform_state_unavailable_without_registrar() {
 		let _g = super::test_util::REG_LOCK.lock().unwrap();
 		// Ensure no registrar is left over.
-		crate::task::set_task_submit_cb_extern(None, std::ptr::null_mut());
+		super::test_util::clear_submit_cb();
 		let cache = temp_subdir("unavail");
 		let s = ConformManager::instance()
 			.get_conform_state(&cache, "missing.mp4", 0, 48000, 0x3, 0, false)
@@ -323,15 +330,12 @@ mod tests {
 	#[test]
 	fn get_conform_state_generating_when_registered() {
 		let _g = super::test_util::REG_LOCK.lock().unwrap();
-		crate::task::set_task_submit_cb_extern(
-			Some(super::test_util::accept_cb),
-			std::ptr::null_mut(),
-		);
+		super::test_util::register_accept_cb();
 		let cache = temp_subdir("generating");
 		let s = ConformManager::instance()
 			.get_conform_state(&cache, "missing.mp4", 0, 48000, 0x3, 0, false)
 			.unwrap();
-		crate::task::set_task_submit_cb_extern(None, std::ptr::null_mut());
+		super::test_util::clear_submit_cb();
 		assert_eq!(s, ConformState::Generating);
 	}
 }
