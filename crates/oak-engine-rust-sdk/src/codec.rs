@@ -606,8 +606,9 @@ mod tests {
 			ProxyState::Missing
 		);
 		let params = ProxyParams::default();
+		let cache = std::env::temp_dir().to_string_lossy().into_owned();
 		let filename =
-			proxy_get_filename("/tmp", "/tmp/oak-sdk-src.mp4", 0, &params).expect("filename");
+			proxy_get_filename(&cache, "oak-sdk-src.mp4", 0, &params).expect("filename");
 		assert!(filename.ends_with(".v1.a1.mp4"), "unexpected: {filename}");
 		let working = proxy_get_working_filename(&filename).expect("working");
 		assert!(working.ends_with(".working.mp4"));

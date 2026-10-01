@@ -296,8 +296,8 @@ mod tests {
 			preset: cstr32(b"veryfast"),
 			..oak_codec_proxy_params_default()
 		};
-		let cache = "/tmp";
-		let source = "/tmp/oak-source-clip.mp4";
+		let cache = std::env::temp_dir().to_string_lossy().into_owned();
+		let source = "oak-source-clip.mp4";
 		let mut buf = [0u8; 1024];
 		let n = unsafe {
 			oak_codec_proxy_get_filename(
@@ -313,7 +313,12 @@ mod tests {
 		};
 		assert!(n > 0);
 		let filename = std::str::from_utf8(&buf[..n as usize]).unwrap();
-		assert!(filename.starts_with("/tmp/"));
+		// Platform-agnostic: the derived file lives somewhere under the
+		// cache directory (which may gain a proxy subdirectory).
+		assert!(
+			filename.starts_with(cache.trim_end_matches(['/', '\\'])),
+			"unexpected: {filename} (cache {cache})"
+		);
 		assert!(filename.ends_with(".v1.a1.mp4"), "unexpected: {filename}");
 
 		let n = unsafe {
