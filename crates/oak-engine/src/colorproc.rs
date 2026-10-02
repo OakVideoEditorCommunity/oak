@@ -229,3 +229,81 @@ mod tests {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ColorTransform (the plain-data display/output transform descriptor)
+// ---------------------------------------------------------------------------
+
+use oak_core::colortransform::ColorTransform;
+
+crate::export_handle!(
+	ColorTransform,
+	oak_core_colortransform_add_ref,
+	oak_core_colortransform_release
+);
+
+/// An output-colorspace transform descriptor; null on invalid input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colortransform_new_output(
+	output: *const u8,
+	output_len: usize,
+) -> *mut ColorTransform {
+	let Some(output) = (unsafe { str_arg(output, output_len) }) else {
+		return std::ptr::null_mut();
+	};
+	into_ffi(ColorTransform::new_output(output)) as *mut ColorTransform
+}
+
+/// A display/view/look transform descriptor; null on invalid input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colortransform_new_display(
+	display: *const u8,
+	display_len: usize,
+	view: *const u8,
+	view_len: usize,
+	look: *const u8,
+	look_len: usize,
+) -> *mut ColorTransform {
+	let (Some(display), Some(view), Some(look)) = (
+		unsafe { str_arg(display, display_len) },
+		unsafe { str_arg(view, view_len) },
+		unsafe { str_arg(look, look_len) },
+	) else {
+		return std::ptr::null_mut();
+	};
+	into_ffi(ColorTransform::new_display(display, view, look)) as *mut ColorTransform
+}
+
+/// Whether this is a display/view/look transform.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colortransform_is_display(
+	this: *const ColorTransform,
+) -> bool {
+	!this.is_null() && unsafe { &*this }.is_display()
+}
+
+macro_rules! colortransform_getter {
+	($( $name:ident => $native:ident ),* $(,)?) => {
+		$(
+			#[doc = concat!("`ColorTransform::", stringify!($native), "`, snprintf-style; -1 on null.")]
+			#[unsafe(no_mangle)]
+			pub unsafe extern "C" fn $name(
+				this: *const ColorTransform,
+				buf: *mut u8,
+				buf_len: usize,
+			) -> i32 {
+				if this.is_null() {
+					return -1;
+				}
+				copy_str_out(unsafe { &*this }.$native(), buf, buf_len)
+			}
+		)*
+	};
+}
+
+colortransform_getter! {
+	oak_core_colortransform_output => output,
+	oak_core_colortransform_display => display,
+	oak_core_colortransform_view => view,
+	oak_core_colortransform_look => look,
+}

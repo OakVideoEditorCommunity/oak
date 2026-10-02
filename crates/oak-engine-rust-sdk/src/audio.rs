@@ -38,6 +38,27 @@ unsafe extern "C" {
 		error_buf: *mut u8,
 		error_buf_len: usize,
 	) -> bool;
+
+	// params conversions (pure functions)
+	fn oak_audio_params_channel_count(channel_layout: u64) -> i32;
+	fn oak_audio_params_bytes_per_sample_per_channel(format: i32) -> i64;
+	fn oak_audio_params_samples_to_bytes(
+		sample_rate: i32,
+		channel_layout: u64,
+		format: i32,
+		samples: i64,
+	) -> i64;
+	fn oak_audio_params_frames_to_rational(frames: i64, sample_rate: i32) -> crate::types::Rational;
+	fn oak_audio_params_rational_to_samples(time: crate::types::Rational, sample_rate: i32) -> i64;
+
+	// levelmeter
+	fn oak_audio_levelmeter_analyze(
+		planar: *const *const f32,
+		samples_per_channel: usize,
+		channels: usize,
+		channel_stats: *mut ChannelStats,
+		out: *mut OakLevelStats,
+	) -> bool;
 }
 
 use crate::vecs::VecString;
@@ -263,6 +284,110 @@ pub fn push_to_output(params: AudioParams, samples: &[u8]) -> Result<(), PushErr
 	}))
 }
 
+// ---------------------------------------------------------------------------
+// Params conversions (pure functions)
+// ---------------------------------------------------------------------------
+
+/// Channel count of an ffmpeg-style channel layout mask.
+pub fn channel_count(channel_layout: u64) -> i32 {
+	unsafe { oak_audio_params_channel_count(channel_layout) }
+}
+
+/// Bytes per sample per channel for a [`SampleFormat`].
+pub fn bytes_per_sample_per_channel(format: SampleFormat) -> i64 {
+	unsafe { oak_audio_params_bytes_per_sample_per_channel(format as i32) }
+}
+
+impl AudioParams {
+	/// Byte count of `samples` frames in this format.
+	pub fn samples_to_bytes(&self, samples: i64) -> i64 {
+		unsafe {
+			oak_audio_params_samples_to_bytes(
+				self.sample_rate,
+				self.channel_layout,
+				self.format,
+				samples,
+			)
+		}
+	}
+}
+
+/// Frame count as rational seconds at `sample_rate`.
+pub fn frames_to_rational(frames: i64, sample_rate: i32) -> crate::types::Rational {
+	unsafe { oak_audio_params_frames_to_rational(frames, sample_rate) }
+}
+
+/// Rational seconds as a frame count at `sample_rate`.
+pub fn rational_to_samples(time: crate::types::Rational, sample_rate: i32) -> i64 {
+	unsafe { oak_audio_params_rational_to_samples(time, sample_rate) }
+}
+
+// ---------------------------------------------------------------------------
+// Level meter
+// ---------------------------------------------------------------------------
+
+/// Per-channel level statistics.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ChannelStats {
+	/// Peak amplitude, linear scale (0.0 when silent).
+	pub peak_linear: f64,
+	/// Peak amplitude, decibel scale (-200.0 when silent).
+	pub peak_db: f64,
+	/// RMS level, linear scale.
+	pub rms_linear: f64,
+	/// RMS level, decibel scale (-200.0 when silent).
+	pub rms_db: f64,
+	/// VU-meter ballistics reading, decibel scale.
+	pub vu_db: f64,
+}
+
+/// Whole-buffer level statistics.
+#[derive(Clone, Debug, Default)]
+pub struct LevelStats {
+	/// Per-channel statistics, indexed by channel.
+	pub channels: Vec<ChannelStats>,
+	/// Maximum peak across all channels, linear scale.
+	pub max_peak_linear: f64,
+	/// Integrated loudness (EBU R128 LUFS; -200.0 for silence).
+	pub integrated_lufs: f64,
+	/// Every channel below the noise gate.
+	pub silence: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct OakLevelStats {
+	max_peak_linear: f64,
+	integrated_lufs: f64,
+	silence: i32,
+}
+
+/// Analyzes a planar f32 sample buffer (one slice per channel; all
+/// channels must have the same length).
+pub fn analyze_samples(planar: &[&[f32]]) -> LevelStats {
+	let channels = planar.len();
+	let samples = planar.first().map_or(0, |c| c.len());
+	let ptrs: Vec<*const f32> = planar.iter().map(|c| c.as_ptr()).collect();
+	let mut channel_stats = vec![ChannelStats::default(); channels];
+	let mut out = OakLevelStats::default();
+	unsafe {
+		oak_audio_levelmeter_analyze(
+			ptrs.as_ptr(),
+			samples,
+			channels,
+			channel_stats.as_mut_ptr(),
+			&mut out,
+		)
+	};
+	LevelStats {
+		channels: channel_stats,
+		max_peak_linear: out.max_peak_linear,
+		integrated_lufs: out.integrated_lufs,
+		silence: out.silence != 0,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -357,6 +482,33 @@ mod tests {
 			// still surface with a non-empty message.
 			Err(e) => assert!(!e.0.is_empty()),
 		}
+	}
+
+	#[test]
+	fn params_conversions() {
+		assert_eq!(channel_count(0x3), 2);
+		assert_eq!(bytes_per_sample_per_channel(SampleFormat::F32), 4);
+		let params = AudioParams::new(48_000, 0x3, SampleFormat::F32);
+		assert_eq!(params.samples_to_bytes(100), 800);
+
+		let r = frames_to_rational(48, 48_000);
+		assert_eq!(r, crate::types::Rational::new(1, 1000));
+		assert_eq!(rational_to_samples(r, 48_000), 48);
+	}
+
+	#[test]
+	fn levelmeter_analyze() {
+		let left = [0.5f32, -0.5, 0.25];
+		let right = [0.25f32, 0.25, -0.25];
+		let stats = analyze_samples(&[&left, &right]);
+		assert_eq!(stats.channels.len(), 2);
+		assert_eq!(stats.max_peak_linear, 0.5);
+		assert!(!stats.silence);
+		assert_eq!(stats.channels[0].peak_linear, 0.5);
+		assert_eq!(stats.channels[1].peak_linear, 0.25);
+
+		let silent = analyze_samples(&[&[0.0f32; 16]]);
+		assert!(silent.silence);
 	}
 
 	#[test]

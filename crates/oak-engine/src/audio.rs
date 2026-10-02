@@ -195,3 +195,229 @@ pub unsafe extern "C" fn oak_audio_manager_push_to_output(params: OakAudioParams
     let Some(mut inst) = instance() else { return false; };
     inst.push_to_output(params.into_audio_params(), sample_buf, error_buf).is_ok()
 }
+
+// ---------------------------------------------------------------------------
+// Audio params conversions (pure functions)
+// ---------------------------------------------------------------------------
+
+/// Channel count of an ffmpeg-style channel layout mask.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_channel_count(channel_layout: u64) -> i32 {
+	oak_audio::params::AudioParams {
+		sample_rate: 0,
+		channel_layout,
+		format: oak_core::SampleFormat::Invalid,
+	}
+	.channel_count()
+}
+
+/// Bytes per sample per channel for a SampleFormat discriminant.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_bytes_per_sample_per_channel(format: i32) -> i64 {
+	oak_audio::params::AudioParams {
+		sample_rate: 0,
+		channel_layout: 0,
+		format: oak_audio::params::sample_format_from_i32(format),
+	}
+	.bytes_per_sample_per_channel()
+}
+
+/// Byte count of `samples` frames in the given format/layout.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_samples_to_bytes(
+	sample_rate: i32,
+	channel_layout: u64,
+	format: i32,
+	samples: i64,
+) -> i64 {
+	oak_audio::params::AudioParams {
+		sample_rate,
+		channel_layout,
+		format: oak_audio::params::sample_format_from_i32(format),
+	}
+	.samples_to_bytes(samples)
+}
+
+/// Frame count as rational seconds at `sample_rate`.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_frames_to_rational(
+	frames: i64,
+	sample_rate: i32,
+) -> crate::coretypes::OakRational {
+	crate::handle::NativeMirror::from_native(&oak_audio::params::frames_to_rational(
+		frames,
+		sample_rate,
+	))
+}
+
+/// Rational seconds as a frame count at `sample_rate`.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_rational_to_samples(
+	time: crate::coretypes::OakRational,
+	sample_rate: i32,
+) -> i64 {
+	oak_audio::params::rational_to_samples(
+		crate::handle::NativeMirror::to_native(&time),
+		sample_rate,
+	)
+}
+
+/// `f64` seconds as a rational.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_params_rational_from_double(
+	value: f64,
+) -> crate::coretypes::OakRational {
+	crate::handle::NativeMirror::from_native(&oak_audio::params::rational_from_double(value))
+}
+
+// ---------------------------------------------------------------------------
+// Level meter
+// ---------------------------------------------------------------------------
+
+/// Per-channel level statistics.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct OakChannelStats {
+	/// Peak amplitude, linear scale (0.0 when silent).
+	pub peak_linear: f64,
+	/// Peak amplitude, decibel scale (-200.0 when silent).
+	pub peak_db: f64,
+	/// RMS level, linear scale.
+	pub rms_linear: f64,
+	/// RMS level, decibel scale (-200.0 when silent).
+	pub rms_db: f64,
+	/// VU-meter ballistics reading, decibel scale.
+	pub vu_db: f64,
+}
+
+/// Whole-buffer level statistics.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct OakLevelStats {
+	/// Maximum peak across all channels, linear scale.
+	pub max_peak_linear: f64,
+	/// Integrated loudness (EBU R128 LUFS; -200.0 for silence).
+	pub integrated_lufs: f64,
+	/// Every channel below the noise gate.
+	pub silence: i32,
+}
+
+/// Analyzes a planar f32 sample buffer: `planar` points to `channels`
+/// channel pointers, each with `samples_per_channel` samples.
+/// `channel_stats` must hold `channels` entries (may be null to skip
+/// per-channel stats). False on null/invalid input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_audio_levelmeter_analyze(
+	planar: *const *const f32,
+	samples_per_channel: usize,
+	channels: usize,
+	channel_stats: *mut OakChannelStats,
+	out: *mut OakLevelStats,
+) -> bool {
+	if out.is_null() || (planar.is_null() && channels > 0) {
+		return false;
+	}
+	if channels > 0 && channel_stats.is_null() {
+		return false;
+	}
+	let channels_ptrs =
+		unsafe { std::slice::from_raw_parts(planar, channels) };
+	let mut lanes: Vec<&[f32]> = Vec::with_capacity(channels);
+	for &ptr in channels_ptrs {
+		if ptr.is_null() && samples_per_channel > 0 {
+			return false;
+		}
+		lanes.push(if ptr.is_null() {
+			&[]
+		} else {
+			unsafe { std::slice::from_raw_parts(ptr, samples_per_channel) }
+		});
+	}
+	let stats = oak_audio::levelmeter::analyze_sample_buffer(&lanes);
+	for (i, c) in stats.channels.iter().enumerate() {
+		unsafe {
+			*channel_stats.add(i) = OakChannelStats {
+				peak_linear: c.peak_linear,
+				peak_db: c.peak_db,
+				rms_linear: c.rms_linear,
+				rms_db: c.rms_db,
+				vu_db: c.vu_db,
+			};
+		}
+	}
+	unsafe {
+		*out = OakLevelStats {
+			max_peak_linear: stats.max_peak_linear,
+			integrated_lufs: stats.integrated_lufs,
+			silence: stats.silence as i32,
+		};
+	}
+	true
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn params_conversions() {
+		// Stereo (layout 0x3) F32 (discriminant 10): 4 bytes/sample/channel.
+		assert_eq!(oak_audio_params_channel_count(0x3), 2);
+		assert_eq!(oak_audio_params_bytes_per_sample_per_channel(10), 4);
+		assert_eq!(oak_audio_params_samples_to_bytes(48000, 0x3, 10, 100), 800);
+
+		let r = oak_audio_params_frames_to_rational(48, 48_000);
+		assert_eq!((r.num, r.den), (1, 1000));
+		assert_eq!(oak_audio_params_rational_to_samples(r, 48_000), 48);
+		let d = oak_audio_params_rational_from_double(0.5);
+		assert_eq!((d.num, d.den), (1, 2));
+	}
+
+	#[test]
+	fn levelmeter_analyze() {
+		unsafe {
+			let left = [0.5f32, -0.5, 0.25];
+			let right = [0.25f32, 0.25, -0.25];
+			let planar = [left.as_ptr(), right.as_ptr()];
+			let mut channels = [OakChannelStats {
+				peak_linear: 0.0,
+				peak_db: 0.0,
+				rms_linear: 0.0,
+				rms_db: 0.0,
+				vu_db: 0.0,
+			}; 2];
+			let mut stats = OakLevelStats {
+				max_peak_linear: 0.0,
+				integrated_lufs: 0.0,
+				silence: 1,
+			};
+			assert!(oak_audio_levelmeter_analyze(
+				planar.as_ptr(),
+				3,
+				2,
+				channels.as_mut_ptr(),
+				&mut stats,
+			));
+			assert_eq!(stats.max_peak_linear, 0.5);
+			assert_eq!(stats.silence, 0);
+			assert_eq!(channels[0].peak_linear, 0.5);
+			assert_eq!(channels[1].peak_linear, 0.25);
+
+			// Null safety.
+			assert!(!oak_audio_levelmeter_analyze(
+				std::ptr::null(),
+				3,
+				1,
+				channels.as_mut_ptr(),
+				&mut stats,
+			));
+			assert!(!oak_audio_levelmeter_analyze(
+				planar.as_ptr(),
+				3,
+				2,
+				std::ptr::null_mut(),
+				&mut stats,
+			));
+		}
+	}
+}

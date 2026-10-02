@@ -1,6 +1,8 @@
 //! C ABI bindings for oak-codec: proxy manager, export format/codec
 //! enumerations, and the background-task submit lane.
 
+mod decoder;
+mod encoder;
 mod exportcodec;
 mod frame;
 mod exportformat;

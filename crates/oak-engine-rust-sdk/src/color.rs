@@ -33,6 +33,24 @@ unsafe extern "C" {
 	fn oak_core_colorproc_convert_bgra8(this: *const c_void, data: *mut u8, pixels: i64) -> bool;
 	fn oak_core_colorproc_add_ref(this: *const c_void);
 	fn oak_core_colorproc_release(this: *const c_void);
+
+	// colortransform
+	fn oak_core_colortransform_new_output(output: *const u8, output_len: usize) -> *mut c_void;
+	fn oak_core_colortransform_new_display(
+		display: *const u8,
+		display_len: usize,
+		view: *const u8,
+		view_len: usize,
+		look: *const u8,
+		look_len: usize,
+	) -> *mut c_void;
+	fn oak_core_colortransform_is_display(this: *const c_void) -> bool;
+	fn oak_core_colortransform_output(this: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_core_colortransform_display(this: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_core_colortransform_view(this: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_core_colortransform_look(this: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_core_colortransform_add_ref(this: *const c_void);
+	fn oak_core_colortransform_release(this: *const c_void);
 }
 
 /// A failed color-processor call.
@@ -148,6 +166,82 @@ impl Drop for ColorProcessor {
 	}
 }
 
+/// A display/output transform descriptor. Reference-counted in the
+/// engine: `Clone` adds a reference, `Drop` releases.
+pub struct ColorTransform {
+	ptr: *mut c_void,
+}
+
+unsafe impl Send for ColorTransform {}
+unsafe impl Sync for ColorTransform {}
+
+impl ColorTransform {
+	/// An output-colorspace transform.
+	pub fn new_output(output: &str) -> Self {
+		Self {
+			ptr: unsafe { oak_core_colortransform_new_output(output.as_ptr(), output.len()) },
+		}
+	}
+
+	/// A display/view/look transform.
+	pub fn new_display(display: &str, view: &str, look: &str) -> Self {
+		Self {
+			ptr: unsafe {
+				oak_core_colortransform_new_display(
+					display.as_ptr(),
+					display.len(),
+					view.as_ptr(),
+					view.len(),
+					look.as_ptr(),
+					look.len(),
+				)
+			},
+		}
+	}
+
+	/// Whether this is a display/view/look transform.
+	pub fn is_display(&self) -> bool {
+		unsafe { oak_core_colortransform_is_display(self.ptr) }
+	}
+
+	/// The output colorspace name ("" for display transforms).
+	pub fn output(&self) -> String {
+		string_out(|buf, len| unsafe { oak_core_colortransform_output(self.ptr, buf, len) })
+			.unwrap_or_default()
+	}
+
+	/// The display name ("" for output transforms).
+	pub fn display(&self) -> String {
+		string_out(|buf, len| unsafe { oak_core_colortransform_display(self.ptr, buf, len) })
+			.unwrap_or_default()
+	}
+
+	/// The view name.
+	pub fn view(&self) -> String {
+		string_out(|buf, len| unsafe { oak_core_colortransform_view(self.ptr, buf, len) })
+			.unwrap_or_default()
+	}
+
+	/// The look name.
+	pub fn look(&self) -> String {
+		string_out(|buf, len| unsafe { oak_core_colortransform_look(self.ptr, buf, len) })
+			.unwrap_or_default()
+	}
+}
+
+impl Clone for ColorTransform {
+	fn clone(&self) -> Self {
+		unsafe { oak_core_colortransform_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for ColorTransform {
+	fn drop(&mut self) {
+		unsafe { oak_core_colortransform_release(self.ptr) };
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -170,6 +264,24 @@ mod tests {
 		// Clones share the processor.
 		let clone = proc.clone();
 		assert_eq!(clone.convert_color([1.0, 0.0, 0.0, 1.0]), [1.0, 0.0, 0.0, 1.0]);
+	}
+
+	#[test]
+	fn colortransform_roundtrip() {
+		let output = ColorTransform::new_output("srgb");
+		assert!(!output.is_display());
+		assert_eq!(output.output(), "srgb");
+		assert_eq!(output.display(), "");
+
+		let display = ColorTransform::new_display("sRGB", "Standard", "none");
+		assert!(display.is_display());
+		assert_eq!(display.display(), "sRGB");
+		assert_eq!(display.view(), "Standard");
+		assert_eq!(display.look(), "none");
+
+		let clone = display.clone();
+		drop(display);
+		assert_eq!(clone.view(), "Standard");
 	}
 
 	#[test]

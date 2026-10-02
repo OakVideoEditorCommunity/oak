@@ -78,6 +78,66 @@ unsafe extern "C" {
 	fn oak_codec_frame_set_params(this: *mut c_void, params: crate::types::VideoParams);
 	fn oak_codec_frame_add_ref(this: *const c_void);
 	fn oak_codec_frame_release(this: *const c_void);
+
+	// decoder/encoder filename helpers
+	fn oak_codec_decoder_ids() -> *mut c_void;
+	fn oak_codec_decoder_transform_image_sequence_filename(
+		filename: *const u8,
+		filename_len: usize,
+		number: i64,
+		buf: *mut u8,
+		buf_len: usize,
+	) -> i32;
+	fn oak_codec_decoder_image_sequence_digit_count(filename: *const u8, len: usize) -> i32;
+	fn oak_codec_decoder_image_sequence_index(filename: *const u8, len: usize) -> i64;
+	fn oak_codec_encoder_filename_contains_digit_placeholder(
+		filename: *const u8,
+		len: usize,
+	) -> bool;
+	fn oak_codec_encoder_image_sequence_placeholder_digit_count(
+		filename: *const u8,
+		len: usize,
+	) -> i32;
+	fn oak_codec_encoder_filename_remove_digit_placeholder(
+		filename: *const u8,
+		filename_len: usize,
+		buf: *mut u8,
+		buf_len: usize,
+	) -> i32;
+
+	// probe (FootageDescription is a read-only handle)
+	fn oak_codec_decoder_probe(
+		decoder_id: *const u8,
+		decoder_id_len: usize,
+		filename: *const u8,
+		filename_len: usize,
+	) -> *mut c_void;
+	fn oak_codec_footage_decoder_name(fd: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_codec_footage_total_stream_count(fd: *const c_void) -> i32;
+	fn oak_codec_footage_stream_type(fd: *const c_void, index: i32) -> i32;
+	fn oak_codec_footage_video_stream_count(fd: *const c_void) -> i32;
+	fn oak_codec_footage_audio_stream_count(fd: *const c_void) -> i32;
+	fn oak_codec_footage_subtitle_stream_count(fd: *const c_void) -> i32;
+	fn oak_codec_footage_get_video_stream(
+		fd: *const c_void,
+		ordinal: i32,
+		out: *mut crate::types::VideoParams,
+	) -> bool;
+	fn oak_codec_footage_get_audio_stream(
+		fd: *const c_void,
+		ordinal: i32,
+		out: *mut crate::types::AudioStreamParams,
+	) -> bool;
+	fn oak_codec_footage_get_subtitle_stream(
+		fd: *const c_void,
+		ordinal: i32,
+		out: *mut crate::types::SubtitleParams,
+	) -> bool;
+	fn oak_codec_footage_has_source_start_time(fd: *const c_void) -> bool;
+	fn oak_codec_footage_source_start_time(fd: *const c_void) -> crate::types::Rational;
+	fn oak_codec_footage_duration(fd: *const c_void, out: *mut crate::types::TimeRange) -> bool;
+	fn oak_codec_footage_add_ref(fd: *const c_void);
+	fn oak_codec_footage_release(fd: *const c_void);
 }
 
 /// A failed engine codec call. The C ABI carries no detail beyond the
@@ -552,7 +612,7 @@ pub fn task_submit(req: &TaskRequest) -> Result<bool, Error> {
 // Frame (reference-counted CPU pixel buffer)
 // ---------------------------------------------------------------------------
 
-use crate::types::{PixelFormat, Rational, VideoParams};
+use crate::types::{AudioStreamParams, PixelFormat, Rational, SubtitleParams, TimeRange, VideoParams};
 
 /// A reference-counted CPU pixel buffer; the plugin I/O carrier.
 ///
@@ -681,6 +741,217 @@ impl Clone for Frame {
 impl Drop for Frame {
 	fn drop(&mut self) {
 		unsafe { oak_codec_frame_release(self.ptr) };
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Decoder/encoder filename helpers
+// ---------------------------------------------------------------------------
+
+/// The ids of all registered decoders (e.g. "ffmpeg", "oiio").
+pub fn decoder_ids() -> crate::vecs::VecString {
+	unsafe { crate::vecs::VecString::from_raw(oak_codec_decoder_ids()) }
+}
+
+/// Substitutes the frame number into an image-sequence filename
+/// (`frame_0001.png` + 42 → `frame_0042.png`).
+pub fn transform_image_sequence_filename(filename: &str, number: i64) -> Option<String> {
+	string_out(|buf, len| unsafe {
+		oak_codec_decoder_transform_image_sequence_filename(
+			filename.as_ptr(),
+			filename.len(),
+			number,
+			buf,
+			len,
+		)
+	})
+}
+
+/// The trailing-digit count marking `filename` as an image sequence
+/// (0 when it is not one).
+pub fn image_sequence_digit_count(filename: &str) -> Option<i32> {
+	let n = unsafe {
+		oak_codec_decoder_image_sequence_digit_count(filename.as_ptr(), filename.len())
+	};
+	(n >= 0).then_some(n)
+}
+
+/// The sequence index encoded in `filename` (0 when there is none).
+pub fn image_sequence_index(filename: &str) -> i64 {
+	unsafe { oak_codec_decoder_image_sequence_index(filename.as_ptr(), filename.len()) }
+}
+
+/// Whether `filename` contains an image-sequence digit placeholder
+/// (`[####]`).
+pub fn filename_contains_digit_placeholder(filename: &str) -> bool {
+	unsafe {
+		oak_codec_encoder_filename_contains_digit_placeholder(filename.as_ptr(), filename.len())
+	}
+}
+
+/// The digit count of the sequence placeholder in `filename` (0 when
+/// none).
+pub fn placeholder_digit_count(filename: &str) -> Option<i32> {
+	let n = unsafe {
+		oak_codec_encoder_image_sequence_placeholder_digit_count(
+			filename.as_ptr(),
+			filename.len(),
+		)
+	};
+	(n >= 0).then_some(n)
+}
+
+/// `filename` with the digit placeholder removed.
+pub fn remove_digit_placeholder(filename: &str) -> Option<String> {
+	string_out(|buf, len| unsafe {
+		oak_codec_encoder_filename_remove_digit_placeholder(
+			filename.as_ptr(),
+			filename.len(),
+			buf,
+			len,
+		)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Probe (read-only FootageDescription handle)
+// ---------------------------------------------------------------------------
+
+
+/// A stream's kind within a [`FootageDescription`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamType {
+	Video = 0,
+	Audio = 1,
+	Subtitle = 2,
+}
+
+impl StreamType {
+	fn from_i32(v: i32) -> Option<StreamType> {
+		match v {
+			0 => Some(StreamType::Video),
+			1 => Some(StreamType::Audio),
+			2 => Some(StreamType::Subtitle),
+			_ => None,
+		}
+	}
+}
+
+/// Probes `filename` and returns its stream inventory. `None` for the
+/// decoder id tries every registered decoder in order; otherwise only
+/// the named one. `None` when nothing can read the file.
+pub fn decoder_probe(decoder_id: Option<&str>, filename: &str) -> Option<FootageDescription> {
+	let (id, id_len) = match decoder_id {
+		Some(id) => (id.as_ptr(), id.len()),
+		None => (std::ptr::null(), 0),
+	};
+	let ptr = unsafe { oak_codec_decoder_probe(id, id_len, filename.as_ptr(), filename.len()) };
+	if ptr.is_null() {
+		return None;
+	}
+	Some(FootageDescription { ptr })
+}
+
+/// The streams a probe found in a file. Read-only; `Clone` adds a
+/// reference, `Drop` releases.
+pub struct FootageDescription {
+	ptr: *mut c_void,
+}
+
+unsafe impl Send for FootageDescription {}
+unsafe impl Sync for FootageDescription {}
+
+impl FootageDescription {
+	/// The probing decoder's id (e.g. "ffmpeg").
+	pub fn decoder_name(&self) -> String {
+		string_out(|buf, len| unsafe { oak_codec_footage_decoder_name(self.ptr, buf, len) })
+			.unwrap_or_default()
+	}
+
+	/// Total stream count (video + audio + subtitle).
+	pub fn total_stream_count(&self) -> usize {
+		unsafe { oak_codec_footage_total_stream_count(self.ptr) as usize }
+	}
+
+	/// The kind of the `index`-th stream in probe order.
+	pub fn stream_type(&self, index: usize) -> Option<StreamType> {
+		StreamType::from_i32(unsafe { oak_codec_footage_stream_type(self.ptr, index as i32) })
+	}
+
+	pub fn video_stream_count(&self) -> usize {
+		unsafe { oak_codec_footage_video_stream_count(self.ptr) as usize }
+	}
+
+	pub fn audio_stream_count(&self) -> usize {
+		unsafe { oak_codec_footage_audio_stream_count(self.ptr) as usize }
+	}
+
+	pub fn subtitle_stream_count(&self) -> usize {
+		unsafe { oak_codec_footage_subtitle_stream_count(self.ptr) as usize }
+	}
+
+	/// The `ordinal`-th video stream's params (per-type ordinal, NOT the
+	/// probe-order index).
+	pub fn video_stream(&self, ordinal: usize) -> Option<VideoParams> {
+		let mut out = VideoParams::new();
+		if unsafe { oak_codec_footage_get_video_stream(self.ptr, ordinal as i32, &mut out) } {
+			Some(out)
+		} else {
+			None
+		}
+	}
+
+	/// The `ordinal`-th audio stream's params (per-type ordinal).
+	pub fn audio_stream(&self, ordinal: usize) -> Option<AudioStreamParams> {
+		let mut out = AudioStreamParams::default();
+		if unsafe { oak_codec_footage_get_audio_stream(self.ptr, ordinal as i32, &mut out) } {
+			Some(out)
+		} else {
+			None
+		}
+	}
+
+	/// The `ordinal`-th subtitle stream's params (per-type ordinal).
+	pub fn subtitle_stream(&self, ordinal: usize) -> Option<SubtitleParams> {
+		let mut out = SubtitleParams::default();
+		if unsafe { oak_codec_footage_get_subtitle_stream(self.ptr, ordinal as i32, &mut out) } {
+			Some(out)
+		} else {
+			None
+		}
+	}
+
+	/// The source start time, when the media carries one.
+	pub fn source_start_time(&self) -> Option<Rational> {
+		if unsafe { oak_codec_footage_has_source_start_time(self.ptr) } {
+			Some(unsafe { oak_codec_footage_source_start_time(self.ptr) })
+		} else {
+			None
+		}
+	}
+
+	/// The total duration, when known.
+	pub fn duration(&self) -> Option<TimeRange> {
+		let mut out = TimeRange::default();
+		if unsafe { oak_codec_footage_duration(self.ptr, &mut out) } {
+			Some(out)
+		} else {
+			None
+		}
+	}
+}
+
+impl Clone for FootageDescription {
+	fn clone(&self) -> Self {
+		unsafe { oak_codec_footage_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for FootageDescription {
+	fn drop(&mut self) {
+		unsafe { oak_codec_footage_release(self.ptr) };
 	}
 }
 
@@ -821,6 +1092,37 @@ mod tests {
 		set_task_submit_cb::<fn(&TaskRequest) -> i32>(None);
 		let req = proxy_task("/tmp/a\0b.mp4", "/tmp/a.p.mp4");
 		assert!(task_submit(&req).is_err());
+	}
+
+	#[test]
+	fn decoder_ids_and_sequence_helpers() {
+		let ids = decoder_ids();
+		assert!(ids.iter().any(|id| id == "ffmpeg"));
+
+		assert_eq!(image_sequence_digit_count("frame_0001.png"), Some(4));
+		assert_eq!(image_sequence_digit_count("frame.png"), Some(0));
+		assert_eq!(
+			transform_image_sequence_filename("frame_0001.png", 42).as_deref(),
+			Some("frame_0042.png")
+		);
+	}
+
+	#[test]
+	fn encoder_placeholder_helpers() {
+		assert!(filename_contains_digit_placeholder("out_[#####].png"));
+		assert!(!filename_contains_digit_placeholder("out.png"));
+		assert_eq!(placeholder_digit_count("out_[#####].png"), Some(5));
+		let stripped = remove_digit_placeholder("out_[#####].png").expect("strip");
+		assert!(!stripped.contains('#'), "got {stripped}");
+	}
+
+	#[test]
+	fn probe_negative_paths() {
+		// The positive path is covered end-to-end by the engine tests
+		// (they generate real media with testmedia); here we verify the
+		// wrapper's None mapping.
+		assert!(decoder_probe(Some("no-such-decoder"), "/nonexistent/x.mp4").is_none());
+		assert!(decoder_probe(None, "/nonexistent/x.mp4").is_none());
 	}
 
 	#[test]

@@ -7,6 +7,7 @@
 //! thread-safe.
 
 use oak_core::colormath::{self, OutputColorSpec, WorkingColorSpace};
+use oak_core::colormath::{PRIMARIES_AP1, PRIMARIES_BT2020, PRIMARIES_DISPLAY_P3, PRIMARIES_SRGB};
 use oak_core::filefunctions::{FileFunctions, default_disk_cache_path};
 use oak_core::lut::Lut3d;
 
@@ -115,6 +116,92 @@ pub extern "C" fn oak_core_colormath_gamma_oetf(v: f32, gamma: f32) -> f32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colormath_gamma_eotf(v: f32, gamma: f32) -> f32 {
 	colormath::gamma_eotf(v, gamma)
+}
+
+/// `repr(C)` mirror of `colormath::Xy` (a chromaticity coordinate).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OakXy {
+	pub x: f32,
+	pub y: f32,
+}
+
+/// `repr(C)` mirror of `colormath::Primaries` (RGB primaries + white
+/// point).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OakPrimaries {
+	pub red: OakXy,
+	pub green: OakXy,
+	pub blue: OakXy,
+	pub white: OakXy,
+}
+
+fn xy(p: OakXy) -> colormath::Xy {
+	colormath::Xy { x: p.x, y: p.y }
+}
+
+fn primaries(p: OakPrimaries) -> colormath::Primaries {
+	colormath::Primaries {
+		red: xy(p.red),
+		green: xy(p.green),
+		blue: xy(p.blue),
+		white: xy(p.white),
+	}
+}
+
+fn oak_primaries(p: colormath::Primaries) -> OakPrimaries {
+	let cvt = |c: colormath::Xy| OakXy { x: c.x, y: c.y };
+	OakPrimaries {
+		red: cvt(p.red),
+		green: cvt(p.green),
+		blue: cvt(p.blue),
+		white: cvt(p.white),
+	}
+}
+
+/// The Bradford chromatic adaptation matrix between two white points.
+/// Mat3 is `[[f32; 3]; 3]` — plain C layout, returned by value.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_colormath_chromatic_adaptation(
+	src_white: OakXy,
+	dst_white: OakXy,
+) -> [[f32; 3]; 3] {
+	colormath::chromatic_adaptation(xy(src_white), xy(dst_white))
+}
+
+/// The RGB→XYZ matrix for a set of primaries.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_colormath_rgb_to_xyz(p: OakPrimaries) -> [[f32; 3]; 3] {
+	colormath::rgb_to_xyz_matrix(primaries(p))
+}
+
+/// The direct RGB→RGB conversion matrix between two primary sets.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_colormath_rgb_to_rgb(
+	src: OakPrimaries,
+	dst: OakPrimaries,
+) -> [[f32; 3]; 3] {
+	colormath::rgb_to_rgb_matrix(primaries(src), primaries(dst))
+}
+
+macro_rules! export_primaries {
+	($( $name:ident => $native:ident ),* $(,)?) => {
+		$(
+			#[doc = concat!("The built-in `", stringify!($native), "` primaries.")]
+			#[unsafe(no_mangle)]
+			pub extern "C" fn $name() -> OakPrimaries {
+				oak_primaries($native)
+			}
+		)*
+	};
+}
+
+export_primaries! {
+	oak_core_colormath_primaries_srgb => PRIMARIES_SRGB,
+	oak_core_colormath_primaries_display_p3 => PRIMARIES_DISPLAY_P3,
+	oak_core_colormath_primaries_bt2020 => PRIMARIES_BT2020,
+	oak_core_colormath_primaries_ap1 => PRIMARIES_AP1,
 }
 
 // ---------------------------------------------------------------------------

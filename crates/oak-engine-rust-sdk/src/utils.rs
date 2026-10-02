@@ -39,6 +39,14 @@ unsafe extern "C" {
 	fn oak_core_lut_display_edge() -> u32;
 	fn oak_core_lut_display_domain(lo: *mut f32, hi: *mut f32) -> bool;
 
+	fn oak_core_colormath_chromatic_adaptation(src_white: Xy, dst_white: Xy) -> [[f32; 3]; 3];
+	fn oak_core_colormath_rgb_to_xyz(primaries: Primaries) -> [[f32; 3]; 3];
+	fn oak_core_colormath_rgb_to_rgb(src: Primaries, dst: Primaries) -> [[f32; 3]; 3];
+	fn oak_core_colormath_primaries_srgb() -> Primaries;
+	fn oak_core_colormath_primaries_display_p3() -> Primaries;
+	fn oak_core_colormath_primaries_bt2020() -> Primaries;
+	fn oak_core_colormath_primaries_ap1() -> Primaries;
+
 	fn oak_core_file_default_disk_cache_path(buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_core_file_get_configuration_location(buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_core_file_get_application_path(buf: *mut u8, buf_len: usize) -> i32;
@@ -190,6 +198,66 @@ pub fn lut_display_domain() -> ([f32; 3], [f32; 3]) {
 }
 
 // ---------------------------------------------------------------------------
+// Color matrices
+// ---------------------------------------------------------------------------
+
+/// A chromaticity coordinate (white point / primary).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Xy {
+	pub x: f32,
+	pub y: f32,
+}
+
+/// A set of RGB primaries plus the white point.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Primaries {
+	pub red: Xy,
+	pub green: Xy,
+	pub blue: Xy,
+	pub white: Xy,
+}
+
+/// A 3x3 color matrix (`[[f32; 3]; 3]`, plain C layout).
+pub type Mat3 = [[f32; 3]; 3];
+
+/// The Bradford chromatic adaptation matrix between two white points.
+pub fn chromatic_adaptation(src_white: Xy, dst_white: Xy) -> Mat3 {
+	unsafe { oak_core_colormath_chromatic_adaptation(src_white, dst_white) }
+}
+
+/// The RGB→XYZ matrix for a set of primaries.
+pub fn rgb_to_xyz_matrix(primaries: Primaries) -> Mat3 {
+	unsafe { oak_core_colormath_rgb_to_xyz(primaries) }
+}
+
+/// The direct RGB→RGB conversion matrix between two primary sets.
+pub fn rgb_to_rgb_matrix(src: Primaries, dst: Primaries) -> Mat3 {
+	unsafe { oak_core_colormath_rgb_to_rgb(src, dst) }
+}
+
+/// The built-in sRGB (Rec.709, D65) primaries.
+pub fn primaries_srgb() -> Primaries {
+	unsafe { oak_core_colormath_primaries_srgb() }
+}
+
+/// The built-in Display P3 (D65) primaries.
+pub fn primaries_display_p3() -> Primaries {
+	unsafe { oak_core_colormath_primaries_display_p3() }
+}
+
+/// The built-in Rec.2020 (D65) primaries.
+pub fn primaries_bt2020() -> Primaries {
+	unsafe { oak_core_colormath_primaries_bt2020() }
+}
+
+/// The built-in ACES AP1 (D60) primaries.
+pub fn primaries_ap1() -> Primaries {
+	unsafe { oak_core_colormath_primaries_ap1() }
+}
+
+// ---------------------------------------------------------------------------
 // File functions
 // ---------------------------------------------------------------------------
 
@@ -302,6 +370,28 @@ mod tests {
 		let mut data = vec![0.18f32, 0.5, 0.9, 1.0];
 		working_to_display_target(&mut data, "acescg", "srgb", "srgb");
 		assert_ne!(data[0], 0.18, "acescg transforms");
+	}
+
+	#[test]
+	fn color_matrices() {
+		let srgb = primaries_srgb();
+		assert!((srgb.white.x - 0.3127).abs() < 1e-3, "sRGB D65 white");
+
+		// Identity transform: same primaries in and out.
+		let id = rgb_to_rgb_matrix(srgb, srgb);
+		for (i, row) in id.iter().enumerate() {
+			for (j, &v) in row.iter().enumerate() {
+				let expected = if i == j { 1.0 } else { 0.0 };
+				assert!((v - expected).abs() < 1e-4, "identity at [{i}][{j}]: {v}");
+			}
+		}
+
+		// sRGB -> Display P3 is a real (non-identity) matrix.
+		let m = rgb_to_rgb_matrix(srgb, primaries_display_p3());
+		assert!((m[0][0] - 1.0).abs() > 1e-3);
+
+		let _ = rgb_to_xyz_matrix(primaries_bt2020());
+		let _ = chromatic_adaptation(srgb.white, primaries_ap1().white);
 	}
 
 	#[test]

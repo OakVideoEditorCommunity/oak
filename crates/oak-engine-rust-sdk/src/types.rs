@@ -334,6 +334,31 @@ impl Default for VideoParams {
 	}
 }
 
+/// An audio stream's parameters as reported by a probe. Layout matches
+/// the engine's `OakAudioStreamParams`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AudioStreamParams {
+	pub sample_rate: i32,
+	pub channel_layout: u64,
+	pub format: i32,
+	pub stream_index: i32,
+	pub duration: i64,
+	pub time_base_num: i32,
+	pub time_base_den: i32,
+}
+
+/// A subtitle stream's parameters as reported by a probe (the subtitle
+/// entries themselves are content, not exposed here). Layout matches
+/// the engine's `OakSubtitleParams`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SubtitleParams {
+	pub stream_index: i32,
+	pub enabled: i32,
+	pub entry_count: i32,
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
