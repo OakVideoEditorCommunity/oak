@@ -79,7 +79,7 @@ pub enum ProxyParamsError {
 
 /// Runs an engine snprintf-style string getter to completion: query the
 /// length, allocate, fetch. `None` on engine error (-1).
-fn string_out(f: impl Fn(*mut u8, usize) -> i32) -> Option<String> {
+pub(crate) fn string_out(f: impl Fn(*mut u8, usize) -> i32) -> Option<String> {
 	let n = f(std::ptr::null_mut(), 0);
 	if n < 0 {
 		return None;
