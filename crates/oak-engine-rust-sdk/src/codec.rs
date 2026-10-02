@@ -180,6 +180,29 @@ unsafe extern "C" {
 	) -> i32;
 	fn oak_codec_decoder_add_ref(session: *const c_void);
 	fn oak_codec_decoder_release(session: *const c_void);
+
+	// encode sessions
+	fn oak_codec_encoding_params_default() -> EncodingParams;
+	fn oak_codec_encoder_create(params: *const EncodingParams) -> *mut c_void;
+	fn oak_codec_encoder_open(session: *mut c_void) -> bool;
+	fn oak_codec_encoder_write_video(session: *mut c_void, frame: *const c_void) -> bool;
+	fn oak_codec_encoder_write_audio(
+		session: *mut c_void,
+		samples: *const f32,
+		sample_count: usize,
+		frame_count: i32,
+	) -> bool;
+	fn oak_codec_encoder_flush(session: *mut c_void) -> bool;
+	fn oak_codec_encoder_close(session: *mut c_void) -> bool;
+	fn oak_codec_encoder_write_subtitle(
+		session: *mut c_void,
+		text: *const u8,
+		text_len: usize,
+		in_seconds: f64,
+		out_seconds: f64,
+	) -> bool;
+	fn oak_codec_encoder_add_ref(session: *const c_void);
+	fn oak_codec_encoder_release(session: *const c_void);
 }
 
 /// A failed engine codec call. The C ABI carries no detail beyond the
@@ -1207,6 +1230,248 @@ impl Drop for DecoderSession {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Encode sessions
+// ---------------------------------------------------------------------------
+
+/// Encoding parameters. Layout matches the engine's `EncodingParams`
+/// (which mirrors oak-codec's `repr(C)` struct field for field); the
+/// three inner enums cross as their i32 discriminants ([`crate::types::PixelFormat`],
+/// [`crate::audio::SampleFormat`], scaling method).
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct EncodingParams {
+	/// Output filename (or image-sequence "[#####]" template),
+	/// NUL-terminated, 1023 bytes max.
+	filename: [u8; 1024],
+	/// [`Format`] discriminant.
+	pub format: i32,
+	pub video_enabled: i32,
+	/// [`Codec`] discriminant.
+	pub video_codec: i32,
+	pub video_width: i32,
+	pub video_height: i32,
+	pub video_time_base_num: i32,
+	pub video_time_base_den: i32,
+	/// [`crate::types::PixelFormat`] discriminant.
+	pub video_pixel_format: i32,
+	pub video_interlacing: i32,
+	pub video_pixel_aspect_num: i32,
+	pub video_pixel_aspect_den: i32,
+	pub video_bit_rate: i64,
+	pub video_min_bit_rate: i64,
+	pub video_max_bit_rate: i64,
+	pub video_buffer_size: i64,
+	pub video_threads: i32,
+	/// Encoded pixel format name (e.g. "yuv420p"), NUL-terminated.
+	video_pix_fmt: [u8; 64],
+	pub video_is_image_sequence: i32,
+	pub video_scaling_method: i32,
+	pub audio_enabled: i32,
+	/// [`Codec`] discriminant.
+	pub audio_codec: i32,
+	pub audio_sample_rate: i32,
+	pub audio_channel_layout: u64,
+	/// [`crate::audio::SampleFormat`] discriminant.
+	pub audio_sample_format: i32,
+	pub audio_bit_rate: i64,
+	pub subtitles_enabled: i32,
+	pub subtitles_codec: i32,
+	pub subtitles_are_sidecar: i32,
+	pub subtitles_sidecar_format: i32,
+	/// Output OCIO colorspace name; empty = reference space.
+	color_transform_output: [u8; 256],
+	pub export_length_num: i32,
+	pub export_length_den: i32,
+	pub has_custom_range: i32,
+	pub custom_range_in_num: i64,
+	pub custom_range_in_den: i64,
+	pub custom_range_out_num: i64,
+	pub custom_range_out_den: i64,
+	/// H.273 code points written into the container (0 = leave unset).
+	pub color_primaries: i32,
+	pub color_trc: i32,
+	pub color_space: i32,
+	pub color_range: i32,
+}
+
+impl Default for EncodingParams {
+	fn default() -> Self {
+		unsafe { oak_codec_encoding_params_default() }
+	}
+}
+
+impl EncodingParams {
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	fn read_cstr(field: &[u8]) -> &str {
+		let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+		std::str::from_utf8(&field[..end]).unwrap_or("")
+	}
+
+	fn write_cstr(
+		field: &mut [u8],
+		field_name: &'static str,
+		value: &str,
+	) -> Result<(), ParamsStringError> {
+		if value.len() > field.len() - 1 {
+			return Err(ParamsStringError::TooLong(field_name));
+		}
+		let bytes = value.as_bytes();
+		if bytes.contains(&0) {
+			return Err(ParamsStringError::InteriorNul(field_name));
+		}
+		field.fill(0);
+		field[..bytes.len()].copy_from_slice(bytes);
+		Ok(())
+	}
+
+	pub fn filename(&self) -> &str {
+		Self::read_cstr(&self.filename)
+	}
+
+	pub fn set_filename(&mut self, value: &str) -> Result<(), ParamsStringError> {
+		Self::write_cstr(&mut self.filename, "filename", value)
+	}
+
+	pub fn video_pix_fmt(&self) -> &str {
+		Self::read_cstr(&self.video_pix_fmt)
+	}
+
+	pub fn set_video_pix_fmt(&mut self, value: &str) -> Result<(), ParamsStringError> {
+		Self::write_cstr(&mut self.video_pix_fmt, "video_pix_fmt", value)
+	}
+
+	pub fn color_transform_output(&self) -> &str {
+		Self::read_cstr(&self.color_transform_output)
+	}
+
+	pub fn set_color_transform_output(&mut self, value: &str) -> Result<(), ParamsStringError> {
+		Self::write_cstr(&mut self.color_transform_output, "color_transform_output", value)
+	}
+}
+
+/// Why a fixed-size string field rejected a value.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParamsStringError {
+	/// Longer than the field allows.
+	#[error("params field {0} too long")]
+	TooLong(&'static str),
+	/// C strings cannot contain NUL.
+	#[error("params field {0} contains a NUL byte")]
+	InteriorNul(&'static str),
+}
+
+/// An encode session: configure at creation, then open → write → flush
+/// → close. `Drop` closes (idempotent) and releases.
+pub struct EncoderSession {
+	ptr: *mut c_void,
+}
+
+unsafe impl Send for EncoderSession {}
+unsafe impl Sync for EncoderSession {}
+
+impl EncoderSession {
+	/// Creates a configured encoder session; `None` when no encoder
+	/// supports the requested format or configuration fails.
+	pub fn create(params: &EncodingParams) -> Option<Self> {
+		let ptr = unsafe { oak_codec_encoder_create(params) };
+		if ptr.is_null() {
+			None
+		} else {
+			Some(Self { ptr })
+		}
+	}
+
+	/// Opens the output file and writes the headers.
+	pub fn open(&self) -> Result<(), Error> {
+		if unsafe { oak_codec_encoder_open(self.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Encodes one video frame; the caller keeps its [`Frame`] reference.
+	pub fn write_video(&self, frame: &Frame) -> Result<(), Error> {
+		if unsafe { oak_codec_encoder_write_video(self.ptr, frame.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Encodes `frame_count` frames of interleaved f32 audio.
+	pub fn write_audio(&self, samples: &[f32], frame_count: i32) -> Result<(), Error> {
+		if unsafe {
+			oak_codec_encoder_write_audio(self.ptr, samples.as_ptr(), samples.len(), frame_count)
+		} {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Flushes the encoders.
+	pub fn flush(&self) -> Result<(), Error> {
+		if unsafe { oak_codec_encoder_flush(self.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Encodes one subtitle entry (`in_seconds`/`out_seconds` in
+	/// seconds). Currently the ffmpeg encoder does not implement
+	/// subtitle encoding, so this returns `Err` until it does.
+	pub fn write_subtitle(
+		&self,
+		text: &str,
+		in_seconds: f64,
+		out_seconds: f64,
+	) -> Result<(), Error> {
+		if unsafe {
+			oak_codec_encoder_write_subtitle(
+				self.ptr,
+				text.as_ptr(),
+				text.len(),
+				in_seconds,
+				out_seconds,
+			)
+		} {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Writes the trailer and closes the output (idempotent; also
+	/// happens on drop).
+	pub fn close(&self) -> Result<(), Error> {
+		if unsafe { oak_codec_encoder_close(self.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+}
+
+impl Clone for EncoderSession {
+	fn clone(&self) -> Self {
+		unsafe { oak_codec_encoder_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for EncoderSession {
+	fn drop(&mut self) {
+		let _ = self.close();
+		unsafe { oak_codec_encoder_release(self.ptr) };
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1402,6 +1667,61 @@ mod tests {
 		let clone = p.clone();
 		drop(p);
 		drop(clone);
+	}
+
+	#[test]
+	fn encode_h264_roundtrip_via_sdk() {
+		let out = std::env::temp_dir()
+			.join(format!("oaksdk_encode_{}.mp4", std::process::id()));
+		let mut params = EncodingParams::new();
+		params.set_filename(out.to_str().unwrap()).unwrap();
+		params.format = Format::MPEG4Video as i32;
+		params.video_enabled = 1;
+		params.video_codec = Codec::H264 as i32;
+		params.video_width = 64;
+		params.video_height = 64;
+		params.video_time_base_num = 1;
+		params.video_time_base_den = 10;
+		params.video_pixel_format = crate::types::PixelFormat::F32 as i32;
+		params.video_pixel_aspect_num = 1;
+		params.video_pixel_aspect_den = 1;
+
+		let session = EncoderSession::create(&params).expect("create");
+		session.open().expect("open");
+
+		let mut vp = crate::types::VideoParams::new();
+		vp.width = 64;
+		vp.height = 64;
+		vp.format = crate::types::PixelFormat::F32 as i32;
+		vp.channel_count = 4;
+		for i in 0..10 {
+			let mut frame = Frame::with_params(&vp);
+			frame.allocate().expect("allocate");
+			frame.set_timestamp(crate::types::Rational::new(i, 10));
+			frame.data().unwrap()[..64 * 16].fill(0x3F); // some nonzero pattern
+			session.write_video(&frame).expect("write");
+		}
+		session.flush().expect("flush");
+		session.close().expect("close");
+		drop(session);
+
+		let len = std::fs::metadata(&out).expect("output exists").len();
+		assert!(len > 1000, "encoded file is implausibly small: {len}");
+		let _ = std::fs::remove_file(&out);
+	}
+
+	#[test]
+	fn encoder_negative_paths() {
+		// Unknown format.
+		let params = EncodingParams::new();
+		assert!(EncoderSession::create(&params).is_none());
+
+		// Field validation.
+		let mut params = EncodingParams::new();
+		assert!(params.set_filename(&"x".repeat(2000)).is_err());
+		assert!(params.set_filename("a\0b").is_err());
+		params.set_filename("/tmp/oak.mp4").unwrap();
+		assert_eq!(params.filename(), "/tmp/oak.mp4");
 	}
 
 	#[test]

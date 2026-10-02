@@ -33,6 +33,7 @@ use ocio_rs::TransformDirection;
 /// Native pixel format codes, mirroring `olive::core::PixelFormat`. Values
 /// are load-bearing (they cross the C ABI as ints) and must stay in sync
 /// with `olive/core/render/pixelformat.h`.
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PixelFormat {
 	/// Invalid/unknown format.
