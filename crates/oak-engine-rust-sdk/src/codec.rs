@@ -58,6 +58,26 @@ unsafe extern "C" {
 	fn oak_codec_task_submit_is_registered() -> bool;
 	fn oak_codec_task_set_submit_cb(cb: Option<TaskSubmitFn>, userdata: *mut c_void);
 	fn oak_codec_task_submit(req: *const OakCodecTaskRequest) -> i32;
+
+	// frame (the reference-counted CPU pixel buffer)
+	fn oak_codec_frame_new() -> *mut c_void;
+	fn oak_codec_frame_with_params(params: crate::types::VideoParams) -> *mut c_void;
+	fn oak_codec_frame_allocate(this: *mut c_void) -> bool;
+	fn oak_codec_frame_is_allocated(this: *const c_void) -> bool;
+	fn oak_codec_frame_data(this: *mut c_void) -> *mut u8;
+	fn oak_codec_frame_allocated_size(this: *const c_void) -> usize;
+	fn oak_codec_frame_linesize_bytes(this: *const c_void) -> i32;
+	fn oak_codec_frame_linesize_pixels(this: *const c_void) -> i32;
+	fn oak_codec_frame_width(this: *const c_void) -> i32;
+	fn oak_codec_frame_height(this: *const c_void) -> i32;
+	fn oak_codec_frame_format(this: *const c_void) -> i32;
+	fn oak_codec_frame_channel_count(this: *const c_void) -> i32;
+	fn oak_codec_frame_timestamp(this: *const c_void) -> crate::types::Rational;
+	fn oak_codec_frame_set_timestamp(this: *mut c_void, ts: crate::types::Rational);
+	fn oak_codec_frame_get_params(this: *const c_void, out: *mut crate::types::VideoParams) -> bool;
+	fn oak_codec_frame_set_params(this: *mut c_void, params: crate::types::VideoParams);
+	fn oak_codec_frame_add_ref(this: *const c_void);
+	fn oak_codec_frame_release(this: *const c_void);
 }
 
 /// A failed engine codec call. The C ABI carries no detail beyond the
@@ -528,6 +548,142 @@ pub fn task_submit(req: &TaskRequest) -> Result<bool, Error> {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Frame (reference-counted CPU pixel buffer)
+// ---------------------------------------------------------------------------
+
+use crate::types::{PixelFormat, Rational, VideoParams};
+
+/// A reference-counted CPU pixel buffer; the plugin I/O carrier.
+///
+/// `Clone` adds a reference, `Drop` releases. Mutation (`allocate`,
+/// `set_params`, `set_timestamp`, writing through `data`) requires
+/// holding the only live clone — the same discipline the engine's C++
+/// Frame has. A `data` pointer stays valid until the next `allocate` or
+/// `set_params`, or the last drop.
+pub struct Frame {
+	ptr: *mut c_void,
+}
+
+// Arc-backed on the engine side; pixel buffers are plain memory.
+unsafe impl Send for Frame {}
+unsafe impl Sync for Frame {}
+
+impl Frame {
+	/// An empty frame with default (invalid) params.
+	pub fn new() -> Self {
+		Self {
+			ptr: unsafe { oak_codec_frame_new() },
+		}
+	}
+
+	/// A frame with a copy of `params` (line sizes computed).
+	pub fn with_params(params: &VideoParams) -> Self {
+		Self {
+			ptr: unsafe { oak_codec_frame_with_params(params.clone()) },
+		}
+	}
+
+	/// Allocates the pixel buffer per the current params.
+	pub fn allocate(&mut self) -> Result<(), Error> {
+		if unsafe { oak_codec_frame_allocate(self.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	pub fn is_allocated(&self) -> bool {
+		unsafe { oak_codec_frame_is_allocated(self.ptr) }
+	}
+
+	/// The pixel buffer; `None` until allocated. See the type docs for
+	/// the validity window.
+	pub fn data(&mut self) -> Option<&mut [u8]> {
+		let ptr = unsafe { oak_codec_frame_data(self.ptr) };
+		if ptr.is_null() {
+			return None;
+		}
+		let len = self.allocated_size();
+		Some(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+	}
+
+	/// The allocated buffer size in bytes (0 when unallocated).
+	pub fn allocated_size(&self) -> usize {
+		unsafe { oak_codec_frame_allocated_size(self.ptr) }
+	}
+
+	pub fn linesize_bytes(&self) -> i32 {
+		unsafe { oak_codec_frame_linesize_bytes(self.ptr) }
+	}
+
+	pub fn linesize_pixels(&self) -> i32 {
+		unsafe { oak_codec_frame_linesize_pixels(self.ptr) }
+	}
+
+	pub fn width(&self) -> i32 {
+		unsafe { oak_codec_frame_width(self.ptr) }
+	}
+
+	pub fn height(&self) -> i32 {
+		unsafe { oak_codec_frame_height(self.ptr) }
+	}
+
+	/// The allocated pixel format.
+	pub fn format(&self) -> PixelFormat {
+		PixelFormat::from_i32(unsafe { oak_codec_frame_format(self.ptr) })
+			.unwrap_or(PixelFormat::Invalid)
+	}
+
+	pub fn channel_count(&self) -> i32 {
+		unsafe { oak_codec_frame_channel_count(self.ptr) }
+	}
+
+	/// The frame timestamp (rational seconds).
+	pub fn timestamp(&self) -> Rational {
+		unsafe { oak_codec_frame_timestamp(self.ptr) }
+	}
+
+	pub fn set_timestamp(&mut self, ts: Rational) {
+		unsafe { oak_codec_frame_set_timestamp(self.ptr, ts) };
+	}
+
+	/// A copy of the frame's params.
+	pub fn params(&self) -> Option<VideoParams> {
+		let mut out = VideoParams::new();
+		if unsafe { oak_codec_frame_get_params(self.ptr, &mut out) } {
+			Some(out)
+		} else {
+			None
+		}
+	}
+
+	/// Replaces the frame's params (recomputes line sizes, does NOT
+	/// reallocate the buffer).
+	pub fn set_params(&mut self, params: &VideoParams) {
+		unsafe { oak_codec_frame_set_params(self.ptr, params.clone()) };
+	}
+}
+
+impl Default for Frame {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Clone for Frame {
+	fn clone(&self) -> Self {
+		unsafe { oak_codec_frame_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for Frame {
+	fn drop(&mut self) {
+		unsafe { oak_codec_frame_release(self.ptr) };
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -665,5 +821,32 @@ mod tests {
 		set_task_submit_cb::<fn(&TaskRequest) -> i32>(None);
 		let req = proxy_task("/tmp/a\0b.mp4", "/tmp/a.p.mp4");
 		assert!(task_submit(&req).is_err());
+	}
+
+	#[test]
+	fn frame_lifecycle() {
+		let mut params = crate::types::VideoParams::new();
+		params.width = 64;
+		params.height = 32;
+		params.format = crate::types::PixelFormat::F32 as i32;
+		params.channel_count = 4;
+
+		let mut frame = Frame::with_params(&params);
+		assert!(!frame.is_allocated());
+		frame.allocate().expect("allocate");
+		assert_eq!((frame.width(), frame.height()), (64, 32));
+		assert_eq!(frame.format(), crate::types::PixelFormat::F32);
+		assert_eq!(frame.allocated_size(), 64 * 32 * 4 * 4);
+		assert_eq!(frame.linesize_bytes(), 64 * 4 * 4);
+
+		frame.data().expect("data")[..16].fill(0xAB);
+		frame.set_timestamp(crate::types::Rational::new(3, 2));
+		assert_eq!(frame.timestamp(), crate::types::Rational::new(3, 2));
+		assert_eq!(frame.params().map(|p| p.width), Some(64));
+
+		// Clones share the buffer until the last drop.
+		let clone = frame.clone();
+		drop(frame);
+		assert!(clone.is_allocated());
 	}
 }

@@ -7,6 +7,10 @@
 //! (reduction, sentinel propagation, C++-compatible overflow behavior)
 //! instead of reimplementing them.
 
+use oak_core::ocioutils::PixelFormat as VideoPixelFormat;
+
+use crate::handle::NativeMirror;
+use oak_core::videoparams::{ColorRange, Interlacing, VideoParams, VideoType};
 use oak_core::{PixelFormat, Rational, TimeRange};
 
 /// `repr(C)` mirror of oak-core's `Rational`: always reduced with a
@@ -18,19 +22,21 @@ pub struct OakRational {
 	pub den: i64,
 }
 
-impl OakRational {
-	/// Re-canonicalizes through `Rational::new`, so raw C input gets the
-	/// same reduction as any native value (idempotent for values that
-	/// came from [`OakRational::from_native`]).
-	fn to_native(self) -> Rational {
-		Rational::new(self.num, self.den)
-	}
+/// Re-canonicalizes through `Rational::new`, so raw C input gets the
+/// same reduction as any native value (idempotent for values that came
+/// from [`NativeMirror::from_native`]).
+impl crate::handle::NativeMirror for OakRational {
+	type Native = Rational;
 
-	fn from_native(r: Rational) -> Self {
+	fn from_native(r: &Rational) -> Self {
 		Self {
 			num: r.numerator(),
 			den: r.denominator(),
 		}
+	}
+
+	fn to_native(&self) -> Rational {
+		Rational::new(self.num, self.den)
 	}
 }
 
@@ -45,16 +51,18 @@ pub struct OakTimeRange {
 	pub out: OakRational,
 }
 
-impl OakTimeRange {
-	fn to_native(self) -> TimeRange {
-		TimeRange::new(self.in_.to_native(), self.out.to_native())
+impl crate::handle::NativeMirror for OakTimeRange {
+	type Native = TimeRange;
+
+	fn from_native(r: &TimeRange) -> Self {
+		Self {
+			in_: OakRational::from_native(&r.in_()),
+			out: OakRational::from_native(&r.out()),
+		}
 	}
 
-	fn from_native(r: TimeRange) -> Self {
-		Self {
-			in_: OakRational::from_native(r.in_()),
-			out: OakRational::from_native(r.out()),
-		}
+	fn to_native(&self) -> TimeRange {
+		TimeRange::new(self.in_.to_native(), self.out.to_native())
 	}
 }
 
@@ -77,13 +85,13 @@ fn pixel_format_from_i32(v: i32) -> Option<PixelFormat> {
 /// A reduced `num/den` rational (0/0 when `den` is 0).
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_new(num: i64, den: i64) -> OakRational {
-	OakRational::from_native(Rational::new(num, den))
+	OakRational::from_native(&Rational::new(num, den))
 }
 
 /// The null/invalid sentinel (0/0).
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_null() -> OakRational {
-	OakRational::from_native(Rational::NULL)
+	OakRational::from_native(&Rational::NULL)
 }
 
 #[unsafe(no_mangle)]
@@ -105,27 +113,27 @@ pub extern "C" fn oak_core_rational_to_f64(r: OakRational) -> f64 {
 /// The rational closest to `value` within oak-core's precision.
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_from_f64(value: f64) -> OakRational {
-	OakRational::from_native(Rational::from_double(value))
+	OakRational::from_native(&Rational::from_double(value))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_add(a: OakRational, b: OakRational) -> OakRational {
-	OakRational::from_native(a.to_native() + b.to_native())
+	OakRational::from_native(&(a.to_native() + b.to_native()))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_sub(a: OakRational, b: OakRational) -> OakRational {
-	OakRational::from_native(a.to_native() - b.to_native())
+	OakRational::from_native(&(a.to_native() - b.to_native()))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_mul(a: OakRational, b: OakRational) -> OakRational {
-	OakRational::from_native(a.to_native() * b.to_native())
+	OakRational::from_native(&(a.to_native() * b.to_native()))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_rational_div(a: OakRational, b: OakRational) -> OakRational {
-	OakRational::from_native(a.to_native() / b.to_native())
+	OakRational::from_native(&(a.to_native() / b.to_native()))
 }
 
 /// Three-way comparison: -1/0/1 for less/equal/greater.
@@ -152,7 +160,7 @@ pub unsafe extern "C" fn oak_core_rational_from_string(s: *const u8, len: usize)
 	let Some(s) = (unsafe { crate::codec::str_arg(s, len) }) else {
 		return oak_core_rational_null();
 	};
-	OakRational::from_native(Rational::from_string(s))
+	OakRational::from_native(&Rational::from_string(s))
 }
 
 /// `timebase.time_to_timestamp(time)`: rational time to an integer
@@ -172,7 +180,7 @@ pub extern "C" fn oak_core_rational_timestamp_to_time(
 	timebase: OakRational,
 	ts: i64,
 ) -> OakRational {
-	OakRational::from_native(timebase.to_native().timestamp_to_time(ts))
+	OakRational::from_native(&timebase.to_native().timestamp_to_time(ts))
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +190,13 @@ pub extern "C" fn oak_core_rational_timestamp_to_time(
 /// A normalized half-open range (endpoints swapped when `out < in`).
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_timerange_new(in_: OakRational, out: OakRational) -> OakTimeRange {
-	OakTimeRange::from_native(TimeRange::new(in_.to_native(), out.to_native()))
+	OakTimeRange::from_native(&TimeRange::new(in_.to_native(), out.to_native()))
 }
 
 /// `out - in`.
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_timerange_length(r: OakTimeRange) -> OakRational {
-	OakRational::from_native(r.to_native().length())
+	OakRational::from_native(&r.to_native().length())
 }
 
 /// True when `t` lies in [in, out).
@@ -203,13 +211,13 @@ pub extern "C" fn oak_core_timerange_intersected(
 	a: OakTimeRange,
 	b: OakTimeRange,
 ) -> OakTimeRange {
-	OakTimeRange::from_native(a.to_native().intersected(&b.to_native()))
+	OakTimeRange::from_native(&a.to_native().intersected(&b.to_native()))
 }
 
 /// The smallest range covering both inputs.
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_timerange_combined(a: OakTimeRange, b: OakTimeRange) -> OakTimeRange {
-	OakTimeRange::from_native(a.to_native().combined(&b.to_native()))
+	OakTimeRange::from_native(&a.to_native().combined(&b.to_native()))
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +250,179 @@ pub extern "C" fn oak_core_pixelformat_bytes_per_pixel(format: i32, channels: i3
 		Some(f) => f.bytes_per_pixel(channels as usize) as i32,
 		None => -1,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// VideoParams
+// ---------------------------------------------------------------------------
+
+/// `repr(C)` mirror of oak-core's `VideoParams`. Enums cross as their
+/// discriminant ints (`format` is a PixelFormat code, `interlacing` is
+/// 0/1/2, `video_type` 0/1/2, `color_range` 0/1, bools as 0/1);
+/// `colorspace` is a fixed NUL-terminated buffer (63 bytes max).
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct OakVideoParams {
+	pub width: i32,
+	pub height: i32,
+	pub depth: i32,
+	pub time_base_num: i32,
+	pub time_base_den: i32,
+	pub frame_rate_num: i32,
+	pub frame_rate_den: i32,
+	pub pixel_aspect_num: i32,
+	pub pixel_aspect_den: i32,
+	pub format: i32,
+	pub channel_count: i32,
+	pub interlacing: i32,
+	pub divider: i32,
+	pub enabled: i32,
+	pub x: f32,
+	pub y: f32,
+	pub stream_index: i32,
+	pub video_type: i32,
+	pub start_time: i64,
+	pub duration: i64,
+	pub premultiplied_alpha: i32,
+	pub color_range: i32,
+	pub color_primaries: i32,
+	pub color_transfer: i32,
+	pub colorspace: [u8; 64],
+}
+
+impl crate::handle::NativeMirror for OakVideoParams {
+	type Native = VideoParams;
+
+	fn from_native(v: &VideoParams) -> Self {
+		let (time_base_num, time_base_den) = v.time_base();
+		let (frame_rate_num, frame_rate_den) = v.frame_rate();
+		let (pixel_aspect_num, pixel_aspect_den) = v.pixel_aspect_ratio();
+		let mut colorspace = [0u8; 64];
+		let name = v.colorspace().as_bytes();
+		let n = name.len().min(63);
+		colorspace[..n].copy_from_slice(&name[..n]);
+		Self {
+			width: v.width(),
+			height: v.height(),
+			depth: v.depth(),
+			time_base_num,
+			time_base_den,
+			frame_rate_num,
+			frame_rate_den,
+			pixel_aspect_num,
+			pixel_aspect_den,
+			format: v.format().code(),
+			channel_count: v.channel_count(),
+			interlacing: v.interlacing() as i32,
+			divider: v.divider(),
+			enabled: v.enabled() as i32,
+			x: v.x(),
+			y: v.y(),
+			stream_index: v.stream_index(),
+			video_type: v.video_type() as i32,
+			start_time: v.start_time(),
+			duration: v.duration(),
+			premultiplied_alpha: v.premultiplied_alpha() as i32,
+			color_range: v.color_range() as i32,
+			color_primaries: v.color_primaries(),
+			color_transfer: v.color_transfer(),
+			colorspace,
+		}
+	}
+
+	fn to_native(&self) -> VideoParams {
+		let mut v = VideoParams::new();
+		v.set_width(self.width);
+		v.set_height(self.height);
+		v.set_depth(self.depth);
+		v.set_time_base(self.time_base_num, self.time_base_den);
+		v.set_frame_rate(self.frame_rate_num, self.frame_rate_den);
+		v.set_pixel_aspect_ratio(self.pixel_aspect_num, self.pixel_aspect_den);
+		v.set_format(VideoPixelFormat::from_code(self.format));
+		v.set_channel_count(self.channel_count);
+		v.set_interlacing(match self.interlacing {
+			1 => Interlacing::TopFirst,
+			2 => Interlacing::BottomFirst,
+			_ => Interlacing::None,
+		});
+		v.set_divider(self.divider);
+		v.set_enabled(self.enabled != 0);
+		v.set_x(self.x);
+		v.set_y(self.y);
+		v.set_stream_index(self.stream_index);
+		v.set_video_type(match self.video_type {
+			1 => VideoType::Still,
+			2 => VideoType::ImageSequence,
+			_ => VideoType::Video,
+		});
+		v.set_start_time(self.start_time);
+		v.set_duration(self.duration);
+		v.set_premultiplied_alpha(self.premultiplied_alpha != 0);
+		v.set_color_range(match self.color_range {
+			1 => ColorRange::Full,
+			_ => ColorRange::Limited,
+		});
+		v.set_color_primaries(self.color_primaries);
+		v.set_color_transfer(self.color_transfer);
+		let end = self
+			.colorspace
+			.iter()
+			.position(|&b| b == 0)
+			.unwrap_or(self.colorspace.len());
+		v.set_colorspace(std::str::from_utf8(&self.colorspace[..end]).unwrap_or(""));
+		v
+	}
+}
+
+/// The default (invalid) parameter set.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_default() -> OakVideoParams {
+	OakVideoParams::from_native(&VideoParams::new())
+}
+
+/// Whether the parameter set describes a valid video stream.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_is_valid(params: *const OakVideoParams) -> bool {
+	if params.is_null() {
+		return false;
+	}
+	unsafe { &*params }.to_native().is_valid()
+}
+
+/// The width after applying the resolution divider.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_effective_width(params: *const OakVideoParams) -> i32 {
+	if params.is_null() {
+		return 0;
+	}
+	unsafe { &*params }.to_native().effective_width()
+}
+
+/// The height after applying the resolution divider.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_effective_height(params: *const OakVideoParams) -> i32 {
+	if params.is_null() {
+		return 0;
+	}
+	unsafe { &*params }.to_native().effective_height()
+}
+
+/// Bytes per pixel for this parameter set; -1 when params is null.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_bytes_per_pixel(params: *const OakVideoParams) -> i32 {
+	if params.is_null() {
+		return -1;
+	}
+	unsafe { &*params }.to_native().bytes_per_pixel()
+}
+
+/// Total frame buffer size in bytes; -1 when params is null.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_videoparams_buffer_size(params: *const OakVideoParams) -> i32 {
+	if params.is_null() {
+		return -1;
+	}
+	unsafe { &*params }.to_native().buffer_size()
 }
 
 #[cfg(test)]
@@ -347,5 +528,40 @@ mod tests {
 
 		assert_eq!(oak_core_pixelformat_bytes_per_pixel(4, 4), 16);
 		assert_eq!(oak_core_pixelformat_bytes_per_pixel(4, -1), -1);
+	}
+
+	#[test]
+	fn videoparams_default_and_roundtrip() {
+		let mut p = oak_core_videoparams_default();
+		assert_eq!((p.width, p.height, p.divider), (0, 0, 1));
+		assert_eq!(p.format, -1, "invalid pixel format by default");
+		assert!(!oak_core_videoparams_is_valid(&p));
+
+		// Round-trip through native: every field survives.
+		p.width = 1920;
+		p.height = 1080;
+		p.format = 4; // F32
+		p.channel_count = 4;
+		p.time_base_num = 1;
+		p.time_base_den = 25;
+		let name = b"acescg";
+		p.colorspace[..name.len()].copy_from_slice(name);
+		let native = p.to_native();
+		let back = OakVideoParams::from_native(&native);
+		assert_eq!((back.width, back.height, back.format, back.channel_count), (1920, 1080, 4, 4));
+		assert_eq!((back.time_base_num, back.time_base_den), (1, 25));
+		assert_eq!(&back.colorspace[..6], b"acescg");
+		assert!(oak_core_videoparams_is_valid(&back));
+
+		// Computed helpers follow native semantics.
+		p.divider = 2;
+		assert_eq!(oak_core_videoparams_effective_width(&p), 960);
+		assert_eq!(oak_core_videoparams_effective_height(&p), 540);
+		assert!(oak_core_videoparams_bytes_per_pixel(&p) > 0);
+		assert!(oak_core_videoparams_buffer_size(&p) > 0);
+
+		// Null reads are safe.
+		assert!(!oak_core_videoparams_is_valid(std::ptr::null()));
+		assert_eq!(oak_core_videoparams_bytes_per_pixel(std::ptr::null()), -1);
 	}
 }

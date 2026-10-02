@@ -17,6 +17,22 @@ pub fn into_ffi<T>(value: T) -> *const T {
 	Arc::into_raw(Arc::new(value))
 }
 
+/// A `repr(C)` mirror of a native oak type, convertible in both
+/// directions. Implementations live next to the mirror; the C header
+/// declares the mirror's layout.
+pub trait NativeMirror: Sized {
+	/// The native (oak-core/oak-codec) type this mirrors.
+	type Native;
+
+	/// Canonicalizes a native value into its ABI mirror.
+	fn from_native(native: &Self::Native) -> Self;
+
+	/// Converts the mirror back into the native type. Construction goes
+	/// through the native constructors, so invariants (rational
+	/// reduction, range normalization) hold for raw C input too.
+	fn to_native(&self) -> Self::Native;
+}
+
 /// The Rust side of a handle type exported via `export_handle!`.
 ///
 /// Lets a typed wrapper (e.g. oak-app's `Handle<T>`) reach the right

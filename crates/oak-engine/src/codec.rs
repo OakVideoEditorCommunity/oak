@@ -2,6 +2,7 @@
 //! enumerations, and the background-task submit lane.
 
 mod exportcodec;
+mod frame;
 mod exportformat;
 mod proxymanager;
 mod task;

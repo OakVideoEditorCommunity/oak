@@ -35,6 +35,13 @@ unsafe extern "C" {
 	fn oak_core_pixelformat_is_valid(format: i32) -> bool;
 	fn oak_core_pixelformat_bytes_per_channel(format: i32) -> i32;
 	fn oak_core_pixelformat_bytes_per_pixel(format: i32, channels: i32) -> i32;
+
+	fn oak_core_videoparams_default() -> VideoParams;
+	fn oak_core_videoparams_is_valid(params: *const VideoParams) -> bool;
+	fn oak_core_videoparams_effective_width(params: *const VideoParams) -> i32;
+	fn oak_core_videoparams_effective_height(params: *const VideoParams) -> i32;
+	fn oak_core_videoparams_bytes_per_pixel(params: *const VideoParams) -> i32;
+	fn oak_core_videoparams_buffer_size(params: *const VideoParams) -> i32;
 }
 
 /// A rational number, always reduced with a non-negative denominator;
@@ -214,6 +221,119 @@ impl PixelFormat {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// VideoParams
+// ---------------------------------------------------------------------------
+
+/// A video parameter set. Layout matches the engine's `OakVideoParams`;
+/// enums cross as their discriminant ints (`format` is a
+/// [`PixelFormat`] code, `interlacing` 0/1/2 = none/top/bottom,
+/// `video_type` 0/1/2 = video/still/sequence, `color_range` 0/1 =
+/// limited/full, bools as 0/1).
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct VideoParams {
+	pub width: i32,
+	pub height: i32,
+	pub depth: i32,
+	pub time_base_num: i32,
+	pub time_base_den: i32,
+	pub frame_rate_num: i32,
+	pub frame_rate_den: i32,
+	pub pixel_aspect_num: i32,
+	pub pixel_aspect_den: i32,
+	pub format: i32,
+	pub channel_count: i32,
+	pub interlacing: i32,
+	pub divider: i32,
+	pub enabled: i32,
+	pub x: f32,
+	pub y: f32,
+	pub stream_index: i32,
+	pub video_type: i32,
+	pub start_time: i64,
+	pub duration: i64,
+	pub premultiplied_alpha: i32,
+	pub color_range: i32,
+	pub color_primaries: i32,
+	pub color_transfer: i32,
+	/// Colorspace name, NUL-terminated (63 bytes max).
+	colorspace: [u8; 64],
+}
+
+/// Why a [`VideoParams::set_colorspace`] call was rejected.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ColorspaceError {
+	/// Longer than the fixed 64-byte field allows (63 bytes + NUL).
+	#[error("colorspace name too long: {0:?} (max 63 bytes)")]
+	TooLong(String),
+	/// C strings cannot contain NUL.
+	#[error("colorspace name contains a NUL byte: {0:?}")]
+	InteriorNul(String),
+}
+
+impl VideoParams {
+	/// The default (invalid) parameter set.
+	pub fn new() -> Self {
+		unsafe { oak_core_videoparams_default() }
+	}
+
+	/// Whether the parameter set describes a valid video stream.
+	pub fn is_valid(&self) -> bool {
+		unsafe { oak_core_videoparams_is_valid(self) }
+	}
+
+	/// The width after applying the resolution divider.
+	pub fn effective_width(&self) -> i32 {
+		unsafe { oak_core_videoparams_effective_width(self) }
+	}
+
+	/// The height after applying the resolution divider.
+	pub fn effective_height(&self) -> i32 {
+		unsafe { oak_core_videoparams_effective_height(self) }
+	}
+
+	/// Bytes per pixel for this parameter set.
+	pub fn bytes_per_pixel(&self) -> i32 {
+		unsafe { oak_core_videoparams_bytes_per_pixel(self) }
+	}
+
+	/// Total frame buffer size in bytes.
+	pub fn buffer_size(&self) -> i32 {
+		unsafe { oak_core_videoparams_buffer_size(self) }
+	}
+
+	/// The colorspace name ("" when unset).
+	pub fn colorspace(&self) -> &str {
+		let end = self
+			.colorspace
+			.iter()
+			.position(|&b| b == 0)
+			.unwrap_or(self.colorspace.len());
+		std::str::from_utf8(&self.colorspace[..end]).unwrap_or("")
+	}
+
+	/// Sets the colorspace name (validated: 63 bytes max, no NUL).
+	pub fn set_colorspace(&mut self, value: &str) -> Result<(), ColorspaceError> {
+		if value.len() > 63 {
+			return Err(ColorspaceError::TooLong(value.to_string()));
+		}
+		let bytes = value.as_bytes();
+		if bytes.contains(&0) {
+			return Err(ColorspaceError::InteriorNul(value.to_string()));
+		}
+		self.colorspace.fill(0);
+		self.colorspace[..bytes.len()].copy_from_slice(bytes);
+		Ok(())
+	}
+}
+
+impl Default for VideoParams {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -272,5 +392,29 @@ mod tests {
 		assert_eq!(PixelFormat::F32.bytes_per_channel(), 4);
 		assert_eq!(PixelFormat::F32.bytes_per_pixel(4), 16);
 		assert_eq!(PixelFormat::U8.bytes_per_channel(), 1);
+	}
+
+	#[test]
+	fn videoparams_defaults_and_computed() {
+		let mut p = VideoParams::new();
+		assert!(!p.is_valid());
+		assert_eq!(p.divider, 1);
+
+		p.width = 1920;
+		p.height = 1080;
+		p.format = PixelFormat::F32 as i32;
+		p.channel_count = 4;
+		p.time_base_num = 1;
+		p.time_base_den = 25;
+		p.set_colorspace("acescg").unwrap();
+		assert_eq!(p.colorspace(), "acescg");
+		assert!(p.set_colorspace(&"x".repeat(64)).is_err());
+		assert!(p.set_colorspace("a\0b").is_err());
+
+		assert!(p.is_valid());
+		p.divider = 2;
+		assert_eq!(p.effective_width(), 960);
+		assert_eq!(p.effective_height(), 540);
+		assert!(p.buffer_size() > 0);
 	}
 }
