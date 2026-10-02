@@ -73,6 +73,13 @@ unsafe extern "C" {
 	fn oak_core_config_load() -> bool;
 	fn oak_core_config_save() -> bool;
 
+	fn oak_core_cancelatom_new() -> *mut std::ffi::c_void;
+	fn oak_core_cancelatom_cancel(this: *const std::ffi::c_void);
+	fn oak_core_cancelatom_is_cancelled(this: *const std::ffi::c_void) -> bool;
+	fn oak_core_cancelatom_heard_cancel(this: *const std::ffi::c_void) -> bool;
+	fn oak_core_cancelatom_add_ref(this: *const std::ffi::c_void);
+	fn oak_core_cancelatom_release(this: *const std::ffi::c_void);
+
 	fn oak_core_color_set_pipeline_settings(
 		working: *const u8,
 		working_len: usize,
@@ -315,6 +322,70 @@ pub fn displayicc_x11_monitor_fingerprint_at(x: f64, y: f64) -> Option<String> {
 	})
 }
 
+// ---------------------------------------------------------------------------
+// CancelAtom (cooperative cancellation token)
+// ---------------------------------------------------------------------------
+
+/// A cooperative cancellation token shared with the engine (e.g. a
+/// probe). `Clone` adds a reference, `Drop` releases; cancelling one
+/// clone cancels them all.
+pub struct CancelAtom {
+	ptr: *mut std::ffi::c_void,
+}
+
+unsafe impl Send for CancelAtom {}
+unsafe impl Sync for CancelAtom {}
+
+impl CancelAtom {
+	/// A not-cancelled token.
+	pub fn new() -> Self {
+		Self {
+			ptr: unsafe { oak_core_cancelatom_new() },
+		}
+	}
+
+	/// Sets the cancel flag.
+	pub fn cancel(&self) {
+		unsafe { oak_core_cancelatom_cancel(self.ptr) };
+	}
+
+	/// Reads the cancel flag (reading a set flag records the
+	/// cancellation as heard).
+	pub fn is_cancelled(&self) -> bool {
+		unsafe { oak_core_cancelatom_is_cancelled(self.ptr) }
+	}
+
+	/// Whether any consumer has observed the cancel flag.
+	pub fn heard_cancel(&self) -> bool {
+		unsafe { oak_core_cancelatom_heard_cancel(self.ptr) }
+	}
+}
+
+impl Default for CancelAtom {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Clone for CancelAtom {
+	fn clone(&self) -> Self {
+		unsafe { oak_core_cancelatom_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for CancelAtom {
+	fn drop(&mut self) {
+		unsafe { oak_core_cancelatom_release(self.ptr) };
+	}
+}
+
+/// The raw handle, for APIs taking a token (e.g.
+/// [`crate::codec::decoder_probe`]).
+pub(crate) fn atom_ptr(atom: Option<&CancelAtom>) -> *const std::ffi::c_void {
+	atom.map_or(std::ptr::null(), |a| a.ptr)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -361,6 +432,20 @@ mod tests {
 	fn color_default_config_loads_headless() {
 		color_set_up_default_config(None).expect("bundled config");
 		let _ = color_config_path();
+	}
+
+	#[test]
+	fn cancel_atom_lifecycle() {
+		let atom = CancelAtom::new();
+		assert!(!atom.is_cancelled());
+		assert!(!atom.heard_cancel());
+		atom.cancel();
+		assert!(atom.is_cancelled());
+		assert!(atom.heard_cancel());
+
+		// Clones share the flag.
+		let clone = atom.clone();
+		assert!(clone.is_cancelled());
 	}
 
 	#[test]

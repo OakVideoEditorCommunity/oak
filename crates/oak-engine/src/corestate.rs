@@ -485,3 +485,69 @@ mod tests {
 		);
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CancelAtom (cooperative cancellation token)
+// ---------------------------------------------------------------------------
+
+use oak_core::cancelatom::CancelAtom;
+
+use crate::handle::into_ffi;
+
+crate::export_handle!(
+	CancelAtom,
+	oak_core_cancelatom_add_ref,
+	oak_core_cancelatom_release
+);
+
+/// A not-cancelled cancellation token (ref count 1).
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_core_cancelatom_new() -> *mut CancelAtom {
+	into_ffi(CancelAtom::new()) as *mut CancelAtom
+}
+
+/// Sets the cancel flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_cancelatom_cancel(this: *const CancelAtom) {
+	if this.is_null() {
+		return;
+	}
+	unsafe { &*this }.cancel();
+}
+
+/// Reads the cancel flag (reading a set flag records the cancellation
+/// as heard).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_cancelatom_is_cancelled(this: *const CancelAtom) -> bool {
+	!this.is_null() && unsafe { &*this }.is_cancelled()
+}
+
+/// Whether any consumer has observed the cancel flag.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_cancelatom_heard_cancel(this: *const CancelAtom) -> bool {
+	!this.is_null() && unsafe { &*this }.heard_cancel()
+}
+
+#[cfg(test)]
+mod cancel_tests {
+	#[test]
+	fn cancel_lifecycle() {
+		unsafe {
+			let atom = super::oak_core_cancelatom_new();
+			assert!(!super::oak_core_cancelatom_is_cancelled(atom));
+			assert!(!super::oak_core_cancelatom_heard_cancel(atom));
+			super::oak_core_cancelatom_cancel(atom);
+			assert!(super::oak_core_cancelatom_is_cancelled(atom));
+			assert!(super::oak_core_cancelatom_heard_cancel(atom));
+
+			// Null is a no-op everywhere.
+			super::oak_core_cancelatom_cancel(std::ptr::null());
+			assert!(!super::oak_core_cancelatom_is_cancelled(std::ptr::null()));
+			assert!(!super::oak_core_cancelatom_heard_cancel(std::ptr::null()));
+
+			super::oak_core_cancelatom_add_ref(atom);
+			super::oak_core_cancelatom_release(atom);
+			super::oak_core_cancelatom_release(atom);
+		}
+	}
+}

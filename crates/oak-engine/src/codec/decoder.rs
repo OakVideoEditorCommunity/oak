@@ -198,20 +198,23 @@ pub struct OakSubtitleParams {
 /// Probes `filename` and returns its stream inventory as an opaque
 /// handle (release with `oak_codec_footage_release`). `decoder_id` null
 /// or empty tries every registered decoder in order; otherwise only the
-/// named decoder. Null when nothing can read the file.
+/// named decoder. `cancel` is an optional `CancelAtom` (null = none); a
+/// cancelled atom aborts the probe. Null when nothing can read the file.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oak_codec_decoder_probe(
 	decoder_id: *const u8,
 	decoder_id_len: usize,
 	filename: *const u8,
 	filename_len: usize,
+	cancel: *const oak_core::cancelatom::CancelAtom,
 ) -> *mut FootageDescription {
 	let Some(filename) = (unsafe { str_arg(filename, filename_len) }) else {
 		return std::ptr::null_mut();
 	};
+	let cancel = unsafe { cancel.as_ref() };
 	if decoder_id.is_null() || decoder_id_len == 0 {
 		for d in decoder::receive_list_of_all_decoders() {
-			if let Some(desc) = d.probe(filename, None) {
+			if let Some(desc) = d.probe(filename, cancel) {
 				return into_ffi(desc) as *mut FootageDescription;
 			}
 		}
@@ -220,7 +223,7 @@ pub unsafe extern "C" fn oak_codec_decoder_probe(
 	let Some(id) = (unsafe { str_arg(decoder_id, decoder_id_len) }) else {
 		return std::ptr::null_mut();
 	};
-	match decoder::create_from_id(id).and_then(|d| d.probe(filename, None)) {
+	match decoder::create_from_id(id).and_then(|d| d.probe(filename, cancel)) {
 		Some(desc) => into_ffi(desc) as *mut FootageDescription,
 		None => std::ptr::null_mut(),
 	}
@@ -413,7 +416,7 @@ mod probe_tests {
 	fn probe_any_decoder_reports_streams() {
 		let clip = temp_clip("any");
 		unsafe {
-			let fd = oak_codec_decoder_probe(std::ptr::null(), 0, clip.as_ptr(), clip.len());
+			let fd = oak_codec_decoder_probe(std::ptr::null(), 0, clip.as_ptr(), clip.len(), std::ptr::null());
 			assert!(!fd.is_null(), "probe must succeed for a test clip");
 
 			assert!(oak_codec_footage_total_stream_count(fd) >= 1);
@@ -450,7 +453,7 @@ mod probe_tests {
 		unsafe {
 			let ffmpeg = "ffmpeg";
 			let fd =
-				oak_codec_decoder_probe(ffmpeg.as_ptr(), ffmpeg.len(), clip.as_ptr(), clip.len());
+				oak_codec_decoder_probe(ffmpeg.as_ptr(), ffmpeg.len(), clip.as_ptr(), clip.len(), std::ptr::null());
 			assert!(!fd.is_null());
 			let mut buf = [0u8; 64];
 			let n = oak_codec_footage_decoder_name(fd, buf.as_mut_ptr(), buf.len());
@@ -459,14 +462,33 @@ mod probe_tests {
 
 			let bogus = "no-such-decoder";
 			assert!(
-				oak_codec_decoder_probe(bogus.as_ptr(), bogus.len(), clip.as_ptr(), clip.len())
+				oak_codec_decoder_probe(bogus.as_ptr(), bogus.len(), clip.as_ptr(), clip.len(), std::ptr::null())
 					.is_null()
 			);
 			let missing = "/nonexistent/oak-probe.mp4";
 			assert!(
-				oak_codec_decoder_probe(std::ptr::null(), 0, missing.as_ptr(), missing.len())
+				oak_codec_decoder_probe(std::ptr::null(), 0, missing.as_ptr(), missing.len(), std::ptr::null())
 					.is_null()
 			);
+		}
+	}
+
+	#[test]
+	fn probe_with_cancelled_atom_aborts() {
+		let clip = temp_clip("cancel");
+		unsafe {
+			let atom = crate::corestate::oak_core_cancelatom_new();
+			crate::corestate::oak_core_cancelatom_cancel(atom);
+			let fd = oak_codec_decoder_probe(
+				std::ptr::null(),
+				0,
+				clip.as_ptr(),
+				clip.len(),
+				atom,
+			);
+			// A pre-cancelled atom must not yield a description.
+			assert!(fd.is_null());
+			crate::corestate::oak_core_cancelatom_release(atom);
 		}
 	}
 

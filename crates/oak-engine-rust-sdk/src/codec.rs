@@ -111,6 +111,7 @@ unsafe extern "C" {
 		decoder_id_len: usize,
 		filename: *const u8,
 		filename_len: usize,
+		cancel: *const c_void,
 	) -> *mut c_void;
 	fn oak_codec_footage_decoder_name(fd: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_codec_footage_total_stream_count(fd: *const c_void) -> i32;
@@ -906,12 +907,24 @@ impl StreamType {
 /// Probes `filename` and returns its stream inventory. `None` for the
 /// decoder id tries every registered decoder in order; otherwise only
 /// the named one. `None` when nothing can read the file.
-pub fn decoder_probe(decoder_id: Option<&str>, filename: &str) -> Option<FootageDescription> {
+pub fn decoder_probe(
+	decoder_id: Option<&str>,
+	filename: &str,
+	cancel: Option<&crate::state::CancelAtom>,
+) -> Option<FootageDescription> {
 	let (id, id_len) = match decoder_id {
 		Some(id) => (id.as_ptr(), id.len()),
 		None => (std::ptr::null(), 0),
 	};
-	let ptr = unsafe { oak_codec_decoder_probe(id, id_len, filename.as_ptr(), filename.len()) };
+	let ptr = unsafe {
+		oak_codec_decoder_probe(
+			id,
+			id_len,
+			filename.as_ptr(),
+			filename.len(),
+			crate::state::atom_ptr(cancel),
+		)
+	};
 	if ptr.is_null() {
 		return None;
 	}
@@ -1638,8 +1651,8 @@ mod tests {
 		// The positive path is covered end-to-end by the engine tests
 		// (they generate real media with testmedia); here we verify the
 		// wrapper's None mapping.
-		assert!(decoder_probe(Some("no-such-decoder"), "/nonexistent/x.mp4").is_none());
-		assert!(decoder_probe(None, "/nonexistent/x.mp4").is_none());
+		assert!(decoder_probe(Some("no-such-decoder"), "/nonexistent/x.mp4", None).is_none());
+		assert!(decoder_probe(None, "/nonexistent/x.mp4", None).is_none());
 	}
 
 	#[test]
