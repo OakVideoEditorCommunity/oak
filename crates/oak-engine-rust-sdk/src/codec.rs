@@ -138,6 +138,48 @@ unsafe extern "C" {
 	fn oak_codec_footage_duration(fd: *const c_void, out: *mut crate::types::TimeRange) -> bool;
 	fn oak_codec_footage_add_ref(fd: *const c_void);
 	fn oak_codec_footage_release(fd: *const c_void);
+
+	// decode sessions
+	fn oak_codec_retrieve_params_new() -> *mut c_void;
+	fn oak_codec_retrieve_params_set_stream(
+		p: *mut c_void,
+		filename: *const u8,
+		filename_len: usize,
+		stream_index: i32,
+	) -> bool;
+	fn oak_codec_retrieve_params_set_time(p: *mut c_void, time: crate::types::Rational);
+	fn oak_codec_retrieve_params_set_length(p: *mut c_void, length: crate::types::TimeRange);
+	fn oak_codec_retrieve_params_set_force_range(p: *mut c_void, range: i32);
+	fn oak_codec_retrieve_params_set_image_sequence(p: *mut c_void, digits: i32, number: i64);
+	fn oak_codec_retrieve_params_set_target_size(p: *mut c_void, width: u32, height: u32);
+	fn oak_codec_retrieve_params_clear_target_size(p: *mut c_void);
+	fn oak_codec_retrieve_params_set_mode(p: *mut c_void, mode: i32);
+	fn oak_codec_retrieve_params_set_premultiplied_alpha(p: *mut c_void, premultiplied: bool);
+	fn oak_codec_retrieve_params_add_ref(p: *const c_void);
+	fn oak_codec_retrieve_params_release(p: *const c_void);
+	fn oak_codec_decoder_open(
+		decoder_id: *const u8,
+		decoder_id_len: usize,
+		filename: *const u8,
+		filename_len: usize,
+		stream_index: i32,
+	) -> *mut c_void;
+	fn oak_codec_decoder_close(session: *mut c_void) -> bool;
+	fn oak_codec_decoder_retrieve_video_frame(
+		session: *mut c_void,
+		params: *const c_void,
+	) -> *mut c_void;
+	fn oak_codec_decoder_retrieve_audio(
+		session: *mut c_void,
+		dest: *mut f32,
+		dest_len: usize,
+		in_: crate::types::Rational,
+		out: crate::types::Rational,
+		sample_rate: i32,
+		channel_layout: u64,
+	) -> i32;
+	fn oak_codec_decoder_add_ref(session: *const c_void);
+	fn oak_codec_decoder_release(session: *const c_void);
 }
 
 /// A failed engine codec call. The C ABI carries no detail beyond the
@@ -955,6 +997,216 @@ impl Drop for FootageDescription {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Decode sessions
+// ---------------------------------------------------------------------------
+
+/// A retrieve-parameter set. Build by chaining; every setter returns
+/// `self`. All fields start at engine defaults (time 0, no range
+/// forcing, no image sequence, offline mode, native size).
+///
+/// ```ignore
+/// let p = RetrieveParams::new().stream("clip.mp4", 0).time(t).target_size(1920, 1080);
+/// ```
+pub struct RetrieveParams {
+	ptr: *mut c_void,
+}
+
+unsafe impl Send for RetrieveParams {}
+unsafe impl Sync for RetrieveParams {}
+
+impl RetrieveParams {
+	pub fn new() -> Self {
+		Self {
+			ptr: unsafe { oak_codec_retrieve_params_new() },
+		}
+	}
+
+	/// The stream to read from (filename + stream index).
+	pub fn stream(self, filename: &str, stream_index: i32) -> Self {
+		unsafe {
+			oak_codec_retrieve_params_set_stream(
+				self.ptr,
+				filename.as_ptr(),
+				filename.len(),
+				stream_index,
+			)
+		};
+		self
+	}
+
+	/// The timestamp to retrieve (rational seconds).
+	pub fn time(self, time: Rational) -> Self {
+		unsafe { oak_codec_retrieve_params_set_time(self.ptr, time) };
+		self
+	}
+
+	/// The footage range (for early-seek semantics).
+	pub fn length(self, length: TimeRange) -> Self {
+		unsafe { oak_codec_retrieve_params_set_length(self.ptr, length) };
+		self
+	}
+
+	/// Force a color range (`None` = don't force, the default).
+	pub fn force_range(self, range: Option<i32>) -> Self {
+		unsafe { oak_codec_retrieve_params_set_force_range(self.ptr, range.unwrap_or(-1)) };
+		self
+	}
+
+	/// Marks the source as an image sequence and bakes in the frame
+	/// number.
+	pub fn image_sequence(self, digits: i32, number: i64) -> Self {
+		unsafe { oak_codec_retrieve_params_set_image_sequence(self.ptr, digits, number) };
+		self
+	}
+
+	/// The target output size; decode scales in one step. `None` keeps
+	/// the native size.
+	pub fn target_size(self, size: Option<(u32, u32)>) -> Self {
+		unsafe {
+			match size {
+				Some((w, h)) => oak_codec_retrieve_params_set_target_size(self.ptr, w, h),
+				None => oak_codec_retrieve_params_clear_target_size(self.ptr),
+			}
+		};
+		self
+	}
+
+	/// 0 = offline, 1 = online.
+	pub fn mode(self, online: bool) -> Self {
+		unsafe { oak_codec_retrieve_params_set_mode(self.ptr, online as i32) };
+		self
+	}
+
+	/// Whether the frame's alpha is premultiplied.
+	pub fn premultiplied_alpha(self, premultiplied: bool) -> Self {
+		unsafe { oak_codec_retrieve_params_set_premultiplied_alpha(self.ptr, premultiplied) };
+		self
+	}
+}
+
+impl Default for RetrieveParams {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Clone for RetrieveParams {
+	fn clone(&self) -> Self {
+		unsafe { oak_codec_retrieve_params_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for RetrieveParams {
+	fn drop(&mut self) {
+		unsafe { oak_codec_retrieve_params_release(self.ptr) };
+	}
+}
+
+/// The outcome of an audio retrieve.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetrieveAudioStatus {
+	Success = 0,
+	InvalidRange = 1,
+	Unsupported = 2,
+	ConformNeeded = 3,
+	DecoderError = 4,
+}
+
+/// An open decode session. `Drop` closes the stream and releases the
+/// handle.
+pub struct DecoderSession {
+	ptr: *mut c_void,
+}
+
+unsafe impl Send for DecoderSession {}
+unsafe impl Sync for DecoderSession {}
+
+impl DecoderSession {
+	/// Opens a decode session for `filename`'s `stream_index`.
+	/// `decoder_id` `None` auto-picks by probing every registered
+	/// decoder (first success wins). `None` when nothing can open the
+	/// stream.
+	pub fn open(decoder_id: Option<&str>, filename: &str, stream_index: i32) -> Option<Self> {
+		let (id, id_len) = match decoder_id {
+			Some(id) => (id.as_ptr(), id.len()),
+			None => (std::ptr::null(), 0),
+		};
+		let ptr = unsafe {
+			oak_codec_decoder_open(id, id_len, filename.as_ptr(), filename.len(), stream_index)
+		};
+		if ptr.is_null() {
+			None
+		} else {
+			Some(Self { ptr })
+		}
+	}
+
+	/// Closes the stream (safe when already closed; also happens on
+	/// drop).
+	pub fn close(&self) -> Result<(), Error> {
+		if unsafe { oak_codec_decoder_close(self.ptr) } {
+			Ok(())
+		} else {
+			Err(Error)
+		}
+	}
+
+	/// Retrieves one video frame into CPU memory. `None` on error.
+	pub fn retrieve_video_frame(&self, params: &RetrieveParams) -> Option<Frame> {
+		let ptr = unsafe { oak_codec_decoder_retrieve_video_frame(self.ptr, params.ptr) };
+		if ptr.is_null() {
+			None
+		} else {
+			Some(Frame { ptr })
+		}
+	}
+
+	/// Retrieves interleaved f32 audio covering `range` into `dest`.
+	pub fn retrieve_audio(
+		&self,
+		dest: &mut [f32],
+		range: TimeRange,
+		sample_rate: i32,
+		channel_layout: u64,
+	) -> Result<RetrieveAudioStatus, Error> {
+		match unsafe {
+			oak_codec_decoder_retrieve_audio(
+				self.ptr,
+				dest.as_mut_ptr(),
+				dest.len(),
+				range.in_,
+				range.out,
+				sample_rate,
+				channel_layout,
+			)
+		} {
+			0 => Ok(RetrieveAudioStatus::Success),
+			1 => Ok(RetrieveAudioStatus::InvalidRange),
+			2 => Ok(RetrieveAudioStatus::Unsupported),
+			3 => Ok(RetrieveAudioStatus::ConformNeeded),
+			4 => Ok(RetrieveAudioStatus::DecoderError),
+			_ => Err(Error),
+		}
+	}
+}
+
+impl Clone for DecoderSession {
+	fn clone(&self) -> Self {
+		unsafe { oak_codec_decoder_add_ref(self.ptr) };
+		Self { ptr: self.ptr }
+	}
+}
+
+impl Drop for DecoderSession {
+	fn drop(&mut self) {
+		let _ = self.close();
+		unsafe { oak_codec_decoder_release(self.ptr) };
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1123,6 +1375,33 @@ mod tests {
 		// wrapper's None mapping.
 		assert!(decoder_probe(Some("no-such-decoder"), "/nonexistent/x.mp4").is_none());
 		assert!(decoder_probe(None, "/nonexistent/x.mp4").is_none());
+	}
+
+	#[test]
+	fn decoder_session_negative_paths() {
+		// The positive decode path is covered end-to-end by the engine
+		// tests (they generate real media with testmedia).
+		assert!(DecoderSession::open(Some("no-such-decoder"), "/nonexistent/x.mp4", 0).is_none());
+		assert!(DecoderSession::open(None, "/nonexistent/x.mp4", 0).is_none());
+	}
+
+	#[test]
+	fn retrieve_params_builder_chains() {
+		use crate::types::{Rational, TimeRange};
+		let p = RetrieveParams::new()
+			.stream("clip.mp4", 0)
+			.time(Rational::new(1, 2))
+			.length(TimeRange::new(Rational::new(0, 1), Rational::new(10, 1)))
+			.force_range(Some(1))
+			.force_range(None)
+			.image_sequence(4, 7)
+			.target_size(Some((1920, 1080)))
+			.target_size(None)
+			.mode(true)
+			.premultiplied_alpha(true);
+		let clone = p.clone();
+		drop(p);
+		drop(clone);
 	}
 
 	#[test]

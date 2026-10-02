@@ -481,3 +481,406 @@ mod probe_tests {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Decode sessions (opaque handle over an open decoder stream)
+// ---------------------------------------------------------------------------
+//
+// Lifecycle: open → retrieve* × N → close → release. `retrieve_*` before
+// `open` completed or after `close` fails cleanly (null handle / status
+// -1), never crashes.
+
+use std::sync::Arc;
+
+use oak_codec::decoder::{
+	CodecStream, K_COLOR_RANGE_DEFAULT, RenderMode, RetrieveVideoParams,
+};
+
+/// An open decode session. Refcounted like every engine handle.
+pub struct DecoderSession {
+	decoder: Arc<dyn decoder::Decoder>,
+}
+
+crate::export_handle!(
+	DecoderSession,
+	oak_codec_decoder_add_ref,
+	oak_codec_decoder_release
+);
+
+crate::export_handle!(
+	RetrieveVideoParams,
+	oak_codec_retrieve_params_add_ref,
+	oak_codec_retrieve_params_release
+);
+
+/// A retrieve-parameter set with engine-side defaults: time 0, no range
+/// forcing, no image sequence, offline mode, no premultiply, native
+/// target size. Mutate through the setters, pass to
+/// `oak_codec_decoder_retrieve_video_frame`, release when done.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_codec_retrieve_params_new() -> *mut RetrieveVideoParams {
+	into_ffi(RetrieveVideoParams {
+		stream: CodecStream::new(),
+		time: oak_core::Rational::new(0, 1),
+		length: oak_core::TimeRange::default(),
+		force_range: K_COLOR_RANGE_DEFAULT,
+		is_image_sequence: false,
+		image_sequence_digits: 0,
+		image_sequence_number: 0,
+		mode: RenderMode::Offline,
+		alpha_is_premultiplied: false,
+		target_size: None,
+	}) as *mut RetrieveVideoParams
+}
+
+/// The stream to read from (filename + stream index). False on invalid
+/// input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_stream(
+	p: *mut RetrieveVideoParams,
+	filename: *const u8,
+	filename_len: usize,
+	stream_index: i32,
+) -> bool {
+	if p.is_null() {
+		return false;
+	}
+	let Some(filename) = (unsafe { str_arg(filename, filename_len) }) else {
+		return false;
+	};
+	unsafe { &mut *p }.stream =
+		CodecStream::with_block(filename.to_string(), stream_index, None);
+	true
+}
+
+/// The timestamp to retrieve (rational seconds).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_time(
+	p: *mut RetrieveVideoParams,
+	time: OakRational,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.time = time.to_native();
+}
+
+/// The footage range (for early-seek semantics).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_length(
+	p: *mut RetrieveVideoParams,
+	length: OakTimeRange,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.length = length.to_native();
+}
+
+/// Force a color range (`-1` = don't force, the default).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_force_range(
+	p: *mut RetrieveVideoParams,
+	range: i32,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.force_range = range;
+}
+
+/// Marks the source as an image sequence and bakes in the frame number.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_image_sequence(
+	p: *mut RetrieveVideoParams,
+	digits: i32,
+	number: i64,
+) {
+	if p.is_null() {
+		return;
+	}
+	let p = unsafe { &mut *p };
+	p.is_image_sequence = true;
+	p.image_sequence_digits = digits;
+	p.image_sequence_number = number;
+}
+
+/// The target output size (`Some((w, h))`); decode scales in one step.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_target_size(
+	p: *mut RetrieveVideoParams,
+	width: u32,
+	height: u32,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.target_size = Some((width, height));
+}
+
+/// Decode at native size (the default).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_clear_target_size(
+	p: *mut RetrieveVideoParams,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.target_size = None;
+}
+
+/// Render mode: 0 = offline, 1 = online.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_mode(
+	p: *mut RetrieveVideoParams,
+	mode: i32,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.mode = if mode == 1 {
+		RenderMode::Online
+	} else {
+		RenderMode::Offline
+	};
+}
+
+/// Whether the frame's alpha is premultiplied.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_retrieve_params_set_premultiplied_alpha(
+	p: *mut RetrieveVideoParams,
+	premultiplied: bool,
+) {
+	if p.is_null() {
+		return;
+	}
+	unsafe { &mut *p }.alpha_is_premultiplied = premultiplied;
+}
+
+/// Opens a decode session for `filename`'s `stream_index`. `decoder_id`
+/// null/empty auto-picks by probing every registered decoder (first
+/// success wins); otherwise only the named decoder. Null when nothing
+/// can open the stream.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_decoder_open(
+	decoder_id: *const u8,
+	decoder_id_len: usize,
+	filename: *const u8,
+	filename_len: usize,
+	stream_index: i32,
+) -> *mut DecoderSession {
+	let Some(filename) = (unsafe { str_arg(filename, filename_len) }) else {
+		return std::ptr::null_mut();
+	};
+	let decoder = if decoder_id.is_null() || decoder_id_len == 0 {
+		decoder::receive_list_of_all_decoders()
+			.into_iter()
+			.find(|d| d.probe(filename, None).is_some())
+	} else {
+		let Some(id) = (unsafe { str_arg(decoder_id, decoder_id_len) }) else {
+			return std::ptr::null_mut();
+		};
+		decoder::create_from_id(id)
+	};
+	let Some(decoder) = decoder else {
+		return std::ptr::null_mut();
+	};
+	let stream = CodecStream::with_block(filename.to_string(), stream_index, None);
+	if decoder.open(&stream).is_err() {
+		return std::ptr::null_mut();
+	}
+	into_ffi(DecoderSession { decoder }) as *mut DecoderSession
+}
+
+/// Closes the session's stream (safe when already closed). False on
+/// null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_decoder_close(session: *mut DecoderSession) -> bool {
+	if session.is_null() {
+		return false;
+	}
+	unsafe { &*session }.decoder.close().is_ok()
+}
+
+/// Retrieves one video frame into CPU memory as a `Frame` handle
+/// (release with `oak_codec_frame_release`). Null on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_decoder_retrieve_video_frame(
+	session: *mut DecoderSession,
+	params: *const RetrieveVideoParams,
+) -> *mut oak_codec::frame::Frame {
+	if session.is_null() || params.is_null() {
+		return std::ptr::null_mut();
+	}
+	match unsafe { &*session }
+		.decoder
+		.retrieve_video_frame(unsafe { &*params })
+	{
+		// The Arc moves across the boundary directly; the frame release
+		// pair reconstructs it.
+		Ok(frame) => Arc::into_raw(frame) as *mut oak_codec::frame::Frame,
+		Err(_) => std::ptr::null_mut(),
+	}
+}
+
+/// Retrieves interleaved f32 audio covering [in, out) into `dest`.
+/// Returns a RetrieveAudioStatus code (0=success, 1=invalid range,
+/// 2=unsupported, 3=conform needed, 4=decoder error); -1 on ABI misuse.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_codec_decoder_retrieve_audio(
+	session: *mut DecoderSession,
+	dest: *mut f32,
+	dest_len: usize,
+	in_: OakRational,
+	out: OakRational,
+	sample_rate: i32,
+	channel_layout: u64,
+) -> i32 {
+	use oak_codec::decoder::RetrieveAudioStatus;
+	if session.is_null() || (dest.is_null() && dest_len > 0) {
+		return -1;
+	}
+	let dest = if dest.is_null() {
+		&mut []
+	} else {
+		unsafe { std::slice::from_raw_parts_mut(dest, dest_len) }
+	};
+	let range = oak_core::TimeRange::new(in_.to_native(), out.to_native());
+	let status = unsafe { &*session }
+		.decoder
+		.retrieve_audio(dest, &range, sample_rate, channel_layout);
+	match status {
+		Ok(RetrieveAudioStatus::Success) => 0,
+		Ok(RetrieveAudioStatus::InvalidRange) => 1,
+		Ok(RetrieveAudioStatus::Unsupported) => 2,
+		Ok(RetrieveAudioStatus::ConformNeeded) => 3,
+		Ok(RetrieveAudioStatus::Error) => 4,
+		Err(_) => -1,
+	}
+}
+
+#[cfg(test)]
+mod session_tests {
+	use super::*;
+	use crate::coretypes::OakRational;
+
+	fn temp_clip(name: &str) -> String {
+		let dir = std::env::temp_dir().join(format!(
+			"oakengine_session_{}_{}",
+			name,
+			std::process::id()
+		));
+		let _ = std::fs::create_dir_all(&dir);
+		let path = dir.join("clip.mp4");
+		oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("generate test media");
+		path.to_string_lossy().into_owned()
+	}
+
+	#[test]
+	fn open_retrieve_close_roundtrip() {
+		let clip = temp_clip("video");
+		unsafe {
+			let ffmpeg = "ffmpeg";
+			let session = oak_codec_decoder_open(
+				ffmpeg.as_ptr(),
+				ffmpeg.len(),
+				clip.as_ptr(),
+				clip.len(),
+				0,
+			);
+			assert!(!session.is_null(), "open must succeed for the test clip");
+
+			let params = oak_codec_retrieve_params_new();
+			assert!(oak_codec_retrieve_params_set_stream(
+				params,
+				clip.as_ptr(),
+				clip.len(),
+				0
+			));
+			oak_codec_retrieve_params_set_time(params, OakRational { num: 0, den: 1 });
+
+			let frame = oak_codec_decoder_retrieve_video_frame(session, params);
+			assert!(!frame.is_null(), "frame 0 must decode");
+			assert_eq!(crate::codec::frame::oak_codec_frame_width(frame), 64);
+			assert_eq!(crate::codec::frame::oak_codec_frame_height(frame), 64);
+			crate::codec::frame::oak_codec_frame_release(frame);
+
+			// Missing params / closed session fail cleanly.
+			assert!(oak_codec_decoder_retrieve_video_frame(session, std::ptr::null()).is_null());
+			assert!(oak_codec_decoder_close(session));
+			assert!(oak_codec_decoder_retrieve_video_frame(session, params).is_null());
+
+			oak_codec_retrieve_params_release(params);
+			oak_codec_decoder_release(session);
+		}
+	}
+
+	#[test]
+	fn open_auto_picks_decoder_by_probe() {
+		let clip = temp_clip("auto");
+		unsafe {
+			let session =
+				oak_codec_decoder_open(std::ptr::null(), 0, clip.as_ptr(), clip.len(), 0);
+			assert!(!session.is_null());
+			oak_codec_decoder_close(session);
+			oak_codec_decoder_release(session);
+
+			let missing = "/nonexistent/oak-session.mp4";
+			assert!(
+				oak_codec_decoder_open(std::ptr::null(), 0, missing.as_ptr(), missing.len(), 0)
+					.is_null()
+			);
+		}
+	}
+
+	#[test]
+	fn audio_retrieve_on_video_only_clip_is_unsupported() {
+		let clip = temp_clip("noaudio");
+		unsafe {
+			let session =
+				oak_codec_decoder_open(std::ptr::null(), 0, clip.as_ptr(), clip.len(), 0);
+			assert!(!session.is_null());
+			let mut dest = [0.0f32; 1024];
+			let status = oak_codec_decoder_retrieve_audio(
+				session,
+				dest.as_mut_ptr(),
+				dest.len(),
+				OakRational { num: 0, den: 1 },
+				OakRational { num: 1, den: 1 },
+				48_000,
+				0x3,
+			);
+			assert!(status == 2 || status == 1 || status == 4, "video-only clip: {status}");
+			oak_codec_decoder_close(session);
+			oak_codec_decoder_release(session);
+		}
+	}
+
+	#[test]
+	fn params_setters_and_null_safety() {
+		unsafe {
+			let p = oak_codec_retrieve_params_new();
+			oak_codec_retrieve_params_set_time(p, OakRational { num: 3, den: 2 });
+			oak_codec_retrieve_params_set_force_range(p, -1);
+			oak_codec_retrieve_params_set_image_sequence(p, 4, 7);
+			oak_codec_retrieve_params_set_target_size(p, 320, 240);
+			oak_codec_retrieve_params_clear_target_size(p);
+			oak_codec_retrieve_params_set_mode(p, 1);
+			oak_codec_retrieve_params_set_premultiplied_alpha(p, true);
+
+			// Verify through the native struct (same crate).
+			let native = &*p;
+			assert_eq!(native.time, oak_core::Rational::new(3, 2));
+			assert!(native.is_image_sequence);
+			assert_eq!(native.image_sequence_number, 7);
+			assert_eq!(native.target_size, None);
+			assert!(native.alpha_is_premultiplied);
+
+			// Null is a no-op everywhere.
+			oak_codec_retrieve_params_set_time(std::ptr::null_mut(), OakRational { num: 0, den: 1 });
+			assert!(!oak_codec_retrieve_params_set_stream(std::ptr::null_mut(), std::ptr::null(), 0, 0));
+			oak_codec_retrieve_params_release(p);
+			oak_codec_retrieve_params_release(std::ptr::null());
+		}
+	}
+}
