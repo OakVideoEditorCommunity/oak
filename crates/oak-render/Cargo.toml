@@ -44,6 +44,9 @@ libc = "0.2"
 # is the main-process side).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Cache identity UUIDs (src/cache.rs): v4 generation and the canonical
+# braced text form replace the hand-rolled xorshift RNG + hex formatting.
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 # oakcodec is also a plain dependency above; the dev-dependency re-entry

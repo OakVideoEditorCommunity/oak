@@ -29,7 +29,7 @@
 
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
 use oak_core::{Rational, TimeRange, TimeRangeList};
 
@@ -64,62 +64,10 @@ impl CacheKind {
 
 // ---- canonical UUID text ("{8-4-4-4-12}", lowercase) ----------------------
 
-struct UuidRng(u64);
-
-fn uuid_rng() -> std::sync::MutexGuard<'static, UuidRng> {
-	static RNG: LazyLock<Mutex<UuidRng>> = LazyLock::new(|| {
-		let seed = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map(|d| d.as_nanos() as u64)
-			.unwrap_or(0x9E3779B97F4A7C15)
-			| 1;
-		Mutex::new(UuidRng(seed ^ 0x9E3779B97F4A7C15))
-	});
-	RNG.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-impl UuidRng {
-	fn next_u64(&mut self) -> u64 {
-		// xorshift64*
-		let mut x = self.0;
-		x ^= x >> 12;
-		x ^= x << 25;
-		x ^= x >> 27;
-		self.0 = x;
-		x.wrapping_mul(0x2545F4914F6CDD1D)
-	}
-}
-
 /// C++ `create_uuid_text()`: canonical "{8-4-4-4-12}" lowercase text with
 /// version-4 and RFC-4122 variant bits.
 pub fn create_uuid_text() -> String {
-	let mut bytes = [0u8; 16];
-	{
-		let mut rng = uuid_rng();
-		let hi = rng.next_u64();
-		let lo = rng.next_u64();
-		for i in 0..8 {
-			bytes[i] = (hi >> (i * 8)) as u8;
-		}
-		for i in 0..8 {
-			bytes[8 + i] = (lo >> (i * 8)) as u8;
-		}
-	}
-	bytes[6] = (bytes[6] & 0x0F) | 0x40; // version 4
-	bytes[8] = (bytes[8] & 0x3F) | 0x80; // variant 1
-
-	const HEX: &[u8; 16] = b"0123456789abcdef";
-	let mut out = String::with_capacity(38);
-	out.push('{');
-	for i in 0..16 {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			out.push('-');
-		}
-		out.push(HEX[(bytes[i] >> 4) as usize] as char);
-		out.push(HEX[(bytes[i] & 0xF) as usize] as char);
-	}
-	out.push('}');
-	out
+	uuid::Uuid::new_v4().braced().to_string()
 }
 
 // ---- binary stream helpers (QDataStream big-endian subset) -----------------
@@ -133,7 +81,15 @@ fn write_be_i32(out: &mut Vec<u8>, v: i32) {
 }
 
 /// 16 raw bytes in RFC 4122 order from the canonical text form.
+///
+/// Well-formed input goes through the `uuid` crate's parser; anything
+/// else falls back to a lenient nibble scan (invalid characters count as
+/// zero nibbles, anything past the 32nd nibble is ignored) for C++
+/// QDataStream parity.
 fn uuid_text_to_bytes(uuid: &str) -> [u8; 16] {
+	if let Ok(parsed) = uuid::Uuid::parse_str(uuid) {
+		return *parsed.as_bytes();
+	}
 	let mut bytes = [0u8; 16];
 	let mut nibble = 0usize;
 	for c in uuid.chars() {
@@ -156,22 +112,17 @@ fn uuid_text_to_bytes(uuid: &str) -> [u8; 16] {
 
 /// Canonical "{8-4-4-4-12}" lowercase text from 16 raw bytes.
 fn bytes_to_uuid_text(bytes: &[u8; 16]) -> String {
-	const HEX: &[u8; 16] = b"0123456789abcdef";
-	let mut out = String::with_capacity(38);
-	out.push('{');
-	for i in 0..16 {
-		if i == 4 || i == 6 || i == 8 || i == 10 {
-			out.push('-');
-		}
-		out.push(HEX[(bytes[i] >> 4) as usize] as char);
-		out.push(HEX[(bytes[i] & 0xF) as usize] as char);
-	}
-	out.push('}');
-	out
+	uuid::Uuid::from_bytes(*bytes).braced().to_string()
 }
 
 /// Reader over a byte slice; reads past the end yield zeroed values
 /// (QDataStream ReadPastEnd semantics).
+///
+/// Std covers the endian conversion (`from_be_bytes`); the reader itself
+/// stays because neither std nor the usual third-party crates
+/// (`byteorder` & co. error on short reads) provide QDataStream's
+/// zero-fill-on-EOF contract, which the shared on-disk state format
+/// relies on.
 struct ByteReader<'a> {
 	data: &'a [u8],
 	pos: usize,
@@ -183,39 +134,32 @@ impl<'a> ByteReader<'a> {
 	}
 
 	fn read_u32(&mut self) -> u32 {
-		let v = self.read_be(4);
-		v as u32
+		u32::from_be_bytes(self.read_array())
 	}
 
 	fn read_i32(&mut self) -> i32 {
-		let v = self.read_be(4);
-		v as i32
+		i32::from_be_bytes(self.read_array())
 	}
 
 	fn read_uuid(&mut self) -> [u8; 16] {
-		let mut b = [0u8; 16];
-		let n = self.take(&mut b);
-		let _ = n;
+		self.read_array()
+	}
+
+	/// Next `N` bytes as a fixed array; short reads stay zero-padded on
+	/// the right.
+	fn read_array<const N: usize>(&mut self) -> [u8; N] {
+		let mut b = [0u8; N];
+		self.take(&mut b);
 		b
 	}
 
+	/// Copy up to `out.len()` bytes into `out`, advancing the cursor;
+	/// returns how many bytes were actually copied.
 	fn take(&mut self, out: &mut [u8]) -> usize {
 		let n = (self.data.len() - self.pos).min(out.len());
 		out[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
 		self.pos += n;
 		n
-	}
-
-	fn read_be(&mut self, bytes: usize) -> u64 {
-		let mut b = [0u8; 8];
-		let n = (self.data.len() - self.pos).min(bytes);
-		b[8 - bytes..8 - bytes + n].copy_from_slice(&self.data[self.pos..self.pos + n]);
-		self.pos += n;
-		let mut v: u64 = 0;
-		for i in 0..bytes {
-			v = (v << 8) | b[8 - bytes + i] as u64;
-		}
-		v
 	}
 }
 
@@ -230,28 +174,55 @@ fn modification_time_msecs(path: &std::path::Path) -> i64 {
 		.unwrap_or(0)
 }
 
-/// The unified cache.
+/// The unified cache: the C++ `PlaybackCache` / `FrameHashCache` /
+/// `AudioPlaybackCache` / `AudioWaveformCache` / `ThumbnailCache`
+/// subclass family as one type tagged by [`CacheKind`].
+///
+/// The cache tracks two sets of time ranges for its owner's output:
+/// *validated* ranges (frames/samples already rendered and stored on
+/// disk) and *requested* ranges (queued for rendering, used to avoid
+/// scheduling the same work twice). `validate`/`invalidate` move ranges
+/// between those sets and persist the bookkeeping to
+/// `<disk_dir>/<uuid>/state` in the C++ byte format, so C++ and Rust
+/// builds share cache directories. Frame-hash flavors additionally map
+/// a time to its frame file `<disk_dir>/<uuid>/<timestamp>` via
+/// [`timebase`](Self::timebase).
+///
+/// Passthroughs link ranges to *another* cache's uuid, letting a
+/// passthrough node serve frames straight from its source's cache
+/// directory without re-rendering.
+///
+/// Threading: the FFI layer serializes access through the public
+/// [`lock`](Self::lock) (C++ `PlaybackCache::mutex()`); the methods
+/// themselves take plain `&self`/`&mut self`.
 pub struct PlaybackCache {
-	/// Flavor.
+	/// Flavor; the frame-hash kinds are disk-backed and carry a timebase.
 	pub kind: CacheKind,
-	/// Owner identity.
+	/// Identity of the owning node (from [`next_owner_identity`]); never
+	/// dereferenced, only compared.
 	pub owner: OwnerIdentity,
-	/// UUID (canonical text; project-file compatible).
+	/// Stable identity in canonical "{8-4-4-4-12}" text; names the
+	/// on-disk subdirectory and is stored in project files.
 	pub uuid: String,
-	/// Frame timebase (frame-hash flavors only).
+	/// Frame timebase used to turn times into frame-file timestamps;
+	/// `None` on audio caches (frame-hash flavors only).
 	pub timebase: Option<Rational>,
-	/// Validated ranges.
+	/// Ranges already rendered and cached on disk (normalized: merged,
+	/// non-overlapping).
 	validated: TimeRangeList,
-	/// Requested-but-not-yet-validated ranges.
+	/// Ranges queued for rendering but not yet validated.
 	requested: TimeRangeList,
-	/// Passthrough target uuids with their ranges.
+	/// `(range, uuid)` links to another cache whose files cover that
+	/// range; entries overlapping an invalidated range are pruned.
 	passthroughs: Vec<(TimeRange, String)>,
-	/// Persist toggle.
+	/// When false, `validate`/`invalidate` skip the disk write (tests
+	/// and transient caches).
 	saving_enabled: bool,
 	/// Root disk cache directory (defaults to the process-wide default;
 	/// project-owned caches re-point it through the node bridge later).
 	disk_dir: String,
-	/// mtime of the last loaded state file (skip reloads of unchanged files).
+	/// mtime (ms) of the state file at the last load; unchanged files
+	/// are not re-read.
 	last_loaded_state: i64,
 	/// External mutex exposed to the C ABI `oakrender_cache_lock/unlock`
 	/// (C++ `PlaybackCache::mutex()`; always pair the calls).
@@ -935,14 +906,11 @@ mod tests {
 
 		// Partial reads copy only the bytes that exist.
 		let mut r = ByteReader::new(&data);
-		assert_eq!(r.read_be(2), 0x1234);
-		// A partial read is left-aligned and zero-padded on the right.
-		assert_eq!(r.read_be(4), 0x5678_0000);
-		assert_eq!(r.read_be(8), 0);
 		let mut short = [0u8; 2];
-		let mut r = ByteReader::new(&data);
 		assert_eq!(r.take(&mut short), 2);
 		assert_eq!(short, [0x12, 0x34]);
+		// A partial u32 read is left-aligned and zero-padded on the right.
+		assert_eq!(r.read_u32(), 0x5678_0000);
 	}
 
 	#[test]
