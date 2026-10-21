@@ -243,6 +243,19 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 	m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Serializes wgpu instance/device creation process-wide.
+///
+/// The Vulkan loader (libvulkan + ICD) is not safe against concurrent
+/// `vkCreateInstance` on every driver stack: parallel test threads each
+/// calling [`GpuContext::create`] crashed with a null call inside the
+/// loader (SEGV in `vkCreateInstance`). Context creation is rare (test
+/// setup and first renderer init), so the lock costs nothing in
+/// practice.
+fn create_lock() -> MutexGuard<'static, ()> {
+	static LOCK: Mutex<()> = Mutex::new(());
+	lock(&LOCK)
+}
+
 /// The context surface textures depend on (trait object in
 /// [`Texture::Gpu`]). `GpuContext` is the production implementor; tests
 /// can supply a fake.
@@ -441,6 +454,9 @@ impl GpuContext {
 	/// order. `None` when no adapter is available (callers use the CPU
 	/// path).
 	pub fn create(prefer: BackendKind) -> Option<Arc<Self>> {
+		// Held for the whole probe/create sequence: the Vulkan loader
+		// crashes on concurrent instance creation (see `create_lock`).
+		let _create_guard = create_lock();
 		for backends in prefer.wgpu_fallbacks() {
 			let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
 				backends,
