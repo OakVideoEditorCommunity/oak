@@ -133,23 +133,25 @@ impl TimeRange {
 /// Normalized (sorted, non-overlapping) list of ranges — mirrors
 /// `olive::core::TimeRangeList` including its merge-on-insert and
 /// subtraction semantics.
-
-// TODO: This struct should be replace as a Vec
+///
+/// Deliberately a newtype over `Vec<TimeRange>` rather than a plain
+/// `Vec`: [`insert`](TimeRangeList::insert) and
+/// [`remove`](TimeRangeList::remove) maintain the normalized invariant
+/// (merged, non-overlapping ranges), which a raw `Vec` cannot enforce.
+/// The wrapped `Vec` stays private for the same reason.
 #[derive(Clone, Debug, Default)]
-pub struct TimeRangeList {
-	ranges: Vec<TimeRange>,
-}
+pub struct TimeRangeList(Vec<TimeRange>);
 
 impl TimeRangeList {
 	/// Empty list.
 	pub fn new() -> Self {
-		TimeRangeList { ranges: Vec::new() }
+		TimeRangeList(Vec::new())
 	}
 
 	/// True when any element fully contains `range` (C++
 	/// `TimeRangeList::contains`, inclusive edges).
 	fn contains_range(&self, range: &TimeRange) -> bool {
-		self.ranges
+		self.0
 			.iter()
 			.any(|r| r.contains_range(range, true, true))
 	}
@@ -164,17 +166,17 @@ impl TimeRangeList {
 
 		let mut range = range;
 		let mut i = 0;
-		while i < self.ranges.len() {
-			let compare = self.ranges[i];
+		while i < self.0.len() {
+			let compare = self.0[i];
 			if compare.overlaps_with(&range, true, true) {
 				range = compare.combined(&range);
-				self.ranges.remove(i);
+				self.0.remove(i);
 			} else {
 				i += 1;
 			}
 		}
 
-		self.ranges.push(range);
+		self.0.push(range);
 	}
 
 	/// Subtract a range (C++ `remove`, via `util_remove`).
@@ -182,12 +184,12 @@ impl TimeRangeList {
 		let mut additions: Vec<TimeRange> = Vec::new();
 
 		let mut i = 0;
-		while i < self.ranges.len() {
-			let compare = self.ranges[i];
+		while i < self.0.len() {
+			let compare = self.0[i];
 
 			if range.contains_range(&compare, true, true) {
 				// The removal range entirely encompasses this element.
-				self.ranges.remove(i);
+				self.0.remove(i);
 			} else if compare.contains_range(&range, false, false) {
 				// The removal range is strictly inside this element:
 				// split it into two.
@@ -195,38 +197,38 @@ impl TimeRangeList {
 				new_range.set_in(range.out);
 				let mut trimmed = compare;
 				trimmed.set_out(range.in_);
-				self.ranges[i] = trimmed;
+				self.0[i] = trimmed;
 				additions.push(new_range);
 				break;
 			} else {
 				if compare.in_ < range.in_ && compare.out > range.in_ {
 					// This element's out overlaps the range's in: trim it.
-					self.ranges[i].set_out(range.in_);
+					self.0[i].set_out(range.in_);
 				} else if compare.in_ < range.out && compare.out > range.out {
 					// This element's in overlaps the range's out: trim it.
-					self.ranges[i].set_in(range.out);
+					self.0[i].set_in(range.out);
 				}
 				i += 1;
 			}
 		}
 
-		self.ranges.extend(additions);
+		self.0.extend(additions);
 	}
 
 	/// Sorted ranges view.
 	pub fn ranges(&self) -> &[TimeRange] {
-		&self.ranges
+		&self.0
 	}
 
 	/// True when the list has no ranges.
 	pub fn is_empty(&self) -> bool {
-		self.ranges.is_empty()
+		self.0.is_empty()
 	}
 
 	/// Total covered duration (sum of each range's length).
 	pub fn total_length(&self) -> Rational {
 		let mut total = Rational::new(0, 1);
-		for r in &self.ranges {
+		for r in &self.0 {
 			total = total + r.length();
 		}
 		total
@@ -235,7 +237,7 @@ impl TimeRangeList {
 	/// First time covered by any range (C++ `in()` on the first range);
 	/// null rational when empty.
 	pub fn first(&self) -> Rational {
-		match self.ranges.first() {
+		match self.0.first() {
 			Some(r) => r.in_(),
 			None => Rational::NULL,
 		}
@@ -244,10 +246,10 @@ impl TimeRangeList {
 	/// Frame-accurate iteration helper: snap a time to the containing
 	/// frame grid of `timebase` (C++ TimeRangeListFrameIterator snap,
 	/// `k_floor` rounding).
-
-	// TODO: Since self carries no state relevant to a singal snap, this function should remove the self.
-	pub fn snap(&self, time: Rational, timebase: Rational) -> Rational {
-		let _ = self; // self carries no state relevant to a single snap
+	///
+	/// Associated function (no `self`): a single snap needs no list
+	/// state.
+	pub fn snap(time: Rational, timebase: Rational) -> Rational {
 		rational::snap_time_to_timebase(time, timebase)
 	}
 }

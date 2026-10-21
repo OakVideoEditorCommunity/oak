@@ -261,24 +261,26 @@ fn timerangelist_normalization() {
 /// Frame-grid snap semantics (C++ TimeRangeListFrameIterator::Snap).
 #[test]
 fn timerangelist_snap() {
-	let list = TimeRangeList::new();
 	let tb = Rational::new(1001, 30000); // 29.97 fps, seconds per frame.
 
 	// 0.5 frames floors down to frame 0.
 	let half = Rational::new(1001, 60000);
-	assert_eq!(list.snap(half, tb), Rational::new(0, 1));
+	assert_eq!(TimeRangeList::snap(half, tb), Rational::new(0, 1));
 
 	// Exactly 1 frame stays put.
 	let one = Rational::new(1001, 30000);
-	assert_eq!(list.snap(one, tb), Rational::new(1001, 30000));
+	assert_eq!(TimeRangeList::snap(one, tb), Rational::new(1001, 30000));
 
 	// 1.5 frames (1001/20000 s) floors down to 1 frame.
 	let one_and_half = Rational::new(1001, 20000);
-	assert_eq!(list.snap(one_and_half, tb), Rational::new(1001, 30000));
+	assert_eq!(
+		TimeRangeList::snap(one_and_half, tb),
+		Rational::new(1001, 30000)
+	);
 
 	// 30 frames round-trip exactly.
 	assert_eq!(
-		list.snap(Rational::new(1001, 1000), tb),
+		TimeRangeList::snap(Rational::new(1001, 1000), tb),
 		Rational::new(1001, 1000)
 	);
 }
