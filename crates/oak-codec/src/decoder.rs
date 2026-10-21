@@ -351,100 +351,6 @@ pub trait Decoder: Send + Sync {
 	}
 }
 
-/// Placeholder decoder used by the built-in probe registry.
-///
-/// Reports the correct id and capability flags so id-based dispatch
-/// (`create_from_id`) works, but every media operation is unimplemented
-/// and returns `None` / an error. Used for the OIIO entry, whose Rust
-/// implementation (`crate::oiio::OIIODecoder`) is still a dylib stub; the
-/// FFmpeg entry is the real [`crate::ffmpeg::FFmpegDecoder`].
-struct UnimplementedDecoder {
-	id: &'static str,
-	video: bool,
-	audio: bool,
-}
-
-impl UnimplementedDecoder {
-	fn new(id: &'static str, video: bool, audio: bool) -> Self {
-		UnimplementedDecoder { id, video, audio }
-	}
-}
-
-impl Decoder for UnimplementedDecoder {
-	fn id(&self) -> String {
-		self.id.to_string()
-	}
-
-	fn supports_video(&self) -> bool {
-		self.video
-	}
-
-	fn supports_audio(&self) -> bool {
-		self.audio
-	}
-
-	fn probe(
-		&self,
-		_filename: &str,
-		_cancelled: Option<&CancelAtom>,
-	) -> Option<FootageDescription> {
-		None
-	}
-
-	fn open(&self, _stream: &CodecStream) -> crate::error::Result<()> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-
-	fn close(&self) -> crate::error::Result<()> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-
-	fn stream(&self) -> CodecStream {
-		CodecStream::new()
-	}
-
-	fn retrieve_video_frame(&self, _p: &RetrieveVideoParams) -> crate::error::Result<Arc<Frame>> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-
-	fn retrieve_video(&self, _p: &RetrieveVideoParams) -> crate::error::Result<OakRenderTexture> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-
-	fn retrieve_audio(
-		&self,
-		_dest: &mut [f32],
-		_range: &TimeRange,
-		_sample_rate: i32,
-		_channel_layout: u64,
-	) -> crate::error::Result<RetrieveAudioStatus> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-
-	fn conform_audio(
-		&self,
-		_output_filenames: &[String],
-		_sample_rate: i32,
-		_channel_layout: u64,
-		_sample_format: i32,
-		_cancelled: Option<&CancelAtom>,
-	) -> crate::error::Result<()> {
-		Err(crate::error::Error::Failed(
-			"decoder not yet implemented".to_string(),
-		))
-	}
-}
-
 /// `Decoder::create_from_id` — instantiate a decoder by id, or `None`.
 pub fn create_from_id(id: &str) -> Option<Arc<dyn Decoder>> {
 	if id.is_empty() {
@@ -501,11 +407,10 @@ pub fn set_test_decoders(list: Vec<Arc<dyn Decoder>>) {
 /// `Decoder::receive_list_of_all_decoders` — all registered decoders.
 ///
 /// Order is probe priority, mirroring C++: OIIO (more specific) before
-/// FFmpeg (format-agnostic fallback). The OIIO entry is an
-/// [`UnimplementedDecoder`] stub (the OIIO engine is not ported); the
-/// FFmpeg entry is the real [`crate::ffmpeg::FFmpegDecoder`]. When tests
-/// injected a non-empty list via [`set_test_decoders`], that list takes
-/// precedence.
+/// FFmpeg (format-agnostic fallback). The OIIO entry is the real
+/// [`crate::oiio::OIIODecoder`]; the FFmpeg entry is the real
+/// [`crate::ffmpeg::FFmpegDecoder`]. When tests injected a non-empty list
+/// via [`set_test_decoders`], that list takes precedence.
 pub fn receive_list_of_all_decoders() -> Vec<Arc<dyn Decoder>> {
 	if let Some(store) = TEST_DECODERS.get() {
 		let injected = store.lock().unwrap();
@@ -514,7 +419,7 @@ pub fn receive_list_of_all_decoders() -> Vec<Arc<dyn Decoder>> {
 		}
 	}
 	vec![
-		Arc::new(UnimplementedDecoder::new("oiio", false, false)),
+		Arc::new(crate::oiio::OIIODecoder::new()),
 		Arc::new(crate::ffmpeg::FFmpegDecoder::new()),
 	]
 }
@@ -739,7 +644,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests_unimplemented {
+mod tests_builtin {
 	use super::*;
 
 	fn builtin(id: &str) -> Arc<dyn Decoder> {
@@ -882,14 +787,18 @@ mod tests_unimplemented {
 	}
 
 	#[test]
-	fn oiio_placeholder_reports_unimplemented() {
+	fn oiio_builtin_is_the_real_decoder() {
 		let _g = registry_guard();
 		let d = builtin("oiio");
 		assert!(d.probe("x.exr", None).is_none());
+		// Without the liboakoiio dylib the open fails, but the real
+		// decoder still records the requested stream; `close` clears it
+		// and succeeds (safe-when-closed contract).
 		assert!(d
 			.open(&CodecStream::with_block("x.exr".to_string(), 0, None))
 			.is_err());
-		assert!(d.close().is_err());
+		assert_eq!(d.stream().filename(), "x.exr");
+		assert!(d.close().is_ok());
 		assert_eq!(d.stream().filename(), "");
 		let p = test_params();
 		assert!(d.retrieve_video_frame(&p).is_err());
@@ -906,7 +815,7 @@ mod tests_unimplemented {
 		assert!(d
 			.conform_audio(&["a.pcm".to_string()], 48000, 0x3, 10, None)
 			.is_err());
-		// The placeholder keeps the conservative defaults too.
+		// The OIIO decoder keeps the conservative trait defaults too.
 		assert!(!d.hardware_decoding());
 		assert_eq!(d.get_audio_start_offset(), Rational::new(0, 1));
 		assert!(d.retrieve_video_frame_gpu(&p).unwrap().is_none());

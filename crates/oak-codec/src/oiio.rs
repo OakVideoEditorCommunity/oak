@@ -39,9 +39,22 @@ pub struct OIIODecoder {
 }
 
 impl OIIODecoder {
+	/// A decoder in the closed state (no stream recorded yet).
+	pub fn new() -> Self {
+		OIIODecoder {
+			stream: std::sync::Mutex::new(None),
+		}
+	}
+
 	/// Error returned for operations that need the missing `liboakoiio`.
 	const NOT_AVAILABLE: &'static str =
 		"OIIO decoding is not available in this build (needs liboakoiio dylib)";
+}
+
+impl Default for OIIODecoder {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl Decoder for OIIODecoder {
@@ -248,9 +261,7 @@ mod tests {
 
 	#[test]
 	fn oiio_decoder_identity_and_stub_operations() {
-		let d = OIIODecoder {
-			stream: std::sync::Mutex::new(None),
-		};
+		let d = OIIODecoder::new();
 		assert_eq!(d.id(), "oiio");
 		// Still images only: no audio support.
 		assert!(!d.supports_video());
