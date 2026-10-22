@@ -36,6 +36,52 @@ use oak_undo::undocommand::UndoCommand;
 
 use super::graphops::{connect_command, disconnect_command, lock, push_command as push, ProjectRef};
 
+/// The media kind an effect chain carries (video chains are
+/// texture-typed, audio chains samples-typed).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EffectMedia {
+	Video,
+	Audio,
+}
+
+/// The media kind of an effect *node*, from its effect input's value
+/// type: a samples-typed effect input marks an audio effect (volume,
+/// pan); texture-typed (or unrecognized) inputs are treated as video —
+/// the clip/adjustment chain's own typing.
+fn effect_media_of(core: &oak_node::node::NodeCore) -> EffectMedia {
+	match core.get_input(&core.effect_input).map(|i| i.value_type) {
+		Some(oak_node::value::ValueType::Samples) => EffectMedia::Audio,
+		_ => EffectMedia::Video,
+	}
+}
+
+/// The media kind a host's effect chain carries, or `None` when it
+/// cannot be determined (the permissive path). A block inherits its
+/// track's kind: the clip's own effect input is texture-typed on every
+/// track kind and the audio mixer never consults the clip's effect
+/// stack, so the track is the source of truth. Non-block or untracked
+/// hosts fall back to the host effect input's value type.
+fn host_media_of(g: &Graph, host: NodeId) -> Option<EffectMedia> {
+	if let Some(track) = super::graphops::clip_track(g, host) {
+		if let Some(track) = super::graphops::track_behavior(g, track) {
+			return Some(match track.kind {
+				oak_node::track::TrackType::Audio => EffectMedia::Audio,
+				// Video and subtitle tracks carry texture chains.
+				_ => EffectMedia::Video,
+			});
+		}
+	}
+	let entry = g.get(host)?;
+	let id = &entry.core.effect_input;
+	if id.is_empty() {
+		return None;
+	}
+	entry.core.get_input(id).map(|i| match i.value_type {
+		oak_node::value::ValueType::Samples => EffectMedia::Audio,
+		_ => EffectMedia::Video,
+	})
+}
+
 /// The effect-input id of `node`, or `None` when the node cannot host
 /// effects (C++ `Node::GetEffectInputID`).
 pub fn effect_input_of(g: &Graph, node: NodeId) -> Option<String> {
@@ -620,6 +666,22 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 		if core.effect_input.is_empty() {
 			return Err("node type has no effect input; cannot be chained".to_string());
 		}
+		// Media-kind guard: a clip hosts only effects of its track's
+		// media kind. A video effect chained onto an audio clip renders
+		// as a guaranteed pass-through (the audio mixer never consults
+		// the clip's effect stack) while the inspector shows a live
+		// card — reject the insert instead of accepting a dead effect.
+		if let Some(host_media) = host_media_of(&g.graph, host) {
+			let effect_media = effect_media_of(&core);
+			if host_media != effect_media {
+				return Err(match (host_media, effect_media) {
+					(EffectMedia::Audio, EffectMedia::Video) => {
+						"video effects cannot be applied to audio clips".to_string()
+					}
+					_ => "audio effects cannot be applied to video clips".to_string(),
+				});
+			}
+		}
 		let new_input = core.effect_input.clone();
 		let entry = NodeEntry {
 			core,
@@ -846,6 +908,68 @@ mod tests {
 			.next()
 			.expect("the factory registers at least one video effect")
 			.type_id
+	}
+
+	/// Media-kind guard: a clip on an audio track rejects video effects
+	/// (and vice versa), while an untracked clip stays permissive.
+	#[test]
+	fn insert_rejects_cross_media_effects() {
+		let _g = stack_lock();
+		oak_undo::global::clear().unwrap();
+		use oak_node::track::TrackType;
+
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Media Guard");
+		graphops::add_track(&project, seq, TrackType::Audio).expect("audio track");
+		graphops::add_track(&project, seq, TrackType::Video).expect("video track");
+		let (audio_track, video_track) = {
+			let g = lock(&project);
+			(
+				graphops::track_ids(&g.graph, seq, TrackType::Audio)[0],
+				graphops::track_ids(&g.graph, seq, TrackType::Video)[0],
+			)
+		};
+
+		// A bare clip node placed on `track` (the track back-pointer is
+		// what the guard reads; placing footage needs real media).
+		let mk_clip = |track: NodeId| {
+			let mut g = lock(&project);
+			let (core, behavior) = oak_node::block::clip_create();
+			let clip = g.graph.add_node(core, behavior);
+			g.graph
+				.get_mut(clip)
+				.expect("the clip node")
+				.behavior
+				.as_any_mut()
+				.and_then(|b| b.downcast_mut::<oak_node::block::ClipBlockBehavior>())
+				.expect("a clip block")
+				.core
+				.track = Some(track);
+			clip
+		};
+		let audio_clip = mk_clip(audio_track);
+		let video_clip = mk_clip(video_track);
+
+		// Video effect onto the audio clip: rejected...
+		let err = insert(&project, audio_clip, 0, "org.olivevideoeditor.Olive.opacity")
+			.expect_err("a video effect must not chain onto an audio clip");
+		assert!(err.contains("audio"), "{err}");
+		// ...while the audio effect chains fine.
+		insert(&project, audio_clip, 0, "org.olivevideoeditor.Olive.volume")
+			.expect("volume is an audio effect");
+		// Symmetrically on the video clip.
+		let err = insert(&project, video_clip, 0, "org.olivevideoeditor.Olive.volume")
+			.expect_err("an audio effect must not chain onto a video clip");
+		assert!(err.contains("video"), "{err}");
+		insert(&project, video_clip, 0, "org.olivevideoeditor.Olive.opacity")
+			.expect("opacity is a video effect");
+
+		// An untracked clip keeps the permissive fallback.
+		let (p2, free) = project_with_clip();
+		insert(&p2, free, 0, "org.olivevideoeditor.Olive.opacity")
+			.expect("untracked clips stay permissive");
+
+		oak_undo::global::clear().unwrap();
 	}
 
 	#[test]
