@@ -18,12 +18,7 @@
 //! all copying happens inside oaknode. oaknode never implemented the
 //! deep-copy direction (single-lib plan §4.1 — dead direction), so the
 //! copy operations fail explainably; the tests assert those failures.
-//!
-//! M14 R5: the module is entirely internal to oakrender (no facade entry
-//! is involved), so the oaknode project handle was reduced to its numeric
-//! identity — a Rust value type instead of a `CHandle`. The live project
-//! object stays with oaknode; the render side stores only identity pairs
-//! (see `COVERAGE.md`, "render 只存 identity 对").
+
 
 use crate::error::{Error, Result};
 
