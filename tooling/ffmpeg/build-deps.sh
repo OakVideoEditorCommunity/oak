@@ -336,7 +336,11 @@ cmake_build x265 \
 # the driver maps it internally), poisoning every downstream static link
 # line. Map it back to the real library.
 if [ -f "$PREFIX/lib/pkgconfig/x265.pc" ]; then
-	sed -i 's/-latomic_asneeded/-latomic/g' "$PREFIX/lib/pkgconfig/x265.pc"
+	# `sed -i.bak` (not bare `-i`): BSD sed (macOS) reads `-i`'s argument
+	# as the backup suffix, so a bare `-i` eats the script and the file
+	# becomes the script — "sed: -I or -i may not be used with stdin".
+	sed -i.bak 's/-latomic_asneeded/-latomic/g' "$PREFIX/lib/pkgconfig/x265.pc" &&
+		rm -f "$PREFIX/lib/pkgconfig/x265.pc.bak"
 fi
 
 meson_build dav1d \
