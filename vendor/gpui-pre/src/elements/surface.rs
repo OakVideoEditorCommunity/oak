@@ -165,6 +165,16 @@ impl Element for Surface {
         window: &mut Window,
         _: &mut App,
     ) {
+        // On platforms with no surface source (Windows) the enum is
+        // empty; `bounds`/`window` are then unused, and the reference
+        // match below still needs a (wildcard) arm to be exhaustive.
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        let _ = (bounds, window);
         match &self.source {
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             SurfaceSource::Surface(surface) => {
@@ -181,6 +191,13 @@ impl Element for Surface {
                 let new_bounds = self.object_fit.get_bounds(bounds, *size);
                 window.paint_surface(new_bounds, Arc::clone(texture), *size);
             }
+            #[cfg(not(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "linux",
+                target_os = "freebsd"
+            )))]
+            _ => {}
         }
     }
 }
