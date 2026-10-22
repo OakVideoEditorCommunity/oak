@@ -6980,7 +6980,10 @@ mod tests {
 			window.draw(cx).clear(cx);
 		})
 		.expect("window is still open");
-		cx.simulate_keystrokes(window.clone().into(), "ctrl-a backspace");
+		// Platform select-all (cmd-a on macOS, ctrl-a elsewhere — the
+		// input keymap binds ctrl-a to MoveHome on macOS) + backspace
+		// clears the query.
+		cx.simulate_keystrokes(window.clone().into(), "secondary-a backspace");
 
 		// The rendered tab: clicking a capture field starts a capture, and
 		// the armed reset-all confirmation footer renders.
@@ -7067,7 +7070,7 @@ mod tests {
 
 		// A query matching nothing clears the selection (the empty-list
 		// render branch).
-		cx.simulate_keystrokes(window.clone().into(), "ctrl-a");
+		cx.simulate_keystrokes(window.clone().into(), "secondary-a");
 		cx.simulate_input(window.clone().into(), "zzz-no-such-action-zzz");
 		assert!(cx.read(|cx| content.read(cx).selected_action()).is_none());
 		cx.update_window(window.into(), |_root, window, cx| {
@@ -7077,7 +7080,7 @@ mod tests {
 
 		// Clearing the query re-selects the first row; arrow moves wrap
 		// through every item.
-		cx.simulate_keystrokes(window.clone().into(), "ctrl-a backspace");
+		cx.simulate_keystrokes(window.clone().into(), "secondary-a backspace");
 		assert_eq!(
 			cx.read(|cx| content.read(cx).selected_action()),
 			Some(items[0].0)

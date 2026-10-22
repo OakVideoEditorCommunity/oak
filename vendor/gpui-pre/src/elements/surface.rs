@@ -51,6 +51,22 @@ impl Clone for SurfaceSource {
     }
 }
 
+// Platforms without a surface source (Windows): the enum has no
+// variants, but platform-generic callers (the viewer's frame source)
+// still derive `Clone` over it, so provide the trivial impl — an
+// empty-enum match needs no arms.
+#[cfg(not(any(
+	target_os = "macos",
+	target_os = "ios",
+	target_os = "linux",
+	target_os = "freebsd"
+)))]
+impl Clone for SurfaceSource {
+	fn clone(&self) -> Self {
+		match *self {}
+	}
+}
+
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 impl std::fmt::Debug for SurfaceSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

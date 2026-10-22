@@ -1259,6 +1259,10 @@ mod tests {
 		assert!(is_none);
 	}
 
+	// The surface path exists only where `SurfaceSource::Texture` does
+	// (Linux/FreeBSD); on macOS/Windows a registered GPU frame stays on
+	// the CPU-frame path by design.
+	#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 	#[gpui_kit::test]
 	async fn registered_gpu_frame_switches_to_surface(cx: &mut TestAppContext) {
 		// The 10-bit display path: the engine registers an RGBA16F texture
