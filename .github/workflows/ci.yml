@@ -215,6 +215,7 @@ jobs:
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'
+        id: configure-env-windows
         shell: pwsh
         run: |
           # FFmpeg comes from the prebuilt archive extracted above.
@@ -231,6 +232,21 @@ jobs:
           # no OCIO_RS_NO_MSVC_INCLUDES anywhere.
           "OCIO_RS_ENABLE_REAL=1" >> $env:GITHUB_ENV
           "OCIO_RS_LINK=static" >> $env:GITHUB_ENV
+          # ocio-sys' build script puts the bundled cmake build under
+          # %TEMP%\ocrs (a Windows-only path-length workaround) — outside
+          # target/, so the cargo cache never carries it and a cached
+          # build unit's recorded link path dangles on a fresh runner
+          # image (the 20261021 roll broke the Windows link with "could
+          # not find native static library `OpenColorIO`"). Anchor TEMP
+          # inside the workspace so the bundled build is cacheable.
+          $tmp = "$env:GITHUB_WORKSPACE\.cache\tmp"
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          "TEMP=$tmp" >> $env:GITHUB_ENV
+          "TMP=$tmp" >> $env:GITHUB_ENV
+          # The bundled build's identity is the ocio-rs pin (the vendored
+          # sources and the build script both come from it).
+          $rev = [regex]::Match((Get-Content Cargo.lock -Raw), 'ocio-rs\.git\?rev=([0-9a-f]+)').Groups[1].Value
+          "ocio_rev=$rev" >> $env:GITHUB_OUTPUT
 
       # ------------------------------------------------------------------
       # Cargo caches: whole target/ dir plus ~/.cargo, shared per
@@ -242,12 +258,39 @@ jobs:
           shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
           cache-on-failure: true
 
+      # The bundled OCIO build (ocio-sys' build script, ~600 MB of MSVC
+      # static libraries) lives in .cache/tmp/ocrs via the TEMP pin
+      # above. Keyed on the ocio-rs pin: a changed pin must cost a
+      # rebuild, never a mismatched cache (same policy as FFmpeg).
+      - name: Restore bundled OCIO (Windows)
+        if: matrix.platform == 'windows'
+        id: ocio-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/tmp/ocrs
+          key: ocio-bundled-${{ runner.os }}-${{ matrix.arch }}-${{ steps.configure-env-windows.outputs.ocio_rev }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ocio-bundled-${{ runner.os }}-${{ matrix.arch }}-${{ steps.configure-env-windows.outputs.ocio_rev }}-
+
       # A freshly built FFmpeg must not keep linking the archives the
       # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
       # track them); drop just that package so the link picks up the new
       # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
       - name: Refresh the FFmpeg binding
         run: cargo clean -p ffmpeg-sys-next
+
+      # Drop the ocio-sys build unit whenever its recorded library is not
+      # on disk: a restored cargo unit whose build script output predates
+      # the TEMP pin points at the old %TEMP% and would fail the link.
+      # The build script then re-runs and re-records the pinned path (a
+      # no-op cmake build over the restored bundle).
+      - name: Refresh the OCIO binding (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-ChildItem .cache\tmp\ocrs -Recurse -Filter OpenColorIO.lib -ErrorAction SilentlyContinue)) {
+            cargo clean -p ocio-sys
+          }
 
       # ------------------------------------------------------------------
       # Build & test
@@ -359,6 +402,15 @@ jobs:
             cargo test --workspace --locked
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+      # Save the bundled OCIO build even when the tests fail (the next
+      # run's link needs it regardless of the test outcome).
+      - name: Save bundled OCIO (Windows)
+        if: always() && matrix.platform == 'windows'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/tmp/ocrs
+          key: ${{ steps.ocio-cache.outputs.cache-primary-key }}
 
       # ------------------------------------------------------------------
       # Failure diagnostics
