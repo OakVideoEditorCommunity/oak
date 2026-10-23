@@ -288,7 +288,19 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          if (-not (Get-ChildItem .cache\tmp\ocrs -Recurse -Filter OpenColorIO.lib -ErrorAction SilentlyContinue)) {
+          # Diagnostics: where the library actually is vs. where the
+          # cached build unit looks for it.
+          $libs = Get-ChildItem .cache\tmp\ocrs -Recurse -Filter OpenColorIO.lib -ErrorAction SilentlyContinue
+          Write-Host "OpenColorIO.lib on disk:"
+          $libs | ForEach-Object { Write-Host "  $($_.FullName)" }
+          Write-Host "recorded link-search paths:"
+          Get-ChildItem target\debug\build -Directory -Filter "ocio-sys-*" -ErrorAction SilentlyContinue | ForEach-Object {
+            $out = Join-Path $_.FullName "output"
+            if (Test-Path $out) {
+              Select-String -Path $out -Pattern 'cargo:rustc-link-search' | ForEach-Object { Write-Host "  $($_.Line)" }
+            }
+          }
+          if (-not $libs) {
             cargo clean -p ocio-sys
           }
 
