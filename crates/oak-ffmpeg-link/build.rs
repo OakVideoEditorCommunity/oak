@@ -168,7 +168,28 @@ fn main() {
 				.expect("pkgconfig dir has a parent")
 				.join(format!("lib{lib}.a"));
 			if archive.exists() {
-				println!("cargo:rustc-link-lib=static={lib}");
+				// The subtitle/text stack (libass and its closure) is
+				// referenced only by libavfilter objects bundled in
+				// ffmpeg-sys-next's rlib, which can land AFTER this crate's
+				// rlib in the final link order (the order is
+				// target-dependent: aarch64-linux puts this crate first,
+				// and GNU ld never rescans an archive it already passed),
+				// so an on-demand archive here resolves nothing there
+				// (observed: undefined FT_*/Fc*/ass_* symbols from
+				// avf_showcqt.o and vf_subtitles.o in the openKylin arm64
+				// CD build). Whole-archive the stack so its symbols are
+				// unconditionally defined wherever it sits on the link
+				// line. The codec libraries must NOT be whole-archived:
+				// libtheoraenc and libtheoradec share member objects, so
+				// force-including both duplicates theora_* symbols.
+				const WHOLE_ARCHIVE: [&str; 7] = [
+					"ass", "unibreak", "harfbuzz", "fribidi", "fontconfig", "expat", "freetype",
+				];
+				if WHOLE_ARCHIVE.contains(&lib) {
+					println!("cargo:rustc-link-lib=static:-bundle,+whole-archive={lib}");
+				} else {
+					println!("cargo:rustc-link-lib=static={lib}");
+				}
 			} else {
 				println!("cargo:rustc-link-lib={lib}");
 			}
