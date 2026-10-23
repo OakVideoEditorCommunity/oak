@@ -294,13 +294,22 @@ jobs:
           Write-Host "OpenColorIO.lib on disk:"
           $libs | ForEach-Object { Write-Host "  $($_.FullName)" }
           Write-Host "recorded link-search paths:"
+          $recorded = @()
           Get-ChildItem target\debug\build -Directory -Filter "ocio-sys-*" -ErrorAction SilentlyContinue | ForEach-Object {
             $out = Join-Path $_.FullName "output"
             if (Test-Path $out) {
-              Select-String -Path $out -Pattern 'cargo:rustc-link-search' | ForEach-Object { Write-Host "  $($_.Line)" }
+              Select-String -Path $out -Pattern 'cargo:rustc-link-search' | ForEach-Object {
+                Write-Host "  $($_.Line)"
+                if ($_.Line -match 'ocrs') { $script:recorded += $_.Line }
+              }
             }
           }
-          if (-not $libs) {
+          # Clean when the library is missing OR the unit's recorded ocrs
+          # path predates the TEMP pin (points at the old %TEMP%): the
+          # link would look for the library there.
+          $stale = @($recorded | Where-Object { $_ -notlike "*$env:TEMP*" }).Count -gt 0
+          if (-not $libs -or $stale) {
+            Write-Host "ocio-sys unit missing or records a pre-pin path; rebuilding the unit"
             cargo clean -p ocio-sys
           }
 
