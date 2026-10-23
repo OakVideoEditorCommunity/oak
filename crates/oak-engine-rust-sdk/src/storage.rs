@@ -241,7 +241,10 @@ mod tests {
 			.to_string_lossy()
 			.into_owned();
 		let _ = std::fs::remove_file(&path);
-		let uri = format!("oakdb+sqlite:///{path}");
+		// Two slashes, not three: the platform path supplies its own root
+		// (`/tmp/…` on unix, `C:\…` on Windows — a third slash would make
+		// the Windows form root-relative, failing is_absolute).
+		let uri = format!("oakdb+sqlite://{path}");
 		assert_eq!(library_projects(&uri).expect("list"), vec![]);
 		assert!(library_delete(&uri, "no-such-uuid").is_err());
 		assert!(library_rename(&uri, "no-such-uuid", "x").is_err());

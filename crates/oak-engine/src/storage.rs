@@ -398,7 +398,11 @@ mod tests {
 				.to_string_lossy()
 				.into_owned();
 			let _ = std::fs::remove_file(&path);
-			let uri = format!("oakdb+sqlite:///{path}");
+			// Two slashes, not three: `parse_target` requires an absolute
+			// path and the platform path supplies its own root
+			// (`/tmp/…` on unix, `C:\…` on Windows — a third slash would
+			// make the Windows form root-relative, failing is_absolute).
+			let uri = format!("oakdb+sqlite://{path}");
 			let (u, ul) = arg(&uri);
 			assert_eq!(oak_storage_library_count(u, ul), 0);
 			let mut buf = [0u8; 64];
