@@ -38,7 +38,7 @@ resolver = "2"
 [workspace.package]
 # Single source of truth for the release version: the app package
 # inherits it, and with it cargo-packager and the CD packaging scripts.
-version = "0.5.1"
+version = "0.5.2"
 
 [profile.release]
 # FFI discipline: every module crate exports an `extern "C"` ABI whose
