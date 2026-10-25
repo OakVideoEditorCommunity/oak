@@ -4,7 +4,7 @@
 > 组件分解、里程碑、验收标准全部内联，无需阅读其他文档。
 >
 > **定位**：功能性插件扩展的是编辑器的 **功能与工作流**（AI 剪辑、转写、批量处理、
-> 外部面板、自动化），与 `../../crates/oak-ofx-plugin`（OpenFX 特效宿主，管图像处理滤镜）
+> 外部面板、自动化），与 `../../../crates/oak-ofx-plugin`（OpenFX 特效宿主，管图像处理滤镜）
 > **完全正交**。旗舰用例是 AI 剪辑插件：给多模态 AI 一组工具，让它自己"看"视频
 > （取帧回喂）并执行剪辑——外部程序因此必须能完整操作 Oak。
 
@@ -17,8 +17,8 @@
 2. 插件可以是任何语言（C++/Python/Node…），协议必须是**语言无关的文本协议 +
    共享内存数据面**，不发明需要链接 Rust/C ABI 的绑定。
 3. 插件的一切编辑动作**必须可撤销**（UndoStack 事务），默认"确认后执行"。
-4. 复用既有基础设施，不新造轮子：渲染进程隔离（`crates/oak-render/src/procpool.rs`
-   + `crates/oak-render/src/ipc.rs`，已落地）的 **NDJSON over stdio + shm 帧槽**
+4. 复用既有基础设施，不新造轮子：渲染进程隔离（`../../../crates/oak-render/src/procpool.rs`
+   + `../../../crates/oak-render/src/ipc.rs`，已落地）的 **NDJSON over stdio + shm 帧槽**
    模式就是本系统传输层的范本。
 5. 不引入 tokio 到 app 路径：IO 线程 + `std::sync::mpsc` + gpui executor 足够。
 6. 不为插件发明新的引擎内部机制：宿主 API 全部是现有

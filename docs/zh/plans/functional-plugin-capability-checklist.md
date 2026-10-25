@@ -4,14 +4,14 @@
 
 每项能力标注：
 
-- **OPP/1 对应**：`docs/zh/plans/completed/external-plugin-protocol.md` 中的协议章节（已冻结的方法目录）。
+- **OPP/1 对应**：`completed/external-plugin-protocol.md` 中的协议章节（已冻结的方法目录）。
 - **代码落点**：该能力在现有代码中的实现位置。
 - **现状**：
   - ✅ 现成可用——已有公共接口，可直接包装导出；
   - 🔶 需封装——能力存在于 app 层内部函数，需要新建稳定的门面层（HostApi）导出；
   - ❌ 需新增——机制本身不存在，需要新建。
 
-背景：功能性插件采用进程隔离 + JSON-RPC/NDJSON + 共享内存帧传输（总体设计见 `docs/zh/plans/completed/external-plugin-system.md`），与现有 `../../crates/oak-ofx-plugin`（OpenFX 特效宿主，dlopen 进主进程）完全正交。插件宿主 crate（`oak-ofx-plugin-host`）与 SDK（`oakxp`/`oakxp-c`）尚未实现。
+背景：功能性插件采用进程隔离 + JSON-RPC/NDJSON + 共享内存帧传输（总体设计见 `completed/external-plugin-system.md`），与现有 `../../crates/oak-ofx-plugin`（OpenFX 特效宿主，dlopen 进主进程）完全正交。插件宿主 crate（`oak-ofx-plugin-host`）与 SDK（`oakxp`/`oakxp-c`）尚未实现。
 
 ---
 
@@ -147,6 +147,6 @@
 
 ## 参考
 
-- 总体设计：`docs/zh/plans/completed/external-plugin-system.md`
-- 协议全文（方法/事件/能力位目录）：`docs/zh/plans/completed/external-plugin-protocol.md`
-- OFX 特效宿主（正交，勿混淆）：`../../crates/oak-ofx-plugin`
+- 总体设计：`completed/external-plugin-system.md`
+- 协议全文（方法/事件/能力位目录）：`completed/external-plugin-protocol.md`
+- OFX 特效宿主（正交，勿混淆）：`../../../crates/oak-ofx-plugin`

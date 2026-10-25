@@ -52,13 +52,13 @@ oak-\* 模块 crate 不变。
 ## 10-bit GPU 纹理路径（已恢复）
 
 **已按方案 A 恢复**（2026-10-13）：`[patch.crates-io]` 把三个 crate
-vendor 到 `vendor/` 并打上最小补丁 ——
+vendor 到 `../../../../vendor` 并打上最小补丁 ——
 
-- `vendor/gpui-pre`：`SurfaceSource::Texture` 变体（Linux/FreeBSD）、
+- `../../../../vendor/gpui-pre`：`SurfaceSource::Texture` 变体（Linux/FreeBSD）、
   `Window::paint_surface` 的纹理形态、`Window::gpu_context` /
   `gpu_device_lost`、`PlatformWindow` 的两个默认 `None` 方法；
-- `vendor/gpui-pre-linux`：wayland/x11 窗口把渲染器的 device/queue 透出；
-- `vendor/gpui-pre-wgpu`：`OAK_DISPLAY_BIT_DEPTH` 下优先
+- `../../../../vendor/gpui-pre-linux`：wayland/x11 窗口把渲染器的 device/queue 透出；
+- `../../../../vendor/gpui-pre-wgpu`：`OAK_DISPLAY_BIT_DEPTH` 下优先
   `Rgb10a2Unorm`/`Rgba16Float` swapchain 格式、`draw_surfaces` 纹理
   管线（fork 的 YCbCr 视频 surface shader 换成单纹理 RGBA 采样）、
   `WgpuRenderer::gpu_context` 访问器。
@@ -70,7 +70,7 @@ app 启动时的 `gpu_context` 捕获均已恢复；fork 的
 **OS 层色彩空间声明也已恢复**（同日）：`LayerColorManagement` /
 `WindowContentColorspace` / `ContentPrimaries` / `ContentTransfer` 类型与
 `Window::set_layer_color_management` / `set_content_colorspace` 进了
-`vendor/gpui-pre`；Wayland 的 color-management-v1 声明（图像描述创建 +
+`../../../../vendor/gpui-pre`；Wayland 的 color-management-v1 声明（图像描述创建 +
 `ready` 派发 + `apply_color_description`）进了 `vendor/gpui-pre-linux`。
 `displaycolor::apply_to_window` 恢复原实现。
 

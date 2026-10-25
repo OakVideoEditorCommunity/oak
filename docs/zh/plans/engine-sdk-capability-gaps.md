@@ -9,12 +9,12 @@ C wrapper 的能力缺口。背景：`oak-app-new` 以「只用 gpui-kit + oak-e
 
 三层对照：
 
-1. **oak-app 使用面**：`crates/oak-app/src` 中对 `oak_node` / `oak_core` / `oak_undo` /
+1. **oak-app 使用面**：`../../../crates/oak-app/src` 中对 `oak_node` / `oak_core` / `oak_undo` /
    `oak_timeline` / `oak_render` / `oak_codec` / `oak_task` / `oak_storage` /
    `oak_audio` / `oak_ofx_plugin` 的全部引用；
 2. **引擎导出面**：`liboak_engine.so` 的真实符号表（`nm -D`，619 个 `oak_*` 符号，
    含宏生成的导出）；
-3. **SDK 包装面**：`crates/oak-engine-rust-sdk/src` 声明的 508 个 extern 函数。
+3. **SDK 包装面**：`../../../crates/oak-engine-rust-sdk/src` 声明的 508 个 extern 函数。
 
 ## 一、SDK 包装层本身的漏洞（小）
 
