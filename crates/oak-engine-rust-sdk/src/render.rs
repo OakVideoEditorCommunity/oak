@@ -35,6 +35,8 @@ unsafe extern "C" {
 	fn oak_render_manager_is_initialized() -> bool;
 	fn oak_render_manager_shutdown();
 	fn oak_render_textengine_install();
+	fn oak_render_textengine_font_family_count() -> i32;
+	fn oak_render_textengine_font_family_at(index: i32, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_render_swizzle_bgra8_to_rgba8(src: *const u8, dst: *mut u8, pixel_count: usize) -> bool;
 }
 
@@ -134,6 +136,18 @@ pub fn textengine_install() {
 	unsafe { oak_render_textengine_install() }
 }
 
+/// System font families from the same backend used by render workers.
+pub fn font_families() -> Vec<String> {
+	let count = unsafe { oak_render_textengine_font_family_count() }.max(0);
+	(0..count)
+		.filter_map(|index| {
+			string_out(|buf, len| unsafe {
+				oak_render_textengine_font_family_at(index, buf, len)
+			})
+		})
+		.collect()
+}
+
 /// Swizzles BGRA8 pixels to RGBA8 (buffers may not overlap).
 pub fn swizzle_bgra8_to_rgba8(src: &[u8], dst: &mut [u8]) -> bool {
 	if src.len() != dst.len() || !src.len().is_multiple_of(4) {
@@ -183,5 +197,14 @@ mod tests {
 		assert!(swizzle_bgra8_to_rgba8(&src, &mut dst));
 		assert_eq!(dst, [30, 20, 10, 255]);
 		assert!(!swizzle_bgra8_to_rgba8(&src, &mut dst[..3]));
+	}
+
+	#[test]
+	fn text_backend_install_and_font_families() {
+		textengine_install();
+		let families = font_families();
+		assert!(!families.is_empty(), "the host exposes font families");
+		assert!(families.iter().all(|name| !name.is_empty()));
+		assert_eq!(families, font_families(), "the engine caches the enumeration");
 	}
 }

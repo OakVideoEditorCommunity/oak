@@ -44,6 +44,7 @@ use gpui_kit::component::input::InputEvent;
 
 use crate::actions::ActionId;
 use crate::i18n;
+use crate::oakui::engine::proxy_params_from_config;
 use crate::oakui::real::{
 	audio_input_device, audio_input_devices, audio_output_device, audio_output_devices,
 	config_get_bool, config_get_int, config_get_string, config_set_bool, config_set_int,
@@ -1499,7 +1500,7 @@ impl<E: crate::oakui::engine::AppEngine> ProxyDialogContent<E> {
 	/// Builds the content seeded from the global config params (the C++
 	/// `oakengine_proxy_params_from_config` defaults).
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-		let params = crate::oakui::engine::proxy_params_from_config();
+		let params = proxy_params_from_config();
 
 		let dividers: Vec<i32> = vec![1, 2, 4, 8];
 		let divider_options = dividers

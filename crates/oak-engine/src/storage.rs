@@ -44,6 +44,33 @@ fn resolve(
 	Ok((parsed, backend))
 }
 
+/// The configured default write-through library.
+pub(crate) fn default_library() -> Result<StorageUri, i32> {
+	if !oak_storage::writethrough::storage_enabled() {
+		return Err(oak_storage::error::OAKSTORAGE_E_INVALID);
+	}
+	let uri = oak_storage::writethrough::library_uri()
+		.ok_or(oak_storage::error::OAKSTORAGE_E_INVALID)?;
+	StorageUri::parse(&uri).map_err(|_| oak_storage::error::OAKSTORAGE_E_INVALID)
+}
+
+/// A default-library URI selecting one project row.
+pub(crate) fn project_uri(uuid: &str) -> Result<StorageUri, i32> {
+	let base = default_library()?;
+	StorageUri::parse(&format!("{}?project={uuid}", base.to_uri_string()))
+		.map_err(|_| oak_storage::error::OAKSTORAGE_E_INVALID)
+}
+
+/// The configured default library URI, snprintf-style; negative when
+/// write-through storage is disabled or cannot be resolved.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_default_library_uri(buf: *mut u8, buf_len: usize) -> i32 {
+	match default_library() {
+		Ok(uri) => copy_str_out(&uri.to_uri_string(), buf, buf_len),
+		Err(code) => code,
+	}
+}
+
 /// Opens the project at `uri` through the claiming backend. Returns
 /// the project handle (ref count 1), or null on failure. When the
 /// backend only reports version info (the project was written by an
@@ -305,6 +332,183 @@ pub unsafe extern "C" fn oak_storage_library_rename(
 		Ok(()) => oak_storage::error::OAKSTORAGE_OK,
 		Err(e) => code(e),
 	}
+}
+
+/// Unix timestamps and derived graph statistics for one library row.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_created_at(uri: *const u8, uri_len: usize, index: i32) -> i64 {
+	library_info(uri, uri_len, index).map_or(-1, |info| info.created_at.and_utc().timestamp())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_modified_at(uri: *const u8, uri_len: usize, index: i32) -> i64 {
+	library_info(uri, uri_len, index).map_or(-1, |info| info.modified_at.and_utc().timestamp())
+}
+
+fn library_info(
+	uri: *const u8,
+	uri_len: usize,
+	index: i32,
+) -> Option<oak_storage::backends::database::ProjectInfo> {
+	if index < 0 {
+		return None;
+	}
+	let text = unsafe { str_arg(uri, uri_len) }?;
+	let parsed = StorageUri::parse(text).ok()?;
+	oak_storage::writethrough::backend()
+		.list_projects(&parsed)
+		.ok()?
+		.into_iter()
+		.nth(index as usize)
+}
+
+fn library_stats(
+	uri: *const u8,
+	uri_len: usize,
+	index: i32,
+) -> Option<oak_storage::backends::database::ProjectStats> {
+	let info = library_info(uri, uri_len, index)?;
+	let text = unsafe { str_arg(uri, uri_len) }?;
+	let parsed = StorageUri::parse(text).ok()?;
+	oak_storage::writethrough::backend()
+		.project_stats(&parsed, &info.uuid)
+		.ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_duration_ms(uri: *const u8, uri_len: usize, index: i32) -> i64 {
+	library_stats(uri, uri_len, index).map_or(0, |stats| stats.duration_ms)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_track_count(uri: *const u8, uri_len: usize, index: i32) -> i32 {
+	library_stats(uri, uri_len, index).map_or(0, |stats| stats.track_count)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_clip_count(uri: *const u8, uri_len: usize, index: i32) -> i32 {
+	library_stats(uri, uri_len, index).map_or(0, |stats| stats.clip_count)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_footage_count(uri: *const u8, uri_len: usize, index: i32) -> i32 {
+	library_stats(uri, uri_len, index).map_or(0, |stats| stats.footage_count)
+}
+
+/// Creates a blank row in the selected library and returns its uuid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_create(
+	uri: *const u8,
+	uri_len: usize,
+	name: *const u8,
+	name_len: usize,
+	uuid_buf: *mut u8,
+	uuid_buf_len: usize,
+) -> i32 {
+	let (Some(uri), Some(name)) = (unsafe { str_arg(uri, uri_len) }, unsafe {
+		str_arg(name, name_len)
+	}) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	if name.trim().is_empty() {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	}
+	let Ok(uri) = StorageUri::parse(uri) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	let project = oak_node::project::Project::new();
+	let uuid = {
+		let mut guard = project.lock().unwrap_or_else(|e| e.into_inner());
+		if guard.initialize().is_err() {
+			return oak_storage::error::OAKSTORAGE_E_INVALID;
+		}
+		guard.settings.insert("projectname".into(), name.trim().into());
+		guard.uuid.clone()
+	};
+	match oak_storage::writethrough::backend().save_project(&project, &uri, 0) {
+		Ok(()) => copy_str_out(&uuid, uuid_buf, uuid_buf_len),
+		Err(e) => code(e),
+	}
+}
+
+/// Duplicates a library row (including its history) and returns the new uuid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_duplicate(
+	uri: *const u8,
+	uri_len: usize,
+	uuid: *const u8,
+	uuid_len: usize,
+	new_uuid_buf: *mut u8,
+	new_uuid_buf_len: usize,
+) -> i32 {
+	let (Some(uri), Some(uuid)) = (unsafe { str_arg(uri, uri_len) }, unsafe {
+		str_arg(uuid, uuid_len)
+	}) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	let Ok(uri) = StorageUri::parse(uri) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	match oak_storage::writethrough::backend().duplicate_project(&uri, uuid, None) {
+		Ok(info) => copy_str_out(&info.uuid, new_uuid_buf, new_uuid_buf_len),
+		Err(e) => code(e),
+	}
+}
+
+/// Imports a file-backed project as a new row and returns its uuid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_import(
+	uri: *const u8,
+	uri_len: usize,
+	file_uri: *const u8,
+	file_uri_len: usize,
+	new_uuid_buf: *mut u8,
+	new_uuid_buf_len: usize,
+) -> i32 {
+	let (Some(uri), Some(file_uri)) = (unsafe { str_arg(uri, uri_len) }, unsafe {
+		str_arg(file_uri, file_uri_len)
+	}) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	let (Ok(uri), Ok(file_uri)) = (StorageUri::parse(uri), StorageUri::parse(file_uri)) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	match oak_storage::writethrough::backend().import_from_file(&uri, &file_uri) {
+		Ok(uuid) => copy_str_out(&uuid, new_uuid_buf, new_uuid_buf_len),
+		Err(e) => code(e),
+	}
+}
+
+/// Exports a library row to a file URI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_storage_library_export(
+	uri: *const u8,
+	uri_len: usize,
+	uuid: *const u8,
+	uuid_len: usize,
+	file_uri: *const u8,
+	file_uri_len: usize,
+) -> i32 {
+	let (Some(uri), Some(uuid), Some(file_uri)) = (
+		unsafe { str_arg(uri, uri_len) },
+		unsafe { str_arg(uuid, uuid_len) },
+		unsafe { str_arg(file_uri, file_uri_len) },
+	) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	let (Ok(uri), Ok(file_uri)) = (StorageUri::parse(uri), StorageUri::parse(file_uri)) else {
+		return oak_storage::error::OAKSTORAGE_E_INVALID;
+	};
+	match oak_storage::writethrough::backend().export_to_file(&uri, uuid, &file_uri) {
+		Ok(()) => oak_storage::error::OAKSTORAGE_OK,
+		Err(e) => code(e),
+	}
+}
+
+/// Flushes all write-through bindings and stops the snapshot worker.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_storage_flush() {
+	oak_storage::writethrough::flush_all();
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ pub mod corestate;
 pub mod coretypes;
 pub mod coreutil;
 pub mod effect;
+pub mod editor;
 pub mod handle;
 pub mod node;
 pub mod ofx;

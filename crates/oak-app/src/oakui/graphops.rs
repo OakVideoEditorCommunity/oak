@@ -49,6 +49,7 @@ use oak_timeline::util::{
 };
 
 use oak_storage::backend::StorageBackend;
+use oak_engine_rust_sdk::storage::ProjectLibrary;
 
 use super::engine::LibraryProject;
 
@@ -1047,6 +1048,14 @@ fn project_uri(uuid: &str) -> Result<oak_storage::uri::StorageUri, String> {
 		.map_err(|e| e.to_string())
 }
 
+/// Library operations that do not open or bind the app's live project
+/// can already use the safe SDK. The live `library_open` and binding
+/// paths below switch with the editor-session migration in P2.
+fn library_client() -> Result<ProjectLibrary, String> {
+	let uri = library()?.to_uri_string();
+	ProjectLibrary::new(uri).map_err(|e| e.to_string())
+}
+
 /// The library rows, most recently modified first (the project manager's
 /// data source). With storage disabled the result is the empty list, not
 /// an error (the facade contract).
@@ -1054,22 +1063,20 @@ pub fn library_list() -> Result<Vec<LibraryProject>, String> {
 	if !oak_storage::writethrough::storage_enabled() {
 		return Ok(Vec::new());
 	}
-	let uri = library()?;
-	let backend = oak_storage::writethrough::backend();
-	let infos = backend.list_projects(&uri).map_err(|e| e.to_string())?;
+	let client = library_client()?;
+	let infos = client.projects().map_err(|e| e.to_string())?;
 	Ok(infos
 		.into_iter()
 		.map(|info| {
-			let stats = backend.project_stats(&uri, &info.uuid).unwrap_or_default();
 			LibraryProject {
 				uuid: info.uuid,
 				name: info.name,
-				created_at: info.created_at.and_utc().timestamp(),
-				modified_at: info.modified_at.and_utc().timestamp(),
-				duration_ms: stats.duration_ms,
-				track_count: stats.track_count,
-				clip_count: stats.clip_count,
-				footage_count: stats.footage_count,
+				created_at: info.created_at,
+				modified_at: info.modified_at,
+				duration_ms: info.duration_ms,
+				track_count: info.track_count,
+				clip_count: info.clip_count,
+				footage_count: info.footage_count,
 			}
 		})
 		.collect())
@@ -1079,23 +1086,7 @@ pub fn library_list() -> Result<Vec<LibraryProject>, String> {
 /// lands immediately (one `kind='import'` command), so the manager list
 /// shows it before the first edit.
 pub fn library_create(name: &str) -> Result<String, String> {
-	if name.trim().is_empty() {
-		return Err("invalid name".to_string());
-	}
-	let uri = library()?;
-	let project = create_project();
-	let uuid = {
-		let mut guard = lock(&project);
-		guard
-			.settings
-			.insert("projectname".to_string(), name.to_string());
-		guard.uuid.clone()
-	};
-	let result = oak_storage::writethrough::backend()
-		.save_project(&project, &uri, 0)
-		.map_err(|e| e.to_string());
-	result?;
-	Ok(uuid)
+	library_client()?.create(name).map_err(|e| e.to_string())
 }
 
 /// Delete the library row `uuid` (cascades settings / snapshots /
@@ -1104,9 +1095,7 @@ pub fn library_delete(uuid: &str) -> Result<(), String> {
 	if uuid.is_empty() {
 		return Err("invalid uuid".to_string());
 	}
-	oak_storage::writethrough::backend()
-		.delete_project(&library()?, uuid)
-		.map_err(|e| e.to_string())
+	library_client()?.delete(uuid).map_err(|e| e.to_string())
 }
 
 /// Rename the library row `uuid` (the manager's list name).
@@ -1114,9 +1103,7 @@ pub fn library_rename(uuid: &str, name: &str) -> Result<(), String> {
 	if uuid.is_empty() || name.trim().is_empty() {
 		return Err("invalid uuid or name".to_string());
 	}
-	oak_storage::writethrough::backend()
-		.rename_project(&library()?, uuid, name.trim())
-		.map_err(|e| e.to_string())
+	library_client()?.rename(uuid, name.trim()).map_err(|e| e.to_string())
 }
 
 /// Duplicate the library row `uuid` (history included) under a fresh
@@ -1126,19 +1113,14 @@ pub fn library_duplicate(uuid: &str) -> Result<String, String> {
 	if uuid.is_empty() {
 		return Err("invalid uuid".to_string());
 	}
-	let info = oak_storage::writethrough::backend()
-		.duplicate_project(&library()?, uuid, None)
-		.map_err(|e| e.to_string())?;
-	Ok(info.uuid)
+	library_client()?.duplicate(uuid).map_err(|e| e.to_string())
 }
 
 /// Import a `.ove` / `.otio` / `.fcpxml` project file as a new library
 /// row; returns the new row's uuid.
 pub fn library_import(path: &Path) -> Result<String, String> {
-	let file_uri =
-		oak_storage::uri::StorageUri::parse(&path.to_string_lossy()).map_err(|e| e.to_string())?;
-	oak_storage::writethrough::backend()
-		.import_from_file(&library()?, &file_uri)
+	library_client()?
+		.import(&path.to_string_lossy())
 		.map_err(|e| e.to_string())
 }
 
@@ -1148,10 +1130,8 @@ pub fn library_export(uuid: &str, path: &Path) -> Result<(), String> {
 	if uuid.is_empty() {
 		return Err("invalid uuid".to_string());
 	}
-	let file_uri =
-		oak_storage::uri::StorageUri::parse(&path.to_string_lossy()).map_err(|e| e.to_string())?;
-	oak_storage::writethrough::backend()
-		.export_to_file(&library()?, uuid, &file_uri)
+	library_client()?
+		.export(uuid, &path.to_string_lossy())
 		.map_err(|e| e.to_string())
 }
 

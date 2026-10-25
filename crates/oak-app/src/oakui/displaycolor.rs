@@ -84,7 +84,7 @@ use std::time::{Duration, Instant};
 
 use oak_core::color::{pipeline_output_spec, ColorProcessor};
 use oak_core::colormath::{output_spec_to_xyz_d65, OutputColorSpec, OutputGamut, OutputTransfer};
-use oak_core::configstore::ConfigStore;
+use oak_engine_rust_sdk::state::Config;
 
 /// Config key: the display color management mode ("icc" / "off"). The
 /// preference only applies where the platform policy allows self-management
@@ -206,11 +206,9 @@ pub fn display_policy() -> DisplayPolicy {
 	// mapping, so self-management is the only way to honor wide-gamut
 	// displays there (the "off" preference opts back into OS-management).
 	#[cfg(target_os = "macos")]
-	match ConfigStore::instance()
-		.get(None, CONFIG_KEY_COLOR_MODE)
-		.as_deref()
+	match Config::global().get(CONFIG_KEY_COLOR_MODE).as_deref()
 	{
-		Ok("icc") => DisplayPolicy::SelfManaged,
+		Some("icc") => DisplayPolicy::SelfManaged,
 		_ => DisplayPolicy::OsManaged,
 	}
 	#[cfg(not(target_os = "macos"))]
@@ -222,9 +220,8 @@ pub fn display_policy() -> DisplayPolicy {
 
 /// The persisted mode preference ("icc" = self-manage, "off" = OS-managed).
 fn configured_mode() -> String {
-	ConfigStore::instance()
-		.get(None, CONFIG_KEY_COLOR_MODE)
-		.unwrap_or_else(|_| "icc".to_string())
+	Config::global().get(CONFIG_KEY_COLOR_MODE)
+		.unwrap_or_else(|| "icc".to_string())
 }
 
 /// Drop the cached processors (call after a preference change).
@@ -301,16 +298,14 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 /// The active (policy, mode, icc, content, monitor) key.
 fn current_key() -> (DisplayPolicy, String, String, String, String) {
 	let policy = display_policy();
-	let custom = ConfigStore::instance()
-		.get(None, CONFIG_KEY_CUSTOM_ICC)
+	let custom = Config::global().get(CONFIG_KEY_CUSTOM_ICC)
 		.unwrap_or_default();
 	// The content space: a non-empty override (an explicit OCIO colorspace
 	// name) wins; otherwise the chain follows the project's output spec —
 	// its (gamut, transfer) pair rekeys (and so rebuilds) the chain, so a
 	// project settings change flows through the same GENERATION machinery
 	// as a preference change.
-	let space = ConfigStore::instance()
-		.get(None, CONFIG_KEY_CONTENT_SPACE)
+	let space = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 		.unwrap_or_default();
 	let space = if space.is_empty() {
 		let spec = pipeline_output_spec();
@@ -543,8 +538,7 @@ mod tests {
 	fn key_tracks_monitor_and_content_override() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = ConfigStore::instance()
-			.get(None, CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(Some("x11:TEST-1".into()));
@@ -559,13 +553,13 @@ mod tests {
 			key.3
 		);
 
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, "ACEScg");
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, "ACEScg");
 		let key = current_key();
 		assert_eq!(key.3, "override:ACEScg");
 
 		// Clearing the override returns to the project output spec, and an
 		// unknown monitor falls back to the main display.
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, &previous);
 		note_monitor(None);
 		let key = current_key();
 		assert_eq!(key.4, "");
@@ -582,8 +576,7 @@ mod tests {
 	fn current_caches_per_key() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = ConfigStore::instance()
-			.get(None, CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(None);
@@ -653,7 +646,7 @@ mod tests {
 			"a first build after invalidate does not bump"
 		);
 
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, &previous);
 		invalidate();
 	}
 

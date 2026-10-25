@@ -10,6 +10,7 @@ pub mod codec;
 pub mod color;
 pub mod core;
 pub mod effect;
+pub mod editor;
 pub mod node;
 pub mod ofx;
 pub mod otio;
@@ -22,3 +23,6 @@ pub mod timeline;
 pub mod types;
 pub mod utils;
 pub mod vecs;
+
+#[cfg(test)]
+mod test_support;

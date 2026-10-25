@@ -42,6 +42,7 @@ use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 use gpui_kit::{Action, KeyBinding, KeyBindingContextPredicate};
+use oak_engine_rust_sdk::utils::configuration_location;
 
 // One macro call generates all three views of the registry, so they can
 // never drift apart: the gpui action structs, the `ActionId` enum and the
@@ -499,9 +500,8 @@ pub(crate) fn shortcuts_test_lock() -> &'static Mutex<()> {
 /// The path of the custom-shortcuts file: `<config>/shortcuts`, exactly like
 /// the C++ `MainWindow::get_custom_shortcuts_file`.
 pub fn custom_shortcuts_path() -> String {
-	let dir = oak_core::filefunctions::FileFunctions::new()
-		.get_configuration_location()
-		.unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+	let dir = configuration_location()
+		.unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
 	format!("{}/shortcuts", dir.trim_end_matches('/'))
 }
 

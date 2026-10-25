@@ -14,9 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! The text engine re-export: the implementation lives in
-//! [`oak_render::textengine`] so the app AND the worker pool share one
-//! installation (the workers render the text nodes — installing the
-//! hooks only in the UI process left text invisible in every preview).
+//! SDK entry points for the shared text backend. Workers install the
+//! same implementation in their own processes.
 
-pub use oak_render::textengine::{font_families, install};
+use oak_engine_rust_sdk::render::{
+	font_families as sdk_font_families, textengine_install as sdk_textengine_install,
+};
+
+pub fn install() {
+	sdk_textengine_install();
+}
+
+pub fn font_families() -> Vec<String> {
+	sdk_font_families()
+}

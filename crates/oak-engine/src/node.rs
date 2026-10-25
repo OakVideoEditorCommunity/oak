@@ -2129,6 +2129,170 @@ pub unsafe extern "C" fn oak_project_deep_copy(
 	}
 }
 
+/// The project's stable library uuid, snprintf-style.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_uuid(
+	project: *const ProjectHandle,
+	buf: *mut u8,
+	buf_len: usize,
+) -> i32 {
+	write_str(
+		with_project(project, |p| p.uuid.clone()),
+		|value, buf, len| copy_str_out(&value, buf, len),
+		buf,
+		buf_len,
+	)
+}
+
+/// Reads an arbitrary project setting (including cache/OCIO metadata).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_setting(
+	project: *const ProjectHandle,
+	key: *const u8,
+	key_len: usize,
+	buf: *mut u8,
+	buf_len: usize,
+) -> i32 {
+	let Some(key) = (unsafe { str_arg(key, key_len) }) else {
+		return -1;
+	};
+	write_str(
+		with_project(project, |p| p.settings.get(key).cloned()).flatten(),
+		|value, buf, len| copy_str_out(value, buf, len),
+		buf,
+		buf_len,
+	)
+}
+
+/// Writes an arbitrary project setting and marks the project modified.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_set_setting(
+	project: *const ProjectHandle,
+	key: *const u8,
+	key_len: usize,
+	value: *const u8,
+	value_len: usize,
+) -> bool {
+	let (Some(key), Some(value)) = (unsafe { str_arg(key, key_len) }, unsafe {
+		str_arg(value, value_len)
+	}) else {
+		return false;
+	};
+	if key.is_empty() {
+		return false;
+	}
+	with_project_mut(project, |guard| {
+		guard.settings.insert(key.to_string(), value.to_string());
+		guard.set_modified(true);
+	})
+	.is_some()
+}
+
+/// Reads `(cache_location_setting, custom_cache_path)`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_cache_location(
+	project: *const ProjectHandle,
+	setting: *mut i32,
+	path: *mut u8,
+	path_len: usize,
+) -> i32 {
+	let Some((mode, custom)) = with_project(project, |p| {
+		(p.cache_location_setting, p.custom_cache_path.clone())
+	}) else {
+		return -1;
+	};
+	if !setting.is_null() {
+		unsafe { *setting = mode };
+	}
+	copy_str_out(&custom, path, path_len)
+}
+
+/// Writes the cache policy and marks the project modified.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_set_cache_location(
+	project: *const ProjectHandle,
+	setting: i32,
+	path: *const u8,
+	path_len: usize,
+) -> bool {
+	let Some(path) = (unsafe { str_arg(path, path_len) }) else {
+		return false;
+	};
+	with_project_mut(project, |guard| {
+		guard.cache_location_setting = setting.clamp(0, 2);
+		guard.custom_cache_path = if guard.cache_location_setting == 2 {
+			path.trim().to_string()
+		} else {
+			String::new()
+		};
+		guard.set_modified(true);
+	})
+	.is_some()
+}
+
+/// The sequence's interlaced flag (-1 for a stale id).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_sequence_interlaced(project: *const ProjectHandle, id: u64) -> i32 {
+	node_id(id)
+		.and_then(|id| {
+			with_project(project, |p| {
+				behavior_as::<SequenceBehavior>(p, id)
+					.and_then(|seq| seq.video_params.first().map(|params| params.interlaced))
+			})
+			.flatten()
+		})
+		.map_or(-1, |value| value as i32)
+}
+
+/// Track presentation/behavior flags used by timeline snapshots.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_height(project: *const ProjectHandle, id: u64) -> f64 {
+	node_id(id)
+		.and_then(|id| with_project(project, |p| behavior_as::<TrackBehavior>(p, id).map(|t| t.height)).flatten())
+		.unwrap_or(0.0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_muted(project: *const ProjectHandle, id: u64) -> bool {
+	node_id(id)
+		.and_then(|id| with_project(project, |p| behavior_as::<TrackBehavior>(p, id).map(|t| t.muted)).flatten())
+		.unwrap_or(false)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_locked(project: *const ProjectHandle, id: u64) -> bool {
+	node_id(id)
+		.and_then(|id| with_project(project, |p| behavior_as::<TrackBehavior>(p, id).map(|t| t.locked)).flatten())
+		.unwrap_or(false)
+}
+
+/// A block's standard enabled flag (false for stale/non-boolean values).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_enabled(project: *const ProjectHandle, id: u64) -> bool {
+	node_id(id)
+		.and_then(|id| {
+			with_project(project, |p| {
+				p.graph.get(id).and_then(|entry| {
+					entry.behavior.as_any().and_then(|behavior| {
+						if let Some(block) = behavior.downcast_ref::<ClipBlockBehavior>() {
+							Some(block.core.enabled)
+						} else if let Some(block) = behavior.downcast_ref::<GapBlockBehavior>() {
+							Some(block.core.enabled)
+						} else if let Some(block) = behavior.downcast_ref::<TransitionBlockBehavior>() {
+							Some(block.core.enabled)
+						} else if let Some(block) = behavior.downcast_ref::<AdjustmentBlockBehavior>() {
+							Some(block.core.enabled)
+						} else {
+							None
+						}
+					})
+				})
+			})
+			.flatten()
+		})
+		.unwrap_or(false)
+}
+
 #[cfg(test)]
 mod persist_tests {
 	use super::*;
@@ -2214,6 +2378,56 @@ mod persist_tests {
 			assert_eq!(oak_folder_child_count(project, oak_project_root(project)), 1);
 
 			oak_project_release(copy);
+			oak_project_release(project);
+		}
+	}
+
+	#[test]
+	fn project_settings_and_snapshot_field_queries() {
+		unsafe {
+			let project = oak_project_new();
+			let sequence = oak_sequence_create(project, "Query".as_ptr(), 5);
+			let list = oak_sequence_track_list_at(project, sequence, 0);
+			let track = oak_tracklist_track_at(project, list, 0);
+			let sequence_id = NodeId::from_identity(sequence).unwrap();
+			let track_id = NodeId::from_identity(track).unwrap();
+			with_project_mut(project, |guard| {
+				let sequence_behavior = guard
+					.graph
+					.get_mut(sequence_id)
+					.and_then(|entry| entry.behavior.as_any_mut())
+					.and_then(|behavior| behavior.downcast_mut::<SequenceBehavior>())
+					.expect("sequence behavior");
+				sequence_behavior.video_params[0].interlaced = true;
+				let track_behavior = guard
+					.graph
+					.get_mut(track_id)
+					.and_then(|entry| entry.behavior.as_any_mut())
+					.and_then(|behavior| behavior.downcast_mut::<TrackBehavior>())
+					.expect("track behavior");
+				track_behavior.height = 77.0;
+				track_behavior.muted = true;
+				track_behavior.locked = true;
+			});
+			assert_eq!(oak_sequence_interlaced(project, sequence), 1);
+			assert_eq!(oak_track_height(project, track), 77.0);
+			assert!(oak_track_muted(project, track));
+			assert!(oak_track_locked(project, track));
+
+			assert!(oak_project_set_setting(project, "key".as_ptr(), 3, "value".as_ptr(), 5));
+			let mut buf = [0u8; 64];
+			let len = oak_project_setting(project, "key".as_ptr(), 3, buf.as_mut_ptr(), buf.len());
+			assert_eq!(std::str::from_utf8(&buf[..len as usize]).unwrap(), "value");
+			assert!(!oak_project_set_setting(project, "".as_ptr(), 0, "bad".as_ptr(), 3));
+			assert!(oak_project_set_cache_location(project, 2, "/tmp/cache".as_ptr(), 10));
+			let mut mode = -1;
+			let len = oak_project_cache_location(project, &mut mode, buf.as_mut_ptr(), buf.len());
+			assert_eq!(mode, 2);
+			assert_eq!(std::str::from_utf8(&buf[..len as usize]).unwrap(), "/tmp/cache");
+
+			let expected = with_project(project, |guard| guard.uuid.clone()).unwrap();
+			let len = oak_project_uuid(project, buf.as_mut_ptr(), buf.len());
+			assert_eq!(std::str::from_utf8(&buf[..len as usize]).unwrap(), expected);
 			oak_project_release(project);
 		}
 	}

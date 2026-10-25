@@ -80,6 +80,7 @@ use crate::widgets::viewer::PlaybackClock;
 
 use oak_node::id::NodeId;
 use oak_node::track::TrackType;
+use oak_engine_rust_sdk::state::Config;
 use oak_render::manager::RenderManager;
 use oak_render::procpool::{bgra8_to_rgba8, ShmFrameRef};
 use oak_timeline::handle::CHandle;
@@ -92,6 +93,9 @@ use super::engine::{
 use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image, synthetic_frame_samples};
 use super::graphops::{self, ProjectRef};
 use super::scopes::{analyze_bgra8, analyze_f32_rgba};
+use super::settings::{
+	proxy_params_from_codec, proxy_params_from_config, proxy_params_to_codec,
+};
 use super::transport::TransportState;
 
 /// The project name of a blank project before it is saved.
@@ -6038,11 +6042,7 @@ impl AppEngine for RealEngine {
 	}
 
 	fn set_use_proxy_media(&mut self, enabled: bool, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			CONFIG_KEY_USE_PROXY,
-			if enabled { "true" } else { "false" },
-		);
+		config_set_bool(CONFIG_KEY_USE_PROXY, enabled);
 		// Every footage's preview media may change: drop the rendered
 		// frames so the next pull re-resolves original/proxy.
 		self.invalidate_preview_frames(cx);
@@ -6052,11 +6052,7 @@ impl AppEngine for RealEngine {
 	/// Resolution ▸` menu): the preview geometry changes, so every cached
 	/// and in-flight preview frame is stale.
 	fn set_playback_divider(&mut self, divider: i64, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			"PlaybackDivider",
-			&divider.clamp(1, 8).to_string(),
-		);
+		config_set_int("PlaybackDivider", divider.clamp(1, 8));
 		self.invalidate_preview_frames(cx);
 	}
 
@@ -6843,7 +6839,7 @@ impl AppEngine for RealEngine {
 				.and_then(|e| e.behavior.as_any_mut())
 				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
 			{
-				f.set_custom_proxy_params(super::settings::proxy_params_to_codec(&params));
+				f.set_custom_proxy_params(proxy_params_to_codec(&params));
 			}
 		}
 		cx.notify();
@@ -6874,20 +6870,20 @@ impl AppEngine for RealEngine {
 		let f = graphops::footage_behavior(&guard.graph, node)?;
 		f.custom_proxy_params
 			.as_ref()
-			.map(super::settings::proxy_params_from_codec)
+			.map(proxy_params_from_codec)
 	}
 
 	fn proxy_effective_params(&self, id: u64) -> super::engine::ProxyParamsUi {
 		let Some(project) = self.project.as_ref() else {
-			return super::engine::proxy_params_from_config();
+			return proxy_params_from_config();
 		};
 		let Some(node) = graphops::id_of(id) else {
-			return super::engine::proxy_params_from_config();
+			return proxy_params_from_config();
 		};
 		let guard = graphops::lock(project);
 		match graphops::footage_behavior(&guard.graph, node) {
-			Some(f) => super::settings::proxy_params_from_codec(&f.effective_proxy_params()),
-			None => super::engine::proxy_params_from_config(),
+			Some(f) => proxy_params_from_codec(&f.effective_proxy_params()),
+			None => proxy_params_from_config(),
 		}
 	}
 
@@ -8150,41 +8146,39 @@ pub const DEFAULT_SNAPSHOT_INTERVAL_SEC: i64 = 600;
 /// The default transition length (seconds).
 pub const DEFAULT_TRANSITION_SEC: &str = "0.5";
 
-/// The process-wide config store.
-fn config_store() -> &'static oak_core::configstore::ConfigStore {
-	oak_core::configstore::ConfigStore::instance()
-}
-
 /// Loads the persisted configuration from disk (once at startup, before
 /// any preference is read).
 pub fn config_load() {
-	config_store().load().ok();
+	oak_core::configstore::ConfigStore::instance().load().ok();
+	Config::global().load().ok();
 }
 
 /// Persists the configuration to disk (the app calls it on exit).
 pub fn config_save() {
-	config_store().save().ok();
+	Config::global().save().ok();
 }
 
 /// Reads a config string from the store (empty when missing).
 pub fn config_get_string(key: &str) -> String {
-	config_store().get(None, key).unwrap_or_default()
+	Config::global().get(key).unwrap_or_default()
 }
 
 /// Writes a config string to the store.
 pub fn config_set_string(key: &str, value: &str) {
-	config_store().set(None, key, value);
+	oak_core::configstore::ConfigStore::instance().set(None, key, value);
+	let _ = Config::global().set(key, value);
 }
 
 /// Reads a config integer from the store (`default` when the key is
 /// missing or not an integer).
 pub fn config_get_int(key: &str, default: i64) -> i64 {
-	config_store().get_int64(None, key, default)
+	Config::global().get_i64(key, default)
 }
 
 /// Writes a config integer to the store.
 pub fn config_set_int(key: &str, value: i64) {
-	config_store().set_int64(None, key, value);
+	oak_core::configstore::ConfigStore::instance().set_int64(None, key, value);
+	let _ = Config::global().set_i64(key, value);
 }
 
 /// Reads a config boolean through the string accessor (the store parses
@@ -15115,8 +15109,7 @@ mod tests {
 		// finalization regression cannot hide behind Failed. Only a machine
 		// with no ffmpeg at all may finalize as Failed (with a printed
 		// reason).
-		let configured = config_store()
-			.get(None, "FFmpegPath")
+		let configured = Config::global().get("FFmpegPath")
 			.unwrap_or_default();
 		let ffmpeg = oak_codec::proxymanager::ProxyManager::find_ffmpeg(&configured);
 		let badge = cx.read(|app| engine.read(app).proxy_badge_of(entry));

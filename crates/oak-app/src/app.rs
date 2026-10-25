@@ -41,6 +41,7 @@ use std::time::Duration;
 
 use crate::oakui::component::menu::{self, Menu, MenuBar, MenuBarEntry, MenuBarEvent, MenuItem};
 use crate::oakui::component::text_input::install_text_input_bindings;
+use crate::oakui::settings::use_proxy_media;
 use gpui_kit::component::dock::{
 	DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, PanelId as DockPanelId,
 	panel_handle,
@@ -3710,11 +3711,7 @@ impl MenuState {
 			snapping: true,
 			loop_playback: false,
 			full_screen: false,
-			use_proxy_media: oak_core::configstore::ConfigStore::instance().get_bool(
-				None,
-				"UseProxyMedia",
-				1,
-			) != 0,
+			use_proxy_media: use_proxy_media(),
 			open_panels: WINDOW_PANELS
 				.iter()
 				.enumerate()

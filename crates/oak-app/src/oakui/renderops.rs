@@ -31,6 +31,7 @@ use std::sync::mpsc;
 use gpui_kit::RenderImage;
 use oak_core::texture::Texture;
 use oak_core::{Rational, TimeRange};
+use oak_engine_rust_sdk::state::Config;
 use oak_node::id::NodeId;
 use oak_node::track::TrackType;
 use oak_render::manager::RenderManager;
@@ -45,6 +46,7 @@ use super::graphops::{
 	clip_behavior, lock, sequence_behavior, track_behavior, track_list_behavior, ProjectRef,
 };
 use super::scopes::{analyze_bgra8, analyze_f32_rgba, ScopeData};
+use super::settings::{proxy_params_from_config, proxy_params_to_codec};
 
 /// The pixel format the viewers render in (`oak_core::PixelFormat::F32`,
 /// the pipeline's internal format; the app downconverts to BGRA itself).
@@ -86,7 +88,7 @@ pub fn ensure_render_manager() -> bool {
 /// `UseProxyMedia` config switch (C++ `Tools > Use Proxy Media`; the
 /// export path never consults it — exports always decode the original).
 pub fn use_proxy_media() -> bool {
-	oak_core::configstore::ConfigStore::instance().get_bool(None, "UseProxyMedia", 1) != 0
+	Config::global().get_bool("UseProxyMedia", true)
 }
 
 /// The preview media of a footage node with the three-level proxy switch
@@ -778,7 +780,9 @@ fn proxy_resolution(f: &oak_node::footage::FootageBehavior) -> Option<(i32, i32)
 	let params = f
 		.custom_proxy_params
 		.clone()
-		.unwrap_or_else(oak_codec::proxymanager::ProxyManager::proxy_params_from_config);
+		.unwrap_or_else(|| {
+			proxy_params_to_codec(&proxy_params_from_config())
+		});
 	if params.width > 0 && params.height > 0 {
 		return Some((params.width, params.height));
 	}
@@ -1476,20 +1480,19 @@ mod tests {
 
 	impl ConfigGuard {
 		fn pin(key: &'static str) -> Self {
-			let prev = oak_core::configstore::ConfigStore::instance()
-				.get(None, key)
+			let prev = Config::global().get(key)
 				.unwrap_or_default();
 			Self { key, prev }
 		}
 
 		fn set_bool(&self, value: i32) {
-			oak_core::configstore::ConfigStore::instance().set_bool(None, self.key, value);
+			let _ = Config::global().set_bool(self.key, value != 0);
 		}
 	}
 
 	impl Drop for ConfigGuard {
 		fn drop(&mut self) {
-			oak_core::configstore::ConfigStore::instance().set(None, self.key, &self.prev);
+			let _ = Config::global().set(self.key, &self.prev);
 		}
 	}
 

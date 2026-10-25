@@ -5335,6 +5335,7 @@ dependencies = [
  "oak-audio",
  "oak-codec",
  "oak-core",
+ "oak-engine-rust-sdk",
  "oak-node",
  "oak-ofx-plugin",
  "oak-render",

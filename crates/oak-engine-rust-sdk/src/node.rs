@@ -9,7 +9,7 @@
 use std::ffi::c_void;
 
 use crate::codec::string_out;
-use crate::types::{Rational, TimeRange};
+use crate::types::Rational;
 
 #[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
 #[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
@@ -27,6 +27,33 @@ unsafe extern "C" {
 	fn oak_project_root(project: *const c_void) -> u64;
 	fn oak_project_add_ref(project: *const c_void);
 	fn oak_project_release(project: *const c_void);
+	fn oak_project_uuid(project: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_project_setting(
+		project: *const c_void,
+		key: *const u8,
+		key_len: usize,
+		buf: *mut u8,
+		buf_len: usize,
+	) -> i32;
+	fn oak_project_set_setting(
+		project: *const c_void,
+		key: *const u8,
+		key_len: usize,
+		value: *const u8,
+		value_len: usize,
+	) -> bool;
+	fn oak_project_cache_location(
+		project: *const c_void,
+		setting: *mut i32,
+		path: *mut u8,
+		path_len: usize,
+	) -> i32;
+	fn oak_project_set_cache_location(
+		project: *const c_void,
+		setting: i32,
+		path: *const u8,
+		path_len: usize,
+	) -> bool;
 
 	fn oak_node_type_id(project: *const c_void, id: u64, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_node_kind(project: *const c_void, id: u64) -> i32;
@@ -60,6 +87,7 @@ unsafe extern "C" {
 	fn oak_sequence_length(project: *const c_void, id: u64) -> Rational;
 	fn oak_sequence_frame_rate(project: *const c_void, id: u64) -> Rational;
 	fn oak_sequence_geometry(project: *const c_void, id: u64, width: *mut i32, height: *mut i32) -> bool;
+	fn oak_sequence_interlaced(project: *const c_void, id: u64) -> i32;
 	fn oak_sequence_set_video_params(
 		project: *const c_void,
 		id: u64,
@@ -74,6 +102,9 @@ unsafe extern "C" {
 	fn oak_tracklist_track_count(project: *const c_void, id: u64) -> i32;
 	fn oak_tracklist_track_at(project: *const c_void, id: u64, index: i32) -> u64;
 	fn oak_track_kind(project: *const c_void, id: u64) -> i32;
+	fn oak_track_height(project: *const c_void, id: u64) -> f64;
+	fn oak_track_muted(project: *const c_void, id: u64) -> bool;
+	fn oak_track_locked(project: *const c_void, id: u64) -> bool;
 	fn oak_track_block_count(project: *const c_void, id: u64) -> i32;
 	fn oak_track_block_at(project: *const c_void, id: u64, index: i32) -> u64;
 	fn oak_track_block_containing_time(project: *const c_void, id: u64, time: Rational) -> u64;
@@ -84,6 +115,7 @@ unsafe extern "C" {
 	fn oak_block_length(project: *const c_void, id: u64) -> Rational;
 	fn oak_block_media_in(project: *const c_void, id: u64) -> Rational;
 	fn oak_block_media_out(project: *const c_void, id: u64) -> Rational;
+	fn oak_block_enabled(project: *const c_void, id: u64) -> bool;
 
 	fn oak_node_standard_value(
 		project: *const c_void,
@@ -253,7 +285,7 @@ impl NodeKind {
 
 /// A video stream's parameters as carried by a footage node.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StreamVideoParams {
 	pub width: i32,
 	pub height: i32,
@@ -265,7 +297,7 @@ pub struct StreamVideoParams {
 
 /// An audio stream's parameters as carried by a footage node.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StreamAudioParams {
 	pub sample_rate: i32,
 	pub channel_layout: u64,
@@ -335,6 +367,48 @@ impl Project {
 	/// Whether the project has unsaved changes.
 	pub fn modified(&self) -> bool {
 		unsafe { oak_project_modified(self.ptr) }
+	}
+
+	/// The stable uuid used by the project library.
+	pub fn uuid(&self) -> String {
+		string_out(|buf, len| unsafe { oak_project_uuid(self.ptr, buf, len) }).unwrap_or_default()
+	}
+
+	/// Reads a persisted project setting.
+	pub fn setting(&self, key: &str) -> Option<String> {
+		string_out(|buf, len| unsafe {
+			oak_project_setting(self.ptr, key.as_ptr(), key.len(), buf, len)
+		})
+	}
+
+	/// Writes a persisted project setting and marks the project modified.
+	pub fn set_setting(&self, key: &str, value: &str) -> bool {
+		unsafe {
+			oak_project_set_setting(
+				self.ptr,
+				key.as_ptr(),
+				key.len(),
+				value.as_ptr(),
+				value.len(),
+			)
+		}
+	}
+
+	/// `(cache mode, custom path)`; mode 2 uses the custom path.
+	pub fn cache_location(&self) -> (i32, String) {
+		let mode = std::cell::Cell::new(0);
+		let path = string_out(|buf, len| unsafe {
+			oak_project_cache_location(self.ptr, mode.as_ptr(), buf, len)
+		})
+		.unwrap_or_default();
+		(mode.get(), path)
+	}
+
+	/// Writes the cache policy and marks the project modified.
+	pub fn set_cache_location(&self, mode: i32, path: &str) -> bool {
+		unsafe {
+			oak_project_set_cache_location(self.ptr, mode, path.as_ptr(), path.len())
+		}
 	}
 
 	/// The root folder of the bin tree.
@@ -456,6 +530,15 @@ impl Project {
 		unsafe { oak_sequence_geometry(self.ptr, sequence.0, &mut w, &mut h) }.then_some((w, h))
 	}
 
+	/// Whether the sequence uses interlaced video (`None` for a stale id).
+	pub fn sequence_interlaced(&self, sequence: NodeId) -> Option<bool> {
+		match unsafe { oak_sequence_interlaced(self.ptr, sequence.0) } {
+			0 => Some(false),
+			1 => Some(true),
+			_ => None,
+		}
+	}
+
 	/// Sets the sequence's output video params (width/height/frame
 	/// rate; pixel format stays F32 RGBA).
 	pub fn sequence_set_video_params(
@@ -510,6 +593,18 @@ impl Project {
 		unsafe { oak_track_kind(self.ptr, track.0) }
 	}
 
+	pub fn track_height(&self, track: NodeId) -> f64 {
+		unsafe { oak_track_height(self.ptr, track.0) }
+	}
+
+	pub fn track_muted(&self, track: NodeId) -> bool {
+		unsafe { oak_track_muted(self.ptr, track.0) }
+	}
+
+	pub fn track_locked(&self, track: NodeId) -> bool {
+		unsafe { oak_track_locked(self.ptr, track.0) }
+	}
+
 	/// Number of blocks on a track.
 	pub fn track_block_count(&self, track: NodeId) -> usize {
 		unsafe { oak_track_block_count(self.ptr, track.0) as usize }
@@ -555,6 +650,11 @@ impl Project {
 	/// The block's media out-point.
 	pub fn block_media_out(&self, block: NodeId) -> Rational {
 		unsafe { oak_block_media_out(self.ptr, block.0) }
+	}
+
+	/// The block's standard enabled flag.
+	pub fn block_enabled(&self, block: NodeId) -> bool {
+		unsafe { oak_block_enabled(self.ptr, block.0) }
 	}
 
 	// -- node parameters -------------------------------------------------

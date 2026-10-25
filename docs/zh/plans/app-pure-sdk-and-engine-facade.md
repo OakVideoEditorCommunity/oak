@@ -60,6 +60,7 @@ oak-codec / oak-audio / oak-task / oak-storage / oak-ofx-plugin / ...
 - 不要求 `oak-worker` 改用 SDK；它是引擎渲染拓扑的内部实现进程。
 - 不在本计划中迁移 `oak-cli`，但其现有直调不得成为新增 app 绕行的理由。
 - 不把 SDK 变成 gpui 专用 API，不在引擎或 SDK 公共契约中暴露 gpui/wgpu 类型。
+- **命名约定**：SDK 最终命名为 **Quercus**；待 P0–P8 全部完成后，再一次性批量修改 crate、包名、文档及示例，迁移期间沿用 `oak-engine-rust-sdk`。
 
 ## 2. 现状与主要缺口
 
@@ -164,20 +165,33 @@ crates/oak-app/src/oakui/
 **出口**：所有直调均有归属阶段和目标 API；基线测试可重复运行；Mock/NullEngine
 不再成为隐藏依赖来源。
 
-### P1：工程会话、配置、存储和只读快照
+### P1：工程会话、配置、存储和只读快照（已完成）
 
-- 迁移工程 new/open/save/close、当前序列、工程浏览器和项目库的组合逻辑，
-  复用 SDK `storage`/`state`，补 write-through、库统计和复制等缺口。
-- 提供 `EditorSession` 以及 project/sequence/track/clip/footage/marker/workarea
-  快照；先切只读路径，减少 app 对 `Graph` 和 behavior downcast 的需求。
-- 将 app 使用的配置、色彩项目设置、缓存路径和文本初始化全部接到 SDK。
-- 用同一工程分别经旧基线与新 SDK 查询，逐项比较快照及保存后的工程。
+实施记录见 [p1-editor-session-implementation.md](p1-editor-session-implementation.md)。
 
-**出口**：新消费者能创建、打开、浏览、保存工程并读出完整时间线；`oak-app`
-不再直接使用 `oak-storage`，工程只读路径不再触碰 `oak-node`。
+> 顺序修正（2026-10-26）：RealEngine 在 P2 前仍直接持有并编辑
+> `Arc<Mutex<Project>>`，write-through 又必须绑定同一实例。为避免双工程或
+> 裸指针桥接，P1 先交付独立会话与可独立切换的能力；app 的实时工程采用、
+> 剩余存储绑定和图只读清零与 P2 原子完成，最终边界不变。
+
+- 在 engine 新增 `EditorSession`：工程 new/open/save/close、当前序列、
+  write-through 绑定及 marker/workarea 辅助状态共享同一工程实例。
+- 复用并扩充 SDK `storage`/`state`，补 write-through、库统计、创建、复制、
+  导入导出和库内打开；不依赖当前 app 工程实例的库操作切到 SDK。
+- 提供 project/sequence/track/clip/footage/marker/workarea 的拥有型 DTO 快照，
+  带 revision；用保存前与重开后的结构对比验证。
+- 将全局配置、快捷键配置目录、效果分组配置和文本初始化/字体枚举接到 SDK；
+  工程实例内的 OCIO/cache/color 设置先提供 SDK API，app 切换随 P2 完成。
+
+**出口**：新消费者能创建、打开、浏览、保存工程并读出完整时间线，项目库
+全生命周期通过；app 的全局配置及非实时库操作走 SDK。实时工程仍保留的
+`oak-storage` 绑定和 `oak-node` 只读路径明确转入 P2，不宣称提前清零。
 
 ### P2：时间线编辑、历史与复合命令
 
+- RealEngine 采用 P1 的 `EditorSession`，一次性切换工程实例、write-through
+  绑定和项目级 OCIO/cache/color 设置；删除剩余 `oak-storage` 直调，并用会话
+  快照替换实时工程只读图遍历，避免维护第二份工程。
 - 将 `graphops.rs` 的编辑实现和测试迁入引擎：轨道、放置、分割、全部修剪、
   移动、波纹删除、链接、转场、调整层、标记、工作区、剪贴板、嵌套和速度。
 - SDK 提供语义级命令；原子完成“计算目标 + 修改图 + undo 分组 + 失效预览”，

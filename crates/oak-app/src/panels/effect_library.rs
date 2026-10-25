@@ -34,6 +34,7 @@ use gpui_kit::{
 };
 use gpui_kit::base::input::InputState;
 use gpui_kit::component::input::InputEvent;
+use oak_engine_rust_sdk::state::Config;
 
 use crate::i18n;
 use crate::oakui::effectchain::group_label;
@@ -94,8 +95,7 @@ impl<E: AppEngine> EffectLibraryPanel<E> {
 /// simply starts with every group expanded).
 fn load_collapsed() -> HashSet<String> {
 	parse_collapsed(
-		&oak_core::configstore::ConfigStore::instance()
-			.get(None, COLLAPSED_CONFIG_KEY)
+		&Config::global().get(COLLAPSED_CONFIG_KEY)
 			.unwrap_or_default(),
 	)
 }
@@ -122,11 +122,7 @@ fn format_collapsed(collapsed: &HashSet<String>) -> String {
 /// pattern: the config store is the source of truth, read once at panel
 /// construction).
 fn store_collapsed(collapsed: &HashSet<String>) {
-	oak_core::configstore::ConfigStore::instance().set(
-		None,
-		COLLAPSED_CONFIG_KEY,
-		&format_collapsed(collapsed),
-	);
+	let _ = Config::global().set(COLLAPSED_CONFIG_KEY, &format_collapsed(collapsed));
 }
 
 /// Flips the collapsed state of `group_key`, returning the new state

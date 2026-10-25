@@ -17,16 +17,10 @@
     "build-dependencies": []
   },
   "references": {
-    "crates/oak-app/src/actions.rs": {
-      "total": 1,
-      "crates": {
-        "oak-core": 1
-      }
-    },
     "crates/oak-app/src/app.rs": {
-      "total": 3,
+      "total": 2,
       "crates": {
-        "oak-core": 3
+        "oak-core": 2
       }
     },
     "crates/oak-app/src/dialogs.rs": {
@@ -56,9 +50,9 @@
       }
     },
     "crates/oak-app/src/oakui/displaycolor.rs": {
-      "total": 10,
+      "total": 9,
       "crates": {
-        "oak-core": 10
+        "oak-core": 9
       }
     },
     "crates/oak-app/src/oakui/effectchain.rs": {
@@ -76,12 +70,12 @@
       }
     },
     "crates/oak-app/src/oakui/graphops.rs": {
-      "total": 373,
+      "total": 364,
       "crates": {
         "oak-codec": 12,
         "oak-core": 2,
         "oak-node": 69,
-        "oak-storage": 27,
+        "oak-storage": 18,
         "oak-task": 5,
         "oak-timeline": 53,
         "oak-undo": 205
@@ -118,11 +112,11 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 288,
+      "total": 287,
       "crates": {
         "oak-audio": 21,
         "oak-codec": 29,
-        "oak-core": 71,
+        "oak-core": 70,
         "oak-node": 72,
         "oak-ofx-plugin": 2,
         "oak-render": 11,
@@ -133,10 +127,10 @@
       }
     },
     "crates/oak-app/src/oakui/renderops.rs": {
-      "total": 213,
+      "total": 208,
       "crates": {
-        "oak-codec": 31,
-        "oak-core": 63,
+        "oak-codec": 30,
+        "oak-core": 59,
         "oak-node": 59,
         "oak-render": 18,
         "oak-task": 11,
@@ -145,16 +139,9 @@
       }
     },
     "crates/oak-app/src/oakui/settings.rs": {
-      "total": 3,
+      "total": 1,
       "crates": {
-        "oak-codec": 1,
-        "oak-core": 2
-      }
-    },
-    "crates/oak-app/src/oakui/textengine.rs": {
-      "total": 2,
-      "crates": {
-        "oak-render": 2
+        "oak-codec": 1
       }
     },
     "crates/oak-app/src/oakui/waveform.rs": {
@@ -168,12 +155,6 @@
       "total": 1,
       "crates": {
         "oak-audio": 1
-      }
-    },
-    "crates/oak-app/src/panels/effect_library.rs": {
-      "total": 2,
-      "crates": {
-        "oak-core": 2
       }
     },
     "crates/oak-app/src/panels/multicam.rs": {

@@ -119,6 +119,65 @@ unsafe extern "C" {
 #[error("the engine state call failed")]
 pub struct Error;
 
+/// Idiomatic access to the process-wide engine configuration.
+///
+/// Keys are the same full paths used by the native store (`"Storage/Backend"`,
+/// `"UseProxyMedia"`, …), so callers do not need to split a group or think
+/// about the C ABI's optional-group representation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Config;
+
+impl Config {
+	/// The process-wide configuration stored inside the engine.
+	pub fn global() -> Self {
+		Self
+	}
+
+	/// Loads persisted settings.
+	pub fn load(self) -> Result<(), Error> {
+		config_load()
+	}
+
+	/// Persists current settings.
+	pub fn save(self) -> Result<(), Error> {
+		config_save()
+	}
+
+	/// Reads a string or formatted scalar (`None` when absent).
+	pub fn get(self, key: &str) -> Option<String> {
+		config_get(None, key)
+	}
+
+	/// Writes a string or parses it into an existing typed entry.
+	pub fn set(self, key: &str, value: &str) -> Result<(), Error> {
+		config_set(None, key, value)
+	}
+
+	pub fn get_bool(self, key: &str, fallback: bool) -> bool {
+		config_get_bool(None, key, fallback)
+	}
+
+	pub fn set_bool(self, key: &str, value: bool) -> Result<(), Error> {
+		config_set_bool(None, key, value)
+	}
+
+	pub fn get_i64(self, key: &str, fallback: i64) -> i64 {
+		config_get_i64(None, key, fallback)
+	}
+
+	pub fn set_i64(self, key: &str, value: i64) -> Result<(), Error> {
+		config_set_i64(None, key, value)
+	}
+
+	pub fn get_f64(self, key: &str, fallback: f64) -> f64 {
+		config_get_f64(None, key, fallback)
+	}
+
+	pub fn set_f64(self, key: &str, value: f64) -> Result<(), Error> {
+		config_set_f64(None, key, value)
+	}
+}
+
 fn arg(s: &str) -> (*const u8, usize) {
 	(s.as_ptr(), s.len())
 }
@@ -389,6 +448,20 @@ pub(crate) fn atom_ptr(atom: Option<&CancelAtom>) -> *const std::ffi::c_void {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn idiomatic_config_uses_full_keys_and_native_rust_types() {
+		let config = Config::global();
+		config.set("OakSdkConfigObject", "value").expect("set");
+		assert_eq!(config.get("OakSdkConfigObject").as_deref(), Some("value"));
+		config.set_bool("OakSdkConfigBool", true).expect("set bool");
+		assert!(config.get_bool("OakSdkConfigBool", false));
+		config.set_i64("OakSdkConfigInt", 42).expect("set int");
+		assert_eq!(config.get_i64("OakSdkConfigInt", 0), 42);
+		config.set_f64("OakSdkConfigFloat", 1.5).expect("set float");
+		assert_eq!(config.get_f64("OakSdkConfigFloat", 0.0), 1.5);
+		assert_eq!(config.get("OakSdkConfigMissing"), None);
+	}
 
 	#[test]
 	fn config_roundtrip_and_fallbacks() {

@@ -74,6 +74,33 @@ pub extern "C" fn oak_render_textengine_install() {
 	oak_render::textengine::install();
 }
 
+/// Number of font families exposed by the shared text backend.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_textengine_font_family_count() -> i32 {
+	font_families().len() as i32
+}
+
+fn font_families() -> &'static [String] {
+	static FAMILIES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+	FAMILIES.get_or_init(oak_render::textengine::font_families)
+}
+
+/// A font family name, snprintf-style; -1 when out of range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_render_textengine_font_family_at(
+	index: i32,
+	buf: *mut u8,
+	buf_len: usize,
+) -> i32 {
+	if index < 0 {
+		return -1;
+	}
+	match font_families().get(index as usize) {
+		Some(name) => crate::codec::copy_str_out(name, buf, buf_len),
+		None => -1,
+	}
+}
+
 /// Swizzles BGRA8 pixels to RGBA8 (`src` and `dst` may not overlap);
 /// both buffers are `pixel_count*4` bytes. False on invalid input.
 #[unsafe(no_mangle)]

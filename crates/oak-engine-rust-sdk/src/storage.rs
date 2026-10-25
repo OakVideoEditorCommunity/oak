@@ -62,6 +62,46 @@ unsafe extern "C" {
 		new_name: *const u8,
 		new_name_len: usize,
 	) -> i32;
+	fn oak_storage_default_library_uri(buf: *mut u8, buf_len: usize) -> i32;
+	fn oak_storage_library_created_at(uri: *const u8, uri_len: usize, index: i32) -> i64;
+	fn oak_storage_library_modified_at(uri: *const u8, uri_len: usize, index: i32) -> i64;
+	fn oak_storage_library_duration_ms(uri: *const u8, uri_len: usize, index: i32) -> i64;
+	fn oak_storage_library_track_count(uri: *const u8, uri_len: usize, index: i32) -> i32;
+	fn oak_storage_library_clip_count(uri: *const u8, uri_len: usize, index: i32) -> i32;
+	fn oak_storage_library_footage_count(uri: *const u8, uri_len: usize, index: i32) -> i32;
+	fn oak_storage_library_create(
+		uri: *const u8,
+		uri_len: usize,
+		name: *const u8,
+		name_len: usize,
+		uuid_buf: *mut u8,
+		uuid_buf_len: usize,
+	) -> i32;
+	fn oak_storage_library_duplicate(
+		uri: *const u8,
+		uri_len: usize,
+		uuid: *const u8,
+		uuid_len: usize,
+		new_uuid_buf: *mut u8,
+		new_uuid_buf_len: usize,
+	) -> i32;
+	fn oak_storage_library_import(
+		uri: *const u8,
+		uri_len: usize,
+		file_uri: *const u8,
+		file_uri_len: usize,
+		new_uuid_buf: *mut u8,
+		new_uuid_buf_len: usize,
+	) -> i32;
+	fn oak_storage_library_export(
+		uri: *const u8,
+		uri_len: usize,
+		uuid: *const u8,
+		uuid_len: usize,
+		file_uri: *const u8,
+		file_uri_len: usize,
+	) -> i32;
+	fn oak_storage_flush();
 }
 
 /// The save succeeded / load carried no version note.
@@ -162,6 +202,12 @@ pub fn backend_for_uri(uri: &str) -> Option<String> {
 pub struct LibraryProject {
 	pub uuid: String,
 	pub name: String,
+	pub created_at: i64,
+	pub modified_at: i64,
+	pub duration_ms: i64,
+	pub track_count: i32,
+	pub clip_count: i32,
+	pub footage_count: i32,
 }
 
 /// The projects in the library at `uri` (an `oakdb+sqlite:///…` URI).
@@ -171,15 +217,21 @@ pub fn library_projects(uri: &str) -> Result<Vec<LibraryProject>, StorageError> 
 		return Err(StorageError(count));
 	}
 	Ok((0..count)
-		.filter_map(|i| {
-			Some(LibraryProject {
+		.map(|i| LibraryProject {
 				uuid: string_out(|buf, len| unsafe {
 					oak_storage_library_uuid_at(uri.as_ptr(), uri.len(), i, buf, len)
-				})?,
+				})
+				.unwrap_or_default(),
 				name: string_out(|buf, len| unsafe {
 					oak_storage_library_name_at(uri.as_ptr(), uri.len(), i, buf, len)
-				})?,
-			})
+				})
+				.unwrap_or_default(),
+				created_at: unsafe { oak_storage_library_created_at(uri.as_ptr(), uri.len(), i) },
+				modified_at: unsafe { oak_storage_library_modified_at(uri.as_ptr(), uri.len(), i) },
+				duration_ms: unsafe { oak_storage_library_duration_ms(uri.as_ptr(), uri.len(), i) },
+				track_count: unsafe { oak_storage_library_track_count(uri.as_ptr(), uri.len(), i) },
+				clip_count: unsafe { oak_storage_library_clip_count(uri.as_ptr(), uri.len(), i) },
+				footage_count: unsafe { oak_storage_library_footage_count(uri.as_ptr(), uri.len(), i) },
 		})
 		.collect())
 }
@@ -203,9 +255,144 @@ pub fn library_rename(uri: &str, uuid: &str, new_name: &str) -> Result<(), Stora
 	})
 }
 
+/// The configured default library URI (`None` when storage is disabled).
+pub fn default_library_uri() -> Option<String> {
+	string_out(|buf, len| unsafe { oak_storage_default_library_uri(buf, len) })
+}
+
+/// Flushes every binding and stops the snapshot worker.
+pub fn flush() {
+	unsafe { oak_storage_flush() }
+}
+
+fn string_result(f: impl Fn(*mut u8, usize) -> i32) -> Result<String, StorageError> {
+	// Unlike read-only getters, create/duplicate/import are side-effecting:
+	// never use the two-pass "query size, then call again" convention here.
+	let mut buf = vec![0u8; 4096];
+	let written = f(buf.as_mut_ptr(), buf.len());
+	if written < 0 {
+		return Err(StorageError(written));
+	}
+	if written as usize >= buf.len() {
+		return Err(StorageError(-1));
+	}
+	buf.truncate(written as usize);
+	String::from_utf8(buf).map_err(|_| StorageError(-1))
+}
+
+/// A typed project-library client. Session opening uses the same live
+/// project instance that the library and write-through binding share.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectLibrary {
+	uri: String,
+}
+
+impl ProjectLibrary {
+	pub fn new(uri: impl Into<String>) -> Result<Self, StorageError> {
+		let uri = uri.into();
+		if !uri_is_valid(&uri) || backend_for_uri(&uri).as_deref() != Some("oakdb") {
+			return Err(StorageError(-1));
+		}
+		Ok(Self { uri })
+	}
+
+	pub fn configured() -> Result<Option<Self>, StorageError> {
+		Ok(default_library_uri().map(|uri| Self { uri }))
+	}
+
+	pub fn uri(&self) -> &str {
+		&self.uri
+	}
+
+	pub fn projects(&self) -> Result<Vec<LibraryProject>, StorageError> {
+		library_projects(&self.uri)
+	}
+
+	pub fn create(&self, name: &str) -> Result<String, StorageError> {
+		string_result(|buf, len| unsafe {
+			oak_storage_library_create(
+				self.uri.as_ptr(),
+				self.uri.len(),
+				name.as_ptr(),
+				name.len(),
+				buf,
+				len,
+			)
+		})
+	}
+
+	pub fn delete(&self, uuid: &str) -> Result<(), StorageError> {
+		library_delete(&self.uri, uuid)
+	}
+
+	pub fn rename(&self, uuid: &str, name: &str) -> Result<(), StorageError> {
+		library_rename(&self.uri, uuid, name)
+	}
+
+	pub fn duplicate(&self, uuid: &str) -> Result<String, StorageError> {
+		string_result(|buf, len| unsafe {
+			oak_storage_library_duplicate(
+				self.uri.as_ptr(),
+				self.uri.len(),
+				uuid.as_ptr(),
+				uuid.len(),
+				buf,
+				len,
+			)
+		})
+	}
+
+	pub fn import(&self, file_uri: &str) -> Result<String, StorageError> {
+		string_result(|buf, len| unsafe {
+			oak_storage_library_import(
+				self.uri.as_ptr(),
+				self.uri.len(),
+				file_uri.as_ptr(),
+				file_uri.len(),
+				buf,
+				len,
+			)
+		})
+	}
+
+	pub fn export(&self, uuid: &str, file_uri: &str) -> Result<(), StorageError> {
+		check(unsafe {
+			oak_storage_library_export(
+				self.uri.as_ptr(),
+				self.uri.len(),
+				uuid.as_ptr(),
+				uuid.len(),
+				file_uri.as_ptr(),
+				file_uri.len(),
+			)
+		})
+	}
+
+	/// Opens a row from the configured default library. Like the app,
+	/// sessions bind only to the default library, not an arbitrary client.
+	pub fn open(&self, uuid: &str) -> Result<crate::editor::EditorSession, StorageError> {
+		if default_library_uri().as_deref() != Some(self.uri.as_str()) {
+			return Err(StorageError(-1));
+		}
+		crate::editor::EditorSession::open_library(uuid)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::state::Config;
+
+	fn storage_config(backend: Option<&str>, path: Option<&str>) {
+		Config::global()
+			.set("Storage/Backend", backend.unwrap_or("off"))
+			.expect("backend config");
+		if let Some(path) = path {
+			Config::global()
+				.set("Storage/SqlitePath", path)
+				.expect("sqlite path config");
+		}
+	}
 
 	#[test]
 	fn file_roundtrip_and_enumeration() {
@@ -249,5 +436,113 @@ mod tests {
 		assert!(library_delete(&uri, "no-such-uuid").is_err());
 		assert!(library_rename(&uri, "no-such-uuid", "x").is_err());
 		let _ = std::fs::remove_file(&path);
+	}
+
+	#[test]
+	fn library_lifecycle_and_live_session() {
+		let _guard = crate::node::UNDO_SERIAL
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		flush();
+		let path = std::env::temp_dir()
+			.join(format!("oaksdk_library_{}.sqlite", std::process::id()))
+			.to_string_lossy()
+			.into_owned();
+		let exported = std::env::temp_dir()
+			.join(format!("oaksdk_library_{}.ove", std::process::id()))
+			.to_string_lossy()
+			.into_owned();
+		let _ = std::fs::remove_file(&path);
+		let _ = std::fs::remove_file(&exported);
+		storage_config(Some("sqlite"), Some(&path));
+
+		let library = ProjectLibrary::configured()
+			.expect("configured library")
+			.expect("sqlite enabled");
+		assert!(ProjectLibrary::new("not a uri").is_err());
+		assert!(library.create("   ").is_err());
+		assert!(library.duplicate("missing").is_err());
+		assert!(library.import("/definitely/missing/project.ove").is_err());
+		assert!(library.export("missing", "/tmp/never.ove").is_err());
+		assert!(library.projects().expect("initial rows").is_empty());
+		let dropped = crate::editor::EditorSession::create_in_library("Drop Binding")
+			.expect("drop-bound row");
+		let dropped_uuid = dropped.project().uuid();
+		assert!(dropped.storage_bound());
+		drop(dropped);
+		library.delete(&dropped_uuid).expect("delete after Drop unbinds");
+		assert!(library.projects().expect("drop leaves no row").is_empty());
+
+		let session = crate::editor::EditorSession::create_in_library("Library Test")
+			.expect("create live row");
+		let uuid = session.project().uuid();
+		assert_eq!(library.projects().expect("row after create").len(), 1);
+		assert!(!uuid.is_empty());
+		assert!(session.storage_bound());
+		let sequence = session.create_sequence("Sequence").expect("sequence");
+		let project = session.project();
+		let list = project.sequence_track_list_at(sequence, 0);
+		let track = project.tracklist_track_at(list, 0);
+		let clip = project.create_clip().expect("clip");
+		assert!(project.track_append_block(track, clip));
+		assert!(project.block_set_length(clip, crate::types::Rational::new(2, 1)));
+		let media = crate::test_support::make_test_clip("library");
+		project.import_footage(&media).expect("import footage");
+
+		let rows = library.projects().expect("rows after edit");
+		let row = rows.iter().find(|row| row.uuid == uuid).expect("created row");
+		assert_eq!(row.name, "Library Test");
+		assert_eq!(row.track_count, 4);
+		assert_eq!(row.clip_count, 1);
+		assert_eq!(row.footage_count, 1);
+		assert!(row.duration_ms >= 2_000);
+		assert!(row.created_at > 0 && row.modified_at > 0);
+
+		library.rename(&uuid, "Renamed").expect("rename");
+		let duplicate = library.duplicate(&uuid).expect("duplicate");
+		assert_eq!(library.projects().expect("rows after duplicate").len(), 2);
+		assert_ne!(duplicate, uuid);
+		library.export(&uuid, &exported).expect("export");
+		let imported = library.import(&exported).expect("import");
+		assert_eq!(library.projects().expect("rows after import").len(), 3);
+		assert_ne!(imported, uuid);
+
+		let expected = session.snapshot();
+		let opened = library.open(&duplicate).expect("open duplicate");
+		let snapshot = opened.snapshot();
+		assert_eq!(snapshot.sequences, expected.sequences);
+		assert_eq!(snapshot.footages, expected.footages);
+		opened.create_sequence("Copy Only").expect("edit duplicate");
+		assert_eq!(opened.snapshot().sequences.len(), 2);
+		assert_eq!(session.snapshot().sequences.len(), 1, "duplicate edits stay independent");
+
+		let imported_session = library.open(&imported).expect("open import");
+		assert_eq!(imported_session.snapshot().sequences, expected.sequences);
+		assert_eq!(imported_session.snapshot().footages, expected.footages);
+		let custom = ProjectLibrary::new(format!(
+			"oakdb+sqlite://{}/other.sqlite",
+			std::env::temp_dir().display()
+		))
+		.expect("custom library URI");
+		assert!(custom.open(&duplicate).is_err(), "custom client cannot open the default library");
+
+		imported_session.close();
+		opened.close();
+		session.close();
+		assert!(!imported_session.storage_bound());
+		assert!(!opened.storage_bound());
+		assert!(!session.storage_bound());
+		for id in [uuid, duplicate, imported] {
+			library.delete(&id).expect("delete row");
+		}
+		let remaining = library.projects().expect("rows after delete");
+		assert!(remaining.is_empty(), "remaining rows: {remaining:?}");
+		storage_config(Some("off"), None);
+		assert!(ProjectLibrary::configured().expect("disabled config").is_none());
+		assert!(crate::editor::EditorSession::create_in_library("Disabled").is_err());
+		flush();
+		let _ = std::fs::remove_file(path);
+		let _ = std::fs::remove_file(exported);
+		let _ = std::fs::remove_file(media);
 	}
 }

@@ -43,7 +43,7 @@ impl crate::handle::NativeMirror for OakRational {
 /// `repr(C)` mirror of oak-core's `TimeRange`: a half-open [in, out)
 /// interval (normalized so `in <= out`).
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OakTimeRange {
 	/// Inclusive start.
 	pub in_: OakRational,

@@ -11,66 +11,63 @@
 //! `AppEngine` contract contains no engine-internal types or calls; P1
 //! moves these operations behind the engine SDK.
 
-use oak_codec::proxymanager::{ProxyManager, ProxyParams};
-use oak_core::colormath::{OutputGamut, OutputTransfer, WorkingColorSpace};
-use oak_core::configstore::ConfigStore;
+use oak_codec::proxymanager::ProxyParams;
+use oak_engine_rust_sdk::codec::ProxyParams as SdkProxyParams;
+use oak_engine_rust_sdk::state::Config;
 
 use super::engine::ProxyParamsUi;
+use super::real::{config_set_bool, config_set_int};
 
 pub fn use_proxy_media() -> bool {
-	ConfigStore::instance().get_bool(None, "UseProxyMedia", 1) != 0
+	Config::global().get_bool("UseProxyMedia", true)
 }
 
 pub fn set_use_proxy_media(enabled: bool) {
-	ConfigStore::instance().set(
-		None,
-		"UseProxyMedia",
-		if enabled { "true" } else { "false" },
-	);
+	config_set_bool("UseProxyMedia", enabled);
 }
 
 pub fn playback_divider() -> i64 {
-	ConfigStore::instance()
-		.get_int(None, "PlaybackDivider", 1)
-		.clamp(1, 8) as i64
+	Config::global().get_i64("PlaybackDivider", 1).clamp(1, 8)
 }
 
 pub fn set_playback_divider(divider: i64) {
-	ConfigStore::instance().set(None, "PlaybackDivider", &divider.clamp(1, 8).to_string());
+	config_set_int("PlaybackDivider", divider.clamp(1, 8));
 }
 
 pub fn stop_on_last() -> bool {
-	ConfigStore::instance().get_bool(None, "StopOnLastFrame", 0) != 0
+	Config::global().get_bool("StopOnLastFrame", false)
 }
 
 pub fn set_stop_on_last(enabled: bool) {
-	ConfigStore::instance().set(
-		None,
-		"StopOnLastFrame",
-		if enabled { "true" } else { "false" },
-	);
+	config_set_bool("StopOnLastFrame", enabled);
 }
 
 pub fn waveform_mode() -> i32 {
-	ConfigStore::instance()
-		.get_int(None, "ViewerWaveformMode", 0)
-		.clamp(0, 2)
+	Config::global().get_i64("ViewerWaveformMode", 0).clamp(0, 2) as i32
 }
 
 pub fn set_waveform_mode(mode: i32) {
-	ConfigStore::instance().set(None, "ViewerWaveformMode", &mode.clamp(0, 2).to_string());
+	config_set_int("ViewerWaveformMode", mode.clamp(0, 2) as i64);
 }
 
 pub fn default_project_color_settings() -> (String, String, String) {
 	(
-		WorkingColorSpace::default().as_setting().to_string(),
-		OutputGamut::default().as_setting().to_string(),
-		OutputTransfer::default().as_setting().to_string(),
+		"acescg".to_string(),
+		"srgb".to_string(),
+		"srgb".to_string(),
 	)
 }
 
 pub fn proxy_params_from_config() -> ProxyParamsUi {
-	proxy_params_from_codec(&ProxyManager::proxy_params_from_config())
+	let params = SdkProxyParams::from_config();
+	ProxyParamsUi {
+		width: params.width,
+		height: params.height,
+		divider: params.divider,
+		crf: params.crf,
+		preset: params.preset().to_string(),
+		include_audio: params.include_audio != 0,
+	}
 }
 
 pub fn proxy_params_to_codec(ui: &ProxyParamsUi) -> ProxyParams {
@@ -141,7 +138,7 @@ mod tests {
 	#[test]
 	fn proxy_params_from_config_returns_the_defaults() {
 		let params = proxy_params_from_config();
-		let defaults = ProxyManager::proxy_params_default();
+		let defaults = SdkProxyParams::default();
 		assert_eq!(params.width, defaults.width);
 		assert_eq!(params.height, defaults.height);
 		assert_eq!(params.divider, defaults.divider);
