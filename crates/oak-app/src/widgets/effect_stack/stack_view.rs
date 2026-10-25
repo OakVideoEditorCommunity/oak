@@ -610,7 +610,10 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 								.text_color(colors.text)
 						})
 						.text_color(colors.disabled)
-						.child("✕")
+						.child(crate::widgets::glyphs::icon(
+							crate::widgets::glyphs::Glyph::Close,
+							colors.text,
+						))
 						.on_click(cx.listener(move |this, _event, _window, cx| {
 							cx.stop_propagation();
 							this.remove(id, cx);

@@ -330,7 +330,14 @@ fn group_header(
 		.font_weight(gpui_kit::FontWeight(600.0))
 		.text_color(colors.disabled)
 		.hover(|style| style.text_color(colors.text))
-		.child(if collapsed { "▶" } else { "▼" })
+		.child(crate::widgets::glyphs::icon(
+			if collapsed {
+				crate::widgets::glyphs::Glyph::ChevronRight
+			} else {
+				crate::widgets::glyphs::Glyph::ChevronDown
+			},
+			colors.disabled,
+		))
 		.child(label.to_string())
 		.on_click(on_toggle)
 }

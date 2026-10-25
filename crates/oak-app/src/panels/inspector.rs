@@ -248,7 +248,10 @@ impl<E: AppEngine> InspectorPanel<E> {
 							.hover(|style| style.bg(colors.selected))
 							.text_color(colors.disabled)
 							.text_sm()
-							.child("✕")
+							.child(crate::widgets::glyphs::icon(
+								crate::widgets::glyphs::Glyph::Close,
+								colors.text,
+							))
 							.on_click(cx.listener(
 								move |this, _event: &gpui_kit::ClickEvent, _window, cx| {
 									this.pending_add = None;

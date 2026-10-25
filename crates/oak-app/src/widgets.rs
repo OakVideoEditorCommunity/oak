@@ -26,6 +26,7 @@ pub mod color_wheel;
 pub mod curve_editor;
 pub mod dialog;
 pub mod effect_stack;
+pub mod glyphs;
 pub mod i18n;
 pub mod icons;
 pub mod keyable;

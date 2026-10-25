@@ -4062,7 +4062,9 @@ pub fn run() {
 /// Runs the app window with `E` as the engine backend.
 fn run_with<E: AppEngine>(args: AppArgs) {
 	let initial = args.project.clone();
-	gpui_kit::application().run(move |cx: &mut App| {
+	gpui_kit::application()
+		.with_assets(gpui_kit::assets::Assets)
+		.run(move |cx: &mut App| {
 		// gpui-kit's component layer (the dock chrome, the text inputs)
 		// renders from its own theme global — install it before any window
 		// exists. `apply_theme` (per window setup and the theme toggle)
