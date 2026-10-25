@@ -3,6 +3,14 @@
 
 Oak Video Editor is based on Olive, aiming to deliver a more complete and user-friendly editing experience.
 
+## Note: For Chinese docs
+
+Some of the docs are written in Chinese.You can translate them by this tool: 
+
+[Translator CLI](https://github.com/TUST-Open-Source-Club/translator)
+
+which maintained by TUST OpenAtom Open Source Club.
+
 ## Screenshots
 
 ![screenshot](docs/imgs/screenshot.png)
