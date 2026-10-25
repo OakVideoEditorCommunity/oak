@@ -1518,7 +1518,10 @@ impl<E: AppEngine> Render for OfxParamsView<E> {
 									.text_color(colors.text)
 									.px_2()
 									.py_1()
-									.child("✓")
+									.child(crate::widgets::glyphs::icon(
+										crate::widgets::glyphs::Glyph::Check,
+										colors.text,
+									))
 									.on_click(move |_event: &ClickEvent, _window, cx| {
 										let text = editor_commit.value(cx);
 										engine.update(cx, |engine, cx| {

@@ -699,10 +699,20 @@ fn menu_popup_element(
 			.child(
 				div()
 					.w(px(16.0))
-					.child(if checked == Some(true) { "✓" } else { "" }),
+					.children((checked == Some(true)).then(|| {
+						crate::widgets::glyphs::icon(
+							crate::widgets::glyphs::Glyph::Check,
+							colors.text,
+						)
+					})),
 			)
 			.child(div().flex_1().child(label.clone()))
-			.child(if has_submenu { "›" } else { "" })
+			.children(has_submenu.then(|| {
+				crate::widgets::glyphs::icon(
+					crate::widgets::glyphs::Glyph::ChevronRight,
+					colors.disabled,
+				)
+			}))
 			.child(
 				div()
 					.text_color(colors.disabled)

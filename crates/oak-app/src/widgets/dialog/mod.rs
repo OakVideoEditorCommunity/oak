@@ -269,7 +269,10 @@ impl Render for Modal {
 											cx.stop_propagation();
 										}),
 									)
-									.child("✕"),
+									.child(crate::widgets::glyphs::icon(
+										crate::widgets::glyphs::Glyph::Close,
+										colors.text,
+									)),
 							),
 					)
 					.child(

@@ -724,7 +724,10 @@ impl Render for CheckBox {
 							.flex()
 							.items_center()
 							.justify_center()
-							.child(div().text_color(colors.selected_text).child("✓"))
+							.child(crate::widgets::glyphs::icon(
+								crate::widgets::glyphs::Glyph::Check,
+								colors.selected_text,
+							))
 							.into_any_element()
 					} else {
 						div().into_any_element()

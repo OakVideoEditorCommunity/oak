@@ -4194,7 +4194,12 @@ impl<E: crate::oakui::engine::AppEngine> Render for MulticamWizardContent<E> {
 							colors.background
 						})
 						.text_color(colors.text)
-						.child(if is_checked { "✓" } else { "" }),
+						.children(is_checked.then(|| {
+							crate::widgets::glyphs::icon(
+								crate::widgets::glyphs::Glyph::Check,
+								colors.text,
+							)
+						})),
 				)
 				.child(
 					div()

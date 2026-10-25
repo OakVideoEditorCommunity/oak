@@ -323,8 +323,6 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 		let selected = self.selected;
 		let control = self.control;
 
-		// Toolbar: view toggle (small glyph buttons; the localized words stay
-		// as tooltips).
 		let toolbar = div()
 			.flex()
 			.items_center()
@@ -334,7 +332,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 			.bg(colors.container)
 			.child(toggle_button(
 				"gpui-widgets-explorer-tree",
-				"☰",
+				crate::widgets::glyphs::Glyph::List,
 				crate::widgets::i18n::tr("explorer.tree", "树"),
 				self.view == ExplorerView::Tree,
 				&colors,
@@ -344,7 +342,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 			))
 			.child(toggle_button(
 				"gpui-widgets-explorer-icons",
-				"▦",
+				crate::widgets::glyphs::Glyph::Grid,
 				crate::widgets::i18n::tr("explorer.icons", "图标"),
 				self.view == ExplorerView::Icons,
 				&colors,
@@ -415,15 +413,20 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 								cx.stop_propagation();
 							}),
 						)
-						.child(div().w(px(14.0)).child(if entry.is_dir {
-							if this_expanded(&expanded, entry.id) {
-								"▾"
-							} else {
-								"▸"
-							}
-						} else {
-							""
-						}))
+						.child(div().w(px(14.0)).children(entry.is_dir.then(|| {
+							crate::widgets::glyphs::icon(
+								if this_expanded(&expanded, entry.id) {
+									crate::widgets::glyphs::Glyph::ChevronDown
+								} else {
+									crate::widgets::glyphs::Glyph::ChevronRight
+								},
+								if is_selected {
+									colors.selected_text
+								} else {
+									colors.text
+								},
+							)
+						})))
 						// Small type glyph: a folder box for directories, a
 						// document for media files. The widget crate ships no
 						// folder/file SVGs, so the rows use text glyphs (the
@@ -611,17 +614,20 @@ fn this_expanded(expanded: &HashSet<u64>, id: u64) -> bool {
 	expanded.contains(&id)
 }
 
-/// A small glyph toggle button for the view switcher: the glyph is the
-/// button face, the localized word its tooltip.
 fn toggle_button(
 	id: &'static str,
-	glyph: &'static str,
+	glyph: crate::widgets::glyphs::Glyph,
 	label: impl Into<gpui_kit::SharedString>,
 	active: bool,
 	colors: &gpui_kit::colors::Colors,
 	on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
 	let label: gpui_kit::SharedString = label.into();
+	let icon_color = if active {
+		colors.selected_text
+	} else {
+		colors.text
+	};
 	div()
 		.id(id)
 		.debug_selector(move || id.into())
@@ -642,15 +648,10 @@ fn toggle_button(
 				style.bg(crate::widgets::theme::neutral_hover(colors))
 			}
 		})
-		.text_color(if active {
-			colors.selected_text
-		} else {
-			colors.text
-		})
 		.cursor_pointer()
 		.tooltip(move |window, cx| crate::widgets::tooltip::tooltip_view(label.clone(), window, cx))
 		.on_click(on_click)
-		.child(glyph)
+		.child(crate::widgets::glyphs::icon(glyph, icon_color))
 }
 
 #[cfg(test)]
