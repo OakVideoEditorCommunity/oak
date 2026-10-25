@@ -316,6 +316,9 @@ jobs:
       # ------------------------------------------------------------------
       # Build & test
       # ------------------------------------------------------------------
+      - name: App engine boundary guard
+        run: python3 tooling/check_app_engine_boundary.py
+
       # `cargo check` (not build): the Test step links the test binaries
       # anyway, and a full build would codegen every workspace crate twice
       # (once without and once with cfg(test)).

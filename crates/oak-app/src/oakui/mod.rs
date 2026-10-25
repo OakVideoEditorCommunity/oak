@@ -60,6 +60,7 @@ pub mod projectbrowser;
 pub mod real;
 pub mod renderops;
 pub mod scopes;
+pub(crate) mod settings;
 pub mod textengine;
 pub mod timecode;
 pub mod transport;

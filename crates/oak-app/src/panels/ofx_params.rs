@@ -67,7 +67,7 @@ use gpui_kit::{
 use gpui_kit::base::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::input::Textarea;
 
-use oak_node::value::{NodeValue, ValueType};
+use crate::oakui::engine::{EffectValue as NodeValue, EffectValueType as ValueType};
 
 use crate::oakui::{AppEngine, EffectParam};
 
@@ -199,7 +199,7 @@ impl<E: AppEngine> OfxParamsView<E> {
 			// or mock engine's snapshot can carry them; a secret input must
 			// never reach the inspector, so filter here as well (the params
 			// view is the last stop before a control is built).
-			.filter(|param| param.flags & oak_node::input::flags::HIDDEN == 0)
+			.filter(|param| param.flags & crate::oakui::engine::input_flags::HIDDEN == 0)
 		{
 			if let Some(ids) = &wheel_ids {
 				if ids.iter().any(|(id, _)| id == &param.input_id) {
@@ -395,7 +395,7 @@ fn curve_domain(
 	curves: &[oak_ofx_plugin::param_curve::Curve],
 ) -> (f64, f64, f64, f64) {
 	let (mut lo, mut hi) = (0.0, 1.0);
-	if let Some((_, oak_node::value::NodeValue::Vec2(v))) = param
+	if let Some((_, NodeValue::Vec2(v))) = param
 		.properties
 		.iter()
 		.find(|(k, _)| k == "parametric_range")

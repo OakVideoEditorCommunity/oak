@@ -1,0 +1,212 @@
+{
+  "schema": 1,
+  "dependencies": {
+    "dependencies": [
+      "oak-audio",
+      "oak-codec",
+      "oak-core",
+      "oak-node",
+      "oak-ofx-plugin",
+      "oak-render",
+      "oak-storage",
+      "oak-task",
+      "oak-timeline",
+      "oak-undo"
+    ],
+    "dev-dependencies": [],
+    "build-dependencies": []
+  },
+  "references": {
+    "crates/oak-app/src/actions.rs": {
+      "total": 1,
+      "crates": {
+        "oak-core": 1
+      }
+    },
+    "crates/oak-app/src/app.rs": {
+      "total": 3,
+      "crates": {
+        "oak-core": 3
+      }
+    },
+    "crates/oak-app/src/dialogs.rs": {
+      "total": 19,
+      "crates": {
+        "oak-codec": 13,
+        "oak-core": 6
+      }
+    },
+    "crates/oak-app/src/handle.rs": {
+      "total": 2,
+      "crates": {
+        "oak-engine": 2
+      }
+    },
+    "crates/oak-app/src/i18n.rs": {
+      "total": 1,
+      "crates": {
+        "oak-node": 1
+      }
+    },
+    "crates/oak-app/src/oakui/audio_thread.rs": {
+      "total": 5,
+      "crates": {
+        "oak-core": 1,
+        "oak-render": 4
+      }
+    },
+    "crates/oak-app/src/oakui/displaycolor.rs": {
+      "total": 10,
+      "crates": {
+        "oak-core": 10
+      }
+    },
+    "crates/oak-app/src/oakui/effectchain.rs": {
+      "total": 90,
+      "crates": {
+        "oak-core": 1,
+        "oak-node": 55,
+        "oak-undo": 34
+      }
+    },
+    "crates/oak-app/src/oakui/gpu.rs": {
+      "total": 24,
+      "crates": {
+        "oak-core": 24
+      }
+    },
+    "crates/oak-app/src/oakui/graphops.rs": {
+      "total": 373,
+      "crates": {
+        "oak-codec": 12,
+        "oak-core": 2,
+        "oak-node": 69,
+        "oak-storage": 27,
+        "oak-task": 5,
+        "oak-timeline": 53,
+        "oak-undo": 205
+      }
+    },
+    "crates/oak-app/src/oakui/multicam.rs": {
+      "total": 52,
+      "crates": {
+        "oak-audio": 1,
+        "oak-core": 5,
+        "oak-node": 36,
+        "oak-timeline": 10
+      }
+    },
+    "crates/oak-app/src/oakui/nodegraph.rs": {
+      "total": 39,
+      "crates": {
+        "oak-node": 24,
+        "oak-timeline": 1,
+        "oak-undo": 14
+      }
+    },
+    "crates/oak-app/src/oakui/ofx.rs": {
+      "total": 53,
+      "crates": {
+        "oak-ofx-plugin": 51,
+        "oak-render": 2
+      }
+    },
+    "crates/oak-app/src/oakui/projectbrowser.rs": {
+      "total": 4,
+      "crates": {
+        "oak-node": 4
+      }
+    },
+    "crates/oak-app/src/oakui/real.rs": {
+      "total": 288,
+      "crates": {
+        "oak-audio": 21,
+        "oak-codec": 29,
+        "oak-core": 71,
+        "oak-node": 72,
+        "oak-ofx-plugin": 2,
+        "oak-render": 11,
+        "oak-storage": 1,
+        "oak-task": 21,
+        "oak-timeline": 20,
+        "oak-undo": 40
+      }
+    },
+    "crates/oak-app/src/oakui/renderops.rs": {
+      "total": 213,
+      "crates": {
+        "oak-codec": 31,
+        "oak-core": 63,
+        "oak-node": 59,
+        "oak-render": 18,
+        "oak-task": 11,
+        "oak-timeline": 1,
+        "oak-undo": 30
+      }
+    },
+    "crates/oak-app/src/oakui/settings.rs": {
+      "total": 3,
+      "crates": {
+        "oak-codec": 1,
+        "oak-core": 2
+      }
+    },
+    "crates/oak-app/src/oakui/textengine.rs": {
+      "total": 2,
+      "crates": {
+        "oak-render": 2
+      }
+    },
+    "crates/oak-app/src/oakui/waveform.rs": {
+      "total": 4,
+      "crates": {
+        "oak-audio": 3,
+        "oak-codec": 1
+      }
+    },
+    "crates/oak-app/src/oakui/waveformsync.rs": {
+      "total": 1,
+      "crates": {
+        "oak-audio": 1
+      }
+    },
+    "crates/oak-app/src/panels/effect_library.rs": {
+      "total": 2,
+      "crates": {
+        "oak-core": 2
+      }
+    },
+    "crates/oak-app/src/panels/multicam.rs": {
+      "total": 2,
+      "crates": {
+        "oak-node": 1,
+        "oak-timeline": 1
+      }
+    },
+    "crates/oak-app/src/panels/ofx_params.rs": {
+      "total": 19,
+      "crates": {
+        "oak-ofx-plugin": 19
+      }
+    },
+    "crates/oak-app/src/panels/project_explorer.rs": {
+      "total": 2,
+      "crates": {
+        "oak-undo": 2
+      }
+    },
+    "crates/oak-app/src/panels/timeline.rs": {
+      "total": 2,
+      "crates": {
+        "oak-node": 2
+      }
+    },
+    "crates/oak-app/tests/waveform_e2e.rs": {
+      "total": 3,
+      "crates": {
+        "oak-audio": 2,
+        "oak-codec": 1
+      }
+    }
+  }
+}

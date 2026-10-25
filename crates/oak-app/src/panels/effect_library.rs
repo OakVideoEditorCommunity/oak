@@ -490,7 +490,7 @@ mod tests {
 	}
 
 	/// The panel renders one row per addable effect of the engine (the
-	/// mock exposes the real factory's video-effect table).
+	/// mock exposes a deterministic app-local effect table).
 	#[gpui_kit::test]
 	async fn lists_every_addable_effect(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
@@ -505,7 +505,7 @@ mod tests {
 		cx.run_until_parked();
 		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
 
-		let expected = crate::oakui::effectchain::addable_effects();
+		let expected = crate::oakui::MockEngine::demo_effect_library();
 		assert!(!expected.is_empty());
 		for entry in &expected {
 			let type_id = &entry.type_id;
@@ -522,7 +522,7 @@ mod tests {
 	async fn collapsing_a_group_hides_its_rows(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
 
-		let entries = crate::oakui::effectchain::addable_effects();
+		let entries = crate::oakui::MockEngine::demo_effect_library();
 		let group = entries
 			.first()
 			.and_then(|entry| entry.group.clone())
@@ -578,7 +578,7 @@ mod tests {
 	async fn clicking_a_group_header_collapses_and_persists_it(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
 
-		let entries = crate::oakui::effectchain::addable_effects();
+		let entries = crate::oakui::MockEngine::demo_effect_library();
 		let group = entries
 			.first()
 			.and_then(|entry| entry.group.clone())

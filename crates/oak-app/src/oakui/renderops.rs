@@ -238,11 +238,7 @@ fn clip_effects(
 				type_id: entry.behavior.type_id().to_string(),
 				enabled: effectchain::is_enabled(g, fx),
 				effect_input_id: effectchain::effect_input_of(g, fx),
-				params: effectchain::effect_params(g, fx)
-					.unwrap_or_default()
-					.into_iter()
-					.map(|p| (p.input_id, p.value))
-					.collect(),
+				params: effectchain::render_params(g, fx).unwrap_or_default(),
 			})
 		})
 		.collect()
@@ -1649,12 +1645,12 @@ mod tests {
 		// would make the checkbox render as the blue accent fill.
 		assert_eq!(
 			invert.value,
-			oak_node::value::NodeValue::Boolean(false),
+			crate::oakui::engine::EffectValue::Boolean(false),
 			"invert_in must start false"
 		);
 		assert_eq!(
 			mask_only.value,
-			oak_node::value::NodeValue::Boolean(false),
+			crate::oakui::engine::EffectValue::Boolean(false),
 			"mask_only_in must start false"
 		);
 	}

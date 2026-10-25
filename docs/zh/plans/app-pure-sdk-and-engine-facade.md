@@ -148,7 +148,9 @@ crates/oak-app/src/oakui/
 删除旧直调”的顺序提交。禁止先留下双实现长期并行；确需临时共存时，以同一组
 行为测试约束并登记待删除文件。
 
-### P0：建立契约、调用台账和行为基线
+### P0：建立契约、调用台账和行为基线（已完成）
+
+实施台账与结果见 [p0-app-engine-call-ledger.md](p0-app-engine-call-ledger.md)。
 
 - 按 `AppEngine` 的方法建立“UI 操作 → 当前 helper → 内部 crate → SDK API”台账，
   覆盖正常路径、默认实现、测试 helper 和 `dialogs.rs`/`actions.rs` 等外围直调。
@@ -333,4 +335,3 @@ app 和独立消费者不得未定义引用内部模块符号，所有 Oak 引�
 - [ ] `examples/sdk_editor` 不依赖 `oak-app` 或其他 Oak 内部 crate，完整工作流通过。
 - [ ] SDK 有面向新前端的生命周期、线程、错误、所有权和任务/事件使用文档。
 - [ ] 三平台 CI 构建、链接和冒烟通过，依赖与源码守卫持续启用。
-

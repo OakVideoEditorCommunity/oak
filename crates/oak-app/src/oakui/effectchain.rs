@@ -31,10 +31,12 @@ use std::sync::{Arc, Mutex};
 use oak_node::graph::{Graph, NodeEntry};
 use oak_node::id::NodeId;
 use oak_node::node::ENABLED_INPUT;
-use oak_node::value::NodeValue;
+use oak_node::value::{NodeValue, ValueType};
 use oak_undo::undocommand::UndoCommand;
 
-use super::graphops::{connect_command, disconnect_command, lock, push_command as push, ProjectRef};
+use super::graphops::{
+	ProjectRef, connect_command, disconnect_command, lock, push_command as push,
+};
 
 /// The media kind an effect chain carries (video chains are
 /// texture-typed, audio chains samples-typed).
@@ -319,13 +321,8 @@ pub fn plugin_instance_handle(g: &Graph, node: NodeId) -> Option<u64> {
 /// editor lists every non-hidden, non-connection input); connection/data
 /// inputs (texture / samples / matrix) and the structural enabled input
 /// are excluded.
-pub fn effect_params(
-	g: &Graph,
-	node: NodeId,
-) -> Option<Vec<super::engine::EffectParam>> {
+pub fn effect_params(g: &Graph, node: NodeId) -> Option<Vec<super::engine::EffectParam>> {
 	use oak_node::input::flags as input_flags;
-	use oak_node::value::ValueType;
-
 	let entry = g.get(node)?;
 	// The pack keys describe the built-in nodes only: an OpenFX plugin's
 	// labels come from the plugin (and the OFX translation pass), and a
@@ -376,7 +373,8 @@ pub fn effect_params(
 		// `set_combo_box_strings`); OFX plugin params already carry the
 		// ("combo_option", _) properties from the translation pass.
 		let mut properties = input.properties.clone();
-		if input.value_type == ValueType::Combo && !properties.iter().any(|(k, _)| k == "combo_option")
+		if input.value_type == ValueType::Combo
+			&& !properties.iter().any(|(k, _)| k == "combo_option")
 		{
 			for option in entry.behavior.input_combo_strings(&input.id) {
 				properties.push((
@@ -417,13 +415,110 @@ pub fn effect_params(
 		out.push(super::engine::EffectParam {
 			input_id: input.id.clone(),
 			display_name,
-			value_type: input.value_type,
-			value: entry.core.standard_value(&input.id, -1),
+			value_type: effect_value_type(input.value_type),
+			value: effect_value(&entry.core.standard_value(&input.id, -1)),
 			flags: input.flags,
-			properties,
+			properties: properties
+				.into_iter()
+				.map(|(key, value)| (key, effect_value(&value)))
+				.collect(),
 		});
 	}
 	Some(out)
+}
+
+/// Convert the domain value vocabulary into the owned app DTO. This is
+/// the only place where the real backend's parameter snapshots cross
+/// that boundary; neither widgets nor MockEngine need domain values.
+fn effect_value_type(value: ValueType) -> super::engine::EffectValueType {
+	use super::engine::EffectValueType as Out;
+	match value {
+		ValueType::None => Out::None,
+		ValueType::Int => Out::Int,
+		ValueType::Float => Out::Float,
+		ValueType::Color => Out::Color,
+		ValueType::Text => Out::Text,
+		ValueType::Boolean => Out::Boolean,
+		ValueType::Texture => Out::Texture,
+		ValueType::Samples => Out::Samples,
+		ValueType::Rational => Out::Rational,
+		ValueType::Vec2 => Out::Vec2,
+		ValueType::Vec3 => Out::Vec3,
+		ValueType::Vec4 => Out::Vec4,
+		ValueType::Matrix => Out::Matrix,
+		ValueType::Combo => Out::Combo,
+		ValueType::StrCombo => Out::StrCombo,
+		ValueType::VideoParams => Out::VideoParams,
+		ValueType::AudioParams => Out::AudioParams,
+		ValueType::Binary => Out::Binary,
+		ValueType::NodeRef => Out::NodeRef,
+		ValueType::PushButton => Out::PushButton,
+		ValueType::Parametric => Out::Parametric,
+	}
+}
+
+fn effect_value(value: &NodeValue) -> super::engine::EffectValue {
+	use super::engine::EffectValue as Out;
+	match value {
+		NodeValue::None => Out::None,
+		NodeValue::Int(value) => Out::Int(*value),
+		NodeValue::Float(value) => Out::Float(*value),
+		NodeValue::Color(value) => Out::Color(*value),
+		NodeValue::Text(value) => Out::Text(value.clone()),
+		NodeValue::Boolean(value) => Out::Boolean(*value),
+		NodeValue::Vec2(value) => Out::Vec2(*value),
+		NodeValue::Vec3(value) => Out::Vec3(*value),
+		NodeValue::Vec4(value) => Out::Vec4(*value),
+		NodeValue::Combo(value) => Out::Combo(*value),
+		NodeValue::StrCombo(value) => Out::StrCombo(value.clone()),
+		NodeValue::Binary(value) => Out::Binary(value.clone()),
+		NodeValue::PushButton => Out::PushButton,
+		other => Out::Unsupported(format!("{other:?}")),
+	}
+}
+
+/// Domain-preserving parameter access for the montage builder. Rendering
+/// must not round-trip through the inspector DTO: unsupported UI payload
+/// kinds still have to reach the renderer unchanged.
+pub fn render_params(g: &Graph, node: NodeId) -> Option<Vec<(String, NodeValue)>> {
+	let entry = g.get(node)?;
+	Some(
+		entry
+			.core
+			.inputs
+			.iter()
+			.filter(|input| {
+				!matches!(
+					input.value_type,
+					ValueType::Texture | ValueType::Samples | ValueType::Matrix
+				) && input.flags & oak_node::input::flags::HIDDEN == 0
+					&& input.id != oak_node::node::ENABLED_INPUT
+			})
+			.map(|input| (input.id.clone(), entry.core.standard_value(&input.id, -1)))
+			.collect(),
+	)
+}
+
+/// Convert an edited app DTO back to the domain value. Unsupported
+/// read-only payloads cannot be committed accidentally as `None`.
+pub fn into_node_value(value: super::engine::EffectValue) -> Result<NodeValue, String> {
+	use super::engine::EffectValue as In;
+	Ok(match value {
+		In::None => NodeValue::None,
+		In::Int(value) => NodeValue::Int(value),
+		In::Float(value) => NodeValue::Float(value),
+		In::Color(value) => NodeValue::Color(value),
+		In::Text(value) => NodeValue::Text(value),
+		In::Boolean(value) => NodeValue::Boolean(value),
+		In::Vec2(value) => NodeValue::Vec2(value),
+		In::Vec3(value) => NodeValue::Vec3(value),
+		In::Vec4(value) => NodeValue::Vec4(value),
+		In::Combo(value) => NodeValue::Combo(value),
+		In::StrCombo(value) => NodeValue::StrCombo(value),
+		In::Binary(value) => NodeValue::Binary(value),
+		In::PushButton => NodeValue::PushButton,
+		In::Unsupported(_) => return Err("this parameter value is read-only".into()),
+	})
 }
 
 /// The combo option labels of a parameter, collected from the repeated
@@ -435,7 +530,7 @@ pub fn combo_options(p: &super::engine::EffectParam) -> Vec<String> {
 		.iter()
 		.filter(|(k, _)| k == "combo_option")
 		.filter_map(|(_, v)| match v {
-			oak_node::value::NodeValue::Text(s) => Some(s.clone()),
+			super::engine::EffectValue::Text(s) => Some(s.clone()),
 			_ => None,
 		})
 		.collect()
@@ -447,7 +542,7 @@ pub fn combo_values(p: &super::engine::EffectParam) -> Vec<String> {
 		.iter()
 		.filter(|(k, _)| k == "combo_value")
 		.filter_map(|(_, v)| match v {
-			oak_node::value::NodeValue::Text(s) => Some(s.clone()),
+			super::engine::EffectValue::Text(s) => Some(s.clone()),
 			_ => None,
 		})
 		.collect()
@@ -461,7 +556,7 @@ pub fn ui_section_of(p: &super::engine::EffectParam) -> Option<(String, String)>
 		.iter()
 		.find(|(k, _)| k == "ui_group")
 		.and_then(|(_, v)| match v {
-			oak_node::value::NodeValue::Text(s) => Some(s.clone()),
+			super::engine::EffectValue::Text(s) => Some(s.clone()),
 			_ => None,
 		});
 	let page = p
@@ -469,7 +564,7 @@ pub fn ui_section_of(p: &super::engine::EffectParam) -> Option<(String, String)>
 		.iter()
 		.find(|(k, _)| k == "ui_page")
 		.and_then(|(_, v)| match v {
-			oak_node::value::NodeValue::Text(s) => Some(s.clone()),
+			super::engine::EffectValue::Text(s) => Some(s.clone()),
 			_ => None,
 		});
 	match (group, page) {
@@ -481,8 +576,6 @@ pub fn ui_section_of(p: &super::engine::EffectParam) -> Option<(String, String)>
 // ---------------------------------------------------------------------------
 // Command pieces
 // ---------------------------------------------------------------------------
-
-
 
 /// Shared state of an add-node command: the node's entry while detached
 /// plus its arena id once added (kept across undo/redo so the rewiring
@@ -619,8 +712,7 @@ pub fn set_input_value(
 			move || {
 				let mut g = lock(&p2);
 				if let Some(e) = g.graph.get_mut(effect) {
-					e.core
-						.set_standard_value(&undo_input, -1, undo_old.clone());
+					e.core.set_standard_value(&undo_input, -1, undo_old.clone());
 				}
 			},
 		),
@@ -660,7 +752,8 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 		if effect_input_of(&g.graph, host).is_none() {
 			return Err("node cannot host effects (no effect input)".to_string());
 		}
-		let Some((core, behavior)) = oak_node::factory::Factory::global().create_any(type_id) else {
+		let Some((core, behavior)) = oak_node::factory::Factory::global().create_any(type_id)
+		else {
 			return Err(format!("unknown node type id \"{type_id}\""));
 		};
 		if core.effect_input.is_empty() {
@@ -714,13 +807,22 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 		// 2. Unhook the downstream input from its current upstream (when
 		//    there is one).
 		if upstream.is_some() {
-			push(disconnect_command(p, downstream, &downstream_input)?, "Add Effect")?;
+			push(
+				disconnect_command(p, downstream, &downstream_input)?,
+				"Add Effect",
+			)?;
 		}
 		// 3. Wire the new effect between upstream and downstream (each
 		//    command validates against the live post-edit graph).
-		push(connect_command(p, fresh, downstream, &downstream_input)?, "Add Effect")?;
+		push(
+			connect_command(p, fresh, downstream, &downstream_input)?,
+			"Add Effect",
+		)?;
 		if let Some(upstream) = upstream {
-			push(connect_command(p, upstream, fresh, &new_input)?, "Add Effect")?;
+			push(
+				connect_command(p, upstream, fresh, &new_input)?,
+				"Add Effect",
+			)?;
 		}
 		Ok(fresh)
 	})
@@ -773,9 +875,15 @@ pub fn remove(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String
 		}
 		// 2. Unhook the downstream from the effect, then bridge it back to
 		//    the upstream (validated against the live post-edit graph).
-		push(disconnect_command(p, downstream, &downstream_input)?, "Remove Effect")?;
+		push(
+			disconnect_command(p, downstream, &downstream_input)?,
+			"Remove Effect",
+		)?;
 		if let Some(upstream) = upstream {
-			push(connect_command(p, upstream, downstream, &downstream_input)?, "Remove Effect")?;
+			push(
+				connect_command(p, upstream, downstream, &downstream_input)?,
+				"Remove Effect",
+			)?;
 		}
 		Ok(())
 	})
@@ -859,20 +967,35 @@ pub fn move_effect(
 		if upstream.is_some() {
 			push(disconnect_command(p, effect, &eff_input)?, "Reorder Effect")?;
 		}
-		push(disconnect_command(p, downstream, &downstream_input)?, "Reorder Effect")?;
+		push(
+			disconnect_command(p, downstream, &downstream_input)?,
+			"Reorder Effect",
+		)?;
 		if let Some(upstream) = upstream {
-			push(connect_command(p, upstream, downstream, &downstream_input)?, "Reorder Effect")?;
+			push(
+				connect_command(p, upstream, downstream, &downstream_input)?,
+				"Reorder Effect",
+			)?;
 		}
 		// ---- reinsert at position `to` (each command validates against
 		// the live post-edit graph) ------------------------------------
 		if up2.is_some() {
-			push(disconnect_command(p, down2, &down2_input)?, "Reorder Effect")?;
+			push(
+				disconnect_command(p, down2, &down2_input)?,
+				"Reorder Effect",
+			)?;
 		}
-		push(connect_command(p, effect, down2, &down2_input)?, "Reorder Effect")?;
+		push(
+			connect_command(p, effect, down2, &down2_input)?,
+			"Reorder Effect",
+		)?;
 		// The upstream -> effect connect addresses the EFFECT's own effect
 		// input (identical to the upstream's for the standard tex_in chains).
 		if let Some(up2) = up2 {
-			push(connect_command(p, up2, effect, &eff_input)?, "Reorder Effect")?;
+			push(
+				connect_command(p, up2, effect, &eff_input)?,
+				"Reorder Effect",
+			)?;
 		}
 		Ok(())
 	})
@@ -951,8 +1074,13 @@ mod tests {
 		let video_clip = mk_clip(video_track);
 
 		// Video effect onto the audio clip: rejected...
-		let err = insert(&project, audio_clip, 0, "org.olivevideoeditor.Olive.opacity")
-			.expect_err("a video effect must not chain onto an audio clip");
+		let err = insert(
+			&project,
+			audio_clip,
+			0,
+			"org.olivevideoeditor.Olive.opacity",
+		)
+		.expect_err("a video effect must not chain onto an audio clip");
 		assert!(err.contains("audio"), "{err}");
 		// ...while the audio effect chains fine.
 		insert(&project, audio_clip, 0, "org.olivevideoeditor.Olive.volume")
@@ -961,8 +1089,13 @@ mod tests {
 		let err = insert(&project, video_clip, 0, "org.olivevideoeditor.Olive.volume")
 			.expect_err("an audio effect must not chain onto a video clip");
 		assert!(err.contains("video"), "{err}");
-		insert(&project, video_clip, 0, "org.olivevideoeditor.Olive.opacity")
-			.expect("opacity is a video effect");
+		insert(
+			&project,
+			video_clip,
+			0,
+			"org.olivevideoeditor.Olive.opacity",
+		)
+		.expect("opacity is a video effect");
 
 		// An untracked clip keeps the permissive fallback.
 		let (p2, free) = project_with_clip();
@@ -984,7 +1117,10 @@ mod tests {
 		let second = insert(&project, host, 0, &ty).expect("insert at the source side");
 		assert_eq!(chain(&lock(&project).graph, host), vec![second, first]);
 		let third = insert(&project, host, 1, &ty).expect("insert in the middle");
-		assert_eq!(chain(&lock(&project).graph, host), vec![second, third, first]);
+		assert_eq!(
+			chain(&lock(&project).graph, host),
+			vec![second, third, first]
+		);
 
 		// One undo row per insert.
 		oak_undo::global::undo().unwrap();
@@ -1075,9 +1211,13 @@ mod tests {
 				.group
 				.as_deref()
 				.unwrap_or_else(|| panic!("built-in {} has no group", entry.type_id));
-			let key = GROUP_KEYS.iter().copied().find(|key| *key == group).unwrap_or_else(|| {
-				panic!("built-in {} has the unknown group {group:?}", entry.type_id)
-			});
+			let key = GROUP_KEYS
+				.iter()
+				.copied()
+				.find(|key| *key == group)
+				.unwrap_or_else(|| {
+					panic!("built-in {} has the unknown group {group:?}", entry.type_id)
+				});
 			if !groups.contains(&key) {
 				groups.push(key);
 			}
@@ -1131,10 +1271,7 @@ mod tests {
 			let (a, b) = (&pair[0], &pair[1]);
 			let (ra, rb) = (rank(a), rank(b));
 			if ra != rb {
-				assert!(
-					ra < rb,
-					"group order: {a:?} ({ra}) before {b:?} ({rb})"
-				);
+				assert!(ra < rb, "group order: {a:?} ({ra}) before {b:?} ({rb})");
 			} else if a.group == b.group {
 				assert!(
 					a.name.to_lowercase() <= b.name.to_lowercase(),
@@ -1248,12 +1385,22 @@ mod tests {
 			.standard_value(&input_id, -1);
 		set_input_value(&project, eff, &input_id, NodeValue::Float(42.0)).unwrap();
 		assert_eq!(
-			lock(&project).graph.get(eff).unwrap().core.standard_value(&input_id, -1),
+			lock(&project)
+				.graph
+				.get(eff)
+				.unwrap()
+				.core
+				.standard_value(&input_id, -1),
 			NodeValue::Float(42.0)
 		);
 		oak_undo::global::undo().unwrap();
 		assert_eq!(
-			lock(&project).graph.get(eff).unwrap().core.standard_value(&input_id, -1),
+			lock(&project)
+				.graph
+				.get(eff)
+				.unwrap()
+				.core
+				.standard_value(&input_id, -1),
 			before
 		);
 		oak_undo::global::clear().unwrap();
@@ -1308,7 +1455,10 @@ mod tests {
 			.iter()
 			.find(|p| p.input_id == input_id)
 			.expect("the colour param appears in the snapshot");
-		assert_eq!(param.value_type, oak_node::value::ValueType::Color);
+		assert_eq!(
+			param.value_type,
+			crate::oakui::engine::EffectValueType::Color
+		);
 
 		// Commit the way `OfxColorPicker::commit` does: f32 channels widened
 		// to f64. The readback (f64 → f32) must round-trip exactly, or the
@@ -1316,11 +1466,12 @@ mod tests {
 		let color = NodeValue::Color([0.25, 0.5, 0.75, 0.4]);
 		set_input_value(&project, eff, &input_id, color.clone()).unwrap();
 		let snapshot = effect_params(&lock(&project).graph, eff).unwrap();
-		let read = snapshot
-			.iter()
-			.find(|p| p.input_id == input_id)
-			.unwrap();
-		assert_eq!(read.value, color, "the engine must echo the committed colour");
+		let read = snapshot.iter().find(|p| p.input_id == input_id).unwrap();
+		assert_eq!(
+			read.value,
+			effect_value(&color),
+			"the engine must echo the committed colour"
+		);
 
 		oak_undo::global::clear().unwrap();
 	}
@@ -1372,10 +1523,13 @@ mod tests {
 			.iter()
 			.find(|p| p.input_id == "TintColor")
 			.expect("the plugin colour param appears in the snapshot");
-		assert_eq!(param.value_type, oak_node::value::ValueType::Color);
+		assert_eq!(
+			param.value_type,
+			crate::oakui::engine::EffectValueType::Color
+		);
 		assert_eq!(
 			param.value,
-			oak_node::value::NodeValue::Color([1.0, 0.0, 0.0, 1.0]),
+			crate::oakui::engine::EffectValue::Color([1.0, 0.0, 0.0, 1.0]),
 			"the panel must open with the plugin's default colour"
 		);
 
@@ -1384,11 +1538,12 @@ mod tests {
 		let color = oak_node::value::NodeValue::Color([0.25, 0.5, 0.75, 0.4]);
 		set_input_value(&project, plugin, "TintColor", color.clone()).unwrap();
 		let snapshot = effect_params(&lock(&project).graph, plugin).unwrap();
-		let read = snapshot
-			.iter()
-			.find(|p| p.input_id == "TintColor")
-			.unwrap();
-		assert_eq!(read.value, color, "the engine must echo the committed colour");
+		let read = snapshot.iter().find(|p| p.input_id == "TintColor").unwrap();
+		assert_eq!(
+			read.value,
+			effect_value(&color),
+			"the engine must echo the committed colour"
+		);
 
 		// The render-side read: the traverser fills unconnected inputs from
 		// `value_at_time(id, -1)`, which the plugin job payload then carries
@@ -1399,7 +1554,10 @@ mod tests {
 			.unwrap()
 			.core
 			.value_at_time("TintColor", -1, oak_core::Rational::new(0, 1));
-		assert_eq!(render_read, color, "the renderer must see the committed colour");
+		assert_eq!(
+			render_read, color,
+			"the renderer must see the committed colour"
+		);
 
 		// Undo restores the default; redo reapplies the commit.
 		oak_undo::global::undo().unwrap();
@@ -1430,8 +1588,9 @@ mod tests {
 	/// property keys (and the string-combo values from `("combo_value", _)`).
 	#[test]
 	fn combo_option_collectors_read_repeated_properties() {
-		use crate::oakui::engine::EffectParam;
-		use oak_node::value::{NodeValue, ValueType};
+		use crate::oakui::engine::{
+			EffectParam, EffectValue as NodeValue, EffectValueType as ValueType,
+		};
 		let param = EffectParam {
 			input_id: "mode".into(),
 			display_name: "Mode".into(),
@@ -1453,8 +1612,9 @@ mod tests {
 	/// fine); params without either have no section.
 	#[test]
 	fn ui_section_collects_group_and_page() {
-		use crate::oakui::engine::EffectParam;
-		use oak_node::value::{NodeValue, ValueType};
+		use crate::oakui::engine::{
+			EffectParam, EffectValue as NodeValue, EffectValueType as ValueType,
+		};
 		let plain = EffectParam {
 			input_id: "p".into(),
 			display_name: "P".into(),
@@ -1472,7 +1632,10 @@ mod tests {
 			],
 			..plain
 		};
-		assert_eq!(ui_section_of(&grouped), Some(("Basic".into(), "Main".into())));
+		assert_eq!(
+			ui_section_of(&grouped),
+			Some(("Basic".into(), "Main".into()))
+		);
 	}
 
 	/// W6: the v3 text node is a footage entry now (the project panel's
@@ -1503,16 +1666,16 @@ mod tests {
 			.iter()
 			.find(|p| p.input_id == "plain_text_in")
 			.expect("the structured text parameter survives");
-		assert_eq!(plain_text.value_type, oak_node::value::ValueType::Text);
+		assert_eq!(
+			plain_text.value_type,
+			crate::oakui::engine::EffectValueType::Text
+		);
 		// The facade marks the multi-line text ids (the inspector renders a
 		// multi-line field off this property); the node itself carries no
 		// presentation metadata.
 		assert!(
-			plain_text
-				.properties
-				.iter()
-				.any(|(k, v)| k == "multiline"
-					&& matches!(v, oak_node::value::NodeValue::Boolean(true))),
+			plain_text.properties.iter().any(|(k, v)| k == "multiline"
+				&& matches!(v, crate::oakui::engine::EffectValue::Boolean(true))),
 			"plain_text_in is marked as multi-line"
 		);
 		assert!(params.iter().any(|p| p.input_id == "font_size_in"));
@@ -1608,14 +1771,22 @@ mod tests {
 				if english == input.id {
 					continue;
 				}
-				if crate::i18n::tr_or(&input_name_key(meta.type_id, &input.id), english) == english {
-					missing.push(format!("node.{}.input.{}", type_suffix(meta.type_id), input.id));
+				if crate::i18n::tr_or(&input_name_key(meta.type_id, &input.id), english) == english
+				{
+					missing.push(format!(
+						"node.{}.input.{}",
+						type_suffix(meta.type_id),
+						input.id
+					));
 				}
 				named += 1;
 			}
 		}
 		assert!(missing.is_empty(), "no pack entry for {missing:?}");
-		assert!(named >= 250, "the built-in nodes name their inputs ({named})");
+		assert!(
+			named >= 250,
+			"the built-in nodes name their inputs ({named})"
+		);
 		crate::i18n::set_language_code("en-US");
 	}
 
@@ -1640,7 +1811,10 @@ mod tests {
 			.iter()
 			.find(|p| p.input_id == "font_family_in")
 			.expect("the font family combo is a parameter");
-		assert_eq!(param.value_type, oak_node::value::ValueType::StrCombo);
+		assert_eq!(
+			param.value_type,
+			crate::oakui::engine::EffectValueType::StrCombo
+		);
 
 		let options = combo_options(param);
 		assert!(!options.is_empty(), "the font backend found no families");

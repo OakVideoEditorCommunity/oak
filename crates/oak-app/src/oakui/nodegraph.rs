@@ -71,6 +71,72 @@ const TYPE_ID_TRACK_LIST: &str = "org.olivevideoeditor.Olive.tracklist";
 const TYPE_ID_GAP_BLOCK: &str = "org.olivevideoeditor.Olive.gapblock";
 const TYPE_ID_TRANSITION_BLOCK: &str = "org.olivevideoeditor.Olive.transitionblock";
 
+/// The real factory's Add-menu entries, converted to app-owned DTOs.
+pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
+	use super::engine::{NodeCategory, NodeLibraryEntry, node_category_key};
+	fn category(value: oak_node::node::Category) -> NodeCategory {
+		use oak_node::node::Category as In;
+		match value {
+			In::Output => NodeCategory::Output,
+			In::Effect => NodeCategory::Effect,
+			In::Generator => NodeCategory::Generator,
+			In::Input => NodeCategory::Input,
+			In::Math => NodeCategory::Math,
+			In::Color => NodeCategory::Color,
+			In::Distort => NodeCategory::Distort,
+			In::Filter => NodeCategory::Filter,
+			In::Keying => NodeCategory::Keying,
+			In::OpenFx => NodeCategory::OpenFx,
+			In::Timeline => NodeCategory::Timeline,
+			In::Group => NodeCategory::Group,
+		}
+	}
+
+	let mut out = Vec::new();
+	let factory = oak_node::factory::Factory::global();
+	for meta in factory.entries() {
+		let (core, _behavior) = (meta.create)();
+		if core.flags & oak_node::node::flags::DONT_SHOW_IN_CREATE_MENU != 0 {
+			continue;
+		}
+		let Some(category_key) = meta
+			.categories
+			.first()
+			.copied()
+			.map(category)
+			.and_then(node_category_key)
+		else {
+			continue;
+		};
+		out.push(NodeLibraryEntry {
+			type_id: meta.type_id.to_string(),
+			name: if meta.name.is_empty() {
+				meta.type_id.to_string()
+			} else {
+				meta.name.to_string()
+			},
+			category_key,
+		});
+	}
+	for meta in factory.dynamic_entries() {
+		let Some(category_key) = meta
+			.categories
+			.first()
+			.copied()
+			.map(category)
+			.and_then(node_category_key)
+		else {
+			continue;
+		};
+		out.push(NodeLibraryEntry {
+			type_id: meta.type_id,
+			name: meta.name,
+			category_key,
+		});
+	}
+	out
+}
+
 /// The "video" wire type used by the real graph (the module exposes no
 /// per-input type names; all node ports are treated as video).
 fn video_type() -> PortDataType {

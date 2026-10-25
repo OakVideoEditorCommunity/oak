@@ -42,6 +42,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::widgets::audio_meter::AudioMeterDataSource;
 use crate::widgets::effect_stack::{
 	EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
 };
@@ -49,33 +50,29 @@ use crate::widgets::node_graph::{
 	EdgeData, EdgeId, NodeData, NodeGraphDataSource, NodeGraphEvent, NodeId, PortData,
 	PortDataType, PortId, PortKind,
 };
+use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::timeline::{
 	ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
 	TrackData, TrackKind,
 };
-use gpui_kit::{
-	hsla, point, prelude::*, px, App, Context, Entity, Hsla, Pixels, Point, RenderImage,
-	SharedString,
-};
-use crate::widgets::audio_meter::AudioMeterDataSource;
-use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::viewer::PlaybackClock;
-
-use oak_core::Rational;
-use oak_node::block::clip_input;
-use oak_node::track::TrackType;
-use oak_timeline::util::{block_clip_create, track_append_block};
-
-use super::engine::{
-	AppEngine, EngineGateway, ExportEvent, ExportSession, LibraryProject, Monitor, MulticamState,
-	Project, ScopeData, Sequence, VideoFormat, WizardFootage, WizardSyncOffset,
+use gpui_kit::{
+	App, Context, Entity, Hsla, Pixels, Point, RenderImage, SharedString, hsla, point, prelude::*,
+	px,
 };
-use super::graphops;
+
+use super::engine::input_flags::{ARRAY, HIDDEN};
+use super::engine::{
+	AppEngine, EffectEntry, EffectValue as NodeValue, EffectValueType as ValueType, EngineGateway,
+	ExportEvent, ExportSession, LibraryProject, Monitor, MulticamState, NodeLibraryEntry, Project,
+	ScopeData, Sequence, VideoFormat, WizardFootage, WizardSyncOffset,
+};
 use super::nodegraph::GraphEndpoint;
 use super::transport::TransportState;
 
 /// The demo sequence length: 00:04:18:18 at 25 fps.
 const SEQUENCE_LENGTH: i64 = 6468;
+const TEXT_FOOTAGE_LABEL: &str = "文本";
 
 /// The current unix time in seconds (0 on clock failure).
 fn now_unix() -> i64 {
@@ -596,18 +593,51 @@ pub struct MockEngine {
 	/// The demo clip link pairs (normalized `(min, max)` id pairs; the
 	/// 链接/重新链接 toggle edits them).
 	clip_links: std::collections::HashSet<(u64, u64)>,
-	/// The demo multicam graph: a real oaknode project whose source
-	/// sequence's video tracks are the angles. Created lazily so the demo
-	/// panel shows a genuine graph behind its synthetic frames — and the
-	/// switch / enable / disable commands run on the real command path
-	/// (`oak_timeline::multicam` + the global undo stack).
-	multicam_graph: Mutex<Option<DemoMulticamGraph>>,
+	/// Pure demo multicam state. The mock never constructs a real domain
+	/// graph or pushes commands onto the real engine's undo stack.
+	multicam_enabled: bool,
+	multicam_source: i32,
 	/// The demo multicam angle-frame cache: source → (playhead, image), so
 	/// a paused cell never regenerates its picture.
 	multicam_frames: Mutex<HashMap<i32, (i64, Arc<RenderImage>)>>,
 }
 
 impl MockEngine {
+	/// A deterministic, app-local effect library for demo and UI tests.
+	/// Unlike the real backend, this never reads the node factory.
+	pub fn demo_effect_library() -> Vec<EffectEntry> {
+		[
+			("demo.generator.solid", "Solid", "generator"),
+			("demo.generator.text", "Text", "generator"),
+			("demo.effect.transform", "Transform", "distort"),
+			("demo.effect.color", "Color Correct", "color"),
+			("demo.effect.invert", "Invert", "color"),
+		]
+		.into_iter()
+		.map(|(type_id, name, group)| EffectEntry {
+			type_id: type_id.to_string(),
+			name: name.to_string(),
+			group: Some(group.to_string()),
+		})
+		.collect()
+	}
+
+	/// The demo node Add-menu, also independent of the real factory.
+	pub fn demo_node_library() -> Vec<NodeLibraryEntry> {
+		[
+			("demo.node.transform", "Transform", "node.category.distort"),
+			("demo.node.solid", "Solid", "node.category.generator"),
+			("demo.node.output", "Output", "node.category.output"),
+		]
+		.into_iter()
+		.map(|(type_id, name, category_key)| NodeLibraryEntry {
+			type_id: type_id.to_string(),
+			name: name.to_string(),
+			category_key,
+		})
+		.collect()
+	}
+
 	/// Builds the demo project: 第一稿.ove, one HD sequence, four tracks.
 	/// The parameter-write attempts the params view routed to this engine
 	/// (`(effect, input_id, value debug)`), in call order.
@@ -942,7 +972,8 @@ impl MockEngine {
 			ocio_config: String::new(),
 			cache_location: (0, String::new()),
 			clip_links: std::collections::HashSet::new(),
-			multicam_graph: Mutex::new(None),
+			multicam_enabled: true,
+			multicam_source: 0,
 			multicam_frames: Mutex::new(HashMap::new()),
 		};
 		// The demo graph is born connected: derive every port's `connected`
@@ -1539,10 +1570,7 @@ impl AppEngine for MockEngine {
 	}
 
 	fn addable_effects(&self) -> Vec<crate::oakui::engine::EffectEntry> {
-		// The demo list is the real factory's effect table (built-ins plus
-		// any registered OpenFX plugins), so the effect library shows the
-		// same entries the real engine would.
-		crate::oakui::effectchain::addable_effects()
+		Self::demo_effect_library()
 	}
 
 	fn add_effect(
@@ -1551,7 +1579,7 @@ impl AppEngine for MockEngine {
 		type_id: &str,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some((_, name)) = crate::oakui::effectchain::addable_effects()
+		let Some((_, name)) = Self::demo_effect_library()
 			.into_iter()
 			.find(|entry| entry.type_id == type_id)
 			.map(|entry| (entry.type_id, entry.name))
@@ -1587,7 +1615,6 @@ impl AppEngine for MockEngine {
 		// shadows/midtones/highlights colour + amount shape), so the params
 		// view's wheel group has a fixture.
 		if effect.0 == 901 {
-			use oak_node::value::{NodeValue, ValueType};
 			let color = NodeValue::Color([0.5, 0.5, 0.5, 1.0]);
 			let amount = NodeValue::Float(1.0);
 			let mk = |input_id: &str, display_name: &str, value: NodeValue| {
@@ -1613,9 +1640,6 @@ impl AppEngine for MockEngine {
 			]);
 		}
 		(effect.0 == 900).then(|| {
-			use oak_node::input::flags::{ARRAY, HIDDEN};
-			use oak_node::value::{NodeValue, ValueType};
-
 			fn param(
 				input_id: &str,
 				display_name: &str,
@@ -1769,7 +1793,7 @@ impl AppEngine for MockEngine {
 		&mut self,
 		effect: EffectId,
 		input_id: &str,
-		value: oak_node::value::NodeValue,
+		value: NodeValue,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
 		self.effect_param_attempts
@@ -1800,6 +1824,10 @@ impl AppEngine for MockEngine {
 		} else {
 			Err("the demo engine does not trigger effect push buttons".into())
 		}
+	}
+
+	fn node_library(&self) -> Vec<NodeLibraryEntry> {
+		Self::demo_node_library()
 	}
 
 	fn add_node_at(
@@ -1900,8 +1928,12 @@ impl AppEngine for MockEngine {
 					let delta = {
 						let clip = &self.tracks[track].clips[index];
 						match edge {
-							crate::widgets::timeline::TrimEdge::Start => new_frame.0 - clip.range.start.0,
-							crate::widgets::timeline::TrimEdge::End => new_frame.0 - clip.range.end.0,
+							crate::widgets::timeline::TrimEdge::Start => {
+								new_frame.0 - clip.range.start.0
+							}
+							crate::widgets::timeline::TrimEdge::End => {
+								new_frame.0 - clip.range.end.0
+							}
 						}
 					};
 					{
@@ -2142,9 +2174,7 @@ impl AppEngine for MockEngine {
 			let len = copy.range.end.0 - copy.range.start.0;
 			copy.range = FrameRange::new(Frame(end + offset), Frame(end + offset + len));
 			self.tracks[track].clips.push(copy);
-			self.tracks[track]
-				.clips
-				.sort_by_key(|c| c.range.start.0);
+			self.tracks[track].clips.sort_by_key(|c| c.range.start.0);
 		}
 		cx.notify();
 	}
@@ -2201,7 +2231,9 @@ impl AppEngine for MockEngine {
 		ripple: bool,
 		cx: &mut Context<Self>,
 	) {
-		let playhead = self.clock_frame(crate::oakui::engine::Monitor::Program, cx).0;
+		let playhead = self
+			.clock_frame(crate::oakui::engine::Monitor::Program, cx)
+			.0;
 		for id in clips {
 			let Some((track, index)) = self.mock_clip_position(id) else {
 				continue;
@@ -2252,7 +2284,9 @@ impl AppEngine for MockEngine {
 		at_in: bool,
 		cx: &mut Context<Self>,
 	) {
-		let playhead = self.clock_frame(crate::oakui::engine::Monitor::Program, cx).0;
+		let playhead = self
+			.clock_frame(crate::oakui::engine::Monitor::Program, cx)
+			.0;
 		for id in clips {
 			let Some((track, index)) = self.mock_clip_position(id) else {
 				continue;
@@ -2327,8 +2361,7 @@ impl AppEngine for MockEngine {
 					let mut right = self.tracks[t].clips[i].clone();
 					right.id = right_id;
 					right.range = FrameRange::new(Frame(out_point.0), Frame(end));
-					right.media_in =
-						Frame(right.media_in.0 + (out_point.0 - start));
+					right.media_in = Frame(right.media_in.0 + (out_point.0 - start));
 					self.tracks[t].clips[i].range =
 						FrameRange::new(Frame(start), Frame(in_point.0));
 					self.tracks[t].clips.insert(i + 1, right);
@@ -2533,7 +2566,7 @@ impl AppEngine for MockEngine {
 	) -> Result<(), String> {
 		// A 5-second canned clip labelled after the generator, on the
 		// pointed (or first) video track — the mock's footage-drop shape.
-		let name = crate::oakui::effectchain::addable_effects()
+		let name = Self::demo_effect_library()
 			.into_iter()
 			.find(|entry| entry.type_id == type_id)
 			.map(|entry| entry.name)
@@ -2904,9 +2937,8 @@ impl AppEngine for MockEngine {
 	) -> Result<(), String> {
 		let trimmed = path.trim().to_string();
 		// Validate like the real engine (a bogus path keeps the dialog open).
-		if !trimmed.is_empty() {
-			oak_core::color::set_up_default_config_from(Some(&trimmed))
-				.map_err(|e| e.to_string())?;
+		if !trimmed.is_empty() && !std::path::Path::new(&trimmed).is_file() {
+			return Err(format!("OCIO config does not exist: {trimmed}"));
 		}
 		self.ocio_config = trimmed;
 		cx.notify();
@@ -3133,32 +3165,7 @@ impl AppEngine for MockEngine {
 		enabled: bool,
 		cx: &mut Context<Self>,
 	) {
-		// Run the real enable/disable commands on the demo graph (one undo
-		// entry each, like the real engine).
-		let mut guard = self.ensure_demo_multicam();
-		let Some(demo) = guard.as_mut() else {
-			return;
-		};
-		let clip = demo.clip.clone();
-		if enabled {
-			if demo.multicam.is_some() {
-				return; // The demo starts enabled; enabling again is a no-op.
-			}
-			let sequence = demo.sequence.clone();
-			let cmd = oak_timeline::multicam::multicam_enable(vec![clip], sequence);
-			let label = oak_timeline::multicam::enable_label(1);
-			if let Err(e) = super::graphops::push_command(cmd, &label) {
-				println!("[mock] multicam enable failed: {e}");
-			}
-		} else {
-			let cmd = oak_timeline::multicam::multicam_disable(vec![clip]);
-			let label = oak_timeline::multicam::disable_label(1);
-			if let Err(e) = super::graphops::push_command(cmd, &label) {
-				println!("[mock] multicam disable failed: {e}");
-			}
-		}
-		// Re-resolve the multicam node after the command.
-		demo.multicam = oak_timeline::multicam::clip_find_multicam(&demo.clip);
+		self.multicam_enabled = enabled;
 		self.multicam_frames.lock().unwrap().clear();
 		cx.notify();
 	}
@@ -3174,30 +3181,13 @@ impl AppEngine for MockEngine {
 	}
 
 	fn multicam_switch_to(&mut self, source: i32, split_clip: bool, cx: &mut Context<Self>) {
-		let guard = self.ensure_demo_multicam();
-		let Some(demo) = guard.as_ref() else {
-			return;
-		};
-		let Some(state) =
-			crate::oakui::multicam::multicam_state_for_clip(&demo.project, demo.clip.id)
-		else {
-			return;
-		};
-		if source < 0 || source >= state.source_count {
+		if !self.multicam_enabled || !(0..4).contains(&source) {
 			return;
 		}
-		let playhead_frame = self.clock_frame(Monitor::Program, cx).0;
-		let playhead = Rational::new(playhead_frame.max(0), 25);
-		let cmd = oak_timeline::multicam::multicam_switch(
-			demo.clip.clone(),
-			source,
-			split_clip,
-			playhead,
-		);
-		if let Err(e) = super::graphops::push_command(cmd, oak_timeline::multicam::SWITCH_LABEL) {
-			println!("[mock] multicam switch failed: {e}");
+		if split_clip {
+			self.split_at_playhead(cx);
 		}
-		drop(guard);
+		self.multicam_source = source;
 		self.multicam_frames.lock().unwrap().clear();
 		cx.notify();
 	}
@@ -3391,11 +3381,7 @@ impl ProjectDataSource for MockEngine {
 		// shared node label `文本`, so the demo's browser stays locale-
 		// independent).
 		for &id in &self.text_footages {
-			roots.push(ProjectEntry::new(
-				id,
-				super::graphops::TEXT_FOOTAGE_LABEL,
-				false,
-			));
+			roots.push(ProjectEntry::new(id, TEXT_FOOTAGE_LABEL, false));
 		}
 		roots
 	}
@@ -3426,154 +3412,19 @@ impl AudioMeterDataSource for MockEngine {
 // Demo multicam (the mock's multicam panel grid)
 // ---------------------------------------------------------------------------
 
-/// The mock's demo multicam: a real oaknode graph whose source sequence's
-/// video tracks are the angles. The panel's frames are synthetic colored
-/// cells, but the switch / enable / disable commands run on the REAL command
-/// path (`oak_timeline::multicam` + the global undo stack), so the demo
-/// exercises the same machinery the real engine uses.
-struct DemoMulticamGraph {
-	/// The project holding the graph.
-	project: graphops::ProjectRef,
-	/// The clip whose texture input the multicam feeds.
-	clip: oak_timeline::util::NodeRef,
-	/// The source sequence (its video tracks are the angles).
-	sequence: oak_timeline::util::NodeRef,
-	/// The multicam node (present while enabled).
-	multicam: Option<oak_timeline::util::NodeRef>,
-}
-
-impl DemoMulticamGraph {
-	/// Builds the demo graph: a sequence with four video tracks, one clip on
-	/// the top track fed by the sequence, multicam already enabled. The
-	/// tracks are built directly in the graph (no `Add Track` undo entries —
-	/// the demo's initial state is not a user edit).
-	fn build() -> Self {
-		use oak_node::node::NodeCore;
-		use oak_node::sequence::SequenceBehavior;
-		use oak_node::track::{TrackBehavior, TrackListBehavior};
-
-		let project = graphops::create_project();
-		let sequence = graphops::create_sequence(&project, "Multicam Demo");
-		// A video track list with four tracks, wired into the sequence.
-		{
-			let mut g = graphops::lock(&project);
-			let (core, behavior) = TrackListBehavior::create();
-			let mut behavior = behavior;
-			let list = behavior
-				.as_any_mut()
-				.unwrap()
-				.downcast_mut::<TrackListBehavior>()
-				.unwrap();
-			list.kind = TrackType::Video;
-			list.sequence = Some(sequence);
-			let list_id = g.graph.add_node(core, behavior);
-			for _ in 0..4 {
-				let (core, behavior) = (
-					NodeCore::new(),
-					Box::new(TrackBehavior::new(TrackType::Video)),
-				);
-				let track_id = g.graph.add_node(core, behavior);
-				let t = g
-					.graph
-					.get_mut(track_id)
-					.unwrap()
-					.behavior
-					.as_any_mut()
-					.unwrap()
-					.downcast_mut::<TrackBehavior>()
-					.unwrap();
-				t.kind = TrackType::Video;
-				t.track_list = Some(list_id);
-				let l = g
-					.graph
-					.get_mut(list_id)
-					.unwrap()
-					.behavior
-					.as_any_mut()
-					.unwrap()
-					.downcast_mut::<TrackListBehavior>()
-					.unwrap();
-				l.tracks.push(track_id);
-			}
-			let s = g
-				.graph
-				.get_mut(sequence)
-				.unwrap()
-				.behavior
-				.as_any_mut()
-				.unwrap()
-				.downcast_mut::<SequenceBehavior>()
-				.unwrap();
-			s.track_lists.push(list_id);
-		}
-		let clip = block_clip_create(&project);
-		{
-			let mut g = graphops::lock(&project);
-			let c = g
-				.graph
-				.get_mut(clip.id)
-				.unwrap()
-				.behavior
-				.as_any_mut()
-				.unwrap()
-				.downcast_mut::<oak_node::block::ClipBlockBehavior>()
-				.unwrap();
-			c.core.range = oak_core::TimeRange::new(Rational::new(0, 1), Rational::new(200, 1));
-			c.core.media_in = Rational::new(0, 1);
-		}
-		let track0 = {
-			let g = graphops::lock(&project);
-			graphops::track_ids(&g.graph, sequence, TrackType::Video)[0]
-		};
-		let track0 = oak_timeline::util::NodeRef::new(project.clone(), track0);
-		track_append_block(&track0, &clip);
-		{
-			let mut g = graphops::lock(&project);
-			g.graph
-				.connect(sequence, clip.id, clip_input::TEXTURE_INPUT, -1)
-				.unwrap();
-		}
-		// Enable multicam through the real command (kept out of the undo
-		// stack — it is the demo's initial state, not a user edit).
-		let mut enable = oak_timeline::multicam::MultiCamEnableCommand::new(
-			vec![clip.clone()],
-			oak_timeline::util::NodeRef::new(project.clone(), sequence),
-		);
-		enable.redo();
-		let multicam = oak_timeline::multicam::clip_find_multicam(&clip);
-		let sequence = oak_timeline::util::NodeRef::new(project.clone(), sequence);
-		DemoMulticamGraph {
-			project,
-			clip,
-			sequence,
-			multicam,
-		}
-	}
-}
-
 impl MockEngine {
-	/// The demo multicam graph, built on first access.
-	fn ensure_demo_multicam(&self) -> std::sync::MutexGuard<'_, Option<DemoMulticamGraph>> {
-		let mut guard = self.multicam_graph.lock().unwrap();
-		if guard.is_none() {
-			*guard = Some(DemoMulticamGraph::build());
-		}
-		guard
-	}
-
-	/// The demo multicam state (the panel's grid): source count = the demo
-	/// sequence's video track count, current source read from the multicam
-	/// node.
 	fn mock_multicam_state(&self) -> Option<MulticamState> {
-		let guard = self.ensure_demo_multicam();
-		let demo = guard.as_ref()?;
-		let state = crate::oakui::multicam::multicam_state_for_clip(&demo.project, demo.clip.id)?;
-		Some(state)
+		self.multicam_enabled.then_some(MulticamState {
+			sequence_id: 10_000,
+			node_id: 10_001,
+			clip_id: 10_002,
+			source_count: 4,
+			current_source: self.multicam_source,
+		})
 	}
 
 	/// The demo angle frame: a solid colored cell per source with a moving
-	/// white stripe (the mock cannot decode media; the cells are synthetic
-	/// but the grid geometry and the switch commands are real).
+	/// white stripe. Both the cells and their state are app-local demo data.
 	fn demo_angle_image(source: i32, playhead: i64) -> Option<Arc<RenderImage>> {
 		const W: u32 = 160;
 		const H: u32 = 90;
@@ -4080,7 +3931,10 @@ mod tests {
 		cx.update(|app| {
 			let engine = demo_engine(app);
 			let effects = engine.read(app).addable_effects();
-			assert!(!effects.is_empty(), "the demo list is the factory table");
+			assert!(
+				!effects.is_empty(),
+				"the demo has an app-local effect table"
+			);
 			let first = effects[0].clone();
 			let (type_id, name) = (first.type_id, first.name);
 			let before = engine.read(app).effects().len();
@@ -4267,9 +4121,11 @@ mod tests {
 			});
 			let engine_read = engine.read(app);
 			assert_eq!(engine_read.edges().len(), 7);
-			assert!(engine_read
-				.port(PortId(22))
-				.is_some_and(|p| p.is_connected()));
+			assert!(
+				engine_read
+					.port(PortId(22))
+					.is_some_and(|p| p.is_connected())
+			);
 			let edges = engine_read.edges();
 			let extra = edges
 				.iter()
@@ -4454,7 +4310,7 @@ mod tests {
 			assert!(
 				listed
 					.iter()
-					.all(|e| { e.name == crate::oakui::graphops::TEXT_FOOTAGE_LABEL && !e.is_dir }),
+					.all(|e| e.name == TEXT_FOOTAGE_LABEL && !e.is_dir),
 				"the entries carry the shared 文本 label as leaves"
 			);
 		});
@@ -4479,14 +4335,18 @@ mod tests {
 				// rejected like the real engine's OCIO validation.
 				assert!(e.set_project_ocio_config(String::new(), cx).is_ok());
 				assert_eq!(e.project_ocio_config(), "");
-				assert!(e
-					.set_project_ocio_config("/definitely/not/a/config".into(), cx)
-					.is_err());
+				assert!(
+					e.set_project_ocio_config("/definitely/not/a/config".into(), cx)
+						.is_err()
+				);
 
 				// Setting 2 keeps the trimmed custom path; other settings
 				// clear it, and out-of-range codes clamp to 0..=2.
 				e.set_project_cache_location(2, "  /tmp/oak-cache  ".into(), cx);
-				assert_eq!(e.project_cache_location(), (2, "/tmp/oak-cache".to_string()));
+				assert_eq!(
+					e.project_cache_location(),
+					(2, "/tmp/oak-cache".to_string())
+				);
 				// 9 clamps to 2 (custom) and keeps the trimmed path...
 				e.set_project_cache_location(9, "  /ignored  ".into(), cx);
 				assert_eq!(e.project_cache_location(), (2, "/ignored".to_string()));
@@ -4565,13 +4425,15 @@ mod tests {
 			engine.update(app, |e, cx| {
 				// Project lifecycle.
 				e.new_project(cx);
-				assert!(e
-					.open_project_path(std::path::PathBuf::from("/tmp/demo.ove"), cx)
-					.is_ok());
+				assert!(
+					e.open_project_path(std::path::PathBuf::from("/tmp/demo.ove"), cx)
+						.is_ok()
+				);
 				assert_eq!(e.project.path, std::path::PathBuf::from("/tmp/demo.ove"));
-				assert!(e
-					.import_footage(std::path::PathBuf::from("/tmp/clip.mp4"), cx)
-					.is_ok());
+				assert!(
+					e.import_footage(std::path::PathBuf::from("/tmp/clip.mp4"), cx)
+						.is_ok()
+				);
 				assert!(e.imported_footage.iter().any(|p| p.ends_with("clip.mp4")));
 
 				let text = e.create_text_footage(cx).expect("text footage");
@@ -4585,16 +4447,17 @@ mod tests {
 
 				// Generator drop: the label resolves through the effect
 				// table and an out-of-range track auto-selects video.
-				let generator = crate::oakui::effectchain::addable_effects()
+				let generator = MockEngine::demo_effect_library()
 					.into_iter()
 					.next()
 					.expect("an addable generator");
 				e.drop_generator_clip(&generator.type_id, usize::MAX, Frame(3), cx)
 					.expect("auto-selects a video track");
-				assert!(e
-					.tracks
-					.iter()
-					.any(|t| t.kind == TrackKind::Video && !t.clips.is_empty()));
+				assert!(
+					e.tracks
+						.iter()
+						.any(|t| t.kind == TrackKind::Video && !t.clips.is_empty())
+				);
 				assert!(e.drop_transition_at("x", 0, Frame(0), 25, cx).is_ok());
 
 				// Footage drops: an unknown id is a no-op; audio footage
@@ -4614,10 +4477,7 @@ mod tests {
 
 				// Effect-stack events.
 				let before = e.effects.len();
-				e.apply_effect_event(
-					&EffectStackEvent::AddRequested { index: usize::MAX },
-					cx,
-				);
+				e.apply_effect_event(&EffectStackEvent::AddRequested { index: usize::MAX }, cx);
 				assert_eq!(e.effects.len(), before + 1);
 				let id = e.effects.last().unwrap().id;
 				e.apply_effect_event(
@@ -4955,9 +4815,11 @@ mod tests {
 			});
 			let v1_clips = engine.read(app).track(1).expect("V1").clips().to_vec();
 			assert_eq!(v1_clips.len(), 3, "开场 split in two");
-			assert!(v1_clips
-				.iter()
-				.any(|c| c.range() == FrameRange::new(Frame(150), Frame(300))));
+			assert!(
+				v1_clips
+					.iter()
+					.any(|c| c.range() == FrameRange::new(Frame(150), Frame(300)))
+			);
 
 			// Slide: the clip keeps its length at the new start.
 			engine.update(app, |e, cx| {
@@ -5130,10 +4992,7 @@ mod tests {
 				assert!(e.add_adjustment_layer(2, Frame(0), cx).is_err());
 				e.add_adjustment_layer(0, Frame(200), cx)
 					.expect("video track accepts");
-				assert!(e.tracks[0]
-					.clips
-					.iter()
-					.any(|c| c.label == "调整图层"));
+				assert!(e.tracks[0].clips.iter().any(|c| c.label == "调整图层"));
 
 				// Unknown effect type keeps the stack unchanged.
 				let before = e.effects.len();
@@ -5144,10 +5003,11 @@ mod tests {
 				// to the raw type id as the label.
 				e.drop_generator_clip("not-in-the-table", 0, Frame(0), cx)
 					.expect("video track exists");
-				assert!(e
-					.tracks
-					.iter()
-					.any(|t| t.clips.iter().any(|c| c.label == "not-in-the-table")));
+				assert!(
+					e.tracks
+						.iter()
+						.any(|t| t.clips.iter().any(|c| c.label == "not-in-the-table"))
+				);
 
 				// No video track at all: both generator and video footage
 				// drops are rejected.
@@ -5177,7 +5037,10 @@ mod tests {
 			// add_node_at: unknown type errors; a known one gets one video
 			// input and one video output.
 			engine.update(app, |e, cx| {
-				assert!(e.add_node_at("no-such-node", point(px(0.0), px(0.0)), cx).is_err());
+				assert!(
+					e.add_node_at("no-such-node", point(px(0.0), px(0.0)), cx)
+						.is_err()
+				);
 				let entry = e.node_library().into_iter().next().expect("a node type");
 				e.add_node_at(&entry.type_id, point(px(12.0), px(34.0)), cx)
 					.expect("known node type");
@@ -5208,14 +5071,15 @@ mod tests {
 				assert_eq!(e.sequence.name, "Cam", "a named sequence is kept");
 			});
 
-			// Demo multicam enable/disable run the real commands (the demo
-			// starts enabled, so the first enable is a no-op; disable and
-			// re-enable cover both command paths).
+			// Demo multicam state starts enabled; disable and re-enable
+			// cover both local transitions without touching real undo.
 			let engine3 = demo_engine(app);
 			engine3.update(app, |e, cx| {
 				assert!(e.multicam_state().is_some());
 				e.multicam_enable_selected(vec![], true, cx);
 				assert!(e.multicam_state().is_some(), "enable is a no-op");
+				e.multicam_switch_to(2, false, cx);
+				assert_eq!(e.multicam_state().map(|s| s.current_source), Some(2));
 				e.multicam_enable_selected(vec![], false, cx);
 				assert!(e.multicam_state().is_none(), "disabled");
 				e.multicam_enable_selected(vec![], true, cx);

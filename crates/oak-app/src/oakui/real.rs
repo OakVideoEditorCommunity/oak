@@ -4526,7 +4526,7 @@ impl AppEngine for RealEngine {
 		&mut self,
 		effect: EffectId,
 		input_id: &str,
-		value: oak_node::value::NodeValue,
+		value: super::engine::EffectValue,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
 		let Some(project) = self.project.clone() else {
@@ -4535,7 +4535,8 @@ impl AppEngine for RealEngine {
 		let Some(node) = graphops::id_of(effect.0) else {
 			return Err("effect node not found".into());
 		};
-		let result = super::effectchain::set_input_value(&project, node, input_id, value);
+		let result = super::effectchain::into_node_value(value)
+			.and_then(|value| super::effectchain::set_input_value(&project, node, input_id, value));
 		self.apply_edit(result.clone(), "set parameter", cx);
 		result
 	}
@@ -4673,6 +4674,10 @@ impl AppEngine for RealEngine {
 				cx.notify();
 			}
 		}
+	}
+
+	fn node_library(&self) -> Vec<super::engine::NodeLibraryEntry> {
+		super::nodegraph::node_library()
 	}
 
 	fn apply_node_graph_event(&mut self, event: &NodeGraphEvent, cx: &mut Context<Self>) {
@@ -6838,7 +6843,7 @@ impl AppEngine for RealEngine {
 				.and_then(|e| e.behavior.as_any_mut())
 				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
 			{
-				f.set_custom_proxy_params(params.to_codec());
+				f.set_custom_proxy_params(super::settings::proxy_params_to_codec(&params));
 			}
 		}
 		cx.notify();
@@ -6869,7 +6874,7 @@ impl AppEngine for RealEngine {
 		let f = graphops::footage_behavior(&guard.graph, node)?;
 		f.custom_proxy_params
 			.as_ref()
-			.map(super::engine::ProxyParamsUi::from_codec)
+			.map(super::settings::proxy_params_from_codec)
 	}
 
 	fn proxy_effective_params(&self, id: u64) -> super::engine::ProxyParamsUi {
@@ -6881,7 +6886,7 @@ impl AppEngine for RealEngine {
 		};
 		let guard = graphops::lock(project);
 		match graphops::footage_behavior(&guard.graph, node) {
-			Some(f) => super::engine::ProxyParamsUi::from_codec(&f.effective_proxy_params()),
+			Some(f) => super::settings::proxy_params_from_codec(&f.effective_proxy_params()),
 			None => super::engine::proxy_params_from_config(),
 		}
 	}
@@ -9858,7 +9863,7 @@ mod tests {
 					.set_effect_param(
 						EffectId(effect.0),
 						"opacity_in",
-						oak_node::value::NodeValue::Float(0.0),
+						crate::oakui::engine::EffectValue::Float(0.0),
 						cx,
 					)
 					.expect("set opacity 0");
@@ -13052,7 +13057,7 @@ mod tests {
 				engine.set_effect_param(
 					EffectId(1),
 					"x",
-					oak_node::value::NodeValue::Float(0.0),
+					crate::oakui::engine::EffectValue::Float(0.0),
 					cx,
 				)
 			})
@@ -14044,7 +14049,7 @@ mod tests {
 					.set_effect_param(
 						effect,
 						"opacity_in",
-						oak_node::value::NodeValue::Float(0.5),
+						crate::oakui::engine::EffectValue::Float(0.5),
 						cx,
 					)
 					.expect("set opacity")
