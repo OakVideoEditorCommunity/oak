@@ -253,7 +253,9 @@ impl Drop for EditorSession {
 }
 
 mod snapshot;
+mod graph;
 pub use snapshot::*;
+pub use graph::*;
 
 #[cfg(test)]
 mod tests {

@@ -8,6 +8,7 @@ pub mod effect;
 pub mod editor;
 pub mod editor_commands;
 pub mod editor_dispatch;
+pub mod editor_graph;
 pub mod handle;
 pub mod node;
 pub mod ofx;

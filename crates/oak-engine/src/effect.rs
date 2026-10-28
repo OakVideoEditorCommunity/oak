@@ -58,7 +58,7 @@ fn connected_node(g: &Graph, node: NodeId, input_id: &str) -> Option<NodeId> {
 /// input). The walk follows each node's effect input upstream until an
 /// unconnected input or a node without an effect input; a `seen` guard
 /// protects against malformed cycles.
-fn chain(g: &Graph, host: NodeId) -> Vec<NodeId> {
+pub(crate) fn chain(g: &Graph, host: NodeId) -> Vec<NodeId> {
 	let mut chain = Vec::new();
 	let mut cur = host;
 	let mut seen: Vec<NodeId> = Vec::new();

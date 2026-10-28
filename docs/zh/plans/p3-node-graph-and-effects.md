@@ -1,7 +1,7 @@
 # P3：节点图、效果与参数体系实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P3。  
-> 状态：P3A 已完成，P3B 待启动；P3 整体进行中。P2B 已明确跳过；本文不把 P2A 或
+> 状态：P3A/P3B 已完成，P3C 待启动；P3 整体进行中。P2B 已明确跳过；本文不把 P2A 或
 > P3 子阶段完成解释为 app 已完成切换。
 
 ## 1. 子阶段
@@ -23,7 +23,7 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 ## 3. 完成边界
 
 只有 P3A–P3D 全部满足，且独立消费者不依赖 `oak-node` 完成建图、连图、效果、参数、
-关键帧与渲染验证后，才能把 P3 标为完成。当前处于 P3B 待启动状态。
+关键帧与渲染验证后，才能把 P3 标为完成。当前处于 P3C 待启动状态。
 
 ## 4. P3A 实施结果
 
@@ -49,3 +49,23 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
   `shm_open: Operation not permitted`；P3A 相关效果、图和参数测试没有失败。
 - `python3 tooling/check_app_engine_boundary.py --update-baseline`：内部引用基线由 1193
   收紧至 1182，直接内部依赖数量未增加。
+
+## 6. P3B 实施结果
+
+- 新增一次性 `EditorGraphHandle`：engine 在一次调用中捕获完整图并记录 undo revision，
+  SDK 再将不可变快照复制为拥有型 `GraphSnapshot`，避免逐字段查询时读到不同 revision。
+- 完整序列视图包含输出卡、虚拟输入/输出端点、真实边和 clip→sequence 合成边；单片段
+  视图仅包含 `footage → effects → clip`，不包含序列输出卡、端点或合成边。
+- `GraphNode` 提供角色、类型、标签、enabled、受保护标记和上下文物件位置；`GraphPort`
+  只包含 Texture/Samples 流输入及隐式主输出，参数输入不会误显示为图端口。
+- `can_connect` 对当前实时图校验自连接、失效 ID、已占用输入、未知输入、不可连接输入和
+  非流类型输入；查询不修改图、不创建 undo entry。既有连接、断开和位置命令与新快照
+  共同验证。
+- 新增两个端到端 SDK 测试，覆盖完整/单片段快照、不可变旧 revision、受保护节点、真实与
+  合成边、位置更新以及连接校验的实时状态变化。
+
+## 7. P3B 验证
+
+- 新增图快照与连接校验测试：2 个通过。
+- engine / SDK 全量回归：engine 168 个、SDK 90 个测试通过。
+- 本阶段不改变 app 实时工程实例，也不宣称节点编辑器已经切换；app 切换属于 P3D。
