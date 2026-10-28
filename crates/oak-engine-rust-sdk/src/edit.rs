@@ -351,6 +351,16 @@ pub enum EditCommand {
 		footage: NodeId,
 		name: String,
 	},
+	/// Deletes proxy files and clears their footage association without adding
+	/// an undo entry, because file contents cannot be restored by undo.
+	DeleteProxy {
+		footage: NodeId,
+	},
+	/// Changes the per-footage proxy playback switch without starting a worker.
+	SetProxyEnabled {
+		footage: NodeId,
+		enabled: bool,
+	},
 }
 
 /// A clip captured by the session clipboard.

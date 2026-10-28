@@ -186,6 +186,61 @@ fn spawn_task(
 	id
 }
 
+/// Starts one proxy transcode on the common engine task registry.
+///
+/// The caller owns the returned task ID and must eventually release it through
+/// `oak_task_release`. Proxy metadata is deliberately updated by the editor
+/// session, not by this worker: the worker only performs file I/O and reports
+/// progress, while the session serializes graph mutations and task completion.
+pub(crate) fn spawn_proxy(
+	source_filename: &str,
+	output_filename: &str,
+	stream_index: i32,
+	params: &oak_codec::proxymanager::ProxyParams,
+) -> u64 {
+	fn text(field: &[u8]) -> String {
+		let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+		String::from_utf8_lossy(&field[..end]).into_owned()
+	}
+	let (proxy_width, proxy_height) = if params.divider <= 1 {
+		(params.width, params.height)
+	} else {
+		(0, 0)
+	};
+	let request = oak_codec::task::TaskRequest {
+		kind: oak_codec::task::TaskKind::Proxy,
+		input_filename: source_filename,
+		output_filename,
+		stream_index,
+		sample_rate: 0,
+		channel_layout: 0,
+		sample_format: 0,
+		proxy_width,
+		proxy_height,
+	};
+	let task_params = oak_task::proxy::ProxyParams {
+		width: params.width,
+		height: params.height,
+		divider: params.divider,
+		version: params.version,
+		crf: params.crf,
+		include_audio: params.include_audio != 0,
+		extension: text(&params.extension),
+		preset: text(&params.preset),
+	};
+	spawn_task(
+		format!("Generating Proxy {source_filename}"),
+		Box::new(oak_task::proxy::ProxyTask::new(&request, task_params)),
+		None,
+	)
+}
+
+/// Returns the configured upper bound for simultaneous proxy workers.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_task_proxy_max_concurrent() -> i32 {
+	oak_task::proxy::ProxyTask::proxy_max_concurrent()
+}
+
 // ---------------------------------------------------------------------------
 // Task constructors
 // ---------------------------------------------------------------------------

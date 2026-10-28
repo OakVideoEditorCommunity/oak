@@ -86,6 +86,8 @@ pub enum OakEditOp {
 	SetFootageProxyParams,
 	ClearFootageProxyParams,
 	CreateSequenceFromFootage,
+	DeleteProxy,
+	SetProxyEnabled,
 }
 
 impl OakEditOp {
@@ -161,6 +163,8 @@ impl OakEditOp {
 			66 => Self::SetFootageProxyParams,
 			67 => Self::ClearFootageProxyParams,
 			68 => Self::CreateSequenceFromFootage,
+			69 => Self::DeleteProxy,
+			70 => Self::SetProxyEnabled,
 			_ => return None,
 		})
 	}

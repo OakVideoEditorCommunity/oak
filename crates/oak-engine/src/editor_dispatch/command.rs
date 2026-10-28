@@ -329,4 +329,11 @@ pub enum EditCommand {
 		footage: u64,
 		name: String,
 	},
+	DeleteProxy {
+		footage: u64,
+	},
+	SetProxyEnabled {
+		footage: u64,
+		enabled: bool,
+	},
 }

@@ -285,6 +285,7 @@ mod params;
 mod notify;
 mod workflow;
 mod media;
+pub mod proxy;
 pub use snapshot::*;
 pub use graph::*;
 pub use params::*;

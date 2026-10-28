@@ -521,5 +521,14 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 		EditCommand::CreateSequenceFromFootage { footage, name } => {
 			primary(ops::create_sequence_from_footage(project, id(footage)?, &name))
 		}
+		EditCommand::DeleteProxy { footage } => {
+			if session.proxy_tasks.contains_key(&footage) {
+				return Err("cannot delete a proxy while it is generating".into());
+			}
+			empty(ops::delete_proxy(project, id(footage)?))
+		}
+		EditCommand::SetProxyEnabled { footage, enabled } => {
+			empty(ops::set_proxy_enabled(project, id(footage)?, enabled))
+		}
 	}
 }

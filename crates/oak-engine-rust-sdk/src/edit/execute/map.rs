@@ -471,6 +471,11 @@ impl CommandArgs {
 				self.simple(OakEditOp::CreateSequenceFromFootage, footage);
 				self.name(name);
 			}
+			EditCommand::DeleteProxy { footage } => self.simple(OakEditOp::DeleteProxy, footage),
+			EditCommand::SetProxyEnabled { footage, enabled } => {
+				self.simple(OakEditOp::SetProxyEnabled, footage);
+				self.params.enabled = enabled;
+			}
 		}
 	}
 }

@@ -5,9 +5,11 @@
 //! In particular, consumers never recover the `Arc<Mutex<Project>>` that
 //! the engine and write-through backend share.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 pub mod aux;
 pub mod notify;
+pub mod proxy;
 
 use oak_core::handle::CHandle;
 use oak_node::id::NodeId;
@@ -47,6 +49,10 @@ pub(crate) struct SessionState {
 	pub(crate) observers: Vec<Arc<notify::SessionObserver>>,
 	/// Next nonzero ID returned by the edit subscription API.
 	pub(crate) next_observer_id: u64,
+	/// Active proxy tasks keyed by footage identity. Values are engine task IDs;
+	/// keeping them in session state prevents duplicate generation and lets
+	/// status queries distinguish a live worker from a stale working file.
+	pub(crate) proxy_tasks: HashMap<u64, u64>,
 }
 
 impl SessionState {
@@ -61,6 +67,7 @@ impl SessionState {
 			storage: None,
 			observers: Vec::new(),
 			next_observer_id: 1,
+			proxy_tasks: HashMap::new(),
 		}
 	}
 

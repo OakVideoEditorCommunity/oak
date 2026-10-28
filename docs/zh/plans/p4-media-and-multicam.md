@@ -1,7 +1,7 @@
 # P4：素材、代理、波形、同步与多机位实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P4。  
-> 状态：P4A/P4B 已完成，P4C 代理生成与异步任务待启动；后续阶段不提前宣称完成。
+> 状态：P4A–P4C 已完成，下一阶段为 P4D；后续阶段不提前宣称完成。
 
 ## 1. 子阶段
 
@@ -41,3 +41,25 @@
 - `DeleteEntry` 与图编辑 `RemoveNode` 分离，避免浏览器挂载语义被图删除覆盖。
 - engine / SDK 全量回归通过；app 全量 720 个通过、1 个忽略、15 个既有 worker/共享内存
   环境失败，无新增素材或历史失败。
+
+## 6. P4C 范围
+
+- `EditorSession::generate_proxy` 通过引擎统一任务注册表异步转码，返回可轮询
+  进度、标题、错误和终态的 SDK `Task`，不在 UI 线程执行 ffmpeg。
+- 会话记录 footage/task 对应关系，拒绝重复生成；`complete_proxy` 只接受匹配的
+  活动任务，避免旧 worker 覆盖新任务状态。状态查询优先采用活动任务，其次读取
+  磁盘状态和已记录失败。
+- `DeleteProxy` 删除正式及 working 文件并清除素材关联，活动任务期间拒绝删除；
+  文件删除不伪造 undo。`SetProxyEnabled` 只切换解码策略，不隐式启动 worker。
+- app 的生成、进度、完成、删除、启停、自动启动、缓存路径和并发上限均改走 SDK；
+  完成时才失效预览帧，进度更新不反复清空播放缓存。
+
+## 7. P4C 验证
+
+- 真实媒体 SDK 测试覆盖自定义参数继承、异步生成、进度/终态、重复生成与活动
+  任务删除错误、Ready、启停、删除和失效 ID。
+- app 的 `engine_proxy_rows_and_params`、`engine_proxy_generate_and_delete` 和
+  `proxy_lifecycle_and_autostart_policy` 通过；覆盖自动启动、失败、opt-out、
+  ready 跳过和缺失输入错误路径。
+- engine / SDK 全量回归通过，其中 SDK 99 个测试通过。
+- 内部引用基线由 893 收紧至 870。

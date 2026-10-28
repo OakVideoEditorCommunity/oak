@@ -315,5 +315,10 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			footage: p.a,
 			name: text(p.name, p.name_len),
 		},
+		OakEditOp::DeleteProxy => EditCommand::DeleteProxy { footage: p.a },
+		OakEditOp::SetProxyEnabled => EditCommand::SetProxyEnabled {
+			footage: p.a,
+			enabled: p.enabled,
+		},
 	})
 }

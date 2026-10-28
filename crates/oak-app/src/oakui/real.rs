@@ -110,6 +110,18 @@ fn proxy_ui_from_sdk(params: &oak_engine_rust_sdk::codec::ProxyParams) -> super:
 	}
 }
 
+/// Converts the SDK's codec-neutral proxy state into the app facade's UI state.
+fn proxy_media_state(state: oak_engine_rust_sdk::codec::ProxyState) -> super::engine::ProxyMediaState {
+	match state {
+		oak_engine_rust_sdk::codec::ProxyState::Missing => super::engine::ProxyMediaState::Missing,
+		oak_engine_rust_sdk::codec::ProxyState::Generating => {
+			super::engine::ProxyMediaState::Generating
+		}
+		oak_engine_rust_sdk::codec::ProxyState::Ready => super::engine::ProxyMediaState::Ready,
+		oak_engine_rust_sdk::codec::ProxyState::Failed => super::engine::ProxyMediaState::Failed,
+	}
+}
+
 /// The project name of a blank project before it is saved.
 const UNTITLED: &str = "Untitled Project";
 
@@ -996,18 +1008,16 @@ impl ClipData for RealClip {
 	}
 }
 
-/// A running proxy transcode the engine drains on the tick loop (the
-/// task thread reports through the event channel; completion applies the
-/// footage's proxy fields and invalidates the rendered frames).
+/// A running proxy transcode the engine polls on the tick loop. Completion
+/// applies the footage's proxy fields and invalidates the rendered frames.
 struct ProxyRun {
-	/// The footage node.
-	footage: NodeId,
-	/// The task's display label (the status bar's proxy segment).
-	label: String,
-	/// Last reported progress (`0.0..=1.0`).
-	progress: f64,
-	/// The task thread's event channel.
-	events: mpsc::Receiver<super::engine::ExportEvent>,
+	/// Project-explorer/node identity of the footage being transcoded.
+	footage: u64,
+	/// The session that registered the task. It must live until completion so the
+	/// engine can validate the footage/task pair and clear its active-task entry.
+	session: EditorSession,
+	/// Pollable engine task. Dropping it cancels and joins an unfinished worker.
+	task: oak_engine_rust_sdk::task::Task,
 }
 
 /// One card of the real effect stack: the chain node's identity, its
@@ -2564,11 +2574,7 @@ impl RealEngine {
 	/// proxy state get none.
 	fn proxy_badge_of(&self, id: u64) -> Option<crate::widgets::project_explorer::ProxyBadge> {
 		use crate::widgets::project_explorer::ProxyBadge;
-		let project = self.project.as_ref()?;
-		let node = graphops::id_of(id)?;
-		let guard = graphops::lock(project);
-		let f = graphops::footage_behavior(&guard.graph, node)?;
-		match self.proxy_state_of(f, node) {
+		match self.proxy_state(id)? {
 			super::engine::ProxyMediaState::Ready => Some(ProxyBadge::Ready),
 			super::engine::ProxyMediaState::Generating => Some(ProxyBadge::Generating),
 			super::engine::ProxyMediaState::Failed => Some(ProxyBadge::Failed),
@@ -2741,7 +2747,7 @@ impl RealEngine {
 	fn proxy_cache_path() -> String {
 		let configured = config_get_string(CONFIG_KEY_DISK_CACHE_PATH);
 		if configured.trim().is_empty() {
-			oak_core::filefunctions::default_disk_cache_path()
+			oak_engine_rust_sdk::utils::default_disk_cache_path().unwrap_or_default()
 		} else {
 			configured
 		}
@@ -2757,71 +2763,45 @@ impl RealEngine {
 		Some(node)
 	}
 
-	/// Drains the in-flight proxy transcodes (called from the tick loop):
-	/// progress events update the status-bar segment, completion applies
-	/// the footage's proxy fields and invalidates the rendered frames.
+	/// Polls in-flight proxy transcodes from the tick loop.
+	///
+	/// Terminal tasks are finalized through the same editor session that started
+	/// them, so stale workers cannot overwrite newer metadata. Only completion
+	/// invalidates rendered media; progress alone merely repaints the status bar.
 	fn drain_proxy_runs(&mut self, cx: &mut Context<Self>) {
 		if self.proxy_runs.is_empty() {
 			return;
 		}
-		let mut finished: Vec<(NodeId, bool)> = Vec::new();
-		let mut changed = false;
-		for run in self.proxy_runs.iter_mut() {
-			while let Ok(event) = run.events.try_recv() {
-				match event {
-					super::engine::ExportEvent::Started => {}
-					super::engine::ExportEvent::Progress(value) => {
-						run.progress = value.clamp(0.0, 1.0);
-						changed = true;
-					}
-					super::engine::ExportEvent::Finished(ok, _) => {
-						finished.push((run.footage, ok));
-					}
-				}
+		let finished: Vec<(u64, bool)> = self
+			.proxy_runs
+			.iter()
+			.filter_map(|run| match run.task.state() {
+				oak_engine_rust_sdk::task::TaskState::Running => None,
+				oak_engine_rust_sdk::task::TaskState::Succeeded => Some((run.footage, true)),
+				oak_engine_rust_sdk::task::TaskState::Failed
+				| oak_engine_rust_sdk::task::TaskState::Cancelled => Some((run.footage, false)),
+			})
+			.collect();
+		for run in &self.proxy_runs {
+			if let Some((_, succeeded)) = finished.iter().find(|(id, _)| *id == run.footage) {
+				let id = oak_engine_rust_sdk::node::NodeId::from_raw(run.footage);
+				let _ = run.session.complete_proxy(id, &run.task, *succeeded);
 			}
 		}
 		self.proxy_runs
 			.retain(|run| !finished.iter().any(|(footage, _)| *footage == run.footage));
-		if let Some(project) = self.project.clone() {
-			for (footage, ok) in &finished {
-				let mut guard = graphops::lock(&project);
-				if let Some(f) = guard
-					.graph
-					.get_mut(*footage)
-					.and_then(|e| e.behavior.as_any_mut())
-					.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-				{
-					if *ok {
-						// The transcode wrote the final file: mark the
-						// proxy ready and usable (state 2, enabled).
-						f.proxy_state = 2;
-						f.proxy_enabled = true;
-					} else {
-						f.proxy_state = 3;
-					}
-				}
-			}
-		}
-		// Only a FINISHED run may change any preview media (the proxy
-		// engages then); progress events only repaint the status bar.
-		// Invalidating the rendered frames on every progress tick would
-		// keep the playback cache permanently cold while a proxy
-		// generates.
 		if !finished.is_empty() {
 			self.invalidate_preview_frames(cx);
-			// 有转码完成：从队列递补下一个（并发上限可调，见
-			// proxy_max_concurrent）。
 			self.pump_proxy_queue(cx);
-		} else if changed {
+		} else {
 			cx.notify();
 		}
 	}
 
-	/// 自动代理转码的并发上限（Proxy Settings 对话框可调，默认 1；
-	/// 不变式"并发 × 每任务线程 ≤ 核数一半"的线程侧见
-	/// [`oak_task::proxy::ProxyTask::transcode_thread_budget`]）。
+	/// Maximum concurrent proxy workers (configurable in Proxy Settings).
+	/// The SDK value preserves the engine's per-worker CPU/thread budget.
 	fn proxy_max_concurrent() -> usize {
-		oak_task::proxy::ProxyTask::proxy_max_concurrent() as usize
+		oak_engine_rust_sdk::task::proxy_max_concurrent()
 	}
 
 	/// 按并发上限从队列递补启动代理生成（队列去重由入队侧保证）。
@@ -2849,39 +2829,25 @@ impl RealEngine {
 		if !super::renderops::use_proxy_media() {
 			return;
 		}
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
-		let candidates: Vec<u64> = {
-			let guard = graphops::lock(&project);
-			graphops::footage_ids(&guard)
-				.into_iter()
-				.filter(|&node| {
-					let Some(f) = graphops::footage_behavior(&guard.graph, node) else {
-						return false;
-					};
-					if !f.streams.iter().any(|s| s.is_video) {
-						return false;
-					}
-					if f.proxy_state == 3 {
-						return false; // 上次失败：不自动重试
-					}
-					if !f.proxy.is_empty() {
-						if !f.proxy_enabled {
-							return false; // 显式关过代理
-						}
-						// 已启用：磁盘上就绪则无需再生成。
-						if oak_codec::proxymanager::ProxyManager::get_proxy_state(&f.proxy)
-							== oak_codec::proxymanager::ProxyState::Ready
-						{
-							return false;
-						}
-					}
-					self.proxy_runs.iter().all(|run| run.footage != node)
-				})
-				.map(|node| node.identity())
-				.collect()
-		};
+		let candidates: Vec<u64> = session
+			.snapshot()
+			.footages
+			.into_iter()
+			.filter(|footage| {
+				let Some(status) = session.proxy_status(footage.id) else {
+					return false;
+				};
+				status.can_generate
+					&& status.state != oak_engine_rust_sdk::codec::ProxyState::Ready
+					&& status.state != oak_engine_rust_sdk::codec::ProxyState::Failed
+					&& (!status.has_proxy || status.enabled)
+					&& self.proxy_runs.iter().all(|run| run.footage != footage.id.raw())
+			})
+			.map(|footage| footage.id.raw())
+			.collect();
 		// 入队 + 按并发上限递补（不一次全部启动：每个转码本身就是
 		// 多线程 ffmpeg，N 个并发会把 CPU 打满）。
 		for id in candidates {
@@ -2890,34 +2856,6 @@ impl RealEngine {
 			}
 		}
 		self.pump_proxy_queue(cx);
-	}
-
-	/// The proxy lifecycle state of one footage row: an in-flight run
-	/// wins, then the disk state of the recorded proxy path, with a
-	/// recorded failure (state 3) preserved while no file is on disk.
-	fn proxy_state_of(
-		&self,
-		f: &oak_node::footage::FootageBehavior,
-		node: NodeId,
-	) -> super::engine::ProxyMediaState {
-		use super::engine::ProxyMediaState;
-		if self.proxy_runs.iter().any(|run| run.footage == node) {
-			return ProxyMediaState::Generating;
-		}
-		if f.proxy.is_empty() {
-			return ProxyMediaState::Missing;
-		}
-		match oak_codec::proxymanager::ProxyManager::get_proxy_state(&f.proxy) {
-			oak_codec::proxymanager::ProxyState::Ready => ProxyMediaState::Ready,
-			oak_codec::proxymanager::ProxyState::Generating => ProxyMediaState::Generating,
-			_ => {
-				if f.proxy_state == 3 {
-					ProxyMediaState::Failed
-				} else {
-					ProxyMediaState::Missing
-				}
-			}
-		}
 	}
 
 	/// Synchronize the selected clips by their footage's source start
@@ -6614,34 +6552,41 @@ impl AppEngine for RealEngine {
 	}
 
 	fn proxy_rows(&self) -> Vec<super::engine::ProxyFootageRow> {
-		let Some(project) = self.project.as_ref() else {
+		let Some(session) = self.editor_session() else {
 			return Vec::new();
 		};
-		let guard = graphops::lock(project);
-		graphops::footage_ids(&guard)
+		session
+			.snapshot()
+			.footages
 			.into_iter()
-			.filter_map(|node| {
-				let f = graphops::footage_behavior(&guard.graph, node)?;
-				let name = graphops::node_label(&guard.graph, node);
+			.filter_map(|footage| {
+				let status = session.proxy_status(footage.id)?;
+				let id = footage.id.raw();
+				let state = if self.proxy_runs.iter().any(|run| run.footage == id) {
+					super::engine::ProxyMediaState::Generating
+				} else {
+					proxy_media_state(status.state)
+				};
 				Some(super::engine::ProxyFootageRow {
-					id: node.identity(),
-					name,
-					state: self.proxy_state_of(f, node),
-					enabled: f.proxy_enabled,
-					has_custom: f.has_custom_proxy_params(),
-					can_generate: f.valid && f.streams.iter().any(|s| s.is_video),
-					has_proxy: !f.proxy.is_empty(),
+					id,
+					name: footage.name,
+					state,
+					enabled: status.enabled,
+					has_custom: status.has_custom_params,
+					can_generate: status.can_generate,
+					has_proxy: status.has_proxy,
 				})
 			})
 			.collect()
 	}
 
 	fn proxy_state(&self, id: u64) -> Option<super::engine::ProxyMediaState> {
-		let project = self.project.as_ref()?;
-		let node = graphops::id_of(id)?;
-		let guard = graphops::lock(project);
-		let f = graphops::footage_behavior(&guard.graph, node)?;
-		Some(self.proxy_state_of(f, node))
+		if self.proxy_runs.iter().any(|run| run.footage == id) {
+			return Some(super::engine::ProxyMediaState::Generating);
+		}
+		self.editor_session()?
+			.proxy_status(oak_engine_rust_sdk::node::NodeId::from_raw(id))
+			.map(|status| proxy_media_state(status.state))
 	}
 
 	fn proxy_row(&self, id: u64) -> Option<super::engine::ProxyFootageRow> {
@@ -6649,131 +6594,13 @@ impl AppEngine for RealEngine {
 	}
 
 	fn proxy_generate(&mut self, id: u64, cx: &mut Context<Self>) -> Result<(), String> {
-		let footage = self.footage_of(id).ok_or("entry is not footage")?;
-		if self.proxy_runs.iter().any(|run| run.footage == footage) {
+		if self.proxy_runs.iter().any(|run| run.footage == id) {
 			return Err("a proxy is already generating for this footage".into());
 		}
-		let (filename, stream_index, params) = {
-			let project = self.project.as_ref().ok_or("no project open")?;
-			let guard = graphops::lock(project);
-			let f =
-				graphops::footage_behavior(&guard.graph, footage).ok_or("entry is not footage")?;
-			if f.filename.is_empty() {
-				return Err("the footage has no media file".into());
-			}
-			let stream = f
-				.streams
-				.iter()
-				.find(|s| s.is_video)
-				.map(|s| s.index)
-				.ok_or("the footage has no video stream")?;
-			(f.filename.clone(), stream, f.effective_proxy_params())
-		};
-
-		let proxy_path = oak_codec::proxymanager::ProxyManager::get_proxy_filename(
-			&Self::proxy_cache_path(),
-			&filename,
-			stream_index,
-			&params,
-		)
-		.map_err(|e| format!("failed to build the proxy filename: {e}"))?;
-
-		// Absolute targets only apply in custom-size mode; divider mode
-		// scales from the source (the request mirrors the C++ submission).
-		let (proxy_width, proxy_height) = if params.divider <= 1 {
-			(params.width, params.height)
-		} else {
-			(0, 0)
-		};
-		let request = oak_codec::task::TaskRequest {
-			kind: oak_codec::task::TaskKind::Proxy,
-			input_filename: &filename,
-			output_filename: &proxy_path,
-			stream_index,
-			sample_rate: 0,
-			channel_layout: 0,
-			sample_format: 0,
-			proxy_width,
-			proxy_height,
-		};
-		let task_params = oak_task::proxy::ProxyParams {
-			width: params.width,
-			height: params.height,
-			divider: params.divider,
-			version: params.version,
-			crf: params.crf,
-			include_audio: params.include_audio != 0,
-			extension: {
-				let end = params
-					.extension
-					.iter()
-					.position(|&b| b == 0)
-					.unwrap_or(params.extension.len());
-				String::from_utf8_lossy(&params.extension[..end]).into_owned()
-			},
-			preset: {
-				let end = params
-					.preset
-					.iter()
-					.position(|&b| b == 0)
-					.unwrap_or(params.preset.len());
-				String::from_utf8_lossy(&params.preset[..end]).into_owned()
-			},
-		};
-
-		let label = format!("Generating Proxy {}", filename);
-		let (tx, rx) = mpsc::channel::<super::engine::ExportEvent>();
-		let mut driver = oak_task::task::Task::new(&label, None);
-		{
-			let tx = tx.clone();
-			driver.set_event_listener(Box::new(move |event| {
-				let event = match event {
-					oak_task::task::TaskEvent::Started => super::engine::ExportEvent::Started,
-					oak_task::task::TaskEvent::Progress(value) => {
-						super::engine::ExportEvent::Progress(value)
-					}
-					oak_task::task::TaskEvent::Finished => return,
-				};
-				let _ = tx.send(event);
-			}));
-		}
-		driver.set_behavior(Box::new(oak_task::proxy::ProxyTask::new(
-			&request,
-			task_params,
-		)));
-		std::thread::spawn(move || {
-			let result = driver.start();
-			let error = if result.is_ok() {
-				String::new()
-			} else {
-				driver
-					.error()
-					.map(|s| s.to_string())
-					.unwrap_or_else(|| "proxy generation failed".to_string())
-			};
-			let _ = tx.send(super::engine::ExportEvent::Finished(result.is_ok(), error));
-		});
-
-		// Mark the footage generating immediately (state 1), exactly like
-		// the C++ dialog's set_proxy(..., proxy.state, ...) after
-		// get_or_start; the tick drain finalizes it.
-		if let Some(project) = self.project.as_ref() {
-			let mut guard = graphops::lock(project);
-			if let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			{
-				f.set_proxy(&proxy_path, 1, stream_index, params.version, true);
-			}
-		}
-		self.proxy_runs.push(ProxyRun {
-			footage,
-			label,
-			progress: 0.0,
-			events: rx,
-		});
+		let session = self.editor_session().ok_or("no project open")?;
+		let footage = oak_engine_rust_sdk::node::NodeId::from_raw(id);
+		let task = session.generate_proxy(footage, &Self::proxy_cache_path())?;
+		self.proxy_runs.push(ProxyRun { footage: id, session, task });
 		cx.notify();
 		Ok(())
 	}
@@ -6781,60 +6608,36 @@ impl AppEngine for RealEngine {
 	fn proxy_task_progress(&self) -> Option<(String, f64)> {
 		self.proxy_runs
 			.first()
-			.map(|run| (run.label.clone(), run.progress))
+			.map(|run| (run.task.title(), run.task.progress().clamp(0.0, 1.0)))
 	}
 
 	fn proxy_delete(&mut self, id: u64, cx: &mut Context<Self>) {
-		let Some(footage) = self.footage_of(id) else {
+		if self.proxy_runs.iter().any(|run| run.footage == id) {
 			return;
-		};
+		}
 		// 删除代理 = 明确不要了：同时移出自动生成队列（否则递补时
 		// 会立刻重新生成一个）。
 		self.proxy_queue.retain(|&q| q != id);
-		let proxy_path = {
-			let Some(project) = self.project.as_ref() else {
-				return;
-			};
-			let guard = graphops::lock(project);
-			match graphops::footage_behavior(&guard.graph, footage) {
-				Some(f) if !f.proxy.is_empty() => f.proxy.clone(),
-				_ => return,
-			}
+		let Some(session) = self.editor_session() else {
+			return;
 		};
-		let _ = std::fs::remove_file(&proxy_path);
-		if let Ok(working) =
-			oak_codec::proxymanager::ProxyManager::get_working_filename(&proxy_path)
+		if session
+			.delete_proxy(oak_engine_rust_sdk::node::NodeId::from_raw(id))
+			.is_ok()
 		{
-			let _ = std::fs::remove_file(&working);
+			self.invalidate_preview_frames(cx);
 		}
-		if let Some(project) = self.project.as_ref() {
-			let mut guard = graphops::lock(project);
-			if let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			{
-				f.clear_proxy();
-			}
-		}
-		self.invalidate_preview_frames(cx);
 	}
 
 	fn proxy_set_enabled(&mut self, id: u64, enabled: bool, cx: &mut Context<Self>) {
-		let Some(footage) = self.footage_of(id) else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
-		if let Some(project) = self.project.as_ref() {
-			let mut guard = graphops::lock(project);
-			if let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			{
-				f.proxy_enabled = enabled;
-			}
+		if session
+			.set_proxy_enabled(oak_engine_rust_sdk::node::NodeId::from_raw(id), enabled)
+			.is_err()
+		{
+			return;
 		}
 		// 启用而代理未就绪时立即后台生成（禁用则是 opt-out，
 		// autostart_proxies 对有记录路径但未启用的素材不会重启）。
@@ -6845,18 +6648,12 @@ impl AppEngine for RealEngine {
 	}
 
 	fn proxy_reveal(&self, id: u64) {
-		let Some(footage) = self.footage_of(id) else {
+		let Some(proxy_path) = self
+			.editor_session()
+			.and_then(|session| session.proxy_path(oak_engine_rust_sdk::node::NodeId::from_raw(id)))
+			.filter(|path| !path.is_empty())
+		else {
 			return;
-		};
-		let proxy_path = {
-			let Some(project) = self.project.as_ref() else {
-				return;
-			};
-			let guard = graphops::lock(project);
-			match graphops::footage_behavior(&guard.graph, footage) {
-				Some(f) if !f.proxy.is_empty() => f.proxy.clone(),
-				_ => return,
-			}
 		};
 		let path = std::path::Path::new(&proxy_path);
 		if path.exists() {
@@ -6933,34 +6730,26 @@ impl AppEngine for RealEngine {
 		let Some(project) = self.project.as_ref() else {
 			return Vec::new();
 		};
-		let guard = graphops::lock(project);
-		let mut seen: Vec<NodeId> = Vec::new();
-		let mut rows: Vec<super::engine::ProxyFootageRow> = Vec::new();
-		for clip in clips {
-			let Some(node) = graphops::id_of(clip.0) else {
-				continue;
-			};
-			let Some(footage) = graphops::find_input_footage(&guard.graph, node) else {
-				continue;
-			};
-			if seen.contains(&footage) {
-				continue;
+		let footage = {
+			let guard = graphops::lock(project);
+			let mut seen: Vec<NodeId> = Vec::new();
+			for clip in clips {
+				let Some(node) = graphops::id_of(clip.0) else {
+					continue;
+				};
+				let Some(footage) = graphops::find_input_footage(&guard.graph, node) else {
+					continue;
+				};
+				if !seen.contains(&footage) {
+					seen.push(footage);
+				}
 			}
-			let Some(f) = graphops::footage_behavior(&guard.graph, footage) else {
-				continue;
-			};
-			seen.push(footage);
-			rows.push(super::engine::ProxyFootageRow {
-				id: footage.identity(),
-				name: graphops::node_label(&guard.graph, footage),
-				state: self.proxy_state_of(f, footage),
-				enabled: f.proxy_enabled,
-				has_custom: f.has_custom_proxy_params(),
-				can_generate: f.valid && f.streams.iter().any(|s| s.is_video),
-				has_proxy: !f.proxy.is_empty(),
-			});
-		}
-		rows
+			seen
+		};
+		footage
+			.into_iter()
+			.filter_map(|footage| self.proxy_row(footage.identity()))
+			.collect()
 	}
 
 	fn sync_eligibility(&self, clips: &[ClipId]) -> super::engine::SyncEligibility {
@@ -14270,7 +14059,12 @@ mod tests {
 		use crate::oakui::engine::{ProxyMediaState, ProxyParamsUi};
 		let _media = media_lock();
 		let _proxy = ConfigRestore::of(CONFIG_KEY_USE_PROXY);
+		let _cache = ConfigRestore::of(CONFIG_KEY_DISK_CACHE_PATH);
 		config_set_string(CONFIG_KEY_USE_PROXY, "false");
+		let cache_dir = std::env::temp_dir().join(format!("oakapp_proxy_rows_{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&cache_dir);
+		std::fs::create_dir_all(&cache_dir).expect("create the proxy cache dir");
+		config_set_string(CONFIG_KEY_DISK_CACHE_PATH, &cache_dir.to_string_lossy());
 		let (engine, media, entry) = eng_import_media(cx, "proxy_rows");
 
 		let rows = cx.read(|app| engine.read(app).proxy_rows());
@@ -14338,30 +14132,21 @@ mod tests {
 		let rows = cx.read(|app| engine.read(app).proxy_rows());
 		assert!(!rows[0].enabled);
 
-		// The in-flight guard: a recorded run blocks a second generate and
-		// drives the status progress.
-		let (_tx, rx) = std_mpsc::channel();
-		let footage = graphops::id_of(entry).expect("footage node");
-		cx.update(|app| {
-			engine.update(app, |engine, _cx| {
-				engine.proxy_runs.push(ProxyRun {
-					footage,
-					label: "Generating Proxy test.mp4".to_string(),
-					progress: 0.5,
-					events: rx,
-				});
-			})
+		// A real engine task drives status progress and blocks a duplicate.
+		let started = cx.update(|app| {
+			engine.update(app, |engine, cx| engine.proxy_generate(entry, cx))
 		});
-		assert_eq!(
-			cx.read(|app| engine.read(app).proxy_task_progress()),
-			Some(("Generating Proxy test.mp4".to_string(), 0.5))
-		);
+		assert!(started.is_ok(), "proxy generation starts: {started:?}");
+		let progress = cx.read(|app| engine.read(app).proxy_task_progress());
+		assert!(progress.is_some_and(|(label, value)| {
+			label.contains("Generating Proxy") && (0.0..=1.0).contains(&value)
+		}));
 		let r = cx.update(|app| engine.update(app, |engine, cx| engine.proxy_generate(entry, cx)));
 		assert!(r.is_err(), "a second generate is rejected while running");
 		cx.update(|app| {
 			engine.update(app, |engine, _cx| engine.proxy_runs.clear())
 		});
-		// No proxy recorded yet: delete/reveal take their early returns.
+		// Cancelling drops and joins the worker; delete then clears its metadata.
 		cx.update(|app| engine.update(app, |engine, cx| engine.proxy_delete(entry, cx)));
 		cx.update(|app| engine.update(app, |engine, _cx| engine.proxy_reveal(entry)));
 		cx.update(|app| {
@@ -14390,6 +14175,7 @@ mod tests {
 		assert!(r.is_err(), "an unknown id is not footage");
 
 		let _ = std::fs::remove_file(&media);
+		let _ = std::fs::remove_dir_all(&cache_dir);
 	}
 
 	/// Replacing footage re-points the media file and re-probes it in
@@ -16601,13 +16387,12 @@ mod tests {
 		assert!(read_f32_frame(&short).is_none());
 	}
 
-	/// The proxy lifecycle without workers: a fake in-flight run blocks a
-	/// duplicate generation, a completed failure lands state 3 (and the
-	/// Failed disk state), a queued bogus id logs and drains, and the
-	/// autostart policy skips failures / opt-outs / ready files.
+	/// Proxy autostart policy: a queued bogus id drains, recorded failures and
+	/// per-footage opt-outs are respected, and ready files are not regenerated.
+	/// The same test also drives a real missing-input worker to terminal failure.
 	#[gpui_kit::test]
 	async fn proxy_lifecycle_and_autostart_policy(cx: &mut gpui_kit::TestAppContext) {
-		use crate::oakui::engine::{ExportEvent, ProxyMediaState};
+		use crate::oakui::engine::ProxyMediaState;
 		let _media = media_lock();
 		let _proxy = ConfigRestore::of(CONFIG_KEY_USE_PROXY);
 		config_set_bool(CONFIG_KEY_USE_PROXY, true);
@@ -16632,8 +16417,8 @@ mod tests {
 			"the auto-started run finalized a state"
 		);
 
-		// Reset the proxy record so the fake-run failure below is the
-		// observable state (a real file on disk would win the lookup).
+		// Reset the proxy record to a failure with no file on disk, making the
+		// recorded failure observable and eligible for the autostart checks.
 		{
 			let mut g = graphops::lock(&project);
 			let f = g
@@ -16649,40 +16434,16 @@ mod tests {
 				))
 				.to_string_lossy()
 				.into_owned();
-			f.proxy_state = 0;
+			f.proxy_state = 3;
 			f.proxy_enabled = false;
 		}
 
-		// A fake in-flight run: a duplicate generate is rejected.
-		let (tx, rx) = mpsc::channel();
-		cx.update(|app| {
-			engine.update(app, |engine, _cx| {
-				engine.proxy_runs.push(ProxyRun {
-					footage,
-					label: "fake".to_string(),
-					progress: 0.0,
-					events: rx,
-				});
-			})
-		});
-		let r = cx.update(|app| engine.update(app, |engine, cx| engine.proxy_generate(entry, cx)));
-		assert!(r.is_err(), "a run is already in flight");
-
-		// The completion of that run as a FAILURE writes state 3.
-		tx.send(ExportEvent::Finished(false, "boom".to_string()))
-			.expect("the run is still listening");
-		cx.update(|app| engine.update(app, |engine, cx| engine.drain_proxy_runs(cx)));
 		let state = cx.read(|app| engine.read(app).proxy_state(entry));
 		assert_eq!(
 			state,
 			Some(ProxyMediaState::Failed),
 			"the failure is recorded"
 		);
-		assert!(
-			cx.read(|app| engine.read(app).proxy_task_progress().is_none()),
-			"the run drained"
-		);
-
 		// A bogus queued id logs and drains without starting anything.
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {

@@ -37,6 +37,7 @@ unsafe extern "C" {
 	fn oak_task_cancel(id: u64);
 	fn oak_task_wait(id: u64) -> bool;
 	fn oak_task_release(id: u64);
+	fn oak_task_proxy_max_concurrent() -> i32;
 	fn oak_task_take_project(id: u64) -> *mut c_void;
 }
 
@@ -100,8 +101,13 @@ pub struct Task {
 }
 
 impl Task {
-	fn new(id: u64) -> Option<Task> {
+	pub(crate) fn new(id: u64) -> Option<Task> {
 		(id != 0).then_some(Task { id })
+	}
+
+	/// Returns the registry identity for session/task correlation APIs.
+	pub(crate) fn id(&self) -> u64 {
+		self.id
 	}
 
 	/// The task title.
@@ -152,6 +158,14 @@ impl Drop for Task {
 	fn drop(&mut self) {
 		unsafe { oak_task_release(self.id) };
 	}
+}
+
+/// Maximum number of proxy transcodes that should run concurrently.
+///
+/// Queueing remains a host policy; this engine value keeps the UI and other SDK
+/// consumers aligned with the worker's CPU/thread budget.
+pub fn proxy_max_concurrent() -> usize {
+	(unsafe { oak_task_proxy_max_concurrent() }).max(1) as usize
 }
 
 /// Starts an export of the viewer node (a sequence or footage) to

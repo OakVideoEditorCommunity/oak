@@ -151,6 +151,69 @@ pub fn set_footage_proxy_params(
 	)
 }
 
+fn footage_behavior_mut(
+	graph: &mut oak_node::graph::Graph,
+	footage: NodeId,
+) -> Option<&mut FootageBehavior> {
+	graph
+		.get_mut(footage)
+		.and_then(|entry| entry.behavior.as_any_mut())
+		.and_then(|behavior| behavior.downcast_mut::<FootageBehavior>())
+}
+
+/// Deletes the recorded proxy and its working file, then clears the footage's
+/// proxy association.
+///
+/// This is intentionally not an undo command: undo cannot restore deleted file
+/// contents. The caller must reject deletion while a generation task is active;
+/// otherwise that worker could recreate the file after this operation returns.
+pub fn delete_proxy(project: &ProjectRef, footage: NodeId) -> Result<(), String> {
+	let proxy_path = {
+		let guard = lock(project);
+		footage_behavior(&guard.graph, footage)
+			.ok_or_else(|| "entry is not footage".to_string())?
+			.proxy
+			.clone()
+	};
+	if proxy_path.is_empty() {
+		return Ok(());
+	}
+	if std::path::Path::new(&proxy_path).exists() {
+		std::fs::remove_file(&proxy_path)
+			.map_err(|e| format!("failed to delete proxy \"{proxy_path}\": {e}"))?;
+	}
+	if let Ok(working) =
+		oak_codec::proxymanager::ProxyManager::get_working_filename(&proxy_path)
+	{
+		if std::path::Path::new(&working).exists() {
+			std::fs::remove_file(&working)
+				.map_err(|e| format!("failed to delete working proxy \"{working}\": {e}"))?;
+		}
+	}
+	let mut guard = lock(project);
+	footage_behavior_mut(&mut guard.graph, footage)
+		.ok_or_else(|| "entry is not footage".to_string())?
+		.clear_proxy();
+	Ok(())
+}
+
+/// Changes whether decoding may use an existing proxy.
+///
+/// Like other playback policy flags, this per-footage switch is not an editing
+/// history entry. Generation itself remains asynchronous and is started by the
+/// session API rather than by this mutation.
+pub fn set_proxy_enabled(
+	project: &ProjectRef,
+	footage: NodeId,
+	enabled: bool,
+) -> Result<(), String> {
+	let mut guard = lock(project);
+	footage_behavior_mut(&mut guard.graph, footage)
+		.ok_or_else(|| "entry is not footage".to_string())?
+		.proxy_enabled = enabled;
+	Ok(())
+}
+
 /// Creates a sequence using the footage's first video-stream format. Audio-only
 /// footage keeps the engine defaults. Sequence creation itself is not undoable,
 /// matching the existing sequence factory.

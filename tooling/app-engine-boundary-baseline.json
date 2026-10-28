@@ -111,16 +111,16 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 249,
+      "total": 226,
       "crates": {
         "oak-audio": 21,
-        "oak-codec": 29,
-        "oak-core": 70,
-        "oak-node": 69,
+        "oak-codec": 20,
+        "oak-core": 69,
+        "oak-node": 64,
         "oak-ofx-plugin": 1,
         "oak-render": 11,
         "oak-storage": 1,
-        "oak-task": 20,
+        "oak-task": 12,
         "oak-timeline": 20,
         "oak-undo": 7
       }

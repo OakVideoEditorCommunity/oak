@@ -80,6 +80,8 @@ pub(crate) enum OakEditOp {
 	SetFootageProxyParams,
 	ClearFootageProxyParams,
 	CreateSequenceFromFootage,
+	DeleteProxy,
+	SetProxyEnabled,
 }
 
 impl OakEditOp {
