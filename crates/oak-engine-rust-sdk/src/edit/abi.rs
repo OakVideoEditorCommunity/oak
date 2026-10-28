@@ -74,6 +74,7 @@ pub(crate) enum OakEditOp {
 	RemoveNodeKeyframe,
 	SetNodeValueAtTime,
 	PushNodeButton,
+	SetNodeTextValue,
 }
 
 impl OakEditOp {

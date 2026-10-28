@@ -66,6 +66,7 @@ unsafe extern "C" {
 	fn oak_effect_set_enabled(project: *const std::ffi::c_void, effect: u64, enabled: bool)
 		-> bool;
 	fn oak_effect_is_enabled(project: *const std::ffi::c_void, effect: u64) -> bool;
+	fn oak_effect_input_id(project: *const std::ffi::c_void, node: u64, buf: *mut u8, len: usize) -> i32;
 }
 
 // Node flags (oak-node's `node::flags` — compile-time values mirrored
@@ -180,6 +181,11 @@ pub fn dynamic_factory_entries() -> Vec<DynamicFactoryEntry> {
 }
 
 impl Project {
+	/// Returns the input that carries a node's effect chain, if it has one.
+	pub fn effect_input_id(&self, node: NodeId) -> Option<String> {
+		string_out(|buf, len| unsafe { oak_effect_input_id(self.as_raw(), node.raw(), buf, len) })
+	}
+
 	/// The effect chain of `host`, closest-to-source first (signal order).
 	/// Empty when the host is unknown or cannot host effects.
 	pub fn effect_chain(&self, host: NodeId) -> Vec<NodeId> {

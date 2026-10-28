@@ -7,6 +7,21 @@ use crate::node::{NodeId, Project};
 use crate::storage::StorageError;
 use crate::types::TimeRange;
 
+/// Owned C-compatible storage project handle used only for same-instance
+/// migration. Layout matches `oak_core::handle::CHandle` exactly.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct StorageProjectHandle {
+	/// Opaque refcounted project box.
+	pub ctx: *mut c_void,
+	/// Atomic increment supplied by the storage backend.
+	pub addref: Option<unsafe extern "C" fn(*mut c_void)>,
+	/// Atomic decrement supplied by the storage backend.
+	pub release: Option<unsafe extern "C" fn(*mut c_void)>,
+	/// Storage handle ABI version.
+	pub abi_version: u32,
+}
+
 #[cfg_attr(
 	windows,
 	link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim")
@@ -18,6 +33,7 @@ unsafe extern "C" {
 	fn oak_editor_new() -> *mut c_void;
 	fn oak_editor_open(uri: *const u8, uri_len: usize, version_info: *mut i32) -> *mut c_void;
 	fn oak_editor_open_project_from_library(uuid: *const u8, uuid_len: usize, error: *mut i32) -> *mut c_void;
+	fn oak_editor_adopt_storage_project_handle(project: StorageProjectHandle) -> *mut c_void;
 	fn oak_editor_create_library(name: *const u8, name_len: usize, error: *mut i32) -> *mut c_void;
 	fn oak_editor_project(session: *const c_void) -> *mut c_void;
 	fn oak_editor_save(
@@ -65,6 +81,17 @@ unsafe impl Send for EditorSession {}
 unsafe impl Sync for EditorSession {}
 
 impl EditorSession {
+	/// Adopts an owned storage handle into a session without reopening the project.
+	///
+	/// This is intended for migration from an existing shared project owner. The
+	/// handle is consumed, and the session and original `ProjectRef` point to the
+	/// same Arc; it is not a second document or a raw-Arc reconstruction.
+	pub fn adopt_storage_project_handle(
+		handle: StorageProjectHandle,
+	) -> Result<Self, StorageError> {
+		Self::from_raw(unsafe { oak_editor_adopt_storage_project_handle(handle) })
+	}
+
 	fn from_raw(ptr: *mut c_void) -> Result<Self, StorageError> {
 		if ptr.is_null() {
 			Err(StorageError(-1))
@@ -256,6 +283,7 @@ mod snapshot;
 mod graph;
 mod params;
 mod notify;
+mod workflow;
 pub use snapshot::*;
 pub use graph::*;
 pub use params::*;

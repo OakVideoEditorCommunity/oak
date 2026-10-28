@@ -39,3 +39,43 @@ pub(crate) fn make_test_clip(name: &str) -> String {
 	session.close().expect("close encoder");
 	out.to_string_lossy().into_owned()
 }
+
+/// Builds a scan directory containing the bundled CPU OFX test plugin.
+/// Returns `None` when the build artifact is unavailable.
+pub(crate) fn ofx_plugin_scan_dir() -> Option<std::path::PathBuf> {
+	let profile_dir = std::path::Path::new(env!("OUT_DIR")).ancestors().nth(3)?.to_path_buf();
+	let build = profile_dir.join("build");
+	let mut library = None;
+	for entry in std::fs::read_dir(&build).ok()? {
+		let entry = entry.ok()?;
+		if !entry.file_name().to_string_lossy().starts_with("oak-ofx-plugin-") {
+			continue;
+		}
+		for artifact in ["oak_test_plugin.so", "oak_test_plugin.dylib"] {
+			let candidate = entry.path().join("out").join(artifact);
+			if candidate.exists() {
+				library = Some(candidate);
+				break;
+			}
+		}
+		if library.is_some() {
+			break;
+		}
+	}
+	let library = library?;
+	let bundle = std::env::temp_dir().join("oak-sdk-ofx-test/oak_test_plugin.ofx.bundle");
+	let platform = if cfg!(target_os = "macos") {
+		"MacOS"
+	} else if cfg!(target_os = "windows") {
+		"Win64"
+	} else {
+		"Linux-x86-64"
+	};
+	let bin_dir = bundle.join("Contents").join(platform);
+	std::fs::create_dir_all(&bin_dir).ok()?;
+	let target = bin_dir.join(if cfg!(target_os = "windows") { "plugin.dll" } else { "plugin" });
+	if !target.exists() {
+		std::fs::copy(&library, &target).ok()?;
+	}
+	bundle.parent().map(|path| path.to_path_buf())
+}

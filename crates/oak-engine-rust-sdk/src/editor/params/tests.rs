@@ -127,4 +127,50 @@ fn string_parameter_values_and_types_remain_owned() {
 	let plain = snapshot.get("plain_text_in").expect("plain text");
 	assert_eq!(plain.value_type, ParameterValueType::Text);
 	assert!(plain.scalar_value().expect("plain value").text.is_some());
+	session
+		.execute(EditCommand::SetNodeTextValue {
+			node: text,
+			input_id: "plain_text_in".into(),
+			element: -1,
+			value: "hello".into(),
+		})
+		.expect("set text");
+	assert_eq!(
+		session
+			.parameters(text)
+			.unwrap()
+			.get("plain_text_in")
+			.unwrap()
+			.scalar_value()
+			.unwrap()
+			.text
+			.as_deref(),
+		Some("hello")
+	);
+	assert!(crate::node::undo());
+	assert_ne!(
+		session
+			.parameters(text)
+			.unwrap()
+			.get("plain_text_in")
+			.unwrap()
+			.scalar_value()
+			.unwrap()
+			.text
+			.as_deref(),
+		Some("hello")
+	);
+	assert!(crate::node::redo());
+	assert_eq!(
+		session
+			.parameters(text)
+			.unwrap()
+			.get("plain_text_in")
+			.unwrap()
+			.scalar_value()
+			.unwrap()
+			.text
+			.as_deref(),
+		Some("hello")
+	);
 }

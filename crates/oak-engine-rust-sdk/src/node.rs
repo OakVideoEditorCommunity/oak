@@ -241,12 +241,15 @@ impl NodeId {
 		unsafe { oak_node_id_is_valid(self.0) }
 	}
 
-	pub(crate) fn from_raw(raw: u64) -> NodeId {
+	/// Constructs a packed node token from its raw representation.
+	/// This performs no graph lookup; call `is_valid` for untrusted IDs.
+	pub fn from_raw(raw: u64) -> NodeId {
 		NodeId(raw)
 	}
 
 	/// The raw token (crate-internal consumers: the render ABI).
-	pub(crate) fn raw(self) -> u64 {
+	/// Returns the packed raw representation used by SDK DTOs and commands.
+	pub fn raw(self) -> u64 {
 		self.0
 	}
 }

@@ -1193,50 +1193,7 @@ mod tests {
 	/// interact variant), located under the workspace target dir and
 	/// wrapped into the OFX bundle layout for scanning.
 	fn test_plugin_scan_dir() -> Option<std::path::PathBuf> {
-		let profile_dir = std::path::Path::new(env!("OUT_DIR"))
-			.ancestors()
-			.nth(3)?
-			.to_path_buf();
-		let build = profile_dir.join("build");
-		let mut lib = None;
-		for entry in std::fs::read_dir(&build).ok()? {
-			let entry = entry.ok()?;
-			let name = entry.file_name();
-			if !name.to_string_lossy().starts_with("oak-ofx-plugin-") {
-				continue;
-			}
-			for artifact in ["oak_test_plugin.so", "oak_test_plugin.dylib"] {
-				let candidate = entry.path().join("out").join(artifact);
-				if candidate.exists() {
-					lib = Some(candidate);
-					break;
-				}
-			}
-			if lib.is_some() {
-				break;
-			}
-		}
-		let lib = lib?;
-		// The scan expects <dir>/<name>.ofx.bundle/Contents/<platform>/plugin.
-		let bundle = std::env::temp_dir().join("oak-sdk-ofx-test/oak_test_plugin.ofx.bundle");
-		let platform = if cfg!(target_os = "macos") {
-			"MacOS"
-		} else if cfg!(target_os = "windows") {
-			"Win64"
-		} else {
-			"Linux-x86-64"
-		};
-		let bin_dir = bundle.join("Contents").join(platform);
-		std::fs::create_dir_all(&bin_dir).ok()?;
-		let target = bin_dir.join(if cfg!(target_os = "windows") {
-			"plugin.dll"
-		} else {
-			"plugin"
-		});
-		if !target.exists() {
-			std::fs::copy(&lib, &target).ok()?;
-		}
-		bundle.parent().map(|p| p.to_path_buf())
+		crate::test_support::ofx_plugin_scan_dir()
 	}
 
 	// The host is process-global; serialize the host-touching tests.

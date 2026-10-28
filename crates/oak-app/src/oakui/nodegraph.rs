@@ -442,249 +442,141 @@ fn graph_nodes(g: &oak_node::graph::Graph, seq: DomainNodeId) -> Vec<TypedNode> 
 	out
 }
 
-/// The context position of `node` in the sequence's map, or the (0,0)
-/// sentinel the fallback layout replaces.
-fn context_position(
-	g: &oak_node::graph::Graph,
+/// Converts an owned SDK graph snapshot into the GPUI graph DTOs. Layout,
+/// colors and widget ID packing stay in the app; graph traversal stays in engine.
+fn present_graph_snapshot(
+	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
 	seq: DomainNodeId,
-	node: DomainNodeId,
-) -> Point<Pixels> {
-	let placed = g.get(node).and_then(|e| {
-		e.core
-			.context_positions
+) -> (Vec<RealNode>, Vec<RealEdge>) {
+	use oak_engine_rust_sdk::editor::{GraphMediaType, GraphNodeRole};
+	let seq_ident = seq.identity();
+	let mut nodes = Vec::new();
+	let mut edges = Vec::new();
+	for node in &snapshot.nodes {
+		let ident = node.id.raw();
+		let endpoint = match node.role {
+			GraphNodeRole::InputEndpoint => Some(GraphEndpoint::Input),
+			GraphNodeRole::OutputEndpoint => Some(GraphEndpoint::Output),
+			_ => None,
+		};
+		let inputs = node
+			.inputs
 			.iter()
-			.find(|(c, _, _)| *c == seq)
-			.map(|(_, pos, _)| *pos)
-	});
-	match placed {
-		Some((x, y)) if x != 0.0 || y != 0.0 => point(px(x as f32), px(y as f32)),
-		_ => point(px(0.0), px(0.0)),
+			.map(|port| RealPort {
+				id: port_id(ident, PortKind::Input, port.declaration_index as u32),
+				kind: PortKind::Input,
+				input_id: port.id.clone().into(),
+				label: port.label.clone().into(),
+				data_type: match port.media_type {
+					Some(GraphMediaType::Samples) => PortDataType::new("samples", hsla(0.12, 0.65, 0.55, 1.0)),
+					_ => video_type(),
+				},
+				connected: port.connected,
+			})
+			.collect();
+		let outputs = node
+			.output
+			.as_ref()
+			.map(|port| {
+				vec![RealPort {
+					id: port_id(ident, PortKind::Output, 0),
+					kind: PortKind::Output,
+					input_id: SharedString::new_static(""),
+					label: port.label.clone().into(),
+					data_type: out_type(),
+					connected: port.connected,
+				}]
+			})
+			.unwrap_or_default();
+		let position = node
+			.position
+			.map(|(x, y)| point(px(x as f32), px(y as f32)))
+			.unwrap_or_else(|| point(px(0.0), px(0.0)));
+		nodes.push(RealNode {
+			id: NodeId(ident),
+			title: node.label.clone().into(),
+			position,
+			inputs,
+			outputs,
+			header_color: Some(match endpoint {
+				Some(endpoint) => endpoint_color(endpoint),
+				None => node_color(ident),
+			}),
+			collapsed: false,
+			enabled: node.enabled,
+			endpoint,
+		});
 	}
+	for edge in &snapshot.edges {
+		let to_port = nodes
+			.iter()
+			.find(|node| node.id.0 == edge.to.raw())
+			.and_then(|node| node.inputs.iter().find(|port| port.input_id.as_ref() == edge.input_id))
+			.map(|port| port.id)
+			.unwrap_or_else(|| port_id(edge.to.raw(), PortKind::Input, 0));
+		edges.push(RealEdge {
+			id: if edge.synthetic {
+				output_wire_id(edge.from.raw())
+			} else {
+				real_edge_id(edge.from.raw(), edge.to.raw(), &edge.input_id)
+			},
+			from_node: NodeId(edge.from.raw()),
+			from_port: port_id(edge.from.raw(), PortKind::Output, 0),
+			to_node: NodeId(edge.to.raw()),
+			to_port,
+		});
+	}
+	// Apply the existing deterministic role grid only to nodes without a
+	// persisted position; role and row order match the legacy presentation.
+	let mut row_at_role: HashMap<u32, u32> = HashMap::new();
+	for node in &mut nodes {
+		if node.position != point(px(0.0), px(0.0)) {
+			continue;
+		}
+		let snapshot_node = snapshot.nodes.iter().find(|candidate| candidate.id.raw() == node.id.0)
+			.expect("presentation nodes come from the same snapshot");
+		let role = role_of(&snapshot_node.type_id, node.id.0 == seq_ident);
+		let row = row_at_role.entry(role).or_insert(0);
+		node.position = point(
+			px(40.0 + (role as f32) * 260.0),
+			px(40.0 + (*row as f32) * 180.0),
+		);
+		*row += 1;
+	}
+	(nodes, edges)
 }
 
-/// Build the (nodes, edges) snapshot of the sequence's node graph, or of a
-/// single clip's context chain when `clip` is `Some` (the per-clip view the
-/// editor shows while that clip is selected).
+/// Builds one session snapshot over the caller's existing project Arc.
 fn build_graph_impl(
 	project: &ProjectRef,
 	seq: DomainNodeId,
 	clip: Option<DomainNodeId>,
 ) -> (Vec<RealNode>, Vec<RealEdge>) {
-	let g = graphops::lock(project);
-	let g = &g.graph;
-	let mut nodes = Vec::new();
-	let mut edges = Vec::new();
-	if !g.is_valid(seq) {
-		return (nodes, edges);
-	}
-	if let Some(clip) = clip {
-		if !g.is_valid(clip) {
-			return (nodes, edges);
-		}
-	}
-	let seq_ident = seq.identity();
-	let seq_label = graphops::node_label(g, seq);
-	let seq_name = g
-		.get(seq)
-		.map(|e| e.behavior.name().to_string())
-		.unwrap_or_default();
-
-	// The displayable node set: the whole sequence graph, or one clip's
-	// context chain (footage → effects → clip).
-	let all = match clip {
-		Some(clip) => clip_context_nodes(g, clip),
-		None => graph_nodes(g, seq),
+	let Ok(session) = session_for_graph(project) else {
+		return (Vec::new(), Vec::new());
 	};
-	// The synthesized "clip → output" wire only exists in the full-sequence
-	// view: a per-clip context has no output card to wire into.
-	let with_output_wires = clip.is_none();
+	let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity());
+	let clip = clip.map(|id| oak_engine_rust_sdk::node::NodeId::from_raw(id.identity()));
+	let Some(snapshot) = session.graph_snapshot(sequence, clip) else {
+		return (Vec::new(), Vec::new());
+	};
+	present_graph_snapshot(&snapshot, seq)
+}
 
-	// Build every card's ports first (inputs, the implicit output), so
-	// real edges can resolve their target port index by matching the
-	// input id against the already-built cards.
-	let mut built: Vec<(TypedNode, RealNode)> = Vec::new();
-	for typed in all {
-		let ident = typed.ident;
-		let title = if typed.type_id == TYPE_ID_SEQUENCE {
-			if seq_label.is_empty() {
-				seq_name.clone()
-			} else {
-				seq_label.clone()
-			}
-		} else {
-			let label = graphops::node_label(g, typed.id);
-			let name = g
-				.get(typed.id)
-				.map(|e| e.behavior.name().to_string())
-				.unwrap_or_default();
-			if label.is_empty() {
-				name
-			} else {
-				label
-			}
-		};
-		let endpoint = endpoint_of_type_id(&typed.type_id);
-
-		// Inputs: only stream inputs (texture / samples) become ports — an
-		// OFX plugin declares every PARAMETER as an input too, and those
-		// belong to the params panel, not the card (the garbled wall of
-		// "NatronOfxParamProcess*" rows). Secret/internal inputs are hidden
-		// outright. The port label is the human-readable display name (the
-		// OFX param label), the wire lookup uses the id.
-		let input_decls: Vec<(usize, String, String)> = g
-			.get(typed.id)
-			.map(|e| {
-				e.core
-					.inputs
-					.iter()
-					.enumerate()
-					.filter(|(_, i)| {
-						matches!(
-							i.value_type,
-							oak_node::value::ValueType::Texture
-								| oak_node::value::ValueType::Samples
-						) && i.flags & oak_node::input::flags::HIDDEN == 0
-					})
-					.map(|(idx, i)| {
-						let label = if i.display_name.is_empty() {
-							i.id.clone()
-						} else {
-							i.display_name.clone()
-						};
-						(idx, i.id.clone(), label)
-					})
-					.collect()
-			})
-			.unwrap_or_default();
-		let mut inputs = Vec::with_capacity(input_decls.len());
-		for (idx, id_str, label) in &input_decls {
-			if id_str.is_empty() {
-				continue;
-			}
-			inputs.push(RealPort {
-				id: port_id(ident, PortKind::Input, *idx as u32),
-				kind: PortKind::Input,
-				input_id: id_str.clone().into(),
-				label: label.clone().into(),
-				data_type: video_type(),
-				connected: g.is_input_connected(typed.id, id_str, -1),
-			});
-		}
-
-		// The implicit output port. The output endpoint is a sink — nothing
-		// is wired out of it, so it gets no port; the input endpoint keeps
-		// its `tex_out` (the walk's root output).
-		let outputs = if endpoint == Some(GraphEndpoint::Output) {
-			Vec::new()
-		} else {
-			let out_count = g.output_connections(typed.id).len();
-			vec![RealPort {
-				id: port_id(ident, PortKind::Output, 0),
-				kind: PortKind::Output,
-				input_id: SharedString::new_static(""),
-				label: SharedString::new_static("out"),
-				data_type: out_type(),
-				connected: out_count > 0,
-			}]
-		};
-
-		let position = context_position(g, seq, typed.id);
-		built.push((
-			typed,
-			RealNode {
-				id: NodeId(ident),
-				title: title.into(),
-				position,
-				inputs,
-				outputs,
-				header_color: Some(match endpoint {
-					Some(endpoint) => endpoint_color(endpoint),
-					None => node_color(ident),
-				}),
-				collapsed: false,
-				enabled: true,
-				endpoint,
-			},
-		));
-	}
-
-	// Outgoing REAL edges: every source node's output connections, with
-	// the target port resolved to the index of the input whose id matches
-	// (the module stores edges by input id; the index may differ from 0 —
-	// e.g. a clip's `tex_in` sits after `enabled_in`). Edges whose target
-	// is not part of THIS view are skipped: a per-clip context ends at the
-	// clip, so its outgoing sequence/track edges are not part of the chain.
-	let mut node_edges: Vec<(u64, Vec<RealEdge>)> = Vec::new();
-	for (typed, _) in &built {
-		let mut edges_of = Vec::new();
-		for (to, conn_id, _element) in g.output_connections(typed.id) {
-			if !g.is_valid(to) || conn_id.is_empty() {
-				continue;
-			}
-			let to_ident = to.identity();
-			if !built.iter().any(|(t, _)| t.ident == to_ident) {
-				continue;
-			}
-			// The port id packs the DECLARATION index of the input (stable
-			// across the param filtering), so resolve the edge to the
-			// port's own id, not a recomputed index.
-			let to_port = built
-				.iter()
-				.find(|(t, _)| t.ident == to_ident)
-				.and_then(|(_, n)| n.inputs.iter().find(|p| p.input_id.as_ref() == conn_id))
-				.map(|p| p.id)
-				.unwrap_or_else(|| port_id(to_ident, PortKind::Input, 0));
-			edges_of.push(RealEdge {
-				id: real_edge_id(typed.ident, to_ident, &conn_id),
-				from_node: NodeId(typed.ident),
-				from_port: port_id(typed.ident, PortKind::Output, 0),
-				to_node: NodeId(to_ident),
-				to_port,
-			});
-		}
-		node_edges.push((typed.ident, edges_of));
-	}
-
-	// Fallback layout: nodes without a persisted context position get a
-	// deterministic role grid — footage | effects | clips | output as
-	// columns, a per-role row counter as the row (the same grid the
-	// C++-era node editor lays chains out on). Nodes the user has
-	// already dragged keep their persisted position. `fallback_base`
-	// mirrors this grid so the first drag moves from the displayed
-	// position rather than the origin.
-	let mut row_at_role: HashMap<u32, u32> = HashMap::new();
-	for (typed, node) in built.iter_mut() {
-		if node.position != point(px(0.0), px(0.0)) {
-			continue;
-		}
-		let role = role_of(&typed.type_id, typed.ident == seq_ident);
-		let row = row_at_role.entry(role).or_insert(0);
-		let x = 40.0 + (role as f32) * 260.0;
-		let y = 40.0 + (*row as f32) * 180.0;
-		*row += 1;
-		node.position = point(px(x), px(y));
-	}
-
-	// Assemble: every built card + its real edges, plus the synthesized
-	// "clip → output" wires (each clip's main output into the sequence's
-	// `tex_in`, its first declared input) — full-sequence view only.
-	let clip_input = port_id(seq_ident, PortKind::Input, 0);
-	for (typed, node) in built {
-		if with_output_wires && typed.type_id == TYPE_ID_CLIP_BLOCK {
-			edges.push(RealEdge {
-				id: output_wire_id(typed.ident),
-				from_node: node.id,
-				from_port: port_id(typed.ident, PortKind::Output, 0),
-				to_node: NodeId(seq_ident),
-				to_port: clip_input,
-			});
-		}
-		if let Some((_, real)) = node_edges.iter().find(|(id, _)| *id == typed.ident) {
-			edges.extend(real.iter().cloned());
-		}
-		nodes.push(node);
-	}
-	(nodes, edges)
+/// Creates a session over the exact project Arc used by the current app.
+fn session_for_graph(
+	project: &ProjectRef,
+) -> Result<oak_engine_rust_sdk::editor::EditorSession, String> {
+	let handle = graphops::storage_bind(project);
+	oak_engine_rust_sdk::editor::EditorSession::adopt_storage_project_handle(
+		oak_engine_rust_sdk::editor::StorageProjectHandle {
+			ctx: handle.ctx,
+			addref: handle.addref,
+			release: handle.release,
+			abi_version: handle.abi_version,
+		},
+	)
+		.map_err(|error| format!("failed to adopt the current project: {error}"))
 }
 
 /// Build the (nodes, edges) snapshot of the sequence's node graph.
@@ -824,7 +716,16 @@ pub fn can_connect(project: &ProjectRef, from: PortId, to: PortId) -> bool {
 	if id_str.is_empty() {
 		return false;
 	}
-	!g.is_input_connected(node, &id_str, -1)
+	drop(guard);
+	let Some(session) = session_for_graph(project).ok() else {
+		return false;
+	};
+	session.can_connect(
+		oak_engine_rust_sdk::node::NodeId::from_raw(from_node),
+		oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+		&id_str,
+		-1,
+	)
 }
 
 /// Apply a node-graph edit to the sequence's graph (undoable through the
@@ -871,8 +772,12 @@ pub fn apply_edit_in_view(
 				};
 				(src, dst, id_str)
 			};
-			let cmd = graphops::connect_command(project, src, dst, &id_str)?;
-			graphops::push_command(cmd, "Connect Nodes")
+			session_for_graph(project)?.execute(oak_engine_rust_sdk::edit::EditCommand::Connect {
+				from: oak_engine_rust_sdk::node::NodeId::from_raw(src.identity()),
+				to: oak_engine_rust_sdk::node::NodeId::from_raw(dst.identity()),
+				input_id: id_str,
+			})
+			.map(|_| ())
 		}
 		NodeGraphEvent::DisconnectionRequested { edge } => {
 			if is_output_wire(*edge) {
@@ -892,8 +797,11 @@ pub fn apply_edit_in_view(
 				}
 				found.ok_or_else(|| format!("edge {} not found", edge.0))?
 			};
-			let cmd = graphops::disconnect_command(project, dst, &conn_id)?;
-			graphops::push_command(cmd, "Disconnect Nodes")
+			session_for_graph(project)?.execute(oak_engine_rust_sdk::edit::EditCommand::Disconnect {
+				to: oak_engine_rust_sdk::node::NodeId::from_raw(dst.identity()),
+				input_id: conn_id,
+			})
+			.map(|_| ())
 		}
 		NodeGraphEvent::NodeMoveRequested { nodes, delta } => {
 			for node in nodes {
@@ -920,14 +828,14 @@ pub fn apply_edit_in_view(
 					};
 					(id, base)
 				};
-				let cmd = graphops::set_context_position_command(
-					project,
-					id,
-					seq,
-					base.0 + f64::from(delta.x.as_f32()),
-					base.1 + f64::from(delta.y.as_f32()),
+				session_for_graph(project)?.execute(
+					oak_engine_rust_sdk::edit::EditCommand::SetContextPosition {
+						node: oak_engine_rust_sdk::node::NodeId::from_raw(id.identity()),
+						context: oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity()),
+						x: base.0 + f64::from(delta.x.as_f32()),
+						y: base.1 + f64::from(delta.y.as_f32()),
+					},
 				)?;
-				graphops::push_command(cmd, "Set Position")?;
 			}
 			Ok(())
 		}
@@ -941,7 +849,9 @@ pub fn apply_edit_in_view(
 					let guard = graphops::lock(project);
 					find_node(&guard.graph, node.0)?
 				};
-				graphops::remove_node(project, id)?;
+				session_for_graph(project)?.execute(oak_engine_rust_sdk::edit::EditCommand::RemoveNode {
+					node: oak_engine_rust_sdk::node::NodeId::from_raw(id.identity()),
+				})?;
 			}
 			Ok(())
 		}

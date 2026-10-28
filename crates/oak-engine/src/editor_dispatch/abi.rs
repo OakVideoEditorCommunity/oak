@@ -80,6 +80,7 @@ pub enum OakEditOp {
 	RemoveNodeKeyframe,
 	SetNodeValueAtTime,
 	PushNodeButton,
+	SetNodeTextValue,
 }
 
 impl OakEditOp {
@@ -149,6 +150,7 @@ impl OakEditOp {
 			60 => Self::RemoveNodeKeyframe,
 			61 => Self::SetNodeValueAtTime,
 			62 => Self::PushNodeButton,
+			63 => Self::SetNodeTextValue,
 			_ => return None,
 		})
 	}

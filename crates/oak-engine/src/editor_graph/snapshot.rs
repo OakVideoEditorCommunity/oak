@@ -212,6 +212,7 @@ fn node_snapshot(g: &Graph, sequence: NodeId, id: NodeId) -> GraphNode {
 		.filter(|(_, input)| {
 			matches!(input.value_type, ValueType::Texture | ValueType::Samples)
 				&& input.flags & oak_node::input::flags::HIDDEN == 0
+				&& !input.id.is_empty()
 		})
 		.map(|(index, input)| GraphPort {
 			id: input.id.clone(),

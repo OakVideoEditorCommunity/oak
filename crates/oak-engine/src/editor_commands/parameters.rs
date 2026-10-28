@@ -155,3 +155,42 @@ pub fn push_button(p: &ProjectRef, node: NodeId, input: &str) -> Result<(), Stri
 		Err(format!("push button: \"{input}\" is not a plugin button"))
 	}
 }
+
+/// Sets a string-carried static input while preserving its declared text subtype.
+/// Non-string inputs are rejected; undo restores the previous value verbatim.
+pub fn set_text_value(p: &ProjectRef, node: NodeId, input: &str, element: i32, value: &str) -> Result<(), String> {
+	let declared = input_type(p, node, input)?;
+	if !declared.is_string() {
+		return Err(format!("set parameter: \"{input}\" is not string-valued"));
+	}
+	let old = lock(p)
+		.graph
+		.get(node)
+		.map(|entry| entry.core.standard_value(input, element))
+		.unwrap_or(oak_node::value::NodeValue::None);
+	let redo_project = p.clone();
+	let undo_project = p.clone();
+	let redo_input = input.to_string();
+	let undo_input = input.to_string();
+	let value = value.to_string();
+	push_command(
+		oak_undo::undocommand::UndoCommand::from_closures(
+			move || {
+				if let Some(entry) = lock(&redo_project).graph.get_mut(node) {
+					let value = if declared == oak_node::value::ValueType::StrCombo {
+						oak_node::value::NodeValue::StrCombo(value.clone())
+					} else {
+						oak_node::value::NodeValue::Text(value.clone())
+					};
+					entry.core.set_standard_value(&redo_input, element, value);
+				}
+			},
+			move || {
+				if let Some(entry) = lock(&undo_project).graph.get_mut(node) {
+					entry.core.set_standard_value(&undo_input, element, old.clone());
+				}
+			},
+		),
+		"Set Parameter",
+	)
+}

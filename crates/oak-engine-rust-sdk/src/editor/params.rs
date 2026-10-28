@@ -36,6 +36,8 @@ pub enum ParameterValueType {
 	AudioParams,
 	Binary,
 	PushButton,
+	NodeRef,
+	Parametric,
 	Other(i32),
 }
 
@@ -61,6 +63,8 @@ impl ParameterValueType {
 			19 => Self::AudioParams,
 			21 => Self::Binary,
 			22 => Self::PushButton,
+			23 => Self::NodeRef,
+			24 => Self::Parametric,
 			other => Self::Other(other),
 		}
 	}

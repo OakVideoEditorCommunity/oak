@@ -93,6 +93,27 @@ fn is_enabled(g: &Graph, node: NodeId) -> bool {
 		.unwrap_or(false)
 }
 
+/// Copies a node's effect-input ID using the bounded-string convention.
+/// Returns `-1` for a null project, stale node or node without an effect input.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_effect_input_id(
+	project: *const ProjectHandle,
+	node: u64,
+	buf: *mut u8,
+	buf_len: usize,
+) -> i32 {
+	if project.is_null() {
+		return -1;
+	}
+	let Some(node) = NodeId::from_identity(node) else {
+		return -1;
+	};
+	crate::node::with_project(project, |p| effect_input_of(&p.graph, node))
+		.flatten()
+		.map(|id| copy_str_out(&id, buf, buf_len))
+		.unwrap_or(-1)
+}
+
 /// The neighbors of chain position `pos` in `chain`: `(upstream,
 /// downstream)` — the chain source is `None`, the host closes the chain.
 fn neighbors(g: &Graph, host: NodeId, chain: &[NodeId], pos: usize) -> (Option<NodeId>, NodeId) {

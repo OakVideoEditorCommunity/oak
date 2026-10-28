@@ -305,4 +305,10 @@ pub enum EditCommand {
 		node: u64,
 		input_id: String,
 	},
+	SetNodeTextValue {
+		node: u64,
+		input_id: String,
+		element: i32,
+		value: String,
+	},
 }

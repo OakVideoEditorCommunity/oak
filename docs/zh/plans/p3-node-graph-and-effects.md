@@ -1,7 +1,7 @@
 # P3：节点图、效果与参数体系实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P3。  
-> 状态：P3A–P3C 已完成，P3D app 切换待启动。P2B 已明确跳过；本文不把 P2A 或
+> 状态：P3A–P3D 已完成，P3 整体完成。P2B 已明确跳过；本文不把 P2A 或
 > P3 子阶段完成解释为 app 已完成切换。
 
 ## 1. 子阶段
@@ -24,7 +24,7 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 ## 3. 完成边界
 
 只有 P3A–P3D 全部满足，且独立消费者不依赖 `oak-node` 完成建图、连图、效果、参数、
-关键帧与渲染验证后，才能把 P3 标为完成。当前处于 P3D 待启动状态。
+关键帧与渲染验证后，才能把 P3 标为完成。P3D 的 app 切换和独立验收现已完成。
 
 ## 4. P3A 实施结果
 
@@ -108,3 +108,46 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 - engine / SDK 全量回归：engine 168 个、SDK 94 个测试通过。
 - P3A–P3C 的 engine/SDK 能力至此完成；P3 整体仍需 P3D 的 app 切换与 helper 删除，
   以及独立消费者的完整图/效果/参数/关键帧渲染验收。
+
+## 12. P3D 独立消费者验收
+
+新增 `editor::workflow` 集成测试，只通过公开 SDK 完成完整工作流：真实媒体导入、片段
+放置、OFX 效果插入、参数关键帧、图/参数快照、按钮 action、CPU 渲染以及保存重开。
+
+- 使用 CPU `org.oak.test-plugin`，避免把需要 GPU context 的 `colorcorrect` 误当作
+  headless 渲染能力。
+- 插件输出逐像素验证为 `(0.5, 0.5, 0.5, 1.0)`；`gain` 关键帧在 0s/1s 分别读回 0/1。
+- `PushNodeButton` 成功路径通过；保存重开后关键帧轨道和渲染结果保持一致。
+- engine / SDK 全量回归：engine 168 个、SDK 95 个测试通过。
+
+独立验收证明新消费者无需 `oak-node` 即可组合 P3 能力。RealEngine/app 面板切换仍是
+P3D 的剩余工作，必须继续保持同一工程实例，不以第二份工程或裸 Arc 桥接替代。
+
+## 13. P3D app 切换与完成结果
+
+- 新增 `oak_editor_adopt_storage_project_handle` 和显式 `repr(C)` `StorageProjectHandle`：迁移会话
+  与旧 `ProjectRef` 持有同一个 Arc，句柄引用计数完整，不重开工程、不裸还原指针。
+  app 通过既有 `graphops::storage_bind` 取得句柄，没有新增 `oak-storage` 直调。
+- RealEngine 的效果插入、删除、重排、启停、按钮和文本/POD 参数写入全部走
+  `EditorSession::execute`；inspector 使用 `ParameterSnapshot` 并保留 app i18n、Combo、
+  字体和 multiline 展示规则。
+- 节点编辑器使用 `GraphSnapshot` 和会话连接/断开/位置/删除命令。GPUI 卡片、颜色、端口
+  打包与角色网格只留在 app；空 ID 流端口在 engine 快照中同步过滤。
+- 旧效果插入/删除/移动/启停/参数写入 helper 已限制为测试兼容代码，不再构成生产路径；
+  渲染描述和布局回退所需的只读链信息仍由对应 P5 路径接续。
+- 独立 SDK 工作流继续验证真实 CPU 效果、关键帧、按钮和保存重开；app 的
+  `engine_effect_and_node_graph_events` 证明新旧调用作用于同一工程图。
+
+## 14. P3 完成验证
+
+- engine：168 个测试通过；SDK：95 个测试通过。
+- app：effectchain 20 个、nodegraph 8 个定向测试通过，`engine_effect_and_node_graph_events`
+  通过。
+- app 全量：720 个通过、1 个忽略、15 个失败。失败仍是既有 worker/共享内存环境路径，
+  包括 `OAK_WORKER_BIN` 缺失和 `shm_open: Operation not permitted`；没有新增节点图、
+  效果或参数失败。
+- `python3 tooling/check_app_engine_boundary.py --update-baseline`：内部引用基线由 1182
+  收紧至 1177，直接内部依赖数量未增加。
+
+P3A–P3D 的出口均已满足：独立消费者不依赖 `oak-node` 即可建图、连图、加效果、编辑
+参数和关键帧并渲染；app 的节点、效果与参数生产路径已经切换。

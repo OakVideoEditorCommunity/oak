@@ -295,5 +295,11 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			node: p.a,
 			input_id: text(p.input_id, p.input_id_len),
 		},
+		OakEditOp::SetNodeTextValue => EditCommand::SetNodeTextValue {
+			node: p.a,
+			input_id: text(p.input_id, p.input_id_len),
+			element: p.element,
+			value: text(p.name, p.name_len),
+		},
 	})
 }

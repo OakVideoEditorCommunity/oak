@@ -444,6 +444,17 @@ impl CommandArgs {
 				self.simple(OakEditOp::PushNodeButton, node);
 				self.input_id(input_id);
 			}
+			EditCommand::SetNodeTextValue {
+				node,
+				input_id,
+				element,
+				value,
+			} => {
+				self.simple(OakEditOp::SetNodeTextValue, node);
+				self.input_id(input_id);
+				self.params.element = element;
+				self.name(value);
+			}
 		}
 	}
 }

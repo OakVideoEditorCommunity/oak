@@ -216,11 +216,11 @@ crates/oak-app/src/oakui/
 **出口**：独立 SDK 测试可完成粗剪和精剪；每组编辑逐项验证 redo 后状态、undo
 后完全还原、保存重开一致；app 不再直接依赖 `oak-timeline`/`oak-undo`。
 
-### P3：节点图、效果、关键帧与参数体系（进行中）
+### P3：节点图、效果、关键帧与参数体系（已完成）
 
-实施记录见 [p3-node-graph-and-effects.md](p3-node-graph-and-effects.md)。P3 不依赖
-被跳过的 P2B；先完成 engine/SDK 的效果链与参数能力，再推进图快照、关键帧和
-app 切换。P3 全部出口满足前不标记完成。
+实施记录见 [p3-node-graph-and-effects.md](p3-node-graph-and-effects.md)。P3A–P3C 完成
+engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参数生产路径切换。
+迁移会话与旧 `ProjectRef` 通过引用计数句柄共享同一 Arc，没有第二份工程或裸 Arc 还原。
 
 - 将 `nodegraph.rs` 的图查询/连接规则与 `effectchain.rs` 的链操作迁入引擎。
 - 用 SDK DTO 表达节点、端口、连接、效果顺序、参数描述、值、枚举选项、

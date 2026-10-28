@@ -502,5 +502,11 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 		EditCommand::PushNodeButton { node, input_id } => {
 			empty(ops::push_button(project, id(node)?, &input_id))
 		}
+		EditCommand::SetNodeTextValue {
+			node,
+			input_id,
+			element,
+			value,
+		} => empty(ops::set_text_value(project, id(node)?, &input_id, element, &value)),
 	}
 }

@@ -147,7 +147,11 @@ pub(crate) fn build(project: &ProjectRef, node: NodeId) -> Option<ParamSnapshot>
 			Param {
 				input_id: input.id.clone(),
 				label,
-				value_type: input.value_type.to_cpp_discriminant(),
+				value_type: match input.value_type {
+					ValueType::NodeRef => 23,
+					ValueType::Parametric => 24,
+					other => other.to_cpp_discriminant(),
+				},
 				flags: input.flags,
 				properties,
 				values,

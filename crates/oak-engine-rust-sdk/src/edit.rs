@@ -321,6 +321,13 @@ pub enum EditCommand {
 		node: NodeId,
 		input_id: String,
 	},
+	/// Sets a Text/StrCombo/Parametric static value without a POD payload.
+	SetNodeTextValue {
+		node: NodeId,
+		input_id: String,
+		element: i32,
+		value: String,
+	},
 }
 
 /// A clip captured by the session clipboard.

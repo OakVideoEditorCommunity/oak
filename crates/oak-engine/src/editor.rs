@@ -250,6 +250,29 @@ pub unsafe extern "C" fn oak_editor_open_project_from_library(
 	session_from_project_handle(ProjectHandle::from_arc(project))
 }
 
+/// Adopts one owned storage project handle without reopening or copying it.
+///
+/// This is the migration path for a host that already owns a `ProjectRef`: the
+/// handle's Arc is retained by the new session and the supplied handle reference
+/// is released. Both sides therefore observe the same live project. Null or
+/// invalid handles return null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_editor_adopt_storage_project_handle(
+	project: oak_core::handle::CHandle,
+) -> *mut EditorSessionHandle {
+	if project.is_null() {
+		return std::ptr::null_mut();
+	}
+	let project = match unsafe { nodeutil::project_arc(&project) } {
+		Ok(project) => project,
+		Err(_) => {
+			nodeutil::release_project(project);
+			return std::ptr::null_mut();
+		}
+	};
+	session_from_project_handle(ProjectHandle::from_arc(project))
+}
+
 /// Creates a blank row in the configured default library. The returned
 /// session owns the same project that was saved, not a reloaded copy.
 #[unsafe(no_mangle)]

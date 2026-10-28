@@ -91,9 +91,9 @@
       }
     },
     "crates/oak-app/src/oakui/nodegraph.rs": {
-      "total": 35,
+      "total": 31,
       "crates": {
-        "oak-node": 20,
+        "oak-node": 16,
         "oak-timeline": 1,
         "oak-undo": 14
       }
@@ -112,13 +112,13 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 287,
+      "total": 286,
       "crates": {
         "oak-audio": 21,
         "oak-codec": 29,
         "oak-core": 70,
         "oak-node": 72,
-        "oak-ofx-plugin": 2,
+        "oak-ofx-plugin": 1,
         "oak-render": 11,
         "oak-storage": 1,
         "oak-task": 21,

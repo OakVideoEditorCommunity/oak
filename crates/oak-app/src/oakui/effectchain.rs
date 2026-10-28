@@ -26,14 +26,19 @@
 //! project, and the undoable edits are one stack entry each (a multi
 //! command or a closure command from [`oak_undo::undocommand::UndoCommand`]).
 
+#[cfg(test)]
 use std::sync::{Arc, Mutex};
 
+#[allow(unused_imports)]
 use oak_node::graph::{Graph, NodeEntry};
 use oak_node::id::NodeId;
 use oak_node::node::ENABLED_INPUT;
 use oak_node::value::{NodeValue, ValueType};
+use oak_engine_rust_sdk::edit::EditCommand;
+#[cfg(test)]
 use oak_undo::undocommand::UndoCommand;
 
+#[cfg(test)]
 use super::graphops::{
 	ProjectRef, connect_command, disconnect_command, lock, push_command as push,
 };
@@ -41,6 +46,7 @@ use super::graphops::{
 /// The media kind an effect chain carries (video chains are
 /// texture-typed, audio chains samples-typed).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 enum EffectMedia {
 	Video,
 	Audio,
@@ -50,6 +56,7 @@ enum EffectMedia {
 /// type: a samples-typed effect input marks an audio effect (volume,
 /// pan); texture-typed (or unrecognized) inputs are treated as video —
 /// the clip/adjustment chain's own typing.
+#[cfg(test)]
 fn effect_media_of(core: &oak_node::node::NodeCore) -> EffectMedia {
 	match core.get_input(&core.effect_input).map(|i| i.value_type) {
 		Some(oak_node::value::ValueType::Samples) => EffectMedia::Audio,
@@ -63,6 +70,7 @@ fn effect_media_of(core: &oak_node::node::NodeCore) -> EffectMedia {
 /// track kind and the audio mixer never consults the clip's effect
 /// stack, so the track is the source of truth. Non-block or untracked
 /// hosts fall back to the host effect input's value type.
+#[cfg(test)]
 fn host_media_of(g: &Graph, host: NodeId) -> Option<EffectMedia> {
 	if let Some(track) = super::graphops::clip_track(g, host) {
 		if let Some(track) = super::graphops::track_behavior(g, track) {
@@ -316,6 +324,7 @@ pub fn plugin_instance_handle(g: &Graph, node: NodeId) -> Option<u64> {
 /// editor lists every non-hidden, non-connection input); connection/data
 /// inputs (texture / samples / matrix) and the structural enabled input
 /// are excluded.
+#[cfg(test)]
 pub fn effect_params(g: &Graph, node: NodeId) -> Option<Vec<super::engine::EffectParam>> {
 	use oak_node::input::flags as input_flags;
 	let entry = g.get(node)?;
@@ -425,6 +434,7 @@ pub fn effect_params(g: &Graph, node: NodeId) -> Option<Vec<super::engine::Effec
 /// Convert the domain value vocabulary into the owned app DTO. This is
 /// the only place where the real backend's parameter snapshots cross
 /// that boundary; neither widgets nor MockEngine need domain values.
+#[cfg(test)]
 fn effect_value_type(value: ValueType) -> super::engine::EffectValueType {
 	use super::engine::EffectValueType as Out;
 	match value {
@@ -452,6 +462,7 @@ fn effect_value_type(value: ValueType) -> super::engine::EffectValueType {
 	}
 }
 
+#[cfg(test)]
 fn effect_value(value: &NodeValue) -> super::engine::EffectValue {
 	use super::engine::EffectValue as Out;
 	match value {
@@ -470,6 +481,209 @@ fn effect_value(value: &NodeValue) -> super::engine::EffectValue {
 		NodeValue::PushButton => Out::PushButton,
 		other => Out::Unsupported(format!("{other:?}")),
 	}
+}
+
+/// Converts an SDK parameter snapshot into the inspector's owned DTOs while
+/// retaining app-owned localization and presentation-only injections.
+pub fn params_from_sdk(
+	snapshot: &oak_engine_rust_sdk::editor::ParameterSnapshot,
+	type_id: &str,
+) -> Vec<super::engine::EffectParam> {
+	use oak_engine_rust_sdk::editor::{ParameterValue, ParameterValueType};
+	use super::engine::{EffectValue, EffectValueType};
+
+	fn value_type(value: ParameterValueType) -> EffectValueType {
+		use ParameterValueType as In;
+		use EffectValueType as Out;
+		match value {
+			In::None | In::Other(_) => Out::None,
+			In::Int => Out::Int,
+			In::Float => Out::Float,
+			In::Rational => Out::Rational,
+			In::Boolean => Out::Boolean,
+			In::Color => Out::Color,
+			In::Matrix => Out::Matrix,
+			In::Text => Out::Text,
+			In::Texture => Out::Texture,
+			In::Samples => Out::Samples,
+			In::Vec2 => Out::Vec2,
+			In::Vec3 => Out::Vec3,
+			In::Vec4 => Out::Vec4,
+			In::Combo => Out::Combo,
+			In::StrCombo => Out::StrCombo,
+			In::VideoParams => Out::VideoParams,
+			In::AudioParams => Out::AudioParams,
+			In::Binary => Out::Binary,
+			In::PushButton => Out::PushButton,
+			In::NodeRef => Out::NodeRef,
+			In::Parametric => Out::Parametric,
+		}
+	}
+
+	fn pod_value(value: oak_engine_rust_sdk::node::NodeValue) -> EffectValue {
+		match value.kind {
+			1 => EffectValue::Int(value.num),
+			2 => EffectValue::Float(value.f[0]),
+			3 => EffectValue::Boolean(value.num != 0),
+			5 => EffectValue::Color(value.f),
+			6 => EffectValue::Vec2([value.f[0], value.f[1]]),
+			7 => EffectValue::Vec3([value.f[0], value.f[1], value.f[2]]),
+			8 => EffectValue::Vec4(value.f),
+			16 => EffectValue::Combo(value.num),
+			kind => EffectValue::Unsupported(format!("POD kind {kind}")),
+		}
+	}
+
+	fn property_value(value: &ParameterValue) -> EffectValue {
+		if let Some(text) = &value.text {
+			return EffectValue::Text(text.clone());
+		}
+		value.pod.map(pod_value).unwrap_or(EffectValue::None)
+	}
+
+	fn parameter_value(value: &ParameterValue, kind: ParameterValueType) -> EffectValue {
+		if kind == ParameterValueType::PushButton {
+			return EffectValue::PushButton;
+		}
+		if let Some(text) = &value.text {
+			return if kind == ParameterValueType::StrCombo {
+				EffectValue::StrCombo(text.clone())
+			} else {
+				EffectValue::Text(text.clone())
+			};
+		}
+		value.pod.map(pod_value).unwrap_or(EffectValue::None)
+	}
+
+	let builtin = oak_engine_rust_sdk::effect::factory_entries()
+		.iter()
+		.any(|entry| entry.type_id == type_id);
+	snapshot
+		.params
+		.iter()
+		.map(|param| {
+			let display_name = if builtin {
+				crate::i18n::tr_or(&input_name_key(type_id, &param.input_id), &param.label)
+			} else {
+				param.label.clone()
+			};
+			let mut properties: Vec<(String, EffectValue)> = param
+				.properties
+				.iter()
+				.map(|property| (property.key.clone(), property_value(&property.value)))
+				.collect();
+			if param.input_id == "font_family_in"
+				&& !properties.iter().any(|(key, _)| key == "combo_option")
+			{
+				properties.extend(
+					super::textengine::font_families()
+						.into_iter()
+						.map(|name| ("combo_option".into(), EffectValue::Text(name))),
+				);
+			}
+			if matches!(param.value_type, ParameterValueType::Text)
+				&& matches!(param.input_id.as_str(), "plain_text_in" | "text_in")
+				&& !properties.iter().any(|(key, _)| key == "multiline")
+			{
+				properties.push(("multiline".into(), EffectValue::Boolean(true)));
+			}
+			super::engine::EffectParam {
+				input_id: param.input_id.clone(),
+				display_name,
+				value_type: value_type(param.value_type),
+				value: param
+					.scalar_value()
+					.map(|value| parameter_value(value, param.value_type))
+					.unwrap_or(EffectValue::None),
+				flags: param.flags,
+				properties,
+			}
+		})
+		.collect()
+}
+
+/// Writes one app parameter value through the session's native command ABI.
+pub fn set_sdk_input_value(
+	session: &oak_engine_rust_sdk::editor::EditorSession,
+	node: oak_engine_rust_sdk::node::NodeId,
+	input_id: &str,
+	value: super::engine::EffectValue,
+) -> Result<(), String> {
+	use super::engine::EffectValue as In;
+	use oak_engine_rust_sdk::node::NodeValue;
+	fn pod(kind: i32, num: i64, values: &[f64]) -> NodeValue {
+		let mut value = NodeValue {
+			kind,
+			num,
+			..NodeValue::default()
+		};
+		value.f[..values.len()].copy_from_slice(values);
+		value
+	}
+	let command = match value {
+		In::Int(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(1, value, &[]),
+		},
+		In::Float(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(2, 0, &[value]),
+		},
+		In::Color(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(5, 0, &value),
+		},
+		In::Text(value) | In::StrCombo(value) => EditCommand::SetNodeTextValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value,
+		},
+		In::Boolean(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(3, value as i64, &[]),
+		},
+		In::Vec2(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(6, 0, &value),
+		},
+		In::Vec3(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(7, 0, &value),
+		},
+		In::Vec4(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(8, 0, &value),
+		},
+		In::Combo(value) => EditCommand::SetNodeStandardValue {
+			node,
+			input_id: input_id.into(),
+			element: -1,
+			value: pod(16, value, &[]),
+		},
+		In::PushButton => EditCommand::PushNodeButton {
+			node,
+			input_id: input_id.into(),
+		},
+		In::None => return Err("a null parameter value is not writable".into()),
+		In::Binary(_) => return Err("binary parameters are not writable through this DTO".into()),
+		In::Unsupported(_) => return Err("unsupported parameter values are read-only".into()),
+	};
+	session.execute(command).map(|_| ())
 }
 
 /// Domain-preserving parameter access for the montage builder. Rendering
@@ -496,6 +710,7 @@ pub fn render_params(g: &Graph, node: NodeId) -> Option<Vec<(String, NodeValue)>
 
 /// Convert an edited app DTO back to the domain value. Unsupported
 /// read-only payloads cannot be committed accidentally as `None`.
+#[cfg(test)]
 pub fn into_node_value(value: super::engine::EffectValue) -> Result<NodeValue, String> {
 	use super::engine::EffectValue as In;
 	Ok(match value {
@@ -575,6 +790,7 @@ pub fn ui_section_of(p: &super::engine::EffectParam) -> Option<(String, String)>
 /// Shared state of an add-node command: the node's entry while detached
 /// plus its arena id once added (kept across undo/redo so the rewiring
 /// commands of the same group keep addressing the same slot).
+#[cfg(test)]
 type AddNodeState = Arc<Mutex<(Option<NodeEntry>, Option<NodeId>)>>;
 
 /// A command that adds a node entry to the project's graph on `redo` and
@@ -582,6 +798,7 @@ type AddNodeState = Arc<Mutex<(Option<NodeEntry>, Option<NodeId>)>>;
 /// the command and its shared state — the caller reads the assigned id
 /// after the eager redo (the group push executes redos immediately, so
 /// the rewiring commands pushed next address the live id).
+#[cfg(test)]
 fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeState) {
 	let state: AddNodeState = Arc::new(Mutex::new((Some(entry), None)));
 	let (s1, s2) = (state.clone(), state.clone());
@@ -621,6 +838,7 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 /// facade's `oakengine_undo_group_begin` flow), and the group closes as
 /// ONE undo row on success / aborts (undoing the executed children) on
 /// error.
+#[cfg(test)]
 fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 	oak_undo::global::group_begin(name).map_err(|e| e.to_string())?;
 	match f() {
@@ -637,6 +855,7 @@ fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, St
 
 /// Undoable enable toggle of an effect node ("Toggle Effect"; the
 /// `enabled_in` flag).
+#[cfg(test)]
 pub fn set_enabled(p: &ProjectRef, effect: NodeId, enabled: bool) -> Result<(), String> {
 	let old = {
 		let g = lock(p);
@@ -671,6 +890,7 @@ pub fn set_enabled(p: &ProjectRef, effect: NodeId, enabled: bool) -> Result<(), 
 /// "Set Parameter". `input_id` must exist on the node; the value is
 /// written as the standard value of element -1 (non-keyframed). Used by
 /// the inspector's OFX parameter controls.
+#[cfg(test)]
 pub fn set_input_value(
 	p: &ProjectRef,
 	effect: NodeId,
@@ -718,6 +938,7 @@ pub fn set_input_value(
 /// The neighbors of chain position `pos` in `chain` (length `len`):
 /// `(upstream, downstream)` — the chain source is `None`, the host closes
 /// the chain.
+#[cfg(test)]
 fn neighbors(g: &Graph, host: NodeId, chain: &[NodeId], pos: usize) -> (Option<NodeId>, NodeId) {
 	let len = chain.len();
 	if pos == 0 {
@@ -740,6 +961,7 @@ fn neighbors(g: &Graph, host: NodeId, chain: &[NodeId], pos: usize) -> (Option<N
 /// out-of-range indices clamp to the ends). The node is created from the
 /// factory, added to the host's project, and wired into the chain — one
 /// undo row for the whole edit ("Add Effect"). Returns the new node's id.
+#[cfg(test)]
 pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Result<NodeId, String> {
 	let (chain_vec, new_entry, new_input) = {
 		let g = lock(p);
@@ -828,6 +1050,7 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 /// itself is left orphaned in the project graph: the module node-transfer
 /// commands are one-way, so a reversible detach does not exist there yet
 /// — documented limitation carried over from the facade.
+#[cfg(test)]
 pub fn remove(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String> {
 	let (chain_vec, pos) = {
 		let g = lock(p);
@@ -888,6 +1111,7 @@ pub fn remove(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String
 /// insertion index **after** removal, matching the effect stack's
 /// `ReorderRequested`; `0..=len-1` where `len` is the post-removal chain
 /// length). One undo row ("Reorder Effect").
+#[cfg(test)]
 pub fn move_effect(
 	p: &ProjectRef,
 	host: NodeId,

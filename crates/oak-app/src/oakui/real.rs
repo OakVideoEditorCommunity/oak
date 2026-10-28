@@ -80,6 +80,8 @@ use crate::widgets::viewer::PlaybackClock;
 
 use oak_node::id::NodeId;
 use oak_node::track::TrackType;
+use oak_engine_rust_sdk::edit::EditCommand;
+use oak_engine_rust_sdk::editor::EditorSession;
 use oak_engine_rust_sdk::state::Config;
 use oak_render::manager::RenderManager;
 use oak_render::procpool::{bgra8_to_rgba8, ShmFrameRef};
@@ -1699,6 +1701,21 @@ impl RealEngine {
 	/// The open project reference, if any.
 	fn project_ref(&self) -> Option<&ProjectRef> {
 		self.project.as_ref()
+	}
+
+	/// Creates a migration session over the exact same project Arc. The storage
+	/// handle owns one reference and is consumed by the session constructor, so
+	/// graph/effect SDK calls never reload or fork the current document.
+	fn editor_session(&self) -> Option<EditorSession> {
+		let project = self.project.clone()?;
+		let handle = graphops::storage_bind(&project);
+		EditorSession::adopt_storage_project_handle(oak_engine_rust_sdk::editor::StorageProjectHandle {
+			ctx: handle.ctx,
+			addref: handle.addref,
+			release: handle.release,
+			abi_version: handle.abi_version,
+		})
+		.ok()
 	}
 
 	/// The sequence's timebase `(rate_den, rate_num)`, if a sequence with
@@ -3796,16 +3813,21 @@ impl RealEngine {
 	/// cannot host effects yields an empty list (its `target_label` is
 	/// `None`, so the stack shows the empty state).
 	fn selected_effect_cards(&self) -> Vec<Arc<dyn EffectData>> {
-		let Some(project) = self.project_ref() else {
+		let Some(session) = self.editor_session() else {
 			return Vec::new();
 		};
 		let Some(host) = self.selected_clip_node() else {
 			return Vec::new();
 		};
+		let chain = session
+			.project()
+			.effect_chain(oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()));
+		let project = self.project_ref().expect("session requires a project");
 		let guard = graphops::lock(project);
 		let mut out: Vec<Arc<dyn EffectData>> = Vec::new();
-		for node in super::effectchain::chain(&guard.graph, host) {
-			let identity = node.identity();
+		for node in chain {
+			let identity = node.raw();
+			let node = graphops::id_of(identity).expect("SDK and app share node identities");
 			let type_id = graphops::node_type_id(&guard.graph, node);
 			// `name_of` covers both static (built-in) and dynamic (OpenFX
 			// plugin) factory entries.
@@ -4486,13 +4508,19 @@ impl AppEngine for RealEngine {
 		type_id: &str,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let Some(host) = self.selected_clip_node() else {
 			return Err("no selected clip".into());
 		};
-		let result = super::effectchain::insert(&project, host, index, type_id).map(|_| ());
+		let result = session
+			.execute(EditCommand::EffectInsert {
+				host: oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()),
+				index,
+				type_id: type_id.to_string(),
+			})
+			.map(|_| ());
 		self.apply_edit(result.clone(), "add effect", cx);
 		result
 	}
@@ -4505,7 +4533,7 @@ impl AppEngine for RealEngine {
 		type_id: &str,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let Some(host) = graphops::id_of(clip.0) else {
@@ -4514,16 +4542,24 @@ impl AppEngine for RealEngine {
 		if self.clip_track_locked(host) {
 			return Err("the clip's track is locked".into());
 		}
-		let result = super::effectchain::insert(&project, host, usize::MAX, type_id).map(|_| ());
+		let result = session
+			.execute(EditCommand::EffectInsert {
+				host: oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()),
+				index: usize::MAX,
+				type_id: type_id.to_string(),
+			})
+			.map(|_| ());
 		self.apply_edit(result.clone(), "add effect", cx);
 		result
 	}
 
 	fn effect_params(&self, effect: EffectId) -> Option<Vec<crate::oakui::engine::EffectParam>> {
-		let project = self.project_ref()?;
+		let session = self.editor_session()?;
 		let node = graphops::id_of(effect.0)?;
-		let guard = graphops::lock(project);
-		super::effectchain::effect_params(&guard.graph, node)
+		let node = oak_engine_rust_sdk::node::NodeId::from_raw(node.identity());
+		let snapshot = session.parameters(node)?;
+		let type_id = session.project().node_type_id(node).unwrap_or_default();
+		Some(super::effectchain::params_from_sdk(&snapshot, &type_id))
 	}
 
 	fn set_effect_param(
@@ -4533,14 +4569,14 @@ impl AppEngine for RealEngine {
 		value: super::engine::EffectValue,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let Some(node) = graphops::id_of(effect.0) else {
 			return Err("effect node not found".into());
 		};
-		let result = super::effectchain::into_node_value(value)
-			.and_then(|value| super::effectchain::set_input_value(&project, node, input_id, value));
+		let node = oak_engine_rust_sdk::node::NodeId::from_raw(node.identity());
+		let result = super::effectchain::set_sdk_input_value(&session, node, input_id, value);
 		self.apply_edit(result.clone(), "set parameter", cx);
 		result
 	}
@@ -4551,20 +4587,18 @@ impl AppEngine for RealEngine {
 		input_id: &str,
 		cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some(project) = self.project_ref() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let Some(node) = graphops::id_of(effect.0) else {
 			return Err("effect node not found".into());
 		};
-		let guard = graphops::lock(project);
-		let Some(instance) = super::effectchain::plugin_instance_handle(&guard.graph, node) else {
-			return Err("not a plugin effect".into());
-		};
-		drop(guard);
-		if !oak_ofx_plugin::node_factory::push_button_clicked(instance, input_id) {
-			return Err(format!("push button \"{input_id}\" not found"));
-		}
+		session
+			.execute(EditCommand::PushNodeButton {
+				node: oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+				input_id: input_id.to_string(),
+			})
+			.map_err(|error| format!("push button \"{input_id}\" failed: {error}"))?;
 		// A button press can change the plugin's other parameters; refresh
 		// the snapshots and repaint.
 		cx.notify();
@@ -4572,14 +4606,19 @@ impl AppEngine for RealEngine {
 	}
 
 	fn ofx_interact_target(&self, _cx: &App) -> Option<u64> {
-		let Some(project) = self.project_ref() else {
+		let Some(session) = self.editor_session() else {
 			return None;
 		};
 		let Some(host) = self.selected_clip_node() else {
 			return None;
 		};
+		let chain = session
+			.project()
+			.effect_chain(oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()));
+		let project = self.project_ref()?;
 		let guard = graphops::lock(project);
-		for node in super::effectchain::chain(&guard.graph, host) {
+		for node in chain {
+			let node = graphops::id_of(node.raw())?;
 			// The inspector's current selection: the first *expanded*
 			// OFX plugin card (its parameter UI is on screen, so its
 			// custom interact drives the viewer overlay).
@@ -4594,8 +4633,8 @@ impl AppEngine for RealEngine {
 	fn apply_effect_event(&mut self, event: &EffectStackEvent, cx: &mut Context<Self>) {
 		match event {
 			EffectStackEvent::EnableToggled { effect, enabled } => {
-				let (Some(project), Some(_host)) =
-					(self.project.clone(), self.selected_clip_node())
+				let (Some(session), Some(_host)) =
+					(self.editor_session(), self.selected_clip_node())
 				else {
 					cx.notify();
 					return;
@@ -4604,7 +4643,11 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = super::effectchain::set_enabled(&project, node, *enabled);
+				let result = session.execute(EditCommand::EffectSetEnabled {
+					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+					enabled: *enabled,
+				})
+				.map(|_| ());
 				self.apply_edit(result, "toggle effect", cx);
 			}
 			EffectStackEvent::ExpansionToggled { effect, expanded } => {
@@ -4618,7 +4661,7 @@ impl AppEngine for RealEngine {
 				cx.notify();
 			}
 			EffectStackEvent::RemoveRequested(id) => {
-				let (Some(project), Some(host)) = (self.project.clone(), self.selected_clip_node())
+				let (Some(session), Some(host)) = (self.editor_session(), self.selected_clip_node())
 				else {
 					cx.notify();
 					return;
@@ -4627,11 +4670,15 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = super::effectchain::remove(&project, host, node);
+				let result = session.execute(EditCommand::EffectRemove {
+					host: oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()),
+					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+				})
+				.map(|_| ());
 				self.apply_edit(result, "remove effect", cx);
 			}
 			EffectStackEvent::ReorderRequested { effect, new_index } => {
-				let (Some(project), Some(host)) = (self.project.clone(), self.selected_clip_node())
+				let (Some(session), Some(host)) = (self.editor_session(), self.selected_clip_node())
 				else {
 					cx.notify();
 					return;
@@ -4640,7 +4687,12 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = super::effectchain::move_effect(&project, host, node, *new_index);
+				let result = session.execute(EditCommand::EffectMove {
+					host: oak_engine_rust_sdk::node::NodeId::from_raw(host.identity()),
+					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+					new_index: *new_index,
+				})
+				.map(|_| ());
 				self.apply_edit(result, "reorder effect", cx);
 			}
 			EffectStackEvent::AddRequested { index } => {
