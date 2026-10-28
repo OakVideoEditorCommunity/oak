@@ -85,4 +85,64 @@ mod tests {
 		assert_eq!(session.snapshot().root.children[0].name, "After");
 		let _ = std::fs::remove_file(media);
 	}
+
+	#[test]
+	fn proxy_overrides_and_sequence_creation_roundtrip() {
+		let _guard = crate::node::UNDO_SERIAL
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let session = EditorSession::new().expect("session");
+		let media = crate::test_support::make_test_clip("proxy_override");
+		let footage = session.project().import_footage(&media).expect("footage");
+		let mut params = crate::codec::ProxyParams::default();
+		params.width = 320;
+		params.height = 180;
+		params.divider = 4;
+		params.crf = 19;
+		params.include_audio = 0;
+		session
+			.execute(EditCommand::SetFootageProxyParams { footage, params })
+			.expect("set proxy override");
+		let custom = session.project().footage_custom_proxy_params(footage).expect("custom");
+		assert_eq!((custom.width, custom.height, custom.divider, custom.crf), (320, 180, 4, 19));
+		assert_eq!(session.project().footage_effective_proxy_params(footage).unwrap().width, 320);
+		assert!(crate::node::undo());
+		assert!(session.project().footage_custom_proxy_params(footage).is_none());
+		assert!(crate::node::redo());
+		assert!(session.project().footage_custom_proxy_params(footage).is_some());
+		session
+			.execute(EditCommand::ClearFootageProxyParams { footage })
+			.expect("clear override");
+		assert!(session.project().footage_custom_proxy_params(footage).is_none());
+		assert!(crate::node::undo());
+		assert!(session.project().footage_custom_proxy_params(footage).is_some());
+
+		let sequence = session
+			.execute(EditCommand::CreateSequenceFromFootage {
+				footage,
+				name: "From Media".into(),
+			})
+			.expect("sequence from footage")
+			.primary
+			.expect("sequence id");
+		let snapshot = session.snapshot();
+		let created = snapshot.sequences.iter().find(|item| item.id == sequence).expect("sequence");
+		assert_eq!((created.width, created.height), (64, 64));
+		assert_eq!(created.frame_rate, crate::types::Rational::new(10, 1));
+		assert!(session.set_current_sequence(sequence));
+		let nested = session
+			.execute(EditCommand::PlaceNestedSequenceClip {
+				source: sequence,
+				track_index: 0,
+				in_ts: 0,
+				out_ts: 5,
+			})
+			.expect("nested clip")
+			.primary
+			.expect("nested id");
+		assert!(session.snapshot().sequences.iter().any(|item| {
+			item.id == session.current_sequence().unwrap() && item.tracks[0].clips.iter().any(|clip| clip.id == nested)
+		}));
+		let _ = std::fs::remove_file(media);
+	}
 }

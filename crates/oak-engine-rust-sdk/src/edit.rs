@@ -337,6 +337,20 @@ pub enum EditCommand {
 	DeleteEntry {
 		node: NodeId,
 	},
+	/// Replaces a footage node's custom proxy generation parameters.
+	SetFootageProxyParams {
+		footage: NodeId,
+		params: crate::codec::ProxyParams,
+	},
+	/// Clears the per-footage override and restores global proxy parameters.
+	ClearFootageProxyParams {
+		footage: NodeId,
+	},
+	/// Creates a sequence using the footage's first video-stream format.
+	CreateSequenceFromFootage {
+		footage: NodeId,
+		name: String,
+	},
 }
 
 /// A clip captured by the session clipboard.

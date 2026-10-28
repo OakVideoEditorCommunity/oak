@@ -111,6 +111,69 @@ pub fn delete_entry(project: &ProjectRef, node: NodeId) -> Result<(), String> {
 	)
 }
 
+/// Replaces or clears a footage node's custom proxy generation parameters as
+/// one undoable edit. The previous override is restored on undo.
+pub fn set_footage_proxy_params(
+	project: &ProjectRef,
+	footage: NodeId,
+	params: Option<oak_codec::proxymanager::ProxyParams>,
+) -> Result<(), String> {
+	let (old, mut new) = {
+		let guard = lock(project);
+		let old = footage_behavior(&guard.graph, footage)
+			.ok_or_else(|| "entry is not footage".to_string())?
+			.clone();
+		let mut new = old.clone();
+		new.custom_proxy_params = params;
+		(old, new)
+	};
+	let label = if new.custom_proxy_params.is_some() {
+		"Set Custom Proxy Parameters"
+	} else {
+		"Clear Custom Proxy Parameters"
+	};
+	let redo_project = project.clone();
+	let undo_project = project.clone();
+	push_command(
+		oak_undo::undocommand::UndoCommand::from_closures(
+			move || {
+				if let Some(entry) = lock(&redo_project).graph.get_mut(footage) {
+					entry.behavior = Box::new(new.clone());
+				}
+			},
+			move || {
+				if let Some(entry) = lock(&undo_project).graph.get_mut(footage) {
+					entry.behavior = Box::new(old.clone());
+				}
+			},
+		),
+		label,
+	)
+}
+
+/// Creates a sequence using the footage's first video-stream format. Audio-only
+/// footage keeps the engine defaults. Sequence creation itself is not undoable,
+/// matching the existing sequence factory.
+pub fn create_sequence_from_footage(project: &ProjectRef, footage: NodeId, name: &str) -> Result<NodeId, String> {
+	let params = {
+		let guard = lock(project);
+		let footage = footage_behavior(&guard.graph, footage)
+			.ok_or_else(|| "entry is not footage".to_string())?;
+		footage.video_params(0).map(|vp| {
+			(
+				vp.width.max(1),
+				vp.height.max(1),
+				oak_core::Rational::new(
+					vp.frame_rate.numerator().max(1),
+					vp.frame_rate.denominator().max(1),
+				),
+				vp.interlaced,
+			)
+		})
+	};
+	Ok(create_sequence_with_params(project, name, params))
+}
+
 // ---------------------------------------------------------------------------
 // Marker list / workarea auxiliaries
 //

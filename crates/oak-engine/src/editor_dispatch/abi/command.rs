@@ -306,5 +306,14 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			path: text(p.path, p.path_len),
 		},
 		OakEditOp::DeleteEntry => EditCommand::DeleteEntry { node: p.a },
+		OakEditOp::SetFootageProxyParams => EditCommand::SetFootageProxyParams {
+			footage: p.a,
+			params: p.proxy_params.clone(),
+		},
+		OakEditOp::ClearFootageProxyParams => EditCommand::ClearFootageProxyParams { footage: p.a },
+		OakEditOp::CreateSequenceFromFootage => EditCommand::CreateSequenceFromFootage {
+			footage: p.a,
+			name: text(p.name, p.name_len),
+		},
 	})
 }

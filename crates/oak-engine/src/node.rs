@@ -421,6 +421,52 @@ pub unsafe extern "C" fn oak_footage_audio_params(
 	}
 }
 
+/// Copies a footage node's custom proxy parameters. False for null/unknown
+/// footage or when no custom override exists.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_footage_custom_proxy_params(
+	project: *const ProjectHandle,
+	id: u64,
+	out: *mut oak_codec::proxymanager::ProxyParams,
+) -> bool {
+	if out.is_null() {
+		return false;
+	}
+	let Some(id) = node_id(id) else { return false };
+	with_project(project, |p| {
+		behavior_as::<FootageBehavior>(p, id).and_then(|f| f.custom_proxy_params.clone())
+	})
+	.flatten()
+	.map(|params| {
+		unsafe { *out = params };
+		true
+	})
+	.unwrap_or(false)
+}
+
+/// Copies a footage node's effective proxy parameters (custom override or
+/// global defaults). False for null/unknown footage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_footage_effective_proxy_params(
+	project: *const ProjectHandle,
+	id: u64,
+	out: *mut oak_codec::proxymanager::ProxyParams,
+) -> bool {
+	if out.is_null() {
+		return false;
+	}
+	let Some(id) = node_id(id) else { return false };
+	with_project(project, |p| {
+		behavior_as::<FootageBehavior>(p, id).map(|f| f.effective_proxy_params())
+	})
+	.flatten()
+	.map(|params| {
+		unsafe { *out = params };
+		true
+	})
+	.unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Sequence / track list / track
 // ---------------------------------------------------------------------------

@@ -83,6 +83,7 @@ pub fn proxy_params_to_codec(ui: &ProxyParamsUi) -> ProxyParams {
 	params
 }
 
+#[cfg(test)]
 pub fn proxy_params_from_codec(codec: &ProxyParams) -> ProxyParamsUi {
 	let end = codec
 		.preset

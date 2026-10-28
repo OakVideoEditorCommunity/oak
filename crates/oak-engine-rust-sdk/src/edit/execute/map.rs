@@ -460,6 +460,17 @@ impl CommandArgs {
 				self.path(path);
 			}
 			EditCommand::DeleteEntry { node } => self.simple(OakEditOp::DeleteEntry, node),
+			EditCommand::SetFootageProxyParams { footage, params } => {
+				self.simple(OakEditOp::SetFootageProxyParams, footage);
+				self.params.proxy_params = params;
+			}
+			EditCommand::ClearFootageProxyParams { footage } => {
+				self.simple(OakEditOp::ClearFootageProxyParams, footage);
+			}
+			EditCommand::CreateSequenceFromFootage { footage, name } => {
+				self.simple(OakEditOp::CreateSequenceFromFootage, footage);
+				self.name(name);
+			}
 		}
 	}
 }

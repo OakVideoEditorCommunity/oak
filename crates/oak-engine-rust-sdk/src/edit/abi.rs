@@ -77,6 +77,9 @@ pub(crate) enum OakEditOp {
 	SetNodeTextValue,
 	ReplaceFootage,
 	DeleteEntry,
+	SetFootageProxyParams,
+	ClearFootageProxyParams,
+	CreateSequenceFromFootage,
 }
 
 impl OakEditOp {
@@ -108,7 +111,7 @@ pub(crate) struct OakClipboardClip {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 /// Generic operation parameters and borrowed input/output buffers.
 ///
 /// Only the slots documented by the selected opcode are read. String lengths
@@ -142,6 +145,7 @@ pub(crate) struct OakEditParams {
 	pub bezier_in_y: f64,
 	pub bezier_out_x: f64,
 	pub bezier_out_y: f64,
+	pub proxy_params: crate::codec::ProxyParams,
 	pub name: *const u8,
 	pub name_len: usize,
 	pub path: *const u8,
@@ -188,6 +192,7 @@ impl Default for OakEditParams {
 			bezier_in_y: 0.0,
 			bezier_out_x: 0.0,
 			bezier_out_y: 0.0,
+			proxy_params: crate::codec::ProxyParams::default(),
 			name: std::ptr::null(),
 			name_len: 0,
 			path: std::ptr::null(),

@@ -83,6 +83,9 @@ pub enum OakEditOp {
 	SetNodeTextValue,
 	ReplaceFootage,
 	DeleteEntry,
+	SetFootageProxyParams,
+	ClearFootageProxyParams,
+	CreateSequenceFromFootage,
 }
 
 impl OakEditOp {
@@ -155,6 +158,9 @@ impl OakEditOp {
 			63 => Self::SetNodeTextValue,
 			64 => Self::ReplaceFootage,
 			65 => Self::DeleteEntry,
+			66 => Self::SetFootageProxyParams,
+			67 => Self::ClearFootageProxyParams,
+			68 => Self::CreateSequenceFromFootage,
 			_ => return None,
 		})
 	}
@@ -169,7 +175,7 @@ pub struct OakTrackPlacement {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 /// Operation-specific parameter slots shared by every edit opcode.
 ///
 /// `a`–`d` usually carry raw node identities; `command` below is the canonical
@@ -210,6 +216,8 @@ pub struct OakEditParams {
 	pub bezier_in_y: f64,
 	pub bezier_out_x: f64,
 	pub bezier_out_y: f64,
+	// Custom proxy generation parameters used by SetFootageProxyParams.
+	pub proxy_params: oak_codec::proxymanager::ProxyParams,
 	// Borrowed UTF-8 strings and arrays, each with an explicit element/byte count.
 	pub name: *const u8,
 	pub name_len: usize,
@@ -258,6 +266,7 @@ impl Default for OakEditParams {
 			bezier_in_y: 0.0,
 			bezier_out_x: 0.0,
 			bezier_out_y: 0.0,
+			proxy_params: oak_codec::proxymanager::ProxyParams::default(),
 			name: std::ptr::null(),
 			name_len: 0,
 			path: std::ptr::null(),

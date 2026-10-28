@@ -80,6 +80,16 @@ unsafe extern "C" {
 		ordinal: i32,
 		out: *mut StreamAudioParams,
 	) -> bool;
+	fn oak_footage_custom_proxy_params(
+		project: *mut c_void,
+		id: u64,
+		out: *mut crate::codec::ProxyParams,
+	) -> bool;
+	fn oak_footage_effective_proxy_params(
+		project: *mut c_void,
+		id: u64,
+		out: *mut crate::codec::ProxyParams,
+	) -> bool;
 
 	fn oak_sequence_track_list_count(project: *const c_void, id: u64) -> i32;
 	fn oak_sequence_track_list_at(project: *const c_void, id: u64, index: i32) -> u64;
@@ -496,6 +506,18 @@ impl Project {
 		} else {
 			None
 		}
+	}
+
+	/// Returns the per-footage proxy override, or `None` when global defaults apply.
+	pub fn footage_custom_proxy_params(&self, footage: NodeId) -> Option<crate::codec::ProxyParams> {
+		let mut out = crate::codec::ProxyParams::default();
+		unsafe { oak_footage_custom_proxy_params(self.ptr, footage.0, &mut out) }.then_some(out)
+	}
+
+	/// Returns custom proxy parameters when present, otherwise global defaults.
+	pub fn footage_effective_proxy_params(&self, footage: NodeId) -> Option<crate::codec::ProxyParams> {
+		let mut out = crate::codec::ProxyParams::default();
+		unsafe { oak_footage_effective_proxy_params(self.ptr, footage.0, &mut out) }.then_some(out)
 	}
 
 	// -- sequence / track list / track ---------------------------------

@@ -95,10 +95,20 @@ use super::engine::{
 use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image, synthetic_frame_samples};
 use super::graphops::{self, ProjectRef};
 use super::scopes::{analyze_bgra8, analyze_f32_rgba};
-use super::settings::{
-	proxy_params_from_codec, proxy_params_from_config, proxy_params_to_codec,
-};
+use super::settings::proxy_params_from_config;
 use super::transport::TransportState;
+
+/// Converts the SDK proxy DTO into the proxy dialog's app-owned parameters.
+fn proxy_ui_from_sdk(params: &oak_engine_rust_sdk::codec::ProxyParams) -> super::engine::ProxyParamsUi {
+	super::engine::ProxyParamsUi {
+		width: params.width,
+		height: params.height,
+		divider: params.divider,
+		crf: params.crf,
+		preset: params.preset().to_string(),
+		include_audio: params.include_audio != 0,
+	}
+}
 
 /// The project name of a blank project before it is saved.
 const UNTITLED: &str = "Untitled Project";
@@ -6866,16 +6876,20 @@ impl AppEngine for RealEngine {
 		let Some(footage) = self.footage_of(id) else {
 			return;
 		};
-		if let Some(project) = self.project.as_ref() {
-			let mut guard = graphops::lock(project);
-			if let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			{
-				f.set_custom_proxy_params(proxy_params_to_codec(&params));
+		if let Some(session) = self.editor_session() {
+			let mut sdk = oak_engine_rust_sdk::codec::ProxyParams::default();
+			sdk.width = params.width;
+			sdk.height = params.height;
+			sdk.divider = params.divider;
+			sdk.crf = params.crf;
+			sdk.include_audio = i32::from(params.include_audio);
+			if sdk.set_preset(&params.preset).is_err() {
+				return;
 			}
+			let _ = session.execute(EditCommand::SetFootageProxyParams {
+				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.identity()),
+				params: sdk,
+			});
 		}
 		cx.notify();
 	}
@@ -6884,42 +6898,35 @@ impl AppEngine for RealEngine {
 		let Some(footage) = self.footage_of(id) else {
 			return;
 		};
-		if let Some(project) = self.project.as_ref() {
-			let mut guard = graphops::lock(project);
-			if let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			{
-				f.clear_custom_proxy_params();
-			}
+		if let Some(session) = self.editor_session() {
+			let _ = session.execute(EditCommand::ClearFootageProxyParams {
+				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.identity()),
+			});
 		}
 		cx.notify();
 	}
 
 	fn proxy_custom_params(&self, id: u64) -> Option<super::engine::ProxyParamsUi> {
-		let project = self.project.as_ref()?;
+		let session = self.editor_session()?;
 		let node = graphops::id_of(id)?;
-		let guard = graphops::lock(project);
-		let f = graphops::footage_behavior(&guard.graph, node)?;
-		f.custom_proxy_params
-			.as_ref()
-			.map(proxy_params_from_codec)
+		let params = session.project().footage_custom_proxy_params(
+			oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+		)?;
+		Some(proxy_ui_from_sdk(&params))
 	}
 
 	fn proxy_effective_params(&self, id: u64) -> super::engine::ProxyParamsUi {
-		let Some(project) = self.project.as_ref() else {
+		let Some(session) = self.editor_session() else {
 			return proxy_params_from_config();
 		};
 		let Some(node) = graphops::id_of(id) else {
 			return proxy_params_from_config();
 		};
-		let guard = graphops::lock(project);
-		match graphops::footage_behavior(&guard.graph, node) {
-			Some(f) => proxy_params_from_codec(&f.effective_proxy_params()),
-			None => proxy_params_from_config(),
-		}
+		session
+			.project()
+			.footage_effective_proxy_params(oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()))
+			.map(|params| proxy_ui_from_sdk(&params))
+			.unwrap_or_else(proxy_params_from_config)
 	}
 
 	fn clip_footage_entries(&self, clips: &[ClipId]) -> Vec<super::engine::ProxyFootageRow> {
@@ -7933,27 +7940,24 @@ impl RealEngine {
 		footage: NodeId,
 		cx: &mut Context<Self>,
 	) -> Option<NodeId> {
-		let params = {
-			let guard = graphops::lock(project);
-			graphops::footage_behavior(&guard.graph, footage).and_then(|f| f.video_params(0))
+		let Some(session) = self.editor_session() else {
+			return None;
 		};
+		let params = session.project().footage_video_params(
+			oak_engine_rust_sdk::node::NodeId::from_raw(footage.identity()),
+			0,
+		);
 		match params {
-			Some(vp) => match self.create_sequence_with_params(
-				"Sequence 1".to_string(),
-				VideoFormat {
-					width: vp.width.max(1) as u32,
-					height: vp.height.max(1) as u32,
-					rate: FrameRate::new(
-						vp.frame_rate.numerator().max(1) as u32,
-						vp.frame_rate.denominator().max(1) as u32,
-					),
-				},
-				vp.interlaced,
-				cx,
-			) {
-				// `create_sequence_with_params` sets `self.sequence` and
-				// refreshes; nothing else to do here.
-				Ok(_) => self.sequence,
+			Some(_) => match session.execute(EditCommand::CreateSequenceFromFootage {
+				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.identity()),
+				name: "Sequence 1".into(),
+			}) {
+				Ok(result) => {
+					self.sequence = result.primary.and_then(|id| graphops::id_of(id.raw()));
+					self.refresh_sequence_info();
+					self.rebuild_timeline();
+					self.sequence
+				}
 				Err(err) => {
 					println!("[real engine] drop footage: auto-create sequence failed: {err}");
 					None

@@ -318,4 +318,15 @@ pub enum EditCommand {
 	DeleteEntry {
 		node: u64,
 	},
+	SetFootageProxyParams {
+		footage: u64,
+		params: oak_codec::proxymanager::ProxyParams,
+	},
+	ClearFootageProxyParams {
+		footage: u64,
+	},
+	CreateSequenceFromFootage {
+		footage: u64,
+		name: String,
+	},
 }

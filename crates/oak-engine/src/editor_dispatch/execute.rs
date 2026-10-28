@@ -512,5 +512,14 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 			empty(ops::replace_footage(project, id(footage)?, std::path::Path::new(&path)))
 		}
 		EditCommand::DeleteEntry { node } => empty(ops::delete_entry(project, id(node)?)),
+		EditCommand::SetFootageProxyParams { footage, params } => {
+			empty(ops::set_footage_proxy_params(project, id(footage)?, Some(params)))
+		}
+		EditCommand::ClearFootageProxyParams { footage } => {
+			empty(ops::set_footage_proxy_params(project, id(footage)?, None))
+		}
+		EditCommand::CreateSequenceFromFootage { footage, name } => {
+			primary(ops::create_sequence_from_footage(project, id(footage)?, &name))
+		}
 	}
 }
