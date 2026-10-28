@@ -418,6 +418,13 @@ fn all_semantic_operations_use_native_abi() {
 		element: -1,
 		time: Rational::new(0, 1),
 	});
+	assert!(effect_fixture
+		.session
+		.execute(EditCommand::PushNodeButton {
+			node: effect,
+			input_id: "not_a_plugin_button".into(),
+		})
+		.is_err());
 	ok(&effect_fixture.session, EditCommand::EffectRemove {
 		host: effect_host,
 		effect: second_effect,

@@ -301,4 +301,8 @@ pub enum EditCommand {
 		time: WireRational,
 		value: oak_node::value::OakNodeValue,
 	},
+	PushNodeButton {
+		node: u64,
+		input_id: String,
+	},
 }

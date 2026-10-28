@@ -440,6 +440,10 @@ impl CommandArgs {
 				self.params.rate = time;
 				self.params.node_value = value;
 			}
+			EditCommand::PushNodeButton { node, input_id } => {
+				self.simple(OakEditOp::PushNodeButton, node);
+				self.input_id(input_id);
+			}
 		}
 	}
 }

@@ -79,6 +79,7 @@ pub enum OakEditOp {
 	UpsertNodeKeyframe,
 	RemoveNodeKeyframe,
 	SetNodeValueAtTime,
+	PushNodeButton,
 }
 
 impl OakEditOp {
@@ -147,6 +148,7 @@ impl OakEditOp {
 			59 => Self::UpsertNodeKeyframe,
 			60 => Self::RemoveNodeKeyframe,
 			61 => Self::SetNodeValueAtTime,
+			62 => Self::PushNodeButton,
 			_ => return None,
 		})
 	}
@@ -354,15 +356,20 @@ pub unsafe extern "C" fn oak_editor_edit(
 			return -1;
 		}
 	};
-	let mut session = unsafe { &*session }
+	let mut session_guard = unsafe { &*session }
 		.inner
 		.lock()
 		.unwrap_or_else(|e| e.into_inner());
-	match execute(&mut session, command) {
-		Ok(edit_result) => write_result(edit_result, params, result),
+	let (executed, code) = match execute(&mut session_guard, command) {
+		Ok(edit_result) => (true, write_result(edit_result, params, result)),
 		Err(error_text) => {
 			copy_str_out(&error_text, error, error_len);
-			-1
+			(false, -1)
 		}
+	};
+	drop(session_guard);
+	if executed {
+		crate::editor::notify::notify(unsafe { &*session }, op as u32);
 	}
+	code
 }

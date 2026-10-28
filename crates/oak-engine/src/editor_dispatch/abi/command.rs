@@ -291,5 +291,9 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			time: p.rate,
 			value: p.node_value,
 		},
+		OakEditOp::PushNodeButton => EditCommand::PushNodeButton {
+			node: p.a,
+			input_id: text(p.input_id, p.input_id_len),
+		},
 	})
 }

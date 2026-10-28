@@ -316,6 +316,11 @@ pub enum EditCommand {
 		time: Rational,
 		value: NodeValue,
 	},
+	/// Triggers an OFX push-button action. This is not an undoable value edit.
+	PushNodeButton {
+		node: NodeId,
+		input_id: String,
+	},
 }
 
 /// A clip captured by the session clipboard.

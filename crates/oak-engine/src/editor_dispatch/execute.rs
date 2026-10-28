@@ -499,5 +499,8 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 			time.native(),
 			value,
 		)),
+		EditCommand::PushNodeButton { node, input_id } => {
+			empty(ops::push_button(project, id(node)?, &input_id))
+		}
 	}
 }

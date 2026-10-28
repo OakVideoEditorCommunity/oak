@@ -130,3 +130,28 @@ pub fn set_value_at_time(
 	};
 	push(command, "Set Parameter at Time")
 }
+
+/// Triggers a push-button parameter on an OFX plugin node.
+///
+/// Built-in nodes and unknown/non-button parameters return an error. OFX button
+/// actions are not undoable: the plugin may update other parameters, so a
+/// successful session notification tells consumers to refresh their snapshots.
+pub fn push_button(p: &ProjectRef, node: NodeId, input: &str) -> Result<(), String> {
+	let instance = {
+		let guard = lock(p);
+		guard
+			.graph
+			.get(node)
+			.and_then(|entry| entry.behavior.as_any())
+			.and_then(|behavior| behavior.downcast_ref::<oak_node::nodes::plugin::PluginNode>())
+			.map(|plugin| plugin.instance_handle().0)
+	};
+	let Some(instance) = instance else {
+		return Err("push button: node is not an OFX plugin".into());
+	};
+	if oak_ofx_plugin::node_factory::push_button_clicked(instance, input) {
+		Ok(())
+	} else {
+		Err(format!("push button: \"{input}\" is not a plugin button"))
+	}
+}

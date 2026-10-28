@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 pub mod aux;
+pub mod notify;
 
 use oak_core::handle::CHandle;
 use oak_node::id::NodeId;
@@ -42,6 +43,10 @@ pub(crate) struct SessionState {
 	pub(crate) clipboard: Vec<crate::editor_commands::ClipboardClip>,
 	/// Handle used to flush and detach write-through storage on unbind/session drop.
 	pub(crate) storage: Option<CHandle>,
+	/// Session-local edit callbacks cloned before notification.
+	pub(crate) observers: Vec<Arc<notify::SessionObserver>>,
+	/// Next nonzero ID returned by the edit subscription API.
+	pub(crate) next_observer_id: u64,
 }
 
 impl SessionState {
@@ -54,6 +59,8 @@ impl SessionState {
 			workarea: Arc::new(Mutex::new(TimelineWorkArea::new())),
 			clipboard: Vec::new(),
 			storage: None,
+			observers: Vec::new(),
+			next_observer_id: 1,
 		}
 	}
 

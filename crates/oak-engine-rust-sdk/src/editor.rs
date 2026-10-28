@@ -255,9 +255,11 @@ impl Drop for EditorSession {
 mod snapshot;
 mod graph;
 mod params;
+mod notify;
 pub use snapshot::*;
 pub use graph::*;
 pub use params::*;
+pub use notify::*;
 
 #[cfg(test)]
 mod tests {
