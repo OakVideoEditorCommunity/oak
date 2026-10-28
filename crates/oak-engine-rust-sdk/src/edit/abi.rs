@@ -82,6 +82,9 @@ pub(crate) enum OakEditOp {
 	CreateSequenceFromFootage,
 	DeleteProxy,
 	SetProxyEnabled,
+	SetMulticamEnabled,
+	SwitchMulticam,
+	CreateMulticamSequence,
 }
 
 impl OakEditOp {
@@ -158,6 +161,8 @@ pub(crate) struct OakEditParams {
 	pub ids_len: usize,
 	pub placements: *const OakTrackPlacement,
 	pub placements_len: usize,
+	pub values: *const f64,
+	pub values_len: usize,
 	pub result_ids: *mut u64,
 	pub result_ids_capacity: usize,
 	pub result_clipboard: *mut OakClipboardClip,
@@ -205,6 +210,8 @@ impl Default for OakEditParams {
 			ids_len: 0,
 			placements: std::ptr::null(),
 			placements_len: 0,
+			values: std::ptr::null(),
+			values_len: 0,
 			result_ids: std::ptr::null_mut(),
 			result_ids_capacity: 0,
 			result_clipboard: std::ptr::null_mut(),

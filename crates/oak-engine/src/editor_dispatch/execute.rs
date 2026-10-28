@@ -530,5 +530,29 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 		EditCommand::SetProxyEnabled { footage, enabled } => {
 			empty(ops::set_proxy_enabled(project, id(footage)?, enabled))
 		}
+		EditCommand::SetMulticamEnabled { clips, enabled } => {
+			empty(ops::set_multicam_enabled(project, &ids(&clips)?, enabled))
+		}
+		EditCommand::SwitchMulticam {
+			clip,
+			source,
+			split_clip,
+			playhead,
+		} => empty(ops::switch_multicam(
+			project,
+			id(clip)?,
+			source,
+			split_clip,
+			playhead.native(),
+		)),
+		EditCommand::CreateMulticamSequence {
+			host_sequence,
+			angles,
+			offsets,
+			name,
+		} => primary(
+			ops::create_multicam_sequence(project, id(host_sequence)?, &ids(&angles)?, &offsets, &name)
+				.map(|result| result.source_sequence),
+		),
 	}
 }

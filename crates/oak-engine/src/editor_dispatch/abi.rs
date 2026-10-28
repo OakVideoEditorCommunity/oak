@@ -88,6 +88,9 @@ pub enum OakEditOp {
 	CreateSequenceFromFootage,
 	DeleteProxy,
 	SetProxyEnabled,
+	SetMulticamEnabled,
+	SwitchMulticam,
+	CreateMulticamSequence,
 }
 
 impl OakEditOp {
@@ -165,6 +168,9 @@ impl OakEditOp {
 			68 => Self::CreateSequenceFromFootage,
 			69 => Self::DeleteProxy,
 			70 => Self::SetProxyEnabled,
+			71 => Self::SetMulticamEnabled,
+			72 => Self::SwitchMulticam,
+			73 => Self::CreateMulticamSequence,
 			_ => return None,
 		})
 	}
@@ -233,6 +239,9 @@ pub struct OakEditParams {
 	pub ids_len: usize,
 	pub placements: *const OakTrackPlacement,
 	pub placements_len: usize,
+	/// Borrowed f64 array used by multicam angle offsets.
+	pub values: *const f64,
+	pub values_len: usize,
 	// Caller-owned result storage. Capacities are element counts, not bytes.
 	pub result_ids: *mut u64,
 	pub result_ids_capacity: usize,
@@ -281,6 +290,8 @@ impl Default for OakEditParams {
 			ids_len: 0,
 			placements: std::ptr::null(),
 			placements_len: 0,
+			values: std::ptr::null(),
+			values_len: 0,
 			result_ids: std::ptr::null_mut(),
 			result_ids_capacity: 0,
 			result_clipboard: std::ptr::null_mut(),

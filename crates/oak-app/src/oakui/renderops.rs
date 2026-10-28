@@ -116,8 +116,8 @@ pub fn preview_footage_media(
 	if !use_proxy_media() || !f.proxy_enabled || f.proxy.is_empty() {
 		return original;
 	}
-	if oak_codec::proxymanager::ProxyManager::get_proxy_state(&f.proxy)
-		!= oak_codec::proxymanager::ProxyState::Ready
+	if oak_engine_rust_sdk::codec::proxy_get_state(&f.proxy)
+		!= oak_engine_rust_sdk::codec::ProxyState::Ready
 	{
 		return original;
 	}
@@ -129,7 +129,7 @@ pub fn preview_footage_media(
 			Some(stream) if f.proxy_video_stream_index == stream.index => (f.proxy.clone(), 0),
 			_ => original,
 		}
-	} else if oak_codec::proxymanager::ProxyManager::proxy_filename_has_audio(&f.proxy) {
+	} else if oak_engine_rust_sdk::codec::proxy_filename_has_audio(&f.proxy) {
 		(f.proxy.clone(), 1)
 	} else {
 		original
@@ -160,7 +160,7 @@ fn clip_preview_media(
 /// angle_in)`.
 ///
 /// CALLER HOLDS THE PROJECT LOCK: this is pure `Graph` walking — the
-/// `multicam::*` project-locking helpers MUST NOT be called from here
+/// Session multicam queries MUST NOT be called while holding this lock
 /// (non-recursive mutex).
 fn clip_multicam_media(
 	g: &oak_node::graph::Graph,

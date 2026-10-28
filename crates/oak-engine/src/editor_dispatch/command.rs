@@ -336,4 +336,20 @@ pub enum EditCommand {
 		footage: u64,
 		enabled: bool,
 	},
+	SetMulticamEnabled {
+		clips: Vec<u64>,
+		enabled: bool,
+	},
+	SwitchMulticam {
+		clip: u64,
+		source: i32,
+		split_clip: bool,
+		playhead: WireRational,
+	},
+	CreateMulticamSequence {
+		host_sequence: u64,
+		angles: Vec<u64>,
+		offsets: Vec<f64>,
+		name: String,
+	},
 }

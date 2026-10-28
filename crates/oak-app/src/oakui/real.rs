@@ -86,7 +86,6 @@ use oak_engine_rust_sdk::state::Config;
 use oak_render::manager::RenderManager;
 use oak_render::procpool::ShmFrameRef;
 use oak_timeline::handle::CHandle;
-use oak_timeline::util::NodeRef;
 
 use super::engine::{
 	AppEngine, EngineGateway, ExportSession, LibraryProject, Monitor, MulticamState, Project,
@@ -120,6 +119,27 @@ fn proxy_media_state(state: oak_engine_rust_sdk::codec::ProxyState) -> super::en
 		oak_engine_rust_sdk::codec::ProxyState::Ready => super::engine::ProxyMediaState::Ready,
 		oak_engine_rust_sdk::codec::ProxyState::Failed => super::engine::ProxyMediaState::Failed,
 	}
+}
+
+/// Converts the SDK multicam DTO into the app facade's stable-identity state.
+fn multicam_state_from_sdk(
+	state: oak_engine_rust_sdk::editor::multicam::MulticamState,
+) -> super::engine::MulticamState {
+	super::engine::MulticamState {
+		sequence_id: state.sequence.raw(),
+		node_id: state.multicam.raw(),
+		clip_id: state.clip.raw(),
+		source_count: state.source_count,
+		current_source: state.current_source,
+	}
+}
+
+fn rational_to_sdk(value: oak_core::Rational) -> oak_engine_rust_sdk::types::Rational {
+	oak_engine_rust_sdk::types::Rational::new(value.numerator(), value.denominator())
+}
+
+fn rational_from_sdk(value: oak_engine_rust_sdk::types::Rational) -> oak_core::Rational {
+	oak_core::Rational::new(value.num, value.den)
 }
 
 /// The project name of a blank project before it is saved.
@@ -1348,120 +1368,6 @@ pub struct RealEngine {
 }
 
 impl RealEngine {
-	/// The AFV half of a switch: commands that re-point the host AFV audio
-	/// clip (the clip linked to the multicam `clip`) to the CURRENT source's
-	/// audio stream. `None` when the clip has no AFV audio (no linked audio
-	/// clip, or the multicam has no audio angles).
-	///
-	/// The audio clip's own range stays; only its TEXTURE_INPUT edge moves
-	/// to the new angle's audio footage. Two commands (disconnect the old,
-	/// connect the new) join the caller's multi: one undo restores the
-	/// previous source.
-	fn afv_audio_switch_commands(
-		&self,
-		project_ref: &ProjectRef,
-		clip: NodeId,
-		source: i32,
-	) -> Option<Vec<oak_undo::undocommand::UndoCommand>> {
-		let project = project_ref.clone();
-		let (audio_clip, old_footage) = {
-			let g = graphops::lock(&project);
-			let mut audio_clip = None;
-			for &link in &g.graph.links_of(clip) {
-				let Some(track) = graphops::clip_track(&g.graph, link) else {
-					continue;
-				};
-				if !graphops::track_behavior(&g.graph, track)
-					.map(|t| t.kind == TrackType::Audio)
-					.unwrap_or(false)
-				{
-					continue;
-				}
-				audio_clip = Some(link);
-				break;
-			}
-			let audio_clip = audio_clip?;
-			let old_footage = graphops::find_input_footage(&g.graph, audio_clip);
-			(audio_clip, old_footage)
-		};
-		let old_footage = old_footage?;
-		// The multicam node for `clip` and its source sequence — then the
-		// source's AUDIO track at `source`, the angle audio clip, and its
-		// footage as the re-point target.
-		let target_footage = {
-			let g = graphops::lock(&project);
-			let mc =
-				g.graph
-					.connected_output(clip, oak_node::block::clip_input::TEXTURE_INPUT, -1)?;
-			let seq =
-				g.graph
-					.connected_output(mc, oak_node::nodes::multicamnode::SEQUENCE_INPUT, -1)?;
-			let list = graphops::track_list_of(&g.graph, seq, TrackType::Audio)?;
-			let list_behavior = graphops::track_list_behavior(&g.graph, list)?;
-			let audio_track = list_behavior.tracks.get(source as usize)?;
-			let track_behavior = graphops::track_behavior(&g.graph, *audio_track)?;
-			let angle_audio_clip = track_behavior.blocks.first()?;
-			graphops::find_input_footage(&g.graph, *angle_audio_clip)?
-		};
-		if old_footage == target_footage {
-			return Some(Vec::new());
-		}
-		// Disconnect the old edge + connect the new (undoable pair).
-		let p_undo = project.clone();
-		let p_redo = project.clone();
-		let aclip = audio_clip;
-		let old = old_footage;
-		let new_footage = target_footage;
-		let disconnect = oak_undo::undocommand::UndoCommand::from_closures(
-			move || {
-				let mut g = graphops::lock(&p_undo);
-				for (from, input, element) in g.graph.input_connections(aclip) {
-					if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-						g.graph.disconnect(from, aclip, &input, element);
-					}
-				}
-			},
-			move || {
-				let mut g = graphops::lock(&p_redo);
-				let _ = g
-					.graph
-					.connect(old, aclip, oak_node::block::clip_input::TEXTURE_INPUT, -1);
-			},
-		);
-		let p_connect = project.clone();
-		let connect = oak_undo::undocommand::UndoCommand::from_closures(
-			move || {
-				let mut g = graphops::lock(&p_connect);
-				for (from, input, element) in g.graph.input_connections(aclip) {
-					if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-						g.graph.disconnect(from, aclip, &input, element);
-					}
-				}
-				let _ = g.graph.connect(
-					new_footage,
-					aclip,
-					oak_node::block::clip_input::TEXTURE_INPUT,
-					-1,
-				);
-			},
-			{
-				let p = project.clone();
-				move || {
-					let mut g = graphops::lock(&p);
-					for (from, input, element) in g.graph.input_connections(aclip) {
-						if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-							g.graph.disconnect(from, aclip, &input, element);
-						}
-					}
-					let _ =
-						g.graph
-							.connect(old, aclip, oak_node::block::clip_input::TEXTURE_INPUT, -1);
-				}
-			},
-		);
-		Some(vec![disconnect, connect])
-	}
-
 	/// Render one tick's worth of audio at the program playhead and queue
 	/// it for playback (M12 P1; M15 S3: worker-pool prefetch; M16 S3: each
 	/// chunk is queued on the dedicated audio-render thread — see
@@ -2078,16 +1984,16 @@ impl RealEngine {
 	/// the node-graph-selection level of the C++ is not ported (the Rust
 	/// node editor has no multicam selection).
 	fn multicam_state_internal(&self) -> Option<MulticamState> {
-		let project = self.project_ref()?;
-		let seq = self.sequence?;
+		let session = self.editor_session()?;
+		let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(self.sequence?.identity());
 		if let Some(clip) = self.selected_clip_node() {
-			if let Some(state) = super::multicam::multicam_state_for_clip(project, clip) {
-				return Some(state);
+			if let Some(state) = session.multicam_state(oak_engine_rust_sdk::node::NodeId::from_raw(clip.identity())) {
+				return Some(multicam_state_from_sdk(state));
 			}
 		}
-		let time = graphops::sequence_playhead(&graphops::lock(project).graph, seq);
-		let clip = super::multicam::clip_at_playhead_with_multicam(project, seq, time)?;
-		super::multicam::multicam_state_for_clip(project, clip)
+		let time = session.project().sequence_playhead(sequence);
+		let clip = session.multicam_clip_at(sequence, time)?;
+		session.multicam_state(clip).map(multicam_state_from_sdk)
 	}
 
 	/// Renders one multicam angle on a background thread (the same ticket
@@ -2153,10 +2059,16 @@ impl RealEngine {
 		{
 			return Some(img);
 		}
-		let Some(mc) = graphops::id_of(state.node_id) else {
+		let Some(session) = self.editor_session() else {
 			return None;
 		};
-		let Some(track) = super::multicam::multicam_source_track(&project, mc, source) else {
+		let Some(track) = session
+			.multicam_source_track(
+				oak_engine_rust_sdk::node::NodeId::from_raw(state.node_id),
+				source,
+			)
+			.and_then(|track| graphops::id_of(track.raw()))
+		else {
 			return None;
 		};
 		// The panel may outlive a stale node (a multicam removed under it):
@@ -2840,7 +2752,7 @@ impl RealEngine {
 	/// every clip is re-placed so its source head lines up with the
 	/// reference's at the anchor (one multi-undo).
 	fn sync_clips_by_source_time_internal(&mut self, clips: &[ClipId]) {
-		use oak_audio::synchronizer::{place_by_source_time, SourceClip};
+		use oak_engine_rust_sdk::audio_analysis::{SourceClip, place_by_source_time};
 
 		let Some(project) = self.project.clone() else {
 			return;
@@ -2891,8 +2803,8 @@ impl RealEngine {
 					source_head: f.source_start_time + media_in,
 					block_in,
 					source: SourceClip {
-						source_start_time: f.source_start_time,
-						media_in,
+						source_start_time: rational_to_sdk(f.source_start_time),
+						media_in: rational_to_sdk(media_in),
 						has_source_start_time: true,
 					},
 				});
@@ -2917,14 +2829,19 @@ impl RealEngine {
 		// placement (the reference itself lands on the anchor).
 		let mut placements: Vec<(NodeId, NodeId, NodeId, i32, oak_core::Rational)> = Vec::new();
 		for target in &targets {
-			let placement = place_by_source_time(&reference.source, &target.source, anchor_in);
+			let placement = place_by_source_time(
+				&reference.source,
+				&target.source,
+				rational_to_sdk(anchor_in),
+			);
 			if placement.valid {
+				let timeline_in = rational_from_sdk(placement.timeline_in);
 				placements.push((
 					target.node,
 					target.track,
 					target.list,
 					target.track_index,
-					placement.timeline_in,
+					timeline_in,
 				));
 			}
 		}
@@ -2964,7 +2881,7 @@ impl RealEngine {
 	/// offset triggers a rate search whose winner also rescales the clip
 	/// speed (one multi-undo).
 	fn sync_clips_by_waveform_internal(&mut self, clips: &[ClipId], allow_speed: bool) {
-		use oak_audio::synchronizer::place_by_waveform_offset;
+		use oak_engine_rust_sdk::audio_analysis::place_by_waveform_offset;
 		use oak_engine_rust_sdk::audio_analysis::{
 			estimate_envelope_offset, estimate_stretch_offset,
 		};
@@ -3119,15 +3036,19 @@ impl RealEngine {
 			if !offset.valid {
 				continue;
 			}
-			let placement =
-				place_by_waveform_offset(reference.block_in, offset.offset_samples, sample_rate);
-			if placement.valid && placement.timeline_in >= oak_core::Rational::new(0, 1) {
+			let placement = place_by_waveform_offset(
+				rational_to_sdk(reference.block_in),
+				offset.offset_samples,
+				sample_rate,
+			);
+			let timeline_in = rational_from_sdk(placement.timeline_in);
+			if placement.valid && timeline_in >= oak_core::Rational::new(0, 1) {
 				placements.push((
 					target.node,
 					target.track,
 					target.list,
 					target.track_index,
-					placement.timeline_in,
+					timeline_in,
 					speed,
 					target.speed,
 				));
@@ -3565,7 +3486,12 @@ impl RealEngine {
 				} else {
 					entry.core.label.clone()
 				};
-				let multicam = super::multicam::clip_is_multicam(graph, block);
+				let multicam = graph
+					.connected_output(block, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+					.and_then(|source| graph.get(source))
+					.is_some_and(|source| {
+						source.behavior.type_id() == "org.olivevideoeditor.Olive.multicam"
+					});
 				Some(RealClip {
 					id: ClipId(block.identity()),
 					range: FrameRange::new(Frame(to_ts(in_r)), Frame(to_ts(out_r))),
@@ -6917,41 +6843,25 @@ impl AppEngine for RealEngine {
 	}
 
 	fn multicam_eligible(&self, clips: &[ClipId]) -> bool {
-		let Some(project) = self.project_ref() else {
+		let Some(session) = self.editor_session() else {
 			return false;
 		};
-		let g = graphops::lock(project);
-		for id in clips {
-			let Some(block) = graphops::id_of(id.0) else {
-				continue;
-			};
-			if graphops::clip_behavior(&g.graph, block).is_none() {
-				continue;
-			}
-			if super::multicam::clip_connected_sequence(&g.graph, block).is_some() {
-				return true;
-			}
-		}
-		false
+		clips.iter().any(|clip| {
+			session
+				.multicam_connected_sequence(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+				.is_some()
+		})
 	}
 
 	fn multicam_enabled_on_selection(&self, clips: &[ClipId]) -> bool {
-		let Some(project) = self.project_ref() else {
+		let Some(session) = self.editor_session() else {
 			return false;
 		};
-		for id in clips {
-			let Some(block) = graphops::id_of(id.0) else {
-				continue;
-			};
-			if graphops::clip_behavior(&graphops::lock(project).graph, block).is_none() {
-				continue;
-			}
-			let clip_ref = NodeRef::new(project.clone(), block);
-			if oak_timeline::multicam::clip_find_multicam(&clip_ref).is_some() {
-				return true;
-			}
-		}
-		false
+		clips.iter().any(|clip| {
+			session
+				.multicam_state(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+				.is_some()
+		})
 	}
 
 	fn multicam_enable_selected(
@@ -6960,63 +6870,16 @@ impl AppEngine for RealEngine {
 		enabled: bool,
 		cx: &mut Context<Self>,
 	) {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
-		// Resolve the selected clips' block nodes. Enable additionally needs
-		// each clip's connected sequence (the clip's source must be a
-		// sequence — the C++ `connected_viewer()` check); disable just walks
-		// every selected clip (`multicam_disable` skips clips without a
-		// multicam itself).
-		let mut all_clips: Vec<NodeId> = Vec::new();
-		let mut eligible: Vec<(NodeId, NodeId)> = Vec::new();
-		{
-			let g = graphops::lock(&project);
-			for id in &clips {
-				let Some(block) = graphops::id_of(id.0) else {
-					continue;
-				};
-				if graphops::clip_behavior(&g.graph, block).is_none() {
-					continue;
-				}
-				all_clips.push(block);
-				if let Some(seq) = super::multicam::clip_connected_sequence(&g.graph, block) {
-					eligible.push((block, seq));
-				}
-			}
-		}
-		let result = if enabled {
-			if eligible.is_empty() {
-				return;
-			}
-			// Group the clips by their connected sequence (one enable
-			// command per sequence; the common case is a single sequence).
-			let mut by_seq: HashMap<NodeId, Vec<NodeRef>> = HashMap::new();
-			for (block, seq) in &eligible {
-				by_seq
-					.entry(*seq)
-					.or_default()
-					.push(NodeRef::new(project.clone(), *block));
-			}
-			let children: Vec<_> = by_seq
-				.into_iter()
-				.map(|(seq, clips)| {
-					oak_timeline::multicam::multicam_enable(
-						clips,
-						NodeRef::new(project.clone(), seq),
-					)
-				})
-				.collect();
-			let label = oak_timeline::multicam::enable_label(eligible.len());
-			graphops::push_multi_command(children, &label)
-		} else {
-			let clip_refs: Vec<NodeRef> = all_clips
-				.iter()
-				.map(|block| NodeRef::new(project.clone(), *block))
-				.collect();
-			let label = oak_timeline::multicam::disable_label(all_clips.len());
-			graphops::push_command(oak_timeline::multicam::multicam_disable(clip_refs), &label)
-		};
+		let clips = clips
+			.into_iter()
+			.map(|clip| oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+			.collect();
+		let result = session
+			.execute(EditCommand::SetMulticamEnabled { clips, enabled })
+			.map(|_| ());
 		self.apply_edit(result, "multicam enable/disable", cx);
 	}
 
@@ -7060,10 +6923,10 @@ impl AppEngine for RealEngine {
 	}
 
 	fn multicam_switch_to(&mut self, source: i32, split_clip: bool, cx: &mut Context<Self>) {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
-		let Some(seq) = self.sequence else {
+		let Some(sequence) = self.sequence else {
 			return;
 		};
 		let Some(state) = self.multicam_state_internal() else {
@@ -7082,34 +6945,49 @@ impl AppEngine for RealEngine {
 		if state.current_source == source {
 			return;
 		}
-		let Some(clip) = graphops::id_of(state.clip_id) else {
-			return;
-		};
-		let playhead = graphops::sequence_playhead(&graphops::lock(&project).graph, seq);
-		let cmd = oak_timeline::multicam::multicam_switch(
-			NodeRef::new(project.clone(), clip),
-			source,
-			split_clip,
-			playhead,
-		);
-		let afv_cmds = self.afv_audio_switch_commands(&project, clip, source);
-		let result = match afv_cmds {
-			// ONE undo entry: video switch + AFV audio re-point.
-			Some(children) if !children.is_empty() => {
-				let mut all = vec![cmd];
-				all.extend(children);
-				graphops::push_multi_command(all, oak_timeline::multicam::SWITCH_LABEL)
-			}
-			_ => graphops::push_command(cmd, oak_timeline::multicam::SWITCH_LABEL),
-		};
+		let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(sequence.identity());
+		let result = session
+			.execute(EditCommand::SwitchMulticam {
+				clip: oak_engine_rust_sdk::node::NodeId::from_raw(state.clip_id),
+				source,
+				split_clip,
+				playhead: session.project().sequence_playhead(sequence),
+			})
+			.map(|_| ());
 		self.apply_edit(result, "multicam switch", cx);
 	}
 
 	// --- multicam wizard ------------------------------------------------
 
 	fn multicam_wizard_footage(&self) -> Option<Vec<WizardFootage>> {
-		let project = self.project_ref()?;
-		Some(super::multicam::wizard_footage(project))
+		let session = self.editor_session()?;
+		let project = session.project();
+		Some(
+			session
+				.snapshot()
+				.root
+				.children
+				.into_iter()
+				.filter(|entry| entry.kind == Some(oak_engine_rust_sdk::node::NodeKind::Footage))
+				.filter_map(|entry| {
+					let filename = project.footage_filename(entry.id)?;
+					if filename.is_empty() {
+						return None;
+					}
+					let duration = project.footage_duration(entry.id);
+					let source_timecode = project
+						.footage_source_start_time(entry.id)
+						.map(|time| time.to_f64().round() as i64);
+					Some(WizardFootage {
+						id: entry.id.raw(),
+						name: entry.name.into(),
+						source_timecode,
+						duration_s: (!duration.is_null()).then(|| duration.to_f64()),
+						has_audio: Some(project.footage_audio_stream_count(entry.id) > 0),
+					})
+				})
+				.collect(),
+		)
 	}
 
 	fn multicam_wizard_sync_offsets(
@@ -7187,101 +7065,30 @@ impl AppEngine for RealEngine {
 		name: String,
 		cx: &mut Context<Self>,
 	) -> Result<u64, String> {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err(crate::i18n::tr("seqprops.error.no_project").to_string());
 		};
-		let name = if name.trim().is_empty() {
-			"Multi-Cam".to_string()
-		} else {
-			name.trim().to_string()
+		let Some(host_sequence) = self.sequence else {
+			return Err("no sequence open".into());
 		};
-		// Build the source sequence (one clip per angle on its own track,
-		// offset by the sync result) plus the multicam node over it.
-		let (source_seq, mc_node) =
-			super::multicam::build_multicam_sequence(&project, &selected, &offsets, &name)?;
-		// Mount the source sequence under the root folder (non-undoable,
-		// like `create_sequence` does).
-		let root = graphops::lock(&project).root;
-		oak_task::nodeops::folder_add_child_command(
-			(project.clone(), root),
-			(project.clone(), source_seq),
-		)
-		.redo_now();
-
-		// The host clip: the clip under the program playhead on the
-		// current sequence. A clip whose texture input is rewired to the
-		// multicam output (the switch source feeds it). When the host
-		// sequence has no video clip at or anywhere on the video tracks
-		// (a fresh sequence), one is PLACED at the playhead from the
-		// first selected footage first — the wizard needs no pre-existing
-		// clip on an otherwise empty timeline.
-		let playhead = self
-			.sequence
-			.map(|seq| graphops::sequence_playhead(&graphops::lock(&project).graph, seq));
-		let host = match self.find_existing_multicam_host_clip(&project, playhead) {
-			Ok(host_id) => Ok(host_id),
-			Err(no_clip) => {
-				// No candidate: place the first angle's footage at the
-				// playhead (one video clip on the pointed/first video
-				// track), then re-resolve.
-				let angle = selected
-					.first()
-					.cloned()
-					.ok_or_else(|| "no selected angles".to_string())?;
-				self.place_host_clip_for_wizard(&project, playhead, angle)
-					.map_err(|e| format!("{no_clip} — placing skipped: {e}"))
-			}
-		};
-		let host_id = match &host {
-			Ok(id) => *id,
-			Err(e) => {
-				self.apply_edit(Err(e.clone()), "create multicam sequence", cx);
-				return Err(e.clone());
-			}
-		};
-		// Rewire: host clip texture input -> multicam output.
-		let result = {
-			let mut g = graphops::lock(&project);
-			// Disconnect the raw footage edge first (place_footage_clip
-			// wired footage->clip).
-			for (from, input, element) in g.graph.input_connections(host_id) {
-				if input.as_str() == oak_node::block::clip_input::TEXTURE_INPUT {
-					g.graph.disconnect(from, host_id, &input, element);
-				}
-			}
-			g.graph
-				.connect(
-					mc_node,
-					host_id,
-					oak_node::block::clip_input::TEXTURE_INPUT,
-					-1,
-				)
-				.map_err(|e| format!("connect multicam to host clip: {e:?}"))
-		};
+		let angles = selected
+			.iter()
+			.map(|angle| oak_engine_rust_sdk::node::NodeId::from_raw(angle.id))
+			.collect();
+		let result = session.execute(EditCommand::CreateMulticamSequence {
+			host_sequence: oak_engine_rust_sdk::node::NodeId::from_raw(host_sequence.identity()),
+			angles,
+			offsets,
+			name,
+		});
 		match result {
-			Ok(()) => {
-				// The wizard's payload stays on the SOURCE sequence (the
-				// angles' clips + the multicam node); the user's editing
-				// sequence is UNCHANGED — its host clip (under the
-				// playhead) now feeds from the multicam output and IS the
-				// "multi-cam clip" the panel detects. Switching the current
-				// sequence to the source one used to open the angles' rows
-				// (N tracks for N cameras) and left the panel with no clip
-				// resolution ("未检测到多机位片段").
-				// AFV: when the angles carry audio, the host clip's LINKED
-				// audio clip is placed on the host sequence (same range,
-				// linked both ways); its source starts at angle 0's audio
-				// and follows every switch. Muting the host audio track
-				// disables the follow-through audio.
-				if let Err(e) = self.ensure_host_afv_audio(&project, host_id, &selected, cx) {
-					println!("[real engine] AFV audio placement skipped: {e}");
-				}
+			Ok(_) => {
 				self.apply_edit(Ok(()), "create multicam sequence", cx);
-				Ok(self.sequence.unwrap_or(source_seq).identity())
+				Ok(host_sequence.identity())
 			}
-			Err(e) => {
-				self.apply_edit(Err(e.clone()), "create multicam sequence", cx);
-				Err(e)
+			Err(error) => {
+				self.apply_edit(Err(error.clone()), "create multicam sequence", cx);
+				Err(error)
 			}
 		}
 	}
@@ -7292,73 +7099,6 @@ impl AppEngine for RealEngine {
 }
 
 impl RealEngine {
-	/// AFV: places the audio clip paired with the multicam `host_clip` on
-	/// the host sequence — same range, linked both ways (grouped edits
-	/// move them together). Its media source is ANGLE 0's audio stream:
-	/// `multicam_switch_to` re-points it to the switching target's audio
-	/// clip. The host audio track keeps the regular mute/solo controls, so
-	/// muting that track disables the follow-through audio.
-	fn ensure_host_afv_audio(
-		&mut self,
-		project: &ProjectRef,
-		host_clip: NodeId,
-		selected: &[WizardFootage],
-		cx: &mut Context<Self>,
-	) -> Result<NodeId, String> {
-		let Some(host_seq) = self.sequence else {
-			return Err("no sequence open".to_string());
-		};
-		let Some(reference) = selected.first() else {
-			return Err("no selected angles".to_string());
-		};
-		if !reference.has_audio.unwrap_or(false) {
-			return Err("the reference angle has no audio".to_string());
-		}
-		let angle_footage = graphops::id_of(reference.id)
-			.ok_or_else(|| "angle 0 footage is not in the project".to_string())?;
-		// The host audio track: the first audio track, created when the
-		// host sequence has none.
-		let audio_index = match self.tracks.iter().position(|t| t.kind == TrackKind::Audio) {
-			Some(i) => self.tracks[i].track_index,
-			None => {
-				self.add_track(TrackKind::Audio, cx);
-				self.tracks
-					.iter()
-					.find(|t| t.kind == TrackKind::Audio)
-					.map(|t| t.track_index)
-					.ok_or_else(|| "could not add an audio track".to_string())?
-			}
-		};
-		// The clip range on the host timeline (in host sequence frames).
-		let (host_in_ts, host_out_ts) = {
-			let g = graphops::lock(project);
-			let in_r = graphops::clip_range(&g.graph, host_clip)
-				.ok_or_else(|| "host clip has no range".to_string())?
-				.0;
-			let out_r = graphops::clip_range(&g.graph, host_clip)
-				.ok_or_else(|| "host clip has no range".to_string())?
-				.1;
-			let tb = graphops::sequence_time_base(&g.graph, host_seq).unwrap_or((1, 25));
-			(
-				graphops::rational_to_ts(in_r, tb),
-				graphops::rational_to_ts(out_r, tb),
-			)
-		};
-		let audio_clip = graphops::place_footage_clip(
-			project,
-			host_seq,
-			angle_footage,
-			TrackType::Audio,
-			audio_index,
-			host_in_ts,
-			host_out_ts,
-			0,
-		)?;
-		// Link the A/V pair both ways (grouped edits move them together).
-		graphops::set_clips_linked(project, &[host_clip, audio_clip], true)?;
-		Ok(audio_clip)
-	}
-
 	/// Drops a text-project entry on the timeline as a GENERATOR clip: the
 	/// clip spans five seconds from the drop point and its `tex_in` reads
 	/// the text node, so the generator re-renders at whatever time the
@@ -7491,10 +7231,15 @@ impl RealEngine {
 			let guard = graphops::lock(project);
 			graphops::multicam_nodes(&guard.graph)
 		};
-		let mc_for_source = candidates
-			.iter()
-			.copied()
-			.find(|&mc| super::multicam::multicam_sequence(project, mc) == Some(source_seq));
+		let session = self.editor_session();
+		let mc_for_source = candidates.iter().copied().find(|&mc| {
+			session.as_ref().is_some_and(|session| {
+				session
+					.multicam_sequence(oak_engine_rust_sdk::node::NodeId::from_raw(mc.identity()))
+					.map(|sequence| sequence.raw())
+					== Some(source_seq.identity())
+			})
+		});
 		if let Some(mc) = mc_for_source {
 			let result = {
 				let mut g = graphops::lock(project);
@@ -7513,122 +7258,6 @@ impl RealEngine {
 		}
 	}
 
-	/// The clip that will host the multicam output: the clip under the
-	/// current sequence's playhead (on any video track), or the first
-	/// clip on any video track when the playhead sits in a gap. Does NOT
-	/// create a clip ([`Self::place_host_clip_for_wizard`] does).
-	fn find_existing_multicam_host_clip(
-		&self,
-		project: &ProjectRef,
-		playhead: Option<oak_core::Rational>,
-	) -> Result<oak_node::id::NodeId, String> {
-		let Some(seq) = self.sequence else {
-			return Err("no sequence open".to_string());
-		};
-		// 1. The clip covering the playhead on the topmost video track.
-		let covering = {
-			let g = graphops::lock(project);
-			// Walk the video tracks topmost-first for a clip covering the
-			// playhead.
-			let mut found = None;
-			let tracks = graphops::track_ids(&g.graph, seq, TrackType::Video);
-			for &track_id in tracks.iter().rev() {
-				let Some(track) = graphops::track_behavior(&g.graph, track_id) else {
-					continue;
-				};
-				for &block in &track.blocks {
-					let Some(clip) = graphops::clip_behavior(&g.graph, block) else {
-						continue;
-					};
-					if playhead.is_none_or(|t| t >= clip.core.in_() && t < clip.core.out()) {
-						found = Some(block);
-						break;
-					}
-				}
-				if found.is_some() {
-					break;
-				}
-			}
-			found
-		};
-		if let Some(block) = covering {
-			return Ok(block);
-		}
-		// 2. No clip at the playhead: fall back to the FIRST clip on any
-		//    video track, so the wizard still works when the playhead
-		//    sits in a gap.
-		let any_clip = {
-			let g = graphops::lock(project);
-			graphops::track_ids(&g.graph, seq, TrackType::Video)
-				.into_iter()
-				.find_map(|track_id| {
-					graphops::track_behavior(&g.graph, track_id)
-						.and_then(|t| t.blocks.first().copied())
-				})
-		};
-		any_clip.ok_or_else(|| "no clip under the playhead to host the multicam".to_string())
-	}
-
-	/// Places a fresh host clip for the wizard on an empty (or clip-less)
-	/// host sequence: `angle`'s footage at the program playhead on the top
-	/// video track, standard-length — then the wizard rewire slot runs.
-	/// Returns the placed clip's node.
-	fn place_host_clip_for_wizard(
-		&mut self,
-		project: &ProjectRef,
-		playhead: Option<oak_core::Rational>,
-		angle: WizardFootage,
-	) -> Result<oak_node::id::NodeId, String> {
-		let Some(seq) = self.sequence else {
-			return Err("no sequence open".to_string());
-		};
-		let Some(angle) = graphops::id_of(angle.id) else {
-			return Err("the angle footage is not in the project".to_string());
-		};
-		let video_target =
-			if let Some(index) = self.tracks.iter().position(|t| t.kind == TrackKind::Video) {
-				index
-			} else {
-				return Err("no video track on the host sequence".to_string());
-			};
-		let video_index = self.tracks[video_target].track_index;
-		let (length, in_ts) = {
-			let tb = self.frame_rate();
-			let fps_f = tb.num.max(1) as f64 / tb.den.max(1) as f64;
-			let seconds = {
-				let guard = graphops::lock(project);
-				graphops::footage_duration_seconds(&guard.graph, angle)
-			};
-			let length = match seconds {
-				Some(s) => (s * fps_f).round().max(1.0) as i64,
-				None => (10.0 * fps_f).round().max(1.0) as i64,
-			};
-			let in_ts = match playhead {
-				Some(t) => {
-					let (num, den) = (t.numerator(), t.denominator().max(1));
-					let fps_f = fps_f as i64;
-					((num * fps_f) / den).max(0)
-				}
-				None => 0,
-			};
-			(length, in_ts)
-		};
-		let clip = graphops::place_footage_clip(
-			project,
-			seq,
-			angle,
-			TrackType::Video,
-			video_index,
-			in_ts,
-			in_ts + length,
-			0,
-		)
-		.map_err(|e| format!("place host clip: {e}"))?;
-		self.refresh_sequence_info();
-		self.rebuild_timeline();
-		self.invalidate_rendered_frames();
-		Ok(clip)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -12294,45 +11923,6 @@ mod tests {
 			"no-op switches push nothing"
 		);
 
-		// The AFV helper reports "no change" when the clip's audio already
-		// comes from the requested source, and the raw connect command
-		// re-points it when executed directly.
-		let (project_ref, video_block) = cx.read(|app| {
-			let engine = engine.read(app);
-			(
-				engine.project.clone().expect("project"),
-				engine
-					.tracks
-					.iter()
-					.filter(|t| t.kind == TrackKind::Video)
-					.flat_map(|t| t.clips.iter().map(|c| c.block))
-					.next()
-					.expect("the host clip"),
-			)
-		});
-		let unchanged = cx.read(|app| {
-			engine
-				.read(app)
-				.afv_audio_switch_commands(&project_ref, video_block, 0)
-		});
-		assert!(
-			unchanged.is_some_and(|cmds| cmds.is_empty()),
-			"the current source yields no AFV commands"
-		);
-		let mut cmds = cx
-			.read(|app| {
-				engine
-					.read(app)
-					.afv_audio_switch_commands(&project_ref, video_block, 1)
-			})
-			.expect("switching to angle 1 yields the disconnect/connect pair");
-		for cmd in cmds.iter_mut() {
-			cmd.redo_now();
-		}
-		for cmd in cmds.iter_mut().rev() {
-			cmd.undo_now();
-		}
-
 		let _ = std::fs::remove_file(&media_a);
 		let _ = std::fs::remove_file(&media_b);
 	}
@@ -15678,198 +15268,41 @@ mod tests {
 		let _ = std::fs::remove_file(&media);
 	}
 
-	/// The multicam host resolution and AFV helpers: no sequence, no
-	/// selection, no audio, missing video track, unprobed duration and the
-	/// empty-angle wizard failure.
+	/// Public wizard validation covers missing host sequences, empty selections,
+	/// unknown angles and mismatched synchronization offsets.
 	#[gpui_kit::test]
-	async fn wizard_host_and_afv_resolution_guards(cx: &mut gpui_kit::TestAppContext) {
+	async fn wizard_public_api_validation_guards(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
-		let (engine, media, entry) = eng_import_media(cx, "wizard_guards");
-		let project = cx.read(|app| engine.read(app).project.clone().expect("project"));
-		let seq = cx.read(|app| engine.read(app).sequence.expect("sequence"));
-		eng_place_clip(cx, &engine, entry, 0, 0, 25, 0);
-		let host_clip = cx.read(|app| {
-			engine
-				.read(app)
-				.tracks
-				.iter()
-				.flat_map(|t| t.clips.iter().map(|c| c.block))
-				.next()
-				.expect("host clip")
-		});
-		let angle = |id: u64, audio: Option<bool>| WizardFootage {
+		let (engine, media, entry) = eng_import_media(cx, "wizard_public_guards");
+		let angle = |id: u64| WizardFootage {
 			id,
 			name: "angle".into(),
 			source_timecode: None,
 			duration_s: None,
-			has_audio: audio,
+			has_audio: Some(true),
 		};
-
-		// No sequence: both resolutions fail.
-		let r = cx.update(|app| {
-			engine.update(app, |engine, _cx| {
+		let missing_host = cx.update(|app| {
+			engine.update(app, |engine, cx| {
 				engine.sequence = None;
-				engine.find_existing_multicam_host_clip(&project, None)
+				engine.multicam_create_sequence(vec![angle(entry)], vec![0.0], "Test".into(), cx)
 			})
 		});
-		assert!(r.is_err(), "no sequence: no host resolution");
-		let r = cx.update(|app| {
-			engine.update(app, |engine, _cx| {
-				engine.place_host_clip_for_wizard(&project, None, angle(entry, Some(true)))
-			})
-		});
-		assert!(r.is_err(), "no sequence: no host placement");
-		let r = cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				engine.ensure_host_afv_audio(&project, host_clip, &[angle(entry, Some(true))], cx)
-			})
-		});
-		assert!(r.is_err(), "no sequence: no AFV audio");
-		cx.update(|app| engine.update(app, |engine, _cx| engine.sequence = Some(seq)));
-
-		// A clip under the playhead resolves; a gap falls back to the
-		// first video clip.
-		let covering = cx
-			.update(|app| {
-				engine.update(app, |engine, _cx| {
-					engine.find_existing_multicam_host_clip(
-						&project,
-						Some(oak_core::Rational::new(10, 1)),
-					)
-				})
-			})
-			.expect("the clip covers the playhead");
-		assert_eq!(covering, host_clip, "the covering clip is the host");
-		let fallback = cx
-			.update(|app| {
-				engine.update(app, |engine, _cx| {
-					engine.find_existing_multicam_host_clip(
-						&project,
-						Some(oak_core::Rational::new(10_000, 1)),
-					)
-				})
-			})
-			.expect("the fallback finds the first clip");
-		assert_eq!(fallback, host_clip, "the gap falls back to the first clip");
-
-		// AFV with the host sequence's audio tracks removed: the helper
-		// creates the missing audio track and places the angle's audio.
-		cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				while let Some(index) = engine
-					.tracks
-					.iter()
-					.position(|t| t.kind == TrackKind::Audio)
-				{
-					engine.remove_track(index, cx);
-				}
-			})
-		});
-		let afv = cx
-			.update(|app| {
+		assert!(missing_host.is_err());
+		let seq = cx.read(|app| engine.read(app).sequence);
+		cx.update(|app| engine.update(app, |engine, _cx| engine.sequence = seq));
+		for (angles, offsets) in [
+			(Vec::new(), Vec::new()),
+			(vec![angle(0xdead)], vec![0.0]),
+			(vec![angle(entry)], vec![0.0, 1.0]),
+		] {
+			let result = cx.update(|app| {
 				engine.update(app, |engine, cx| {
-					engine.ensure_host_afv_audio(
-						&project,
-						host_clip,
-						&[angle(entry, Some(true))],
-						cx,
-					)
+					engine.multicam_create_sequence(angles, offsets, "  ".into(), cx)
 				})
-			})
-			.expect("the AFV audio is placed and its track created");
-		let afv_track_kind = {
-			let guard = graphops::lock(&project);
-			let track = graphops::clip_track(&guard.graph, afv).expect("the AFV clip's track");
-			graphops::track_behavior(&guard.graph, track).map(|t| t.kind)
-		};
-		assert_eq!(
-			afv_track_kind,
-			Some(oak_node::track::TrackType::Audio),
-			"the placed audio clip sits on an audio track"
-		);
-
-		// Unknown angle ids fail the host placement; no video track fails
-		// it too.
-		let r = cx.update(|app| {
-			engine.update(app, |engine, _cx| {
-				engine.place_host_clip_for_wizard(&project, None, angle(0xdead, Some(true)))
-			})
-		});
-		assert!(r.is_err(), "unknown angle id");
-		cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				while let Some(index) = engine
-					.tracks
-					.iter()
-					.position(|t| t.kind == TrackKind::Video)
-				{
-					engine.remove_track(index, cx);
-				}
-			})
-		});
-		let r = cx.update(|app| {
-			engine.update(app, |engine, _cx| {
-				engine.place_host_clip_for_wizard(&project, None, angle(entry, Some(true)))
-			})
-		});
-		assert!(r.is_err(), "no video track on the host");
-
-		// AFV: empty selection and an angle without audio.
-		let r = cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				engine.ensure_host_afv_audio(&project, host_clip, &[], cx)
-			})
-		});
-		assert!(r.is_err(), "no selected angles");
-		let r = cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				engine.ensure_host_afv_audio(&project, host_clip, &[angle(entry, Some(false))], cx)
-			})
-		});
-		assert!(r.is_err(), "the reference angle has no audio");
-
-		// The wizard with no angles fails before touching the host clip.
-		let r = cx.update(|app| {
-			engine.update(app, |engine, cx| {
-				engine.multicam_create_sequence(vec![], vec![], "  ".to_string(), cx)
-			})
-		});
-		assert!(r.is_err(), "the wizard needs at least one angle");
-
-		// Host placement on a fresh video track with an unprobed angle and
-		// no playhead: the default length and the zero in-point.
-		cx.update(|app| engine.update(app, |engine, cx| engine.add_track(TrackKind::Video, cx)));
-		{
-			let mut g = graphops::lock(&project);
-			let f = g
-				.graph
-				.get_mut(graphops::id_of(entry).expect("footage node"))
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-				.expect("footage behavior");
-			f.streams.clear();
+			});
+			assert!(result.is_err());
 		}
-		let placed = cx
-			.update(|app| {
-				engine.update(app, |engine, _cx| {
-					engine.place_host_clip_for_wizard(&project, None, angle(entry, Some(true)))
-				})
-			})
-			.expect("the host clip is placed with the default length");
-		let range = cx.read(|app| {
-			engine
-				.read(app)
-				.tracks
-				.iter()
-				.flat_map(|t| t.clips.iter())
-				.find(|c| c.block == placed)
-				.map(|c| (c.range.start.0, c.range.end.0))
-		});
-		let (start, end) = range.expect("the placed clip is listed");
-		assert_eq!(start, 0, "no playhead anchors at frame zero");
-		assert!(end > start, "the default length spans frames");
-
-		let _ = std::fs::remove_file(&media);
+		let _ = std::fs::remove_file(media);
 	}
 
 	/// Lookups that resolve selection / entry / proxy / sync state against

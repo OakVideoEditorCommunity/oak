@@ -378,3 +378,93 @@ pub unsafe extern "C" fn oak_audio_estimate_stretch_offset(
 	);
 	OakAudioStretchEstimate::from_native(&result)
 }
+
+/// Source-time metadata used by source-timecode placement.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OakAudioSourceClip {
+	pub source_start_time: crate::coretypes::OakRational,
+	pub media_in: crate::coretypes::OakRational,
+	pub has_source_start_time: bool,
+}
+
+impl NativeMirror for OakAudioSourceClip {
+	type Native = oak_audio::synchronizer::SourceClip;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			source_start_time: crate::coretypes::OakRational::from_native(
+				&native.source_start_time,
+			),
+			media_in: crate::coretypes::OakRational::from_native(&native.media_in),
+			has_source_start_time: native.has_source_start_time,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			source_start_time: self.source_start_time.to_native(),
+			media_in: self.media_in.to_native(),
+			has_source_start_time: self.has_source_start_time,
+		}
+	}
+}
+
+/// Validated timeline placement produced by either synchronization policy.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OakAudioSyncPlacement {
+	pub timeline_in: crate::coretypes::OakRational,
+	pub valid: bool,
+}
+
+impl NativeMirror for OakAudioSyncPlacement {
+	type Native = oak_audio::synchronizer::Placement;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			timeline_in: crate::coretypes::OakRational::from_native(&native.timeline_in),
+			valid: native.valid,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			timeline_in: self.timeline_in.to_native(),
+			valid: self.valid,
+		}
+	}
+}
+
+/// Aligns candidate source timecode to the reference at a timeline anchor.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_audio_place_by_source_time(
+	reference: *const OakAudioSourceClip,
+	candidate: *const OakAudioSourceClip,
+	reference_timeline_in: crate::coretypes::OakRational,
+) -> OakAudioSyncPlacement {
+	let (Some(reference), Some(candidate)) =
+		(unsafe { reference.as_ref() }, unsafe { candidate.as_ref() })
+	else {
+		return OakAudioSyncPlacement::default();
+	};
+	OakAudioSyncPlacement::from_native(&oak_audio::synchronizer::place_by_source_time(
+		&reference.to_native(),
+		&candidate.to_native(),
+		reference_timeline_in.to_native(),
+	))
+}
+
+/// Converts a measured sample offset into a timeline placement.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_audio_place_by_waveform_offset(
+	reference_timeline_in: crate::coretypes::OakRational,
+	candidate_offset_samples: i64,
+	sample_rate: i32,
+) -> OakAudioSyncPlacement {
+	OakAudioSyncPlacement::from_native(&oak_audio::synchronizer::place_by_waveform_offset(
+		reference_timeline_in.to_native(),
+		candidate_offset_samples,
+		sample_rate,
+	))
+}

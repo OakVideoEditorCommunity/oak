@@ -90,6 +90,11 @@ unsafe extern "C" {
 		id: u64,
 		out: *mut crate::codec::ProxyParams,
 	) -> bool;
+	fn oak_footage_source_start_time(
+		project: *const c_void,
+		footage: u64,
+		out: *mut Rational,
+	) -> bool;
 
 	fn oak_sequence_track_list_count(project: *const c_void, id: u64) -> i32;
 	fn oak_sequence_track_list_at(project: *const c_void, id: u64, index: i32) -> u64;
@@ -518,6 +523,12 @@ impl Project {
 	pub fn footage_effective_proxy_params(&self, footage: NodeId) -> Option<crate::codec::ProxyParams> {
 		let mut out = crate::codec::ProxyParams::default();
 		unsafe { oak_footage_effective_proxy_params(self.ptr, footage.0, &mut out) }.then_some(out)
+	}
+
+	/// Returns source-start timecode only when the footage carries it.
+	pub fn footage_source_start_time(&self, footage: NodeId) -> Option<Rational> {
+		let mut out = Rational::NULL;
+		unsafe { oak_footage_source_start_time(self.ptr, footage.0, &mut out) }.then_some(out)
 	}
 
 	// -- sequence / track list / track ---------------------------------

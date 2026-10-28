@@ -400,6 +400,31 @@ footage_rational! {
 	oak_footage_video_length => video_length,
 }
 
+/// Source-start timecode when present; false when unset or not footage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_footage_source_start_time(
+	project: *const ProjectHandle,
+	id: u64,
+	out: *mut OakRational,
+) -> bool {
+	let (Some(id), Some(out)) = (node_id(id), unsafe { out.as_mut() }) else {
+		return false;
+	};
+	let value = with_project(project, |project| {
+		behavior_as::<FootageBehavior>(project, id).and_then(|footage| {
+			footage
+				.has_source_start_time
+				.then_some(OakRational::from_native(&footage.source_start_time))
+		})
+	})
+	.flatten();
+	let Some(value) = value else {
+		return false;
+	};
+	*out = value;
+	true
+}
+
 /// The `ordinal`-th video stream's params. False when out of range or
 /// wrong kind.
 #[unsafe(no_mangle)]

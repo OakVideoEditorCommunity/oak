@@ -287,6 +287,7 @@ mod workflow;
 mod media;
 pub mod proxy;
 pub mod sync;
+pub mod multicam;
 pub use snapshot::*;
 pub use graph::*;
 pub use params::*;

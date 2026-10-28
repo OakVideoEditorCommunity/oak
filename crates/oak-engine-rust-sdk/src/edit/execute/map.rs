@@ -476,6 +476,33 @@ impl CommandArgs {
 				self.simple(OakEditOp::SetProxyEnabled, footage);
 				self.params.enabled = enabled;
 			}
+			EditCommand::SetMulticamEnabled { clips, enabled } => {
+				self.op = OakEditOp::SetMulticamEnabled;
+				self.ids(clips);
+				self.params.enabled = enabled;
+			}
+			EditCommand::SwitchMulticam {
+				clip,
+				source,
+				split_clip,
+				playhead,
+			} => {
+				self.simple(OakEditOp::SwitchMulticam, clip);
+				self.params.kind = source;
+				self.params.enabled = split_clip;
+				self.params.rate = playhead;
+			}
+			EditCommand::CreateMulticamSequence {
+				host_sequence,
+				angles,
+				offsets,
+				name,
+			} => {
+				self.simple(OakEditOp::CreateMulticamSequence, host_sequence);
+				self.ids(angles);
+				self.values(offsets);
+				self.name(name);
+			}
 		}
 	}
 }

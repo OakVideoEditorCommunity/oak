@@ -340,6 +340,21 @@ mod tests {
 				valid: true,
 			},
 		);
+		let source = oak_audio::synchronizer::SourceClip {
+				source_start_time: oak_core::Rational::new(10, 1),
+				media_in: oak_core::Rational::new(1, 2),
+				has_source_start_time: true,
+			};
+		let source_roundtrip = crate::audio_analysis::OakAudioSourceClip::from_native(&source).to_native();
+		assert_eq!(source_roundtrip.source_start_time, source.source_start_time);
+		assert_eq!(source_roundtrip.media_in, source.media_in);
+		assert_eq!(source_roundtrip.has_source_start_time, source.has_source_start_time);
+		assert_roundtrip::<crate::audio_analysis::OakAudioSyncPlacement>(
+			&oak_audio::synchronizer::Placement {
+				timeline_in: oak_core::Rational::new(5, 1),
+				valid: true,
+			},
+		);
 		assert_roundtrip::<crate::thumbnail::OakThumbnailInfo>(
 			&crate::thumbnail::ThumbnailMetadata {
 				width: 144,

@@ -28,6 +28,11 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			.map(|placement| (placement.kind, placement.index))
 			.collect()
 	};
+	let values = if p.values.is_null() {
+		Vec::new()
+	} else {
+		unsafe { std::slice::from_raw_parts(p.values, p.values_len) }.to_vec()
+	};
 	Ok(match op {
 		OakEditOp::AddTrack => EditCommand::AddTrack { kind: p.kind },
 		OakEditOp::RemoveTrack => EditCommand::RemoveTrack { track: p.a },
@@ -319,6 +324,22 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 		OakEditOp::SetProxyEnabled => EditCommand::SetProxyEnabled {
 			footage: p.a,
 			enabled: p.enabled,
+		},
+		OakEditOp::SetMulticamEnabled => EditCommand::SetMulticamEnabled {
+			clips: ids,
+			enabled: p.enabled,
+		},
+		OakEditOp::SwitchMulticam => EditCommand::SwitchMulticam {
+			clip: p.a,
+			source: p.kind,
+			split_clip: p.enabled,
+			playhead: p.rate,
+		},
+		OakEditOp::CreateMulticamSequence => EditCommand::CreateMulticamSequence {
+			host_sequence: p.a,
+			angles: ids,
+			offsets: values,
+			name: text(p.name, p.name_len),
 		},
 	})
 }

@@ -53,7 +53,6 @@ pub mod graphops;
 pub mod gpu;
 pub mod icons;
 pub mod mock;
-pub mod multicam;
 pub mod nodegraph;
 pub mod ofx;
 pub mod projectbrowser;

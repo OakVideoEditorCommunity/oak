@@ -18,6 +18,7 @@ struct CommandArgs {
 	_input_id: Vec<u8>,
 	_ids: Vec<u64>,
 	_placements: Vec<OakTrackPlacement>,
+	_values: Vec<f64>,
 	result_ids: Vec<u64>,
 	result_clipboard: Vec<OakClipboardClip>,
 }
@@ -32,6 +33,7 @@ impl CommandArgs {
 			_input_id: Vec::new(),
 			_ids: Vec::new(),
 			_placements: Vec::new(),
+			_values: Vec::new(),
 			result_ids: vec![0; 1024],
 			result_clipboard: vec![OakClipboardClip::default(); 1024],
 		};
@@ -77,6 +79,12 @@ impl CommandArgs {
 			.collect();
 		self.params.placements = self._placements.as_ptr();
 		self.params.placements_len = self._placements.len();
+	}
+
+	fn values(&mut self, value: Vec<f64>) {
+		self._values = value;
+		self.params.values = self._values.as_ptr();
+		self.params.values_len = self._values.len();
 	}
 
 	/// Packs variant fields into the opcode-specific slots documented by the ABI.

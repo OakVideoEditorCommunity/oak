@@ -361,6 +361,25 @@ pub enum EditCommand {
 		footage: NodeId,
 		enabled: bool,
 	},
+	/// Enables or disables multicam on sequence-connected clips as one undo entry.
+	SetMulticamEnabled {
+		clips: Vec<NodeId>,
+		enabled: bool,
+	},
+	/// Switches video and linked AFV audio, optionally splitting at the playhead.
+	SwitchMulticam {
+		clip: NodeId,
+		source: i32,
+		split_clip: bool,
+		playhead: crate::types::Rational,
+	},
+	/// Builds a multicam source sequence and rewires a host clip on another sequence.
+	CreateMulticamSequence {
+		host_sequence: NodeId,
+		angles: Vec<NodeId>,
+		offsets: Vec<f64>,
+		name: String,
+	},
 }
 
 /// A clip captured by the session clipboard.

@@ -50,6 +50,57 @@ unsafe extern "C" {
 		max_rate: f64,
 		rate_step: f64,
 	) -> StretchEstimate;
+	fn oak_audio_place_by_source_time(
+		reference: *const SourceClip,
+		candidate: *const SourceClip,
+		reference_timeline_in: crate::types::Rational,
+	) -> SyncPlacement;
+	fn oak_audio_place_by_waveform_offset(
+		reference_timeline_in: crate::types::Rational,
+		candidate_offset_samples: i64,
+		sample_rate: i32,
+	) -> SyncPlacement;
+}
+
+/// Source-timecode and media-in metadata used for timeline alignment.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SourceClip {
+	pub source_start_time: crate::types::Rational,
+	pub media_in: crate::types::Rational,
+	pub has_source_start_time: bool,
+}
+
+/// Validated timeline placement produced by a synchronization policy.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SyncPlacement {
+	pub timeline_in: crate::types::Rational,
+	pub valid: bool,
+}
+
+/// Aligns candidate source timecode to the reference at a timeline anchor.
+pub fn place_by_source_time(
+	reference: &SourceClip,
+	candidate: &SourceClip,
+	reference_timeline_in: crate::types::Rational,
+) -> SyncPlacement {
+	unsafe { oak_audio_place_by_source_time(reference, candidate, reference_timeline_in) }
+}
+
+/// Converts a measured sample offset into a timeline placement.
+pub fn place_by_waveform_offset(
+	reference_timeline_in: crate::types::Rational,
+	candidate_offset_samples: i64,
+	sample_rate: i32,
+) -> SyncPlacement {
+	unsafe {
+		oak_audio_place_by_waveform_offset(
+			reference_timeline_in,
+			candidate_offset_samples,
+			sample_rate,
+		)
+	}
 }
 
 /// Candidate offset and normalized correlation confidence.
@@ -224,6 +275,39 @@ impl Drop for Waveform {
 
 #[cfg(test)]
 mod tests {
+	#[test]
+	fn source_time_and_waveform_placement_are_validated() {
+		let reference = super::SourceClip {
+			source_start_time: crate::types::Rational::new(10, 1),
+			media_in: crate::types::Rational::new(2, 1),
+			has_source_start_time: true,
+		};
+		let candidate = super::SourceClip {
+			source_start_time: crate::types::Rational::new(12, 1),
+			media_in: crate::types::Rational::new(0, 1),
+			has_source_start_time: true,
+		};
+		let placement =
+			super::place_by_source_time(&reference, &candidate, crate::types::Rational::new(5, 1));
+		assert!(placement.valid);
+		assert_eq!(placement.timeline_in, crate::types::Rational::new(5, 1));
+		let invalid = super::SourceClip {
+			has_source_start_time: false,
+			..candidate
+		};
+		assert!(
+			!super::place_by_source_time(&reference, &invalid, crate::types::Rational::new(5, 1))
+				.valid
+		);
+		let placement =
+			super::place_by_waveform_offset(crate::types::Rational::new(5, 1), 4_800, 48_000);
+		assert!(placement.valid);
+		assert!((placement.timeline_in.to_f64() - 5.1).abs() < 1e-9);
+		assert!(
+			!super::place_by_waveform_offset(crate::types::Rational::new(5, 1), 4_800, 0).valid
+		);
+	}
+
 	#[test]
 	fn envelope_offset_and_stretch_use_engine_correlation() {
 		let reference: Vec<f64> = (0..10).map(|index| index as f64).collect();

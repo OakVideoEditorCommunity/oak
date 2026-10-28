@@ -11,6 +11,7 @@ pub mod aux;
 pub mod notify;
 pub mod proxy;
 pub mod sync;
+pub mod multicam;
 
 use oak_core::handle::CHandle;
 use oak_node::id::NodeId;

@@ -3,6 +3,7 @@
 use std::ffi::c_void;
 
 use crate::node::NodeId;
+use crate::codec::string_out;
 use crate::types::Rational;
 
 use super::EditorSession;
@@ -15,6 +16,12 @@ use super::EditorSession;
 unsafe extern "C" {
 	fn oak_editor_clip_sync_info(session: *const c_void, clip: u64, out: *mut ClipSyncInfo)
 	-> bool;
+	fn oak_editor_clip_media_filename(
+		session: *const c_void,
+		clip: u64,
+		buf: *mut u8,
+		buf_len: usize,
+	) -> i32;
 }
 
 /// Timeline/media timing and optional source timecode for one block.
@@ -36,6 +43,13 @@ impl EditorSession {
 	pub fn clip_sync_info(&self, clip: NodeId) -> Option<ClipSyncInfo> {
 		let mut info = ClipSyncInfo::default();
 		unsafe { oak_editor_clip_sync_info(self.ptr, clip.raw(), &mut info) }.then_some(info)
+	}
+
+	/// Returns the first upstream footage filename without exposing the graph.
+	pub fn clip_media_filename(&self, clip: NodeId) -> Option<String> {
+		string_out(|buf, len| unsafe {
+			oak_editor_clip_media_filename(self.ptr, clip.raw(), buf, len)
+		})
 	}
 }
 

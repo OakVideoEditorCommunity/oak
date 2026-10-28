@@ -26,6 +26,10 @@ mod editing;
 pub use editing::*;
 mod moving;
 pub use moving::*;
+mod multicam;
+pub use multicam::*;
+mod multicam_wizard;
+pub use multicam_wizard::*;
 mod edit_menu;
 pub use edit_menu::*;
 #[cfg(test)]

@@ -4,6 +4,7 @@ use oak_node::footage::FootageBehavior;
 use oak_node::id::NodeId;
 
 use super::EditorSessionHandle;
+use crate::codec::copy_str_out;
 use crate::coretypes::OakRational;
 use crate::handle::NativeMirror;
 
@@ -58,4 +59,23 @@ pub unsafe extern "C" fn oak_editor_clip_sync_info(
 		media_length_seconds: (timeline_out - timeline_in).to_f64(),
 	};
 	true
+}
+
+/// Returns the media filename of the first upstream footage node.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_editor_clip_media_filename(
+	session: *const EditorSessionHandle,
+	clip: u64,
+	buf: *mut u8,
+	buf_len: usize,
+) -> i32 {
+	let (Some(session), Some(clip)) = (unsafe { session.as_ref() }, NodeId::from_identity(clip))
+	else {
+		return -1;
+	};
+	let project = session.project();
+	let guard = project.lock().unwrap_or_else(|e| e.into_inner());
+	crate::editor_commands::clip_media_filename(&guard.graph, clip)
+		.map(|filename| copy_str_out(&filename, buf, buf_len))
+		.unwrap_or(-1)
 }

@@ -1,7 +1,7 @@
 # P4：素材、代理、波形、同步与多机位实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P4。  
-> 状态：P4A–P4D 已完成，下一阶段为 P4E；后续阶段不提前宣称完成。
+> 状态：P4A–P4E 已完成，P4 整体完成；下一阶段为 P5。
 
 ## 1. 子阶段
 
@@ -90,3 +90,28 @@
   缩略图测试不再依赖 worker/render-manager 环境。
 - oak-audio / engine / SDK 全量回归通过，其中 engine 169 个、SDK 104 个测试通过。
 - 内部引用基线由 870 收紧至 864。
+
+## 10. P4E 范围
+
+- `SetMulticamEnabled` 按源 sequence 分组执行启停；`SwitchMulticam` 复用
+  oak-timeline 的切换/split 命令，并把 AFV 音频重连放入同一 undo 组。
+- `CreateMulticamSequence` 创建并挂载角度源序列，按偏移放置音视频角度，
+  连接 multicam source array；空主机时间线自动放置视频和链接 AFV 音频，且不切换
+  用户当前 sequence。
+- SDK 提供 multicam 状态、连接 sequence、角度轨道和 playhead clip 查询。
+  角度 lag 与底层相关性的符号约定在 app 向导边界显式转换。
+- app 的启停、切换、向导、drop、面板状态和角度轨道均改走 SDK；删除旧
+  `oakui/multicam.rs` 重复实现。同步放置与 renderops 代理状态也改用 SDK，
+  不再保留 P4 范围内的媒体/同步直调入口。
+
+## 11. P4E 验证与 P4 出口
+
+- 独立 SDK 双角度测试覆盖启停、普通/split 切换、AFV 音频跟随和 undo/redo。
+- 向导向真实音视频工程验证偏移、空时间线主机、AFV、当前 sequence 保持及保存重开；
+  参数数量不匹配在修改工程前被拒绝。
+- app 的向导、drop、启停、AFV、源时间/波形同步和公开参数校验定向测试通过。
+- `engine_multicam_angle_frames_render` 仍受既有 render-manager 启动环境限制，未计为
+  通过；角度轨道和源 sequence 改由无渲染 SDK 断言覆盖。
+- engine / SDK 全量回归通过，其中 engine 169 个、SDK 107 个测试通过。
+- 内部引用基线由 864 收紧至 780。P4A–P4E 出口均满足，独立消费者可以从素材
+  导入走到代理、波形、同步和多机位。
