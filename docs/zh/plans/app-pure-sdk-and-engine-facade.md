@@ -197,11 +197,12 @@ crates/oak-app/src/oakui/
   剪贴板、嵌套和速度；每个命令只执行一次并返回 revision。
 - 以迁入测试、全变体 ABI 测试和 undo/redo/保存重开验证。
 
-### P2B：RealEngine 采用、历史与依赖收口（已跳过）
+### P2B：RealEngine 采用、历史与依赖收口（历史统一已完成，其余收口转入 P7）
 
-本轮明确跳过 P2B，直接以 P2A 的 engine/SDK 能力进入 P3。RealEngine 暂不采用
-`EditorSession`，app 的时间线、历史与编辑调用继续走旧路径；因此不能把 P2A
-记为 app 已接入或 `oak-timeline` / `oak-undo` 依赖已清零。
+本轮先在 P3D 发现 engine dylib 与 app rlib 双 undo 栈的问题，随后统一为 engine
+历史栈：graphops 的遗留 `UndoCommand` 通过迁移期 owned 转移入口写入同一栈，
+RealEngine 的 undo/redo/history/jump/group 全部改走 SDK。P3D 必需的历史语义已验证，
+但 `oak-timeline` / `oak-undo` 类型与其他内部依赖的完全清零仍转入 P7。
 
 - RealEngine 采用 P1 的 `EditorSession`，一次性切换工程实例、write-through
   绑定和项目级 OCIO/cache/color 设置；删除剩余 `oak-storage` 直调，并用会话
@@ -220,7 +221,7 @@ crates/oak-app/src/oakui/
 
 实施记录见 [p3-node-graph-and-effects.md](p3-node-graph-and-effects.md)。P3A–P3C 完成
 engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参数生产路径切换。
-迁移会话与旧 `ProjectRef` 通过引用计数句柄共享同一 Arc，没有第二份工程或裸 Arc 还原。
+迁移会话与旧 `ProjectRef` 通过引用计数句柄共享同一 Arc，历史命令也统一到同一栈。
 
 - 将 `nodegraph.rs` 的图查询/连接规则与 `effectchain.rs` 的链操作迁入引擎。
 - 用 SDK DTO 表达节点、端口、连接、效果顺序、参数描述、值、枚举选项、
@@ -231,7 +232,9 @@ engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参�
 **出口**：独立消费者不依赖 `oak-node` 即可建图、连图、加效果、编辑参数和
 关键帧并渲染验证；app 的节点与效果领域 helper 已删除。
 
-### P4：素材、代理、波形、同步与多机位
+### P4：素材、代理、波形、同步与多机位（进行中）
+
+实施记录见 [p4-media-and-multicam.md](p4-media-and-multicam.md)。
 
 - 完成素材导入、替换/relink、参数覆盖、素材与 sequence 互转及项目浏览器写操作。
 - 将代理生成/删除/启停/自定义参数与任务进度封装为 SDK 会话能力，不返回

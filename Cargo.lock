@@ -5432,6 +5432,7 @@ name = "oak-engine-rust-sdk"
 version = "0.5.2"
 dependencies = [
  "oak-engine",
+ "oak-undo",
  "thiserror 2.0.20",
 ]
 

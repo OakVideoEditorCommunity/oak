@@ -1683,7 +1683,7 @@ mod tests {
 			video_montage(&project, seq, at(-1)).is_empty(),
 			"a negative time covers nothing"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -1695,7 +1695,7 @@ mod tests {
 	#[test]
 	fn video_montage_stacks_highest_track_on_top() {
 		let _media = media_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let red = std::env::temp_dir().join(format!("oakapp_stack_red_{}.mp4", std::process::id()));
 		let blue =
 			std::env::temp_dir().join(format!("oakapp_stack_blue_{}.mp4", std::process::id()));
@@ -1757,7 +1757,7 @@ mod tests {
 			"V2's blue covers V1's red (r={r}, b={b})"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&red);
 		let _ = std::fs::remove_file(&blue);
 	}
@@ -1777,7 +1777,7 @@ mod tests {
 			oak_core::colormath::WorkingColorSpace::SrgbLegacy,
 			oak_core::colormath::OutputColorSpec::default(),
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media =
 			std::env::temp_dir().join(format!("oakapp_montage_fx_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate test media");
@@ -1899,7 +1899,7 @@ mod tests {
 			p[0]
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -1985,7 +1985,7 @@ mod tests {
 			oak_core::colormath::WorkingColorSpace::SrgbLegacy,
 			oak_core::colormath::OutputColorSpec::default(),
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let red = std::env::temp_dir().join(format!("oakapp_adj_red_{}.mp4", std::process::id()));
 		let blue = std::env::temp_dir().join(format!("oakapp_adj_blue_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip_solid(&red, 64, 64, 10, 10, [0.9, 0.1, 0.1, 1.0])
@@ -2113,7 +2113,7 @@ mod tests {
 		assert_eq!(m.len(), 2, "the clips stay in the montage");
 		assert!(s.is_empty(), "a disabled layer emits no span");
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&red);
 		let _ = std::fs::remove_file(&blue);
 	}
@@ -2129,7 +2129,7 @@ mod tests {
 			oak_core::colormath::WorkingColorSpace::SrgbLegacy,
 			oak_core::colormath::OutputColorSpec::default(),
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let red =
 			std::env::temp_dir().join(format!("oakapp_adjlow_red_{}.mp4", std::process::id()));
 		let blue =
@@ -2271,7 +2271,7 @@ mod tests {
 			"a span whose range misses the ticket's time renders ungraded"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&red);
 		let _ = std::fs::remove_file(&blue);
 	}
@@ -2480,7 +2480,7 @@ mod tests {
 			"an unprobed angle clip's media is not a preview source"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -2689,7 +2689,7 @@ mod tests {
 			graph_ms, montage_ms
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&red);
 		let _ = std::fs::remove_file(&blue);
 	}
@@ -2765,7 +2765,7 @@ mod tests {
 			"the other track is unaffected"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -2794,7 +2794,7 @@ mod tests {
 			disjoint.is_empty(),
 			"a range past the clip overlaps nothing"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -2836,8 +2836,8 @@ mod tests {
 			"a muted audio track contributes nothing"
 		);
 
-		oak_undo::global::undo().unwrap();
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			video_montage(&project, seq, at(0)).len(),
 			1,
@@ -2848,7 +2848,7 @@ mod tests {
 			1,
 			"undo restores the audio clip"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -2921,7 +2921,7 @@ mod tests {
 	#[test]
 	fn proxy_resolution_bounds_the_sequence_render() {
 		let _media = media_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let orig =
 			std::env::temp_dir().join(format!("oakapp_proxy_src_{}.mp4", std::process::id()));
 		let proxy =
@@ -3000,7 +3000,7 @@ mod tests {
 			"the proxy's blue covers the frame (r={r}, b={b})"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&orig);
 		let _ = std::fs::remove_file(&proxy);
 	}
@@ -3195,7 +3195,7 @@ mod tests {
 
 		let _ = std::fs::remove_file(&proxy);
 		let _ = std::fs::remove_file(&proxy_audio);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// A clip whose only footage has an empty filename (a placeholder or
@@ -3232,7 +3232,7 @@ mod tests {
 			resolved.is_none(),
 			"an empty footage filename is not a preview source"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The full / audio / single-track montage walks skip foreign
@@ -3241,7 +3241,7 @@ mod tests {
 	#[test]
 	fn montage_walks_skip_stale_and_media_less_entries() {
 		let _media = media_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Guard Montage");
 		let (video_track, video_list, audio_track, audio_list, tb) = {
@@ -3302,7 +3302,7 @@ mod tests {
 		// The single-track walk's out-of-range guard.
 		assert!(single_track_video_montage(&project, seq, video_track, at(50)).is_empty());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `proxy_limits_at` skips foreign sequences, lists, tracks and blocks,
@@ -3310,7 +3310,7 @@ mod tests {
 	#[test]
 	fn proxy_limits_skip_foreign_and_media_less_entries() {
 		let _media = media_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Proxy Limits");
 		let (video_track, video_list, tb) = {
@@ -3349,7 +3349,7 @@ mod tests {
 		assert!(proxy_limits_at(&project, seq, at(0)).is_empty());
 		assert!(proxy_limits_at(&project, seq, at(50)).is_empty());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The single-footage ticket clamps to the footage's own ready proxy
@@ -3358,7 +3358,7 @@ mod tests {
 	#[test]
 	fn footage_frame_params_clamps_to_the_proxy_and_rejects_non_footage() {
 		let _media = media_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let proxy_media = ConfigGuard::pin("UseProxyMedia");
 		proxy_media.set_bool(1);
 
@@ -3409,7 +3409,7 @@ mod tests {
 		);
 		assert!(err.contains("not footage"));
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&orig);
 		let _ = std::fs::remove_file(&proxy);
 	}
@@ -3485,7 +3485,7 @@ mod tests {
 		let foreign = bare_clip(&project);
 		assert!(encoding_params(&project, foreign, 2, path, None, 0).is_err());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `encoding_params_with_settings`: the chosen-codec validation, size /
@@ -3613,7 +3613,7 @@ mod tests {
 		)
 		.is_err());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// A fake GPU context whose download hands back a small F32 frame, so
@@ -3801,7 +3801,7 @@ mod tests {
 			ensure_render_manager(),
 			"the render manager must start for this test; build oak-worker or set OAK_WORKER_BIN"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		let media =
 			std::env::temp_dir().join(format!("oakapp_manager_render_{}.mp4", std::process::id()));
@@ -3859,7 +3859,7 @@ mod tests {
 		// An invalid timebase is rejected before any manager access.
 		assert!(render_audio_range(&project, seq, 0, 5, (0, 1)).is_err());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 }

@@ -11,7 +11,8 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
 
-use crate::codec::copy_str_out;
+use crate::codec::{copy_str_out, str_arg};
+use oak_undo::undocommand::UndoCommand;
 
 /// Jumps to history position `index` (undoing/redoing as needed).
 /// False on failure.
@@ -24,6 +25,25 @@ pub extern "C" fn oak_undo_jump(index: i64) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_undo_clear() -> bool {
 	oak_undo::global::clear().is_ok()
+}
+
+/// Takes ownership of one migration command and records it on this engine's
+/// process-wide undo stack. The pointer must come from `Box<UndoCommand>`;
+/// ownership is transferred exactly once and the command is dropped on errors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_undo_push_owned(
+	command: *mut c_void,
+	name: *const u8,
+	name_len: usize,
+) -> bool {
+	if command.is_null() {
+		return false;
+	}
+	let command = unsafe { Box::from_raw(command as *mut UndoCommand) };
+	let Some(name) = (unsafe { str_arg(name, name_len) }) else {
+		return false;
+	};
+	oak_undo::global::push(*command, name).is_ok()
 }
 
 /// The display name of history row `row`, snprintf-style; -1 when out

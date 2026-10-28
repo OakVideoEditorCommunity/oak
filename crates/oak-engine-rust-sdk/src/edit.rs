@@ -328,6 +328,15 @@ pub enum EditCommand {
 		element: i32,
 		value: String,
 	},
+	/// Replaces and reprobes a footage node's media without changing its ID.
+	ReplaceFootage {
+		footage: NodeId,
+		path: String,
+	},
+	/// Deletes a project-bin entry and its folder mount, restoring both on undo.
+	DeleteEntry {
+		node: NodeId,
+	},
 }
 
 /// A clip captured by the session clipboard.

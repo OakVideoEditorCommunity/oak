@@ -49,6 +49,7 @@ pub struct StreamInfo {
 }
 
 /// Footage behavior.
+#[derive(Clone)]
 pub struct FootageBehavior {
 	/// Absolute file path.
 	pub filename: String,

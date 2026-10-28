@@ -996,7 +996,7 @@ mod tests {
 	#[test]
 	fn build_graph_handles_placement_and_invalid_ids() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, clip, _effect, _footage) = project_with_chained_clip();
 
 		// Invalid sequence / clip identities: id_of accepts any non-sentinel
@@ -1054,7 +1054,7 @@ mod tests {
 			"the structural clip -> track edge does not leak into the clip view"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Stream-input port filtering: an empty display name falls back to the
@@ -1062,7 +1062,7 @@ mod tests {
 	#[test]
 	fn build_graph_filters_stream_input_ports() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, clip, _, _) = project_with_chained_clip();
 
 		// The clip's texture input (a stream input that is not hidden).
@@ -1119,7 +1119,7 @@ mod tests {
 			"an input with an empty id is not exposed"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The connection rules reject wrong directions, same-node pairs,
@@ -1128,7 +1128,7 @@ mod tests {
 	#[test]
 	fn can_connect_rejects_the_invalid_pairs() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, _seq, _clip, effect, footage) = project_with_chained_clip();
 
 		let (effect_input_id, effect_input_index) = {
@@ -1194,7 +1194,7 @@ mod tests {
 		}
 		assert!(!can_connect(&project, clip_out, effect_input));
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `apply_edit` covers every event: connection rejection/success,
@@ -1204,7 +1204,7 @@ mod tests {
 	#[test]
 	fn apply_edit_covers_connect_move_and_delete() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, clip, effect, _footage) = project_with_chained_clip();
 
 		// Wrong endpoint kinds.
@@ -1416,7 +1416,7 @@ mod tests {
 		)
 		.is_err());
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Regression: in the per-clip view the first move of an unplaced node
@@ -1427,7 +1427,7 @@ mod tests {
 	#[test]
 	fn move_in_clip_view_uses_the_chain_local_fallback() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, _clip_a, _effect, _footage) = project_with_chained_clip();
 		// A second, bare clip node: the full view's fallback grid now has
 		// two clip-role rows (A at 0, B at 1), B's own chain view has one.
@@ -1493,7 +1493,7 @@ mod tests {
 		};
 		assert_eq!(moved_c, (570.0, 240.0), "the full grid puts C at row 1");
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 
@@ -1550,7 +1550,7 @@ mod tests {
 	#[test]
 	fn clip_context_build_is_the_clip_chain_only() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, clip, effect, footage) = project_with_chained_clip();
 
 		let (nodes, edges) = build_graph_for_clip(&project, seq, clip.identity());
@@ -1594,7 +1594,7 @@ mod tests {
 			"the full graph synthesizes the clip→output wire"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Every project graph carries the virtual endpoint pair: the full view
@@ -1603,7 +1603,7 @@ mod tests {
 	#[test]
 	fn endpoints_build_as_marked_cards() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, clip, _, _) = project_with_chained_clip();
 
 		let (nodes, _edges) = build_graph(&project, seq);
@@ -1640,6 +1640,6 @@ mod tests {
 			"a clip's context chain contains no endpoints"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 }

@@ -508,5 +508,9 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 			element,
 			value,
 		} => empty(ops::set_text_value(project, id(node)?, &input_id, element, &value)),
+		EditCommand::ReplaceFootage { footage, path } => {
+			empty(ops::replace_footage(project, id(footage)?, std::path::Path::new(&path)))
+		}
+		EditCommand::DeleteEntry { node } => empty(ops::delete_entry(project, id(node)?)),
 	}
 }

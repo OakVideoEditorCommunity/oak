@@ -455,6 +455,11 @@ impl CommandArgs {
 				self.params.element = element;
 				self.name(value);
 			}
+			EditCommand::ReplaceFootage { footage, path } => {
+				self.simple(OakEditOp::ReplaceFootage, footage);
+				self.path(path);
+			}
+			EditCommand::DeleteEntry { node } => self.simple(OakEditOp::DeleteEntry, node),
 		}
 	}
 }

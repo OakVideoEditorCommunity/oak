@@ -840,14 +840,19 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 /// error.
 #[cfg(test)]
 fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-	oak_undo::global::group_begin(name).map_err(|e| e.to_string())?;
+	if !oak_engine_rust_sdk::node::undo_group_begin(name) {
+		return Err("failed to begin the undo group".into());
+	}
 	match f() {
 		Ok(v) => {
-			oak_undo::global::group_end().map_err(|e| e.to_string())?;
-			Ok(v)
+			if oak_engine_rust_sdk::node::undo_group_end() {
+				Ok(v)
+			} else {
+				Err("failed to close the undo group".into())
+			}
 		}
 		Err(e) => {
-			let _ = oak_undo::global::group_abort();
+			let _ = oak_engine_rust_sdk::node::undo_group_abort();
 			Err(e)
 		}
 	}
@@ -1257,7 +1262,7 @@ mod tests {
 	#[test]
 	fn insert_rejects_cross_media_effects() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		use oak_node::track::TrackType;
 
 		let project = graphops::create_project();
@@ -1321,13 +1326,13 @@ mod tests {
 		insert(&p2, free, 0, "org.olivevideoeditor.Olive.opacity")
 			.expect("untracked clips stay permissive");
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	#[test]
 	fn insert_walks_the_chain_and_undoes() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 		let ty = some_effect_type();
 
@@ -1342,19 +1347,19 @@ mod tests {
 		);
 
 		// One undo row per insert.
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(chain(&lock(&project).graph, host), vec![second, first]);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(chain(&lock(&project).graph, host), vec![first]);
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(chain(&lock(&project).graph, host), vec![second, first]);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	#[test]
 	fn remove_bridges_the_gap() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 		let ty = some_effect_type();
 		let a = insert(&project, host, 0, &ty).unwrap();
@@ -1364,15 +1369,15 @@ mod tests {
 
 		remove(&project, host, b).expect("remove the middle effect");
 		assert_eq!(chain(&lock(&project).graph, host), vec![a, c]);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(chain(&lock(&project).graph, host), vec![a, b, c]);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	#[test]
 	fn move_reorders_the_chain() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 		let ty = some_effect_type();
 		let a = insert(&project, host, 0, &ty).unwrap();
@@ -1381,15 +1386,15 @@ mod tests {
 
 		move_effect(&project, host, c, 0).expect("move the last effect to the source side");
 		assert_eq!(chain(&lock(&project).graph, host), vec![c, a, b]);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(chain(&lock(&project).graph, host), vec![a, b, c]);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	#[test]
 	fn set_enabled_toggles_and_undoes() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 		let ty = some_effect_type();
 		let eff = insert(&project, host, 0, &ty).unwrap();
@@ -1397,9 +1402,9 @@ mod tests {
 
 		set_enabled(&project, eff, false).unwrap();
 		assert!(!is_enabled(&lock(&project).graph, eff));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(is_enabled(&lock(&project).graph, eff));
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	#[test]
@@ -1558,7 +1563,7 @@ mod tests {
 	#[test]
 	fn set_input_value_undoes() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 
 		// Choose a built-in effect whose scratch core exposes a float input
@@ -1612,7 +1617,7 @@ mod tests {
 				.standard_value(&input_id, -1),
 			NodeValue::Float(42.0)
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			lock(&project)
 				.graph
@@ -1622,7 +1627,7 @@ mod tests {
 				.standard_value(&input_id, -1),
 			before
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The inspector's colour-parameter loop: the value the UI commits
@@ -1634,7 +1639,7 @@ mod tests {
 	#[test]
 	fn color_param_set_read_round_trip() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host) = project_with_clip();
 
 		// A built-in video effect whose scratch core exposes a colour input
@@ -1692,7 +1697,7 @@ mod tests {
 			"the engine must echo the committed colour"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The plugin-node colour loop, shaped exactly like the OFX translation
@@ -1705,7 +1710,7 @@ mod tests {
 	#[test]
 	fn plugin_color_param_set_read_round_trip() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, _host) = project_with_clip();
 
 		// A plugin-shaped node: colour param + texture clip input, defaults
@@ -1779,7 +1784,7 @@ mod tests {
 		);
 
 		// Undo restores the default; redo reapplies the commit.
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			lock(&project)
 				.graph
@@ -1789,7 +1794,7 @@ mod tests {
 				.standard_value("TintColor", -1),
 			oak_node::value::NodeValue::Color([1.0, 0.0, 0.0, 1.0])
 		);
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(
 			lock(&project)
 				.graph
@@ -1800,7 +1805,7 @@ mod tests {
 			color
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The combo-option collector reads the repeated `("combo_option", _)`
@@ -1865,7 +1870,7 @@ mod tests {
 	#[test]
 	fn text3_is_not_addable_but_a_chain_node_still_reports_its_params() {
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		const TEXT3: &str = "org.olivevideoeditor.Olive.text3";
 		assert!(
@@ -1903,7 +1908,7 @@ mod tests {
 		// never in the inspector.
 		assert!(!params.iter().any(|p| p.input_id == "text_in"));
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The effect library and the inspector name built-in effects and their
@@ -1917,7 +1922,7 @@ mod tests {
 			.lock()
 			.unwrap_or_else(|e| e.into_inner());
 		let _g = stack_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		crate::i18n::set_language_code("zh-CN");
 
 		// Every addable built-in shows its pack name, never the factory's
@@ -1967,7 +1972,7 @@ mod tests {
 		assert_eq!(label("gain_in"), "增益");
 
 		crate::i18n::set_language_code("en-US");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The pack coverage behind the lookup above: every name a built-in

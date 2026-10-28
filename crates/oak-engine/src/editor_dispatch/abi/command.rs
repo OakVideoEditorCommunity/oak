@@ -301,5 +301,10 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			element: p.element,
 			value: text(p.name, p.name_len),
 		},
+		OakEditOp::ReplaceFootage => EditCommand::ReplaceFootage {
+			footage: p.a,
+			path: text(p.path, p.path_len),
+		},
+		OakEditOp::DeleteEntry => EditCommand::DeleteEntry { node: p.a },
 	})
 }

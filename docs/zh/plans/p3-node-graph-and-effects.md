@@ -1,7 +1,7 @@
 # P3：节点图、效果与参数体系实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P3。  
-> 状态：P3A–P3D 已完成，P3 整体完成。P2B 已明确跳过；本文不把 P2A 或
+> 状态：P3A–P3D 已完成，P3 整体完成。历史栈已经统一，独立消费者与 app 回归均通过。
 > P3 子阶段完成解释为 app 已完成切换。
 
 ## 1. 子阶段
@@ -24,7 +24,7 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 ## 3. 完成边界
 
 只有 P3A–P3D 全部满足，且独立消费者不依赖 `oak-node` 完成建图、连图、效果、参数、
-关键帧与渲染验证后，才能把 P3 标为完成。P3D 的 app 切换和独立验收现已完成。
+关键帧与渲染验证后，才能把 P3 标为完成。独立验收、app 切换和 P2B 历史统一均已完成。
 
 ## 4. P3A 实施结果
 
@@ -149,5 +149,6 @@ P3D 的剩余工作，必须继续保持同一工程实例，不以第二份工�
 - `python3 tooling/check_app_engine_boundary.py --update-baseline`：内部引用基线由 1182
   收紧至 1177，直接内部依赖数量未增加。
 
-P3A–P3D 的出口均已满足：独立消费者不依赖 `oak-node` 即可建图、连图、加效果、编辑
-参数和关键帧并渲染；app 的节点、效果与参数生产路径已经切换。
+P3A–P3D 的出口均已满足。graphops 的遗留 `UndoCommand` 通过迁移期 owned 转移入口
+与新会话命令进入同一个 engine undo 栈，`entry_rename_and_delete_are_real`、graphops
+全部 48 个测试以及历史/效果/节点定向测试均通过。内部引用基线由 1182 进一步收紧至 895。

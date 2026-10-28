@@ -3280,7 +3280,7 @@ impl RealEngine {
 		// after the debounce window (or immediately when no edit raced
 		// recently). Rapid edits coalesce instead of serializing +
 		// uploading the whole project snapshot on every keystroke.
-		let revision = oak_undo::global::index().unwrap_or(0).max(0) as u64;
+		let revision = oak_engine_rust_sdk::node::undo_index().max(0) as u64;
 		self.pending_snapshot = Some(revision);
 	}
 
@@ -3324,7 +3324,7 @@ impl RealEngine {
 	/// library. Projects without a sequence get a blank default.
 	fn adopt_project(&mut self, project: ProjectRef, cx: &mut Context<Self>) {
 		self.drop_project();
-		oak_undo::global::clear().ok();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// Cached display info.
 		let (name, path, first_sequence) = {
@@ -3403,7 +3403,7 @@ impl RealEngine {
 	fn drop_project(&mut self) {
 		*self.renderer.lock().unwrap() = RendererSlot::Untried;
 		*self.source_renderer.lock().unwrap() = RendererSlot::Untried;
-		oak_undo::global::clear().ok();
+		oak_engine_rust_sdk::node::undo_clear();
 		if let Some(m) = RenderManager::global() {
 			m.clear_graph_snapshot();
 		}
@@ -5523,16 +5523,16 @@ impl AppEngine for RealEngine {
 	/// Open an undo group for a multi-write parameter gesture (a
 	/// color-wheel drag's per-move writes join it, closing as one entry).
 	fn begin_param_drag(&mut self, name: &str, cx: &mut Context<Self>) {
-		if let Err(e) = oak_undo::global::group_begin(name) {
-			println!("[real engine] begin param drag: {e}");
+		if !oak_engine_rust_sdk::node::undo_group_begin(name) {
+			println!("[real engine] begin param drag: failed");
 		}
 		cx.notify();
 	}
 
 	/// Close the gesture's undo group.
 	fn end_param_drag(&mut self, cx: &mut Context<Self>) {
-		if let Err(e) = oak_undo::global::group_end() {
-			println!("[real engine] end param drag: {e}");
+		if !oak_engine_rust_sdk::node::undo_group_end() {
+			println!("[real engine] end param drag: failed");
 		}
 		cx.notify();
 	}
@@ -5567,23 +5567,23 @@ impl AppEngine for RealEngine {
 	}
 
 	fn can_undo(&self) -> bool {
-		self.project.is_some() && oak_undo::global::undoable()
+		self.project.is_some() && oak_engine_rust_sdk::node::undo_can_undo()
 	}
 
 	fn can_redo(&self) -> bool {
-		self.project.is_some() && oak_undo::global::redoable()
+		self.project.is_some() && oak_engine_rust_sdk::node::undo_can_redo()
 	}
 
 	fn undo(&mut self, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_undo::global::undo().ok();
+			oak_engine_rust_sdk::node::undo();
 			self.apply_stack_change(cx);
 		}
 	}
 
 	fn redo(&mut self, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_undo::global::redo().ok();
+			oak_engine_rust_sdk::node::redo();
 			self.apply_stack_change(cx);
 		}
 	}
@@ -5595,18 +5595,18 @@ impl AppEngine for RealEngine {
 		// The C++ `HistoryModel` lists every row of the engine stack (done
 		// first, then the redoable tail); labels are read through the same
 		// two-stage contract the C++ `oakengine_undo_command_text` uses.
-		let count = oak_undo::global::count().unwrap_or(0);
+		let count = oak_engine_rust_sdk::node::undo_count();
 		(0..count)
 			.map(|row| super::HistoryEntry {
-				name: oak_undo::global::command_name(row).unwrap_or_default(),
-				done: oak_undo::global::command_done(row).unwrap_or(false),
+				name: oak_engine_rust_sdk::node::undo_command_name(row).unwrap_or_default(),
+				done: oak_engine_rust_sdk::node::undo_command_done(row).unwrap_or(false),
 			})
 			.collect()
 	}
 
 	fn history_index(&self) -> i64 {
 		if self.project.is_some() {
-			oak_undo::global::index().unwrap_or(0)
+			oak_engine_rust_sdk::node::undo_index()
 		} else {
 			0
 		}
@@ -5614,7 +5614,7 @@ impl AppEngine for RealEngine {
 
 	fn jump_history(&mut self, index: i64, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_undo::global::jump(index).ok();
+			oak_engine_rust_sdk::node::undo_jump(index);
 			self.apply_stack_change(cx);
 		}
 	}
@@ -5700,56 +5700,38 @@ impl AppEngine for RealEngine {
 		if !path.is_file() {
 			return Err(format!("file does not exist: {}", path.display()));
 		}
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let Some(footage) = graphops::id_of(id) else {
 			return Err("unknown project entry".into());
 		};
-		{
-			let mut guard = graphops::lock(&project);
-			if !guard.graph.is_valid(footage) {
-				return Err("unknown project entry".into());
-			}
-			let Some(f) = guard
-				.graph
-				.get_mut(footage)
-				.and_then(|e| e.behavior.as_any_mut())
-				.and_then(|a| a.downcast_mut::<oak_node::footage::FootageBehavior>())
-			else {
-				return Err("entry is not footage".into());
-			};
-			f.filename = path.to_string_lossy().into_owned();
-			// Re-probe in place; a failed probe leaves the footage invalid,
-			// matching the import-time rejection behavior. (Not undoable
-			// yet — the C++ replace is a single command.)
-			f.probe()
-				.map_err(|e| format!("failed to probe \"{}\": {e}", path.display()))?;
-		}
+		session.execute(EditCommand::ReplaceFootage {
+			footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.identity()),
+			path: path.to_string_lossy().into_owned(),
+		})?;
 		cx.notify();
 		Ok(())
 	}
 
 	fn rename_entry(&mut self, id: u64, new_name: String, cx: &mut Context<Self>) {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
 		let Some(node) = graphops::id_of(id) else {
 			return;
 		};
-		let result = {
-			let mut guard = graphops::lock(&project);
-			let Some(entry) = guard.graph.get_mut(node) else {
-				return;
-			};
-			entry.core.label = new_name;
-			Ok::<(), String>(())
-		};
+		let result = session
+			.execute(EditCommand::RenameBlocks {
+				clips: vec![oak_engine_rust_sdk::node::NodeId::from_raw(node.identity())],
+				name: new_name,
+			})
+			.map(|_| ());
 		self.apply_edit(result, "rename entry", cx);
 	}
 
 	fn delete_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return;
 		};
 		let Some(node) = graphops::id_of(id) else {
@@ -5760,10 +5742,11 @@ impl AppEngine for RealEngine {
 		// node and its connections; timeline clips referencing a removed
 		// footage keep their blocks but their decode source is gone —
 		// matching the C++ path, which is undoable).
-		let result = graphops::push_command(
-			oak_task::nodeops::remove_node_command(project, node),
-			"Delete Entry",
-		);
+		let result = session
+			.execute(EditCommand::DeleteEntry {
+				node: oak_engine_rust_sdk::node::NodeId::from_raw(node.identity()),
+			})
+			.map(|_| ());
 		self.apply_edit(result, "delete entry", cx);
 	}
 
@@ -6269,7 +6252,7 @@ impl AppEngine for RealEngine {
 		// resync — the workers re-deserialize the rewritten snapshot, adopt
 		// the new working space/output spec and drop their cached frames.
 		if let Some(m) = RenderManager::global() {
-			let revision = oak_undo::global::index().unwrap_or(0).max(0) as u64;
+			let revision = oak_engine_rust_sdk::node::undo_index().max(0) as u64;
 			let _ = m.resync_graph_snapshot(&project, revision);
 		}
 		// The pipeline colorspace changed: every cached frame (CPU image,
@@ -8660,7 +8643,7 @@ mod tests {
 		// add_track returns the NEW track's index: with the default 2V+2A
 		// layout those are the third video and third audio track.
 		assert_eq!((v, a), (2, 2), "in-memory tracks");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// Save as uncompressed `.ovexml` (the module serializer reads plain
 		// XML).
@@ -8828,7 +8811,7 @@ mod tests {
 				.is_err()
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -8899,7 +8882,7 @@ mod tests {
 		release_rendered_frame(&frame);
 
 		RenderManager::shutdown();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// M12 P3 acceptance: importing a media file makes it appear in the
@@ -8930,7 +8913,7 @@ mod tests {
 		let node = crate::oakui::projectbrowser::find_by_identity(&project, entry.id);
 		assert!(node.is_some(), "selection resolves to a node");
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -9204,7 +9187,7 @@ mod tests {
 			"the redo restored every row"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The multicam switch through the UI path (`multicam_switch_to`): it
@@ -9327,7 +9310,7 @@ mod tests {
 			"disabling multicam clears the detection"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// M12 P2 acceptance: a real project with a sequence + footage clip
@@ -9389,7 +9372,7 @@ mod tests {
 			"the footage→clip media edge is real (got {real_edges} real edges)"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -9545,7 +9528,7 @@ mod tests {
 			"a card click re-selects the effect's node"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Regression: the source monitor's full-res job renders the selected
@@ -9592,7 +9575,7 @@ mod tests {
 			.expect("the worker delivers the frame after the project drop");
 		let bytes = event.image.as_bytes(0).expect("one frame");
 		assert_eq!(bytes.len(), 64 * 64 * 4, "full-res geometry");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -9769,7 +9752,7 @@ mod tests {
 			.count();
 		assert!(nonzero > 0, "the footage clip renders non-black pixels");
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -9935,7 +9918,7 @@ mod tests {
 			std::thread::sleep(Duration::from_millis(10));
 		}
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -11626,7 +11609,7 @@ mod tests {
 		}
 
 		// One undo removes the clip (and its edge) again.
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		{
 			let guard = graphops::lock(&project);
 			assert!(
@@ -11640,7 +11623,7 @@ mod tests {
 				"the undo also drops the gap the placement inserted"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// An effect-library generator (Color Bars) drops onto the timeline as
@@ -11719,7 +11702,7 @@ mod tests {
 		};
 		let _ = (clip, generator);
 
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		{
 			let guard = graphops::lock(&project);
 			assert!(
@@ -11727,7 +11710,7 @@ mod tests {
 				"the undo removes the dropped clip"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Dropping a transition near a clip edge snaps to it. The time base
@@ -11797,7 +11780,7 @@ mod tests {
 				"a head transition wires no outgoing clip"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// five-second empty block at the clicked frame on a video track (an
@@ -11954,7 +11937,7 @@ mod tests {
 		);
 
 		// One undo removes the placement (and the leading gap) again.
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		{
 			let guard = graphops::lock(&project);
 			assert!(
@@ -11968,7 +11951,7 @@ mod tests {
 				"the undo also drops the gap the placement inserted"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `update_sequence_parameters` rewrites the name, the format and the

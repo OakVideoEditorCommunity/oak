@@ -61,6 +61,56 @@ pub fn import_footage(project: &ProjectRef, path: &Path) -> Result<NodeId, Strin
 	Ok(id)
 }
 
+/// Replaces a footage node's media path and reprobes it as one undoable edit.
+///
+/// The new path is probed before the graph is changed. On success, all proxy,
+/// custom-generation and source-time settings are retained while streams,
+/// decoder and timestamp follow the new file. Undo restores the complete prior
+/// behavior, including the old path and probe state. Failure leaves the graph
+/// and undo stack untouched.
+pub fn replace_footage(project: &ProjectRef, footage: NodeId, path: &Path) -> Result<(), String> {
+	if !path.is_file() {
+		return Err(format!("file does not exist: {}", path.display()));
+	}
+	let (old, mut new) = {
+		let guard = lock(project);
+		let old = footage_behavior(&guard.graph, footage)
+			.ok_or_else(|| "entry is not footage".to_string())?
+			.clone();
+		let mut new = old.clone();
+		new.filename = path.to_string_lossy().into_owned();
+		(old, new)
+	};
+	new.probe()
+		.map_err(|e| format!("failed to probe \"{}\": {e}", path.display()))?;
+	let redo_project = project.clone();
+	let undo_project = project.clone();
+	push_command(
+		oak_undo::undocommand::UndoCommand::from_closures(
+			move || {
+				if let Some(entry) = lock(&redo_project).graph.get_mut(footage) {
+					entry.behavior = Box::new(new.clone());
+				}
+			},
+			move || {
+				if let Some(entry) = lock(&undo_project).graph.get_mut(footage) {
+					entry.behavior = Box::new(old.clone());
+				}
+			},
+		),
+		"Replace Footage",
+	)
+}
+
+/// Deletes a project-bin entry, including its folder mount, as one undoable
+/// "Delete Entry" command. Undo restores the graph node and original folder slot.
+pub fn delete_entry(project: &ProjectRef, node: NodeId) -> Result<(), String> {
+	push_command(
+		oak_task::nodeops::remove_node_command(project.clone(), node),
+		"Delete Entry",
+	)
+}
+
 // ---------------------------------------------------------------------------
 // Marker list / workarea auxiliaries
 //

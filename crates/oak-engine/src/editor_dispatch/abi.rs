@@ -81,6 +81,8 @@ pub enum OakEditOp {
 	SetNodeValueAtTime,
 	PushNodeButton,
 	SetNodeTextValue,
+	ReplaceFootage,
+	DeleteEntry,
 }
 
 impl OakEditOp {
@@ -151,6 +153,8 @@ impl OakEditOp {
 			61 => Self::SetNodeValueAtTime,
 			62 => Self::PushNodeButton,
 			63 => Self::SetNodeTextValue,
+			64 => Self::ReplaceFootage,
+			65 => Self::DeleteEntry,
 			_ => return None,
 		})
 	}

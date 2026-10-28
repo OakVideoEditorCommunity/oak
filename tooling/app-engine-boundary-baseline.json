@@ -56,11 +56,11 @@
       }
     },
     "crates/oak-app/src/oakui/effectchain.rs": {
-      "total": 83,
+      "total": 51,
       "crates": {
         "oak-core": 1,
         "oak-node": 48,
-        "oak-undo": 34
+        "oak-undo": 2
       }
     },
     "crates/oak-app/src/oakui/gpu.rs": {
@@ -70,7 +70,7 @@
       }
     },
     "crates/oak-app/src/oakui/graphops.rs": {
-      "total": 364,
+      "total": 195,
       "crates": {
         "oak-codec": 12,
         "oak-core": 2,
@@ -78,7 +78,7 @@
         "oak-storage": 18,
         "oak-task": 5,
         "oak-timeline": 53,
-        "oak-undo": 205
+        "oak-undo": 36
       }
     },
     "crates/oak-app/src/oakui/multicam.rs": {
@@ -91,11 +91,10 @@
       }
     },
     "crates/oak-app/src/oakui/nodegraph.rs": {
-      "total": 31,
+      "total": 17,
       "crates": {
         "oak-node": 16,
-        "oak-timeline": 1,
-        "oak-undo": 14
+        "oak-timeline": 1
       }
     },
     "crates/oak-app/src/oakui/ofx.rs": {
@@ -112,30 +111,29 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 286,
+      "total": 251,
       "crates": {
         "oak-audio": 21,
         "oak-codec": 29,
         "oak-core": 70,
-        "oak-node": 72,
+        "oak-node": 71,
         "oak-ofx-plugin": 1,
         "oak-render": 11,
         "oak-storage": 1,
-        "oak-task": 21,
+        "oak-task": 20,
         "oak-timeline": 20,
-        "oak-undo": 40
+        "oak-undo": 7
       }
     },
     "crates/oak-app/src/oakui/renderops.rs": {
-      "total": 208,
+      "total": 178,
       "crates": {
         "oak-codec": 30,
         "oak-core": 59,
         "oak-node": 59,
         "oak-render": 18,
         "oak-task": 11,
-        "oak-timeline": 1,
-        "oak-undo": 30
+        "oak-timeline": 1
       }
     },
     "crates/oak-app/src/oakui/settings.rs": {
@@ -168,12 +166,6 @@
       "total": 19,
       "crates": {
         "oak-ofx-plugin": 19
-      }
-    },
-    "crates/oak-app/src/panels/project_explorer.rs": {
-      "total": 2,
-      "crates": {
-        "oak-undo": 2
       }
     },
     "crates/oak-app/src/panels/timeline.rs": {

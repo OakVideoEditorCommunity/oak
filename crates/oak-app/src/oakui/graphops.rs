@@ -293,7 +293,9 @@ pub fn create_folder(project: &ProjectRef, name: &str) -> Result<NodeId, String>
 	};
 	let cmd =
 		oak_task::nodeops::folder_add_child_command((project.clone(), root), (project.clone(), id));
-	oak_undo::global::push(cmd, "New Folder").map_err(|e| e.to_string())?;
+	if !oak_engine_rust_sdk::migration::undo_push(cmd, "New Folder") {
+		return Err("failed to push the undo command".into());
+	}
 	Ok(id)
 }
 
@@ -918,7 +920,9 @@ pub fn import_footage(project: &ProjectRef, path: &Path) -> Result<NodeId, Strin
 	};
 	let cmd =
 		oak_task::nodeops::folder_add_child_command((project.clone(), root), (project.clone(), id));
-	oak_undo::global::push(cmd, "Import Footage").map_err(|e| e.to_string())?;
+	if !oak_engine_rust_sdk::migration::undo_push(cmd, "Import Footage") {
+		return Err("failed to push the undo command".into());
+	}
 	Ok(id)
 }
 
@@ -1209,7 +1213,11 @@ pub fn storage_flush() {
 
 /// Push one command onto the global undo stack (redo then record).
 pub fn push_command(cmd: oak_undo::undocommand::UndoCommand, name: &str) -> Result<(), String> {
-	oak_undo::global::push(cmd, name).map_err(|e| e.to_string())
+	if oak_engine_rust_sdk::migration::undo_push(cmd, name) {
+		Ok(())
+	} else {
+		Err("failed to push the undo command".into())
+	}
 }
 
 /// Assemble `children` into ONE multi command and push it (an empty set
@@ -3803,7 +3811,7 @@ mod tests {
 	#[test]
 	fn track_flag_setters_toggle_and_undo() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, _seq, track) = project_with_track(TrackType::Video);
 
 		assert_eq!(track_muted(&project, track), Some(false));
@@ -3814,27 +3822,27 @@ mod tests {
 		set_track_locked(&project, track, true).expect("lock the track");
 		assert_eq!(track_locked(&project, track), Some(true));
 
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(track_locked(&project, track), Some(false));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(track_muted(&project, track), Some(false));
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(track_muted(&project, track), Some(true));
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Setting a flag to its current value pushes no undo row.
 	#[test]
 	fn track_flag_setter_noop_when_unchanged() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, _seq, track) = project_with_track(TrackType::Audio);
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 
 		set_track_muted(&project, track, false).expect("mute already false");
 		set_track_locked(&project, track, false).expect("lock already false");
-		assert_eq!(oak_undo::global::count().unwrap(), before);
-		oak_undo::global::clear().unwrap();
+		assert_eq!(oak_engine_rust_sdk::node::undo_count(), before);
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Undo/redo stability: undo → redo → undo → redo must converge to the
@@ -3844,7 +3852,7 @@ mod tests {
 	#[test]
 	fn undo_redo_cycles_converge_to_the_same_state() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Undo Cycles");
 		let media = std::env::temp_dir().join(format!("oak_undo_cycle_{}.mp4", std::process::id()));
@@ -3883,7 +3891,7 @@ mod tests {
 		// Two full undo/redo cycles; the state must be identical after
 		// every redo and match the pre-undo state after every undo.
 		for cycle in 0..2 {
-			oak_undo::global::undo().expect("undo");
+			assert!(oak_engine_rust_sdk::node::undo(), "undo");
 			let g = lock(&project);
 			let video_blocks: usize = track_ids(&g.graph, seq, TrackType::Video)
 				.iter()
@@ -3895,14 +3903,14 @@ mod tests {
 				.sum();
 			assert_eq!(video_blocks, 0, "cycle {cycle}: undo removes the clips");
 			drop(g);
-			oak_undo::global::redo().expect("redo");
+			assert!(oak_engine_rust_sdk::node::redo(), "redo");
 			let state = snapshot(&project);
 			assert_eq!(
 				state, before,
 				"cycle {cycle}: redo must restore the exact state"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -3910,11 +3918,11 @@ mod tests {
 	#[test]
 	fn track_flag_setters_reject_non_tracks() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, _track) = project_with_track(TrackType::Video);
 		assert!(set_track_muted(&project, seq, true).is_err());
 		assert!(set_track_locked(&project, seq, true).is_err());
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Every clip is stamped at creation with the footage's name as its
@@ -3924,7 +3932,7 @@ mod tests {
 	#[test]
 	fn clips_get_a_creation_time_label_and_stable_color() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Clip Color");
 		let media = std::env::temp_dir().join(format!("oak_clip_color_{}.mp4", std::process::id()));
@@ -3980,7 +3988,7 @@ mod tests {
 			assert_eq!(g.graph.get(clip).unwrap().core.label, name);
 		}
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -3992,7 +4000,7 @@ mod tests {
 	#[test]
 	fn paste_links_the_group_in_node_core_links() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Paste Links");
 		let media =
@@ -4024,7 +4032,7 @@ mod tests {
 		}
 
 		// Undo unlinks the group; redo relinks it.
-		oak_undo::global::undo().expect("undo paste");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo paste");
 		{
 			let g = lock(&project);
 			assert!(
@@ -4032,7 +4040,7 @@ mod tests {
 				"undo unlinks the pair"
 			);
 		}
-		oak_undo::global::redo().expect("redo paste");
+		assert!(oak_engine_rust_sdk::node::redo(), "redo paste");
 		{
 			let g = lock(&project);
 			assert!(
@@ -4040,7 +4048,7 @@ mod tests {
 				"redo relinks the pair"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -4051,7 +4059,7 @@ mod tests {
 	#[test]
 	fn edit_menu_operations_roundtrip() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "EditOps");
 		let media = std::env::temp_dir().join(format!(
@@ -4082,7 +4090,7 @@ mod tests {
 			let g = lock(&project);
 			assert!(!block_core_of(&g.graph, clip_a).unwrap().enabled);
 		}
-		oak_undo::global::undo().expect("undo disable");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo disable");
 		{
 			let g = lock(&project);
 			assert!(block_core_of(&g.graph, clip_a).unwrap().enabled);
@@ -4096,7 +4104,7 @@ mod tests {
 			assert_eq!(core.speed, 2.0);
 		}
 		assert_eq!(range_of(&project, clip_a), (0, 10), "span unchanged");
-		oak_undo::global::undo().expect("undo speed");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo speed");
 		{
 			let g = lock(&project);
 			assert_eq!(block_core_of(&g.graph, clip_a).unwrap().speed, 1.0);
@@ -4112,7 +4120,7 @@ mod tests {
 			let g = lock(&project);
 			assert_eq!(g.graph.get(clip_a).unwrap().core.label, "新名字");
 		}
-		oak_undo::global::undo().expect("undo rename");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo rename");
 		{
 			let g = lock(&project);
 			assert_eq!(g.graph.get(clip_a).unwrap().core.label, old_label);
@@ -4123,7 +4131,7 @@ mod tests {
 		assert_eq!(dup.len(), 2);
 		assert_eq!(range_of(&project, dup[0]), (20, 30));
 		assert_eq!(range_of(&project, dup[1]), (30, 40));
-		oak_undo::global::undo().expect("undo duplicate");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo duplicate");
 
 		// Paste-insert at 5: A straddles the playhead so it splits (front
 		// stays [0,5), rear shifts right past the pasted span); B shifts.
@@ -4132,7 +4140,7 @@ mod tests {
 		assert_eq!(range_of(&project, inserted[0]), (5, 15));
 		assert_eq!(range_of(&project, clip_b), (20, 30), "B shifted right");
 		assert_eq!(range_of(&project, clip_a), (0, 5), "A's front half stays");
-		oak_undo::global::undo().expect("undo paste insert");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo paste insert");
 		assert_eq!(range_of(&project, clip_b), (10, 20), "undo restores B");
 		assert_eq!(range_of(&project, clip_a), (0, 10), "undo restores A");
 
@@ -4140,7 +4148,7 @@ mod tests {
 		roll_clip_edge_to(&project, clip_a, false, 12).expect("roll out");
 		assert_eq!(range_of(&project, clip_a), (0, 12));
 		assert_eq!(range_of(&project, clip_b), (12, 20));
-		oak_undo::global::undo().expect("undo roll");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo roll");
 		assert_eq!(range_of(&project, clip_a), (0, 10));
 		assert_eq!(range_of(&project, clip_b), (10, 20));
 
@@ -4148,14 +4156,14 @@ mod tests {
 		delete_area(&project, seq, 2, 6, false).expect("delete area");
 		assert_eq!(range_of(&project, clip_a), (0, 2));
 		assert_eq!(range_of(&project, clip_b), (10, 20), "gap left behind");
-		oak_undo::global::undo().expect("undo delete area");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo delete area");
 		assert_eq!(range_of(&project, clip_a), (0, 10));
 
 		// Ripple area delete of [2, 6): A shrinks, B pulls left by 4.
 		delete_area(&project, seq, 2, 6, true).expect("ripple delete area");
 		assert_eq!(range_of(&project, clip_a), (0, 2));
 		assert_eq!(range_of(&project, clip_b), (6, 16), "tail rippled left");
-		oak_undo::global::undo().expect("undo ripple delete");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo ripple delete");
 		assert_eq!(range_of(&project, clip_b), (10, 20));
 
 		// Nest: the two clips collapse into one nested clip spanning them,
@@ -4168,7 +4176,7 @@ mod tests {
 			assert!(!g.graph.is_valid(clip_b));
 		}
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -4179,7 +4187,7 @@ mod tests {
 	#[test]
 	fn deleting_one_of_a_linked_pair_clears_the_partner_link() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Delete Linked");
 		let media =
@@ -4216,7 +4224,7 @@ mod tests {
 			let (in_r, _, _) = clip_range(&g.graph, audio).expect("audio is still a clip");
 			assert_eq!(rational_to_ts(in_r, tb), 30, "the survivor moved");
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -4228,7 +4236,7 @@ mod tests {
 	#[test]
 	fn drop_undo_keeps_links_created_after_the_drop() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Drop Undo Links");
 		let media = std::env::temp_dir().join(format!("oak_drop_undo_{}.mp4", std::process::id()));
@@ -4256,8 +4264,8 @@ mod tests {
 
 		// Undo twice: the third clip's placement, then the drop. Neither
 		// may touch the video<->third link.
-		oak_undo::global::undo().expect("undo the third placement");
-		oak_undo::global::undo().expect("undo the drop");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo the third placement");
+		assert!(oak_engine_rust_sdk::node::undo(), "undo the drop");
 		{
 			let g = lock(&project);
 			assert!(
@@ -4271,7 +4279,7 @@ mod tests {
 			);
 			assert!(!g.graph.links_of(audio).contains(&video));
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -4282,7 +4290,7 @@ mod tests {
 	#[test]
 	fn moving_a_linked_clip_skips_the_off_track_partner() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Off Track Move");
 		let media = std::env::temp_dir().join(format!("oak_off_track_{}.mp4", std::process::id()));
@@ -4329,7 +4337,7 @@ mod tests {
 			let (a_in, _, _) = clip_range(&g.graph, audio).expect("audio is a clip");
 			assert_eq!(rational_to_ts(a_in, tb), 0, "the off-track clip stayed put");
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 }
@@ -4344,7 +4352,7 @@ mod undo_cycle_track_tests {
 	#[test]
 	fn add_track_undo_redo_cycles_converge() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Add Track Cycles");
 		let count_of = |p: &ProjectRef, kind: TrackType| {
@@ -4365,13 +4373,13 @@ mod undo_cycle_track_tests {
 		};
 
 		for cycle in 0..3 {
-			oak_undo::global::undo().expect("undo");
+			assert!(oak_engine_rust_sdk::node::undo(), "undo");
 			assert_eq!(
 				count_of(&project, TrackType::Video),
 				2,
 				"cycle {cycle}: undo removes only the added track"
 			);
-			oak_undo::global::redo().expect("redo");
+			assert!(oak_engine_rust_sdk::node::redo(), "redo");
 			assert_eq!(
 				count_of(&project, TrackType::Video),
 				3,
@@ -4389,7 +4397,7 @@ mod undo_cycle_track_tests {
 			);
 			drop(g);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 }
 
@@ -4434,8 +4442,8 @@ mod undo_cycle_ops_tests {
 		what: &str,
 	) {
 		for cycle in 0..3 {
-			oak_undo::global::undo().unwrap_or_else(|e| panic!("{what}: undo failed: {e:?}"));
-			oak_undo::global::redo().unwrap_or_else(|e| panic!("{what}: redo failed: {e:?}"));
+			assert!(oak_engine_rust_sdk::node::undo(), "{what}: undo failed");
+			assert!(oak_engine_rust_sdk::node::redo(), "{what}: redo failed");
 			let state = snapshot(p, seq);
 			assert_eq!(&state, post, "{what}: cycle {cycle} diverged");
 		}
@@ -4465,7 +4473,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn move_trim_delete_split_cycles_converge() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media = std::env::temp_dir().join(format!("oak_cycle_ops_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
 
@@ -4481,25 +4489,25 @@ mod undo_cycle_ops_tests {
 		move_clip(&project, clip, 20).expect("move");
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "move");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// --- trim ---
 		trim_clip(&project, clip, 22, 28).expect("trim");
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "trim");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// --- split ---
 		split_clip(&project, clip, 25).expect("split");
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "split");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// --- delete ---
 		delete_clip(&project, clip).expect("delete");
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "delete");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// --- ripple delete (on a fresh project, then check) ---
 		let (project, seq, _footage) = project_with_two_clips(&media);
@@ -4513,7 +4521,7 @@ mod undo_cycle_ops_tests {
 		ripple_delete_clip(&project, clip).expect("ripple delete");
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "ripple delete");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		let _ = std::fs::remove_file(&media);
 	}
@@ -4537,7 +4545,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn create_folder_and_sequence_mount_under_root() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let folder = create_folder(&project, "Folder 1").expect("create folder");
 		let seq = create_sequence_with_params(
@@ -4553,7 +4561,7 @@ mod undo_cycle_ops_tests {
 			2,
 			"the root folder itself plus the new folder"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `create_sequence_with_params` writes the format into the sequence's
@@ -4582,7 +4590,7 @@ mod undo_cycle_ops_tests {
 			.expect("a video stream")
 			.interlaced;
 		assert!(interlaced, "the interlaced flag lands in the first stream");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Sequences saved before they mounted under the root load free-floating;
@@ -4590,7 +4598,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn ensure_sequences_mounted_reattaches_orphans() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Legacy");
 		// Detach the sequence from the root: a legacy project loaded without
@@ -4615,7 +4623,7 @@ mod undo_cycle_ops_tests {
 			root_children(&project).contains(&seq),
 			"the orphan sequence reattaches under root"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `set_sequence_parameters` rewrites the display name and the first video
@@ -4655,7 +4663,7 @@ mod undo_cycle_ops_tests {
 			.expect("a video stream")
 			.interlaced;
 		assert!(interlaced, "the interlaced flag updates too");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	// ---- adjustment layers ------------------------------------------------
@@ -4717,7 +4725,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn adjustment_layer_trim_and_delete_cycles_converge() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Adjustment Ops");
 		add_track(&project, seq, TrackType::Video).expect("add video track");
@@ -4772,7 +4780,7 @@ mod undo_cycle_ops_tests {
 		}
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "adjustment trim");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		// Delete: the block leaves the track (and the clip list), and the
 		// replaced span is a gap, not a block.
@@ -4799,7 +4807,7 @@ mod undo_cycle_ops_tests {
 		}
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "adjustment delete");
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The production entry point ([`create_adjustment_layer`]) lands the
@@ -4809,7 +4817,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn create_adjustment_layer_places_on_video_track_and_undoes() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Adjustment UI");
 		add_track(&project, seq, TrackType::Video).expect("add video track");
@@ -4861,7 +4869,7 @@ mod undo_cycle_ops_tests {
 		let post = snapshot(&project, seq);
 		cycle_assert(&project, seq, &post, "create adjustment");
 
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		{
 			let g = lock(&project);
 			assert_eq!(
@@ -4874,7 +4882,7 @@ mod undo_cycle_ops_tests {
 				"the detached block stays in the graph as an orphan"
 			);
 		}
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		{
 			let g = lock(&project);
 			assert_eq!(
@@ -4883,7 +4891,7 @@ mod undo_cycle_ops_tests {
 				"the redo re-places the same block"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Only video tracks take adjustment layers, and the span must be a
@@ -4892,7 +4900,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn create_adjustment_layer_rejects_audio_tracks_and_bad_ranges() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Adjustment Rejects");
 		add_track(&project, seq, TrackType::Video).expect("add video track");
@@ -4904,7 +4912,7 @@ mod undo_cycle_ops_tests {
 				track_ids(&g.graph, seq, TrackType::Audio)[0],
 			)
 		};
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 
 		assert!(
 			create_adjustment_layer(&project, seq, audio, 0, 25).is_err(),
@@ -4923,7 +4931,7 @@ mod undo_cycle_ops_tests {
 			"a negative in point is rejected"
 		);
 		assert_eq!(
-			oak_undo::global::count().unwrap(),
+			oak_engine_rust_sdk::node::undo_count(),
 			before,
 			"a rejected call leaves the undo stack untouched"
 		);
@@ -4934,7 +4942,7 @@ mod undo_cycle_ops_tests {
 				"no block was created for the rejected calls"
 			);
 		}
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// 添加文本素材: the helper creates a text generator mounted under the
@@ -4944,12 +4952,12 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn create_text_footage_mounts_under_root_and_undoes() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 		let text = create_text_footage_node(&project).expect("create text footage");
 		assert_eq!(
-			oak_undo::global::count().unwrap(),
+			oak_engine_rust_sdk::node::undo_count(),
 			before + 1,
 			"the whole creation is one undo row"
 		);
@@ -4969,7 +4977,7 @@ mod undo_cycle_ops_tests {
 			"the text entry mounts under the root folder"
 		);
 
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(
 			!root_children(&project).contains(&text),
 			"the undo unmounts the entry"
@@ -4979,7 +4987,7 @@ mod undo_cycle_ops_tests {
 			"the undo removes the node itself — no orphan outlives it"
 		);
 
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert!(
 			root_children(&project).contains(&text),
 			"the redo remounts the entry"
@@ -4996,7 +5004,7 @@ mod undo_cycle_ops_tests {
 			"the restored node names the root again"
 		);
 		drop(g);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The text drop places a GENERATOR clip: the block spans the dropped
@@ -5006,7 +5014,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn place_text_clip_wires_the_generator_and_spans_the_range() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let seq = create_sequence(&project, "Text Drop");
 		let text = create_text_footage_node(&project).expect("create text footage");
@@ -5049,7 +5057,7 @@ mod undo_cycle_ops_tests {
 			place_text_clip(&project, seq, text, 9, 0, 10).is_err(),
 			"a track index past the video tracks is rejected"
 		);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	// ---- default transitions (Ctrl+Shift+D / clip menu) ---------------------
@@ -5095,7 +5103,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn default_transition_covers_both_ends_of_a_lone_clip() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media =
 			std::env::temp_dir().join(format!("oak_lone_transition_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
@@ -5113,12 +5121,12 @@ mod undo_cycle_ops_tests {
 		};
 		let half = ts_to_rational(3, tb);
 
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 		let created =
 			add_default_transition(&project, seq, &[clip], half).expect("add default transition");
 		assert_eq!(created, 2, "a lone clip takes both ends");
 		assert_eq!(
-			oak_undo::global::count().unwrap(),
+			oak_engine_rust_sdk::node::undo_count(),
 			before + 1,
 			"one undo row"
 		);
@@ -5200,11 +5208,11 @@ mod undo_cycle_ops_tests {
 
 		// Idempotent: every edge already carries a transition, so a second
 		// run builds nothing and leaves no empty row.
-		let rows = oak_undo::global::count().unwrap();
+		let rows = oak_engine_rust_sdk::node::undo_count();
 		assert!(add_default_transition(&project, seq, &[clip], half).is_err());
-		assert_eq!(oak_undo::global::count().unwrap(), rows);
+		assert_eq!(oak_engine_rust_sdk::node::undo_count(), rows);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -5214,20 +5222,20 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn default_transition_covers_the_selected_seams() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media =
 			std::env::temp_dir().join(format!("oak_default_transition_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
 		let (project, seq, track, a, b, tb, half) = two_touching_clips(&media);
 
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 		let created = add_default_transition(&project, seq, &[a, b], half).expect("add transition");
 		assert_eq!(
 			created, 1,
 			"both clips name the same seam; it is built once"
 		);
 		assert_eq!(
-			oak_undo::global::count().unwrap(),
+			oak_engine_rust_sdk::node::undo_count(),
 			before + 1,
 			"the whole batch is one undo row"
 		);
@@ -5306,12 +5314,12 @@ mod undo_cycle_ops_tests {
 
 		// The seam carries a transition now: nothing left to build, and the
 		// refused batch leaves no empty undo row behind.
-		let rows = oak_undo::global::count().unwrap();
+		let rows = oak_engine_rust_sdk::node::undo_count();
 		assert!(
 			add_default_transition(&project, seq, &[a, b], half).is_err(),
 			"a seam that already carries a transition is skipped"
 		);
-		assert_eq!(oak_undo::global::count().unwrap(), rows);
+		assert_eq!(oak_engine_rust_sdk::node::undo_count(), rows);
 		{
 			let g = lock(&project);
 			assert!(
@@ -5320,7 +5328,7 @@ mod undo_cycle_ops_tests {
 			);
 		}
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 
@@ -5331,7 +5339,7 @@ mod undo_cycle_ops_tests {
 	#[test]
 	fn transition_length_drag_moves_one_wedge_and_keeps_the_seam() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media =
 			std::env::temp_dir().join(format!("oak_transition_drag_{}.mp4", std::process::id()));
 		oak_codec::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate");
@@ -5405,7 +5413,7 @@ mod undo_cycle_ops_tests {
 			"the first clip has no head transition"
 		);
 
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let _ = std::fs::remove_file(&media);
 	}
 }
@@ -5486,7 +5494,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn project_lifecycle_round_trip_and_errors() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		let missing = temp_path("missing_project", "ove");
 		let _ = std::fs::remove_file(&missing);
@@ -5520,14 +5528,14 @@ mod gap_coverage_tests {
 		);
 
 		let _ = std::fs::remove_file(&path);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// A bare project (no root folder) rejects every node-creating entry.
 	#[test]
 	fn bare_project_without_root_rejects_creations() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let bare = Project::new();
 		let media = media_file("bare_root");
 		assert!(create_folder(&bare, "F").is_err());
@@ -5540,7 +5548,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn import_footage_rejects_missing_and_corrupt_media() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let missing = temp_path("import_missing", "mp4");
 		let _ = std::fs::remove_file(&missing);
@@ -5560,7 +5568,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn reprobe_unprobed_footage_resolves_and_probes() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let media_path = media_file("reprobe");
 		let project = create_project();
 		let add_footage = |filename: &str| -> NodeId {
@@ -5623,7 +5631,7 @@ mod gap_coverage_tests {
 
 		let _ = std::fs::remove_file(&media_path);
 		let _ = std::fs::remove_file(&project_path);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	fn project_root(g: &Project) -> NodeId {
@@ -5635,7 +5643,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn marker_and_workarea_handle_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 
 		let null = CHandle::default();
 		assert!(markers_of(&null).is_empty());
@@ -5669,9 +5677,9 @@ mod gap_coverage_tests {
 			markers_of(&markers),
 			vec![(Rational::new(5, 1), "M2".to_string(), 4)]
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(markers_of(&markers).len(), 2);
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(markers_of(&markers).len(), 1);
 
 		let mut wa = workarea_create();
@@ -5681,14 +5689,14 @@ mod gap_coverage_tests {
 		let new = TimeRange::new(Rational::new(2, 1), Rational::new(3, 1));
 		workarea_set_undoable(&wa, false, new, range).expect("set workarea");
 		assert_eq!(workarea_state(&wa), Some((false, new)));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(workarea_state(&wa), Some((true, range)));
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(workarea_state(&wa), Some((false, new)));
 
 		release_handle(&mut markers);
 		release_handle(&mut wa);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The library setters validate their arguments before touching storage,
@@ -5717,7 +5725,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn connect_and_disconnect_commands_validate_and_undo() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("connect");
 		let clip = place_clip(&project, seq, footage, 0, 10);
 		let bogus = id_of(9_000_001).unwrap();
@@ -5786,7 +5794,7 @@ mod gap_coverage_tests {
 		);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `set_context_position_command` creates an entry on redo, removes it on
@@ -5794,7 +5802,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn context_position_command_covers_create_update_and_remove() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("context_pos");
 		let clip = place_clip(&project, seq, footage, 0, 10);
 		let bogus = id_of(9_000_002).unwrap();
@@ -5840,7 +5848,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn behavior_borrows_and_queries_on_missing_nodes() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let root = lock(&project).root;
 		let seq = create_sequence(&project, "Borrows");
@@ -5903,7 +5911,7 @@ mod gap_coverage_tests {
 		let mut g = lock(&project);
 		assert!(!with_block_core_mut(&mut g.graph, bogus2, |_| {}));
 		assert!(!with_block_core_mut(&mut g.graph, opaque, |_| {}));
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `sequence_length` skips dangling track-list / track / block references
@@ -5911,7 +5919,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn sequence_length_skips_dangling_and_non_block_entries() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("seq_len");
 		let clip = place_clip(&project, seq, footage, 0, 10);
 		let list = video_list_of(&project, seq);
@@ -5968,7 +5976,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn block_core_mut_covers_gap_transition_and_adjustment() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("block_cores");
 		let a = place_clip(&project, seq, footage, 0, 10);
 		let b = place_clip(&project, seq, footage, 10, 20);
@@ -6018,14 +6026,14 @@ mod gap_coverage_tests {
 			assert_eq!(block_core_of(&g.graph, adj).map(|c| c.speed), Some(1.75));
 		}
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Track-list find-or-create, track setters and track removal.
 	#[test]
 	fn track_list_creation_and_track_setter_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let bogus = id_of(9_000_007).unwrap();
 		assert!(
@@ -6068,13 +6076,13 @@ mod gap_coverage_tests {
 			track_ids(&lock(&project).graph, seq, TrackType::Video).len(),
 			before - 1
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			track_ids(&lock(&project).graph, seq, TrackType::Video).len(),
 			before
 		);
 		assert!(lock(&project).graph.is_valid(track));
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Clip placement validates ranges, kinds, footage, track indices and the
@@ -6082,7 +6090,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn clip_placement_validation_and_footage_label_fallback() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("clip_place");
 		let bogus = id_of(9_000_008).unwrap();
 		let input = oak_node::block::clip_input::TEXTURE_INPUT;
@@ -6183,7 +6191,7 @@ mod gap_coverage_tests {
 		);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Nested-sequence and generator clip placement, including their
@@ -6191,7 +6199,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn nested_and_generator_clip_placement_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, host, footage, media) = project_with_footage("nested");
 		let source = create_sequence(&project, "Source Seq");
 		let text = create_text_footage_node(&project).expect("text node");
@@ -6238,7 +6246,7 @@ mod gap_coverage_tests {
 
 		let _ = footage;
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	fn set_clip_track(project: &ProjectRef, clip: NodeId, track: Option<NodeId>) {
@@ -6276,7 +6284,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn copy_and_paste_cover_skip_and_error_branches() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("copy_paste");
 		let dropped = place_footage_clips_linked(
 			&project,
@@ -6434,13 +6442,13 @@ mod gap_coverage_tests {
 				"the out-of-range track index clamps to the last track"
 			);
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(!lock(&project).graph.are_linked(pasted[0], pasted[1]));
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert!(lock(&project).graph.are_linked(pasted[0], pasted[1]));
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Split / split-preserving-links, trim, ripple trim, roll, slide, slip
@@ -6449,7 +6457,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn split_trim_ripple_roll_slide_slip_and_move_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("edit_ops");
 		let track = video_track_of(&project, seq);
 		let a = place_clip(&project, seq, footage, 0, 10);
@@ -6467,7 +6475,7 @@ mod gap_coverage_tests {
 		assert!(split_clip(&project, a, 10).is_err());
 		split_clip(&project, a, 5).expect("split");
 		assert_eq!(clip_ids(&lock(&project).graph, track).len(), 4);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(clip_ids(&lock(&project).graph, track).len(), 3);
 
 		// split preserving links: empty input is a no-op, a linked pair
@@ -6484,7 +6492,7 @@ mod gap_coverage_tests {
 		)
 		.expect("linked pair");
 		split_clips_preserving_links(&project, &pair, 45).expect("split the pair");
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// trim: invalid, unchanged, both ends, in-only and out-only.
 		assert!(trim_clip(&project, a, -1, 5).is_err());
@@ -6501,15 +6509,15 @@ mod gap_coverage_tests {
 			)),
 			"the trim-in shifts the media in-point with the edge"
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			clip_range(&lock(&project).graph, a),
 			Some((Rational::new(0, 1), ts_to_rational(10, tb), Rational::new(0, 1)))
 		);
 		trim_clip(&project, a, 2, 10).expect("in-only trim");
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		trim_clip(&project, a, 0, 8).expect("out-only trim");
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// ripple trim: null delta, trim-in (tail follows right), trim-out
 		// (tail follows left).
@@ -6525,7 +6533,7 @@ mod gap_coverage_tests {
 			ts_to_rational(22, tb),
 			"the tail shifted right"
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		ripple_trim_clip(&project, b, false, 18).expect("ripple out");
 		assert_eq!(
 			clip_range(&lock(&project).graph, b).unwrap().1,
@@ -6536,7 +6544,7 @@ mod gap_coverage_tests {
 			ts_to_rational(18, tb),
 			"the tail followed the out edge"
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// roll edit: non-clip, non-adjacent, escaping and unmoved boundaries,
 		// then the real roll.
@@ -6569,7 +6577,7 @@ mod gap_coverage_tests {
 				"the follower's head loses the 2 rolled frames from its media"
 			);
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// slide: unmoved clip, right into the neighbor, over a collapsing
 		// left neighbor, and onto the right neighbor without trimming it.
@@ -6582,7 +6590,7 @@ mod gap_coverage_tests {
 			assert_eq!(clip_range(&g.graph, a).unwrap().1, ts_to_rational(15, tb));
 			assert_eq!(clip_range(&g.graph, c).unwrap().0, ts_to_rational(25, tb));
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		slide_clip(&project, b, 0).expect("slide onto zero");
 		{
 			let g = lock(&project);
@@ -6593,7 +6601,7 @@ mod gap_coverage_tests {
 				"the collapsing left neighbor is left alone"
 			);
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		slide_clip(&project, b, 20).expect("slide onto the right neighbor");
 		{
 			let g = lock(&project);
@@ -6604,7 +6612,7 @@ mod gap_coverage_tests {
 				"the right neighbor keeps its length"
 			);
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// slip: a negative request clamps to the old media in (a no-op),
 		// otherwise only the media in-point moves.
@@ -6617,7 +6625,7 @@ mod gap_coverage_tests {
 			assert_eq!(media_in, ts_to_rational(7, tb));
 			assert_eq!(in_r, ts_to_rational(10, tb), "the range stays put");
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// move: stale id, negative clamp, real move.
 		assert!(move_clip(&project, bogus, 3).is_err());
@@ -6626,13 +6634,13 @@ mod gap_coverage_tests {
 			clip_range(&lock(&project).graph, b).unwrap().0,
 			Rational::new(0, 1)
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		move_clip(&project, b, 40).expect("move");
 		assert_eq!(
 			clip_range(&lock(&project).graph, b).unwrap().0,
 			ts_to_rational(40, tb)
 		);
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// move to track: stale clip, destination without a list, trackless
 		// clip, then the cross-track move and its undo.
@@ -6660,7 +6668,7 @@ mod gap_coverage_tests {
 			assert_eq!(clip_track(&g.graph, b), Some(track2));
 			assert_eq!(clip_range(&g.graph, b).unwrap().0, ts_to_rational(30, tb));
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// move with links: group to another track, the group-wide clamp at
 		// zero, and ignoring self / stale / off-track linked ids.
@@ -6682,20 +6690,20 @@ mod gap_coverage_tests {
 			assert_eq!(clip_range(&g.graph, v2).unwrap().0, ts_to_rational(100, tb));
 			assert_eq!(clip_range(&g.graph, a2).unwrap().0, ts_to_rational(100, tb));
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		move_clip_with_links(&project, v2, None, -50, &[a2]).expect("clamped group move");
 		{
 			let g = lock(&project);
 			assert_eq!(clip_range(&g.graph, v2).unwrap().0, Rational::new(0, 1));
 			assert_eq!(clip_range(&g.graph, a2).unwrap().0, Rational::new(0, 1));
 		}
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		move_clip_with_links(&project, v2, None, 20, &[v2, bogus, d])
 			.expect("self, stale and off-track linked ids are ignored");
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// The transition seam/edge commands and the default-transition action
@@ -6703,7 +6711,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn transition_error_matrix_and_edge_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("transitions");
 		let track = video_track_of(&project, seq);
 		let tb = {
@@ -6718,9 +6726,9 @@ mod gap_coverage_tests {
 		// The seam command creates, undoes and redoes.
 		let t = add_transition_at_seam(&project, a, b, half).expect("seam transition");
 		assert_eq!(transition_of_clip(&lock(&project).graph, b, true), Some(t));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(transition_of_clip(&lock(&project).graph, b, true).is_none());
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert_eq!(transition_of_clip(&lock(&project).graph, b, true), Some(t));
 		assert!(
 			add_transition_at_seam(&project, a, b, half).is_err(),
@@ -6879,14 +6887,14 @@ mod gap_coverage_tests {
 		);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// `remove_node` is undoable and an empty multi command leaves no row.
 	#[test]
 	fn remove_node_and_empty_multi_command_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("remove_node");
 		let _a = place_clip(&project, seq, footage, 0, 10);
 		let b = place_clip(&project, seq, footage, 10, 20);
@@ -6894,23 +6902,23 @@ mod gap_coverage_tests {
 			let g = lock(&project);
 			sequence_time_base(&g.graph, seq).expect("time base")
 		};
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 		push_multi_command(Vec::new(), "Empty Multi").expect("an empty multi is a no-op");
-		assert_eq!(oak_undo::global::count().unwrap(), before, "no empty row");
+		assert_eq!(oak_engine_rust_sdk::node::undo_count(), before, "no empty row");
 
 		remove_node(&project, b).expect("remove node");
 		assert!(!lock(&project).graph.is_valid(b));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(lock(&project).graph.is_valid(b));
 		assert_eq!(
 			clip_range(&lock(&project).graph, b).unwrap().0,
 			ts_to_rational(10, tb)
 		);
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert!(!lock(&project).graph.is_valid(b));
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Rational <-> timestamp conversion: rounding, invalid timebases and
@@ -6948,7 +6956,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn find_input_footage_handles_cycles() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("cycle");
 		let _ = seq;
 		// A source whose output feeds TWO inputs of one node: the BFS meets
@@ -6985,31 +6993,31 @@ mod gap_coverage_tests {
 	#[test]
 	fn set_clips_linked_links_and_unlinks_the_set() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("set_links");
 		let a = place_clip(&project, seq, footage, 0, 10);
 		let b = place_clip(&project, seq, footage, 10, 20);
-		let before = oak_undo::global::count().unwrap();
+		let before = oak_engine_rust_sdk::node::undo_count();
 		set_clips_linked(&project, &[a], true).expect("a single block is a no-op");
-		assert_eq!(oak_undo::global::count().unwrap(), before);
+		assert_eq!(oak_engine_rust_sdk::node::undo_count(), before);
 
 		set_clips_linked(&project, &[a, b], true).expect("link the pair");
 		assert!(lock(&project).graph.are_linked(a, b));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(!lock(&project).graph.are_linked(a, b));
-		oak_undo::global::redo().unwrap();
+		oak_engine_rust_sdk::node::redo();
 		assert!(lock(&project).graph.are_linked(a, b));
 
 		set_clips_linked(&project, &[a, b], false).expect("unlink the pair");
 		assert!(!lock(&project).graph.are_linked(a, b));
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert!(
 			lock(&project).graph.are_linked(a, b),
 			"the undo restores the prior topology"
 		);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// A relative OVE path is resolved against the working directory and
@@ -7017,7 +7025,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn load_ove_resolves_relative_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let project = create_project();
 		let _ = create_sequence(&project, "Relative");
 		let name = "oak_graphops_gap_relative_load.ove";
@@ -7042,7 +7050,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn sequence_and_move_misc_paths() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("misc_paths");
 		let clip = place_clip(&project, seq, footage, 0, 10);
 		let track = video_track_of(&project, seq);
@@ -7120,7 +7128,7 @@ mod gap_coverage_tests {
 		assert!(move_clip(&project, clip, 20).is_err());
 		set_track_list(&project, track, saved_list);
 		move_clip(&project, clip, 20).expect("the restored list moves again");
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 
 		// A trackless clip cannot be the moved anchor of a linked group.
 		oak_timeline::util::track_ripple_remove_block(
@@ -7155,7 +7163,7 @@ mod gap_coverage_tests {
 		);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 
 	/// Dropping a new clip whose in-point lands in EMPTY track space still
@@ -7168,7 +7176,7 @@ mod gap_coverage_tests {
 	#[test]
 	fn place_clip_from_empty_space_overwrites_the_overlapped_clip() {
 		let _g = test_lock();
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 		let (project, seq, footage, media) = project_with_footage("place_from_empty");
 		let track = video_track_of(&project, seq);
 		let head = place_clip(&project, seq, footage, 0, 40);
@@ -7204,7 +7212,7 @@ mod gap_coverage_tests {
 			"the covered head is removed"
 		);
 
-		oak_undo::global::undo().unwrap();
+		oak_engine_rust_sdk::node::undo();
 		assert_eq!(
 			span(tail),
 			Some((ts_to_rational(100, tb), ts_to_rational(200, tb)))
@@ -7212,6 +7220,6 @@ mod gap_coverage_tests {
 		assert_eq!(clip_ids(&lock(&project).graph, track), vec![head, tail]);
 
 		let _ = std::fs::remove_file(&media);
-		oak_undo::global::clear().unwrap();
+		oak_engine_rust_sdk::node::undo_clear();
 	}
 }

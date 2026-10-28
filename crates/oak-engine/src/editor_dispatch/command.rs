@@ -311,4 +311,11 @@ pub enum EditCommand {
 		element: i32,
 		value: String,
 	},
+	ReplaceFootage {
+		footage: u64,
+		path: String,
+	},
+	DeleteEntry {
+		node: u64,
+	},
 }
