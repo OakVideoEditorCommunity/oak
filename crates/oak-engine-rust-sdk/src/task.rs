@@ -1,10 +1,11 @@
 //! Safe wrapper over the engine's task C ABI (`oak_task_*`):
-//! background tasks with progress/cancel — the render export and the
-//! OTIO/FCPXML project interchange.
+//! background tasks with progress/cancel — render export, project interchange,
+//! proxy generation and audio waveform analysis.
 //!
 //! Tasks run on engine threads; a [`Task`] handle polls or blocks
 //! ([`Task::wait`]), and drops release it. Load tasks hand their
-//! project over through [`Task::take_project`].
+//! project over through [`Task::take_project`]; analysis tasks transfer
+//! immutable owned DTOs through their corresponding take methods.
 
 use std::ffi::c_void;
 
@@ -39,6 +40,21 @@ unsafe extern "C" {
 	fn oak_task_release(id: u64);
 	fn oak_task_proxy_max_concurrent() -> i32;
 	fn oak_task_take_project(id: u64) -> *mut c_void;
+	fn oak_task_waveform_extract(
+		filename: *const u8,
+		filename_len: usize,
+		stream_index: i32,
+		samples_per_point: i32,
+	) -> u64;
+	fn oak_task_take_waveform(id: u64) -> *const c_void;
+	fn oak_task_thumbnail_render(
+		project: *const c_void,
+		viewer: u64,
+		time: crate::types::Rational,
+		width: i32,
+		height: i32,
+	) -> u64;
+	fn oak_task_take_thumbnail(id: u64) -> *const c_void;
 }
 
 /// `repr(C)` mirror of the engine's encoding parameters for
@@ -152,6 +168,17 @@ impl Task {
 		let ptr = unsafe { oak_task_take_project(self.id) };
 		(!ptr.is_null()).then_some(Project::from_raw(ptr))
 	}
+
+	/// Takes the owned result of a successful waveform task. Subsequent calls
+	/// return `None`, and non-waveform tasks never produce a result here.
+	pub fn take_waveform(&self) -> Option<crate::audio_analysis::Waveform> {
+		crate::audio_analysis::Waveform::from_raw(unsafe { oak_task_take_waveform(self.id) })
+	}
+
+	/// Takes the owned result of a successful thumbnail render exactly once.
+	pub fn take_thumbnail(&self) -> Option<crate::thumbnail::Thumbnail> {
+		crate::thumbnail::Thumbnail::from_raw(unsafe { oak_task_take_thumbnail(self.id) })
+	}
 }
 
 impl Drop for Task {
@@ -166,6 +193,47 @@ impl Drop for Task {
 /// consumers aligned with the worker's CPU/thread budget.
 pub fn proxy_max_concurrent() -> usize {
 	(unsafe { oak_task_proxy_max_concurrent() }).max(1) as usize
+}
+
+/// Starts asynchronous min/max peak extraction for one audio-stream ordinal.
+///
+/// Wait or poll the returned task, then call [`Task::take_waveform`] exactly
+/// once. Invalid arguments return `None`; decode failures are reported by the
+/// task state and error string.
+pub fn extract_waveform(filename: &str, stream_index: i32, samples_per_point: i32) -> Option<Task> {
+	Task::new(unsafe {
+		oak_task_waveform_extract(
+			filename.as_ptr(),
+			filename.len(),
+			stream_index,
+			samples_per_point,
+		)
+	})
+}
+
+/// Starts an asynchronous F32 RGBA thumbnail render of a sequence or video
+/// footage node.
+///
+/// The worker retains the project internally. On success, [`Task::take_thumbnail`]
+/// transfers an immutable CPU DTO whose lifetime is independent of the task.
+pub fn render_thumbnail(
+	project: &Project,
+	viewer: NodeId,
+	time: crate::types::Rational,
+	size: (u32, u32),
+) -> Option<Task> {
+	if size.0 == 0 || size.1 == 0 {
+		return None;
+	}
+	Task::new(unsafe {
+		oak_task_thumbnail_render(
+			project.as_raw(),
+			viewer.raw(),
+			time,
+			size.0 as i32,
+			size.1 as i32,
+		)
+	})
 }
 
 /// Starts an export of the viewer node (a sequence or footage) to

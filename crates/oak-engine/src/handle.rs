@@ -232,4 +232,120 @@ mod tests {
 		}
 		assert_eq!(flag.load(Ordering::SeqCst), 1);
 	}
+
+	fn assert_roundtrip<M: NativeMirror>(native: &M::Native)
+	where
+		M::Native: std::fmt::Debug + PartialEq,
+	{
+		let mirror = M::from_native(native);
+		assert_eq!(&mirror.to_native(), native);
+	}
+
+	/// Every metadata mirror added at the C ABI must preserve its complete
+	/// native value in both directions. Variable-length payloads have separate
+	/// metadata types, so these checks never bless a lossy conversion.
+	#[test]
+	fn native_mirror_metadata_roundtrips() {
+		assert_roundtrip::<crate::audio::OakAudioParams>(&oak_audio::params::AudioParams {
+			sample_rate: 48_000,
+			channel_layout: 0x3,
+			format: oak_core::SampleFormat::F32,
+		});
+		assert_roundtrip::<crate::audio::OakChannelStats>(
+			&oak_audio::levelmeter::ChannelStats {
+				peak_linear: 0.5,
+				peak_db: -6.0,
+				rms_linear: 0.25,
+				rms_db: -12.0,
+				vu_db: -11.0,
+			},
+		);
+		assert_roundtrip::<crate::audio::OakLevelStats>(&crate::audio::LevelSummary {
+			max_peak_linear: 0.75,
+			integrated_lufs: -18.0,
+			silence: false,
+		});
+		let primaries = oak_core::colormath::Primaries {
+			red: oak_core::colormath::Xy { x: 0.64, y: 0.33 },
+			green: oak_core::colormath::Xy { x: 0.3, y: 0.6 },
+			blue: oak_core::colormath::Xy { x: 0.15, y: 0.06 },
+			white: oak_core::colormath::Xy { x: 0.3127, y: 0.329 },
+		};
+		let primaries_roundtrip = crate::coreutil::OakPrimaries::from_native(&primaries).to_native();
+		for (actual, expected) in [
+			(primaries_roundtrip.red, primaries.red),
+			(primaries_roundtrip.green, primaries.green),
+			(primaries_roundtrip.blue, primaries.blue),
+			(primaries_roundtrip.white, primaries.white),
+		] {
+			assert_eq!((actual.x, actual.y), (expected.x, expected.y));
+		}
+		assert_roundtrip::<crate::coreutil::OakXy>(&primaries.white);
+
+		assert_roundtrip::<crate::codec::decoder::OakSubtitleParams>(
+			&crate::codec::decoder::SubtitleMetadata {
+				stream_index: 4,
+				enabled: true,
+				entry_count: 12,
+			},
+		);
+		assert_roundtrip::<crate::editor::aux::OakEditorMarker>(
+			&crate::editor::aux::MarkerMetadata {
+				time: oak_core::TimeRange::new(
+					oak_core::Rational::new(1, 25),
+					oak_core::Rational::new(3, 25),
+				),
+				color: 7,
+			},
+		);
+		assert_roundtrip::<crate::node::OakStreamVideoParams>(&oak_node::value::VideoParams {
+			width: 1920,
+			height: 1080,
+			frame_rate: oak_core::Rational::new(24, 1),
+			pixel_format: 4,
+			channels: 4,
+			interlaced: true,
+		});
+		assert_roundtrip::<crate::node::OakStreamAudioParams>(&oak_node::value::AudioParams {
+			sample_rate: 44_100,
+			channel_layout: 0x3,
+			format: 10,
+		});
+
+		let waveform = crate::audio_analysis::WaveformMetadata {
+			channels: 2,
+			sample_rate: 48_000,
+			samples_per_point: 256,
+			point_count: 187,
+		};
+		assert_roundtrip::<crate::audio_analysis::OakWaveformInfo>(&waveform);
+		assert_roundtrip::<crate::audio_analysis::OakWaveformPoint>(
+			&oak_audio::waveform::SamplePerChannel {
+				min: -0.8,
+				max: 0.6,
+			},
+		);
+		assert_roundtrip::<crate::audio_analysis::OakAudioOffsetEstimate>(
+			&oak_audio::waveformsync::OffsetResult {
+				offset_samples: 4_800,
+				confidence: 0.95,
+				valid: true,
+			},
+		);
+		assert_roundtrip::<crate::audio_analysis::OakAudioStretchEstimate>(
+			&oak_audio::waveformsync::StretchOffsetResult {
+				rate: 1.25,
+				offset_samples: -240,
+				confidence: 0.8,
+				valid: true,
+			},
+		);
+		assert_roundtrip::<crate::thumbnail::OakThumbnailInfo>(
+			&crate::thumbnail::ThumbnailMetadata {
+				width: 144,
+				height: 96,
+				pixel_count: 144 * 96 * 4,
+			},
+		);
+	}
 }

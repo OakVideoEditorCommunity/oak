@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 pub mod aux;
 pub mod notify;
 pub mod proxy;
+pub mod sync;
 
 use oak_core::handle::CHandle;
 use oak_node::id::NodeId;

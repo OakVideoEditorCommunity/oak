@@ -82,9 +82,8 @@
       }
     },
     "crates/oak-app/src/oakui/multicam.rs": {
-      "total": 52,
+      "total": 51,
       "crates": {
-        "oak-audio": 1,
         "oak-core": 5,
         "oak-node": 36,
         "oak-timeline": 10
@@ -111,12 +110,12 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 226,
+      "total": 224,
       "crates": {
-        "oak-audio": 21,
+        "oak-audio": 20,
         "oak-codec": 20,
         "oak-core": 69,
-        "oak-node": 64,
+        "oak-node": 63,
         "oak-ofx-plugin": 1,
         "oak-render": 11,
         "oak-storage": 1,
@@ -143,9 +142,8 @@
       }
     },
     "crates/oak-app/src/oakui/waveform.rs": {
-      "total": 4,
+      "total": 1,
       "crates": {
-        "oak-audio": 3,
         "oak-codec": 1
       }
     },

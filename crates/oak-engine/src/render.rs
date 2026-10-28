@@ -12,6 +12,8 @@
 //! the existing `oak_core_cancelatom_*` surface.
 
 use oak_core::PixelFormat;
+use std::sync::{Arc, Mutex};
+
 use oak_node::id::NodeId;
 
 use crate::codec::copy_str_out;
@@ -123,8 +125,7 @@ pub unsafe extern "C" fn oak_render_swizzle_bgra8_to_rgba8(
 	true
 }
 
-/// Renders the frame of the viewer node `viewer` (a node id token, see
-/// `oak_project_root`/`oak_node_*` traversal) at `time` into `dst` as
+/// Renders a sequence or video-footage viewer at `time` into `dst` as
 /// tight F32 RGBA (`width*height*4` floats). Returns the float count
 /// written, -1 on a null handle, an unknown viewer, invalid sizes, an
 /// undersized buffer, or a render failure.
@@ -149,36 +150,100 @@ pub unsafe extern "C" fn oak_render_frame_f32(
 		return -1;
 	};
 	let project = unsafe { &*project }.project();
-	let texture = match oak_render::eval::render_graph_frame(
-		project,
+	let Ok(pixels) = render_frame_f32_data(
+		project.clone(),
 		viewer,
 		time.to_native(),
-		(width, height),
-		PixelFormat::F32,
-	) {
-		Ok(texture) => texture,
-		Err(_) => return -1,
-	};
-	let Ok(frame) = texture.to_frame() else {
+		width,
+		height,
+	) else {
 		return -1;
+	};
+	unsafe { std::ptr::copy_nonoverlapping(pixels.as_ptr(), dst, needed) };
+	needed as i32
+}
+
+/// Renders and tightly packs an owned F32 RGBA frame for synchronous callers
+/// and asynchronous thumbnail tasks. Keeping stride handling here prevents the
+/// C ABI and task DTO from disagreeing about padded GPU readbacks.
+pub(crate) fn render_frame_f32_data(
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	time: oak_core::Rational,
+	width: i32,
+	height: i32,
+) -> Result<Vec<f32>, String> {
+	if width <= 0 || height <= 0 {
+		return Err("invalid frame dimensions".into());
+	}
+	enum Viewer {
+		Sequence,
+		Footage(String, i32),
+	}
+	let viewer_kind = {
+		let guard = project.lock().unwrap_or_else(|e| e.into_inner());
+		let entry = guard.graph.get(viewer).ok_or("viewer node does not exist")?;
+		if entry
+			.behavior
+			.as_any()
+			.and_then(|behavior| behavior.downcast_ref::<oak_node::sequence::SequenceBehavior>())
+			.is_some()
+		{
+			Viewer::Sequence
+		} else if let Some(footage) = entry
+			.behavior
+			.as_any()
+			.and_then(|behavior| behavior.downcast_ref::<oak_node::footage::FootageBehavior>())
+		{
+			let stream = footage
+				.streams
+				.iter()
+				.find(|stream| stream.is_video)
+				.map(|stream| stream.index)
+				.ok_or("footage has no video stream")?;
+			Viewer::Footage(footage.filename.clone(), stream)
+		} else {
+			return Err("viewer is neither a sequence nor video footage".into());
+		}
+	};
+	let texture = match viewer_kind {
+		Viewer::Sequence => oak_render::eval::render_graph_frame(
+			&project,
+			viewer,
+			time,
+			(width, height),
+			PixelFormat::F32,
+		),
+		Viewer::Footage(filename, stream) => oak_render::eval::render_footage_frame(
+			&filename,
+			stream,
+			time,
+			(width, height),
+			PixelFormat::F32,
+		),
+	}
+	.map_err(|e| e.to_string())?;
+	let Ok(frame) = texture.to_frame() else {
+		return Err("failed to read back the rendered frame".into());
 	};
 	let params = frame.video_params();
 	if params.width != width || params.height != height || params.format != PixelFormat::F32 as i32
 	{
-		return -1;
+		return Err("render returned an unexpected pixel format".into());
 	}
-	// Copy row by row (the frame's stride may be padded; the output is
-	// tight RGBA F32).
 	let tight = width as usize * 4 * 4;
 	let row = frame.linesize_bytes().max(tight);
 	if frame.data.len() < row * (height as usize - 1) + tight {
-		return -1;
+		return Err("render returned a truncated pixel buffer".into());
 	}
-	let out = unsafe { std::slice::from_raw_parts_mut(dst as *mut u8, tight * height as usize) };
+	let mut pixels = vec![0.0f32; width as usize * height as usize * 4];
+	let out = unsafe {
+		std::slice::from_raw_parts_mut(pixels.as_mut_ptr() as *mut u8, tight * height as usize)
+	};
 	for y in 0..height as usize {
 		out[y * tight..(y + 1) * tight].copy_from_slice(&frame.data[y * row..y * row + tight]);
 	}
-	needed as i32
+	Ok(pixels)
 }
 
 /// The disk cache directory, snprintf-style.

@@ -279,6 +279,32 @@ pub struct OakStreamVideoParams {
 	pub interlaced: i32,
 }
 
+impl NativeMirror for OakStreamVideoParams {
+	type Native = oak_node::value::VideoParams;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			width: native.width,
+			height: native.height,
+			frame_rate: OakRational::from_native(&native.frame_rate),
+			pixel_format: native.pixel_format,
+			channels: native.channels,
+			interlaced: i32::from(native.interlaced),
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			width: self.width,
+			height: self.height,
+			frame_rate: self.frame_rate.to_native(),
+			pixel_format: self.pixel_format,
+			channels: self.channels,
+			interlaced: self.interlaced != 0,
+		}
+	}
+}
+
 /// An audio stream's parameters as carried by a footage node.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -286,6 +312,26 @@ pub struct OakStreamAudioParams {
 	pub sample_rate: i32,
 	pub channel_layout: u64,
 	pub format: i32,
+}
+
+impl NativeMirror for OakStreamAudioParams {
+	type Native = oak_node::value::AudioParams;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			sample_rate: native.sample_rate,
+			channel_layout: native.channel_layout,
+			format: native.format,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			sample_rate: self.sample_rate,
+			channel_layout: self.channel_layout,
+			format: self.format,
+		}
+	}
 }
 
 /// The footage's absolute file path, snprintf-style; -1 on null/wrong
@@ -370,14 +416,7 @@ pub unsafe extern "C" fn oak_footage_video_params(
 	let params = with_project(project, |p| {
 		behavior_as::<FootageBehavior>(p, id)
 			.and_then(|f| f.video_params(ordinal as usize))
-			.map(|v| OakStreamVideoParams {
-				width: v.width,
-				height: v.height,
-				frame_rate: OakRational::from_native(&v.frame_rate),
-				pixel_format: v.pixel_format,
-				channels: v.channels,
-				interlaced: v.interlaced as i32,
-			})
+			.map(|v| OakStreamVideoParams::from_native(&v))
 	})
 	.flatten();
 	match params {
@@ -405,11 +444,7 @@ pub unsafe extern "C" fn oak_footage_audio_params(
 	let params = with_project(project, |p| {
 		behavior_as::<FootageBehavior>(p, id)
 			.and_then(|f| f.audio_params(ordinal as usize))
-			.map(|a| OakStreamAudioParams {
-				sample_rate: a.sample_rate,
-				channel_layout: a.channel_layout,
-				format: a.format,
-			})
+			.map(|a| OakStreamAudioParams::from_native(&a))
 	})
 	.flatten();
 	match params {

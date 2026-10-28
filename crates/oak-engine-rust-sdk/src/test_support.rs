@@ -5,6 +5,15 @@ use crate::types::{PixelFormat, Rational, VideoParams};
 
 /// A real 64x64, ten-frame H.264 clip with no app-side dependencies.
 pub(crate) fn make_test_clip(name: &str) -> String {
+	make_test_clip_impl(name, false)
+}
+
+/// A real H.264 clip with one second of stereo 440 Hz PCM audio.
+pub(crate) fn make_test_clip_with_audio(name: &str) -> String {
+	make_test_clip_impl(name, true)
+}
+
+fn make_test_clip_impl(name: &str, with_audio: bool) -> String {
 	let out = std::env::temp_dir().join(format!(
 		"oaksdk_editor_fixture_{name}_{}.mp4",
 		std::process::id()
@@ -21,6 +30,13 @@ pub(crate) fn make_test_clip(name: &str) -> String {
 	params.video_pixel_format = PixelFormat::F32 as i32;
 	params.video_pixel_aspect_num = 1;
 	params.video_pixel_aspect_den = 1;
+	if with_audio {
+		params.audio_enabled = 1;
+		params.audio_codec = Codec::PCM as i32;
+		params.audio_sample_rate = 48_000;
+		params.audio_channel_layout = 0x3;
+		params.audio_sample_format = crate::audio::SampleFormat::F32 as i32;
+	}
 
 	let session = EncoderSession::create(&params).expect("create encoder");
 	session.open().expect("open encoder");
@@ -34,6 +50,14 @@ pub(crate) fn make_test_clip(name: &str) -> String {
 		frame.allocate().expect("allocate frame");
 		frame.set_timestamp(Rational::new(index, 10));
 		session.write_video(&frame).expect("write frame");
+	}
+	if with_audio {
+		let mut samples = Vec::with_capacity(96_000);
+		for index in 0..48_000 {
+			let sample = (index as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 0.5;
+			samples.extend_from_slice(&[sample, sample]);
+		}
+		session.write_audio(&samples, 48_000).expect("write audio");
 	}
 	session.flush().expect("flush encoder");
 	session.close().expect("close encoder");

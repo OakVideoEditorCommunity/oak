@@ -1,14 +1,14 @@
 //! C ABI for oak-task (prefix `oak_task_`): background tasks with
-//! progress/cancel, covering the two interchange jobs and the render
-//! export.
+//! progress/cancel, covering interchange, render export, proxy generation and
+//! audio waveform analysis.
 //!
 //! Tasks run on engine-spawned threads and live in a process-global
 //! registry keyed by a u64 id (0 = invalid). Lifecycle:
 //! create (`oak_task_export` / `oak_task_project_save_otio` /
 //! `oak_task_project_load_otio`) → poll
 //! [`oak_task_progress`]/[`oak_task_state`] or block in
-//! [`oak_task_wait`] → load tasks hand their project over through
-//! [`oak_task_take_project`] → [`oak_task_release`].
+//! [`oak_task_wait`] → load/analysis tasks transfer their owned result through
+//! the corresponding take function → [`oak_task_release`].
 //!
 //! The app-side TaskManager (the task panel's job list) is host
 //! infrastructure and intentionally not exported.
@@ -25,6 +25,7 @@ use oak_task::project::saveotio::SaveOTIOTask;
 use oak_task::task::{Task, TaskBehavior, TaskEvent};
 
 use crate::codec::{copy_str_out, str_arg};
+use crate::coretypes::OakRational;
 use crate::handle::NativeMirror;
 use crate::node::ProjectHandle;
 
@@ -66,6 +67,9 @@ pub struct OakTaskEncodingParams {
 }
 
 impl OakTaskEncodingParams {
+	/// Adds the out-of-band filename required by the native export request.
+	/// `NativeMirror` is not used because the ABI value intentionally does not
+	/// contain that required native field.
 	fn to_native(&self, filename: String) -> EncodingParams {
 		EncodingParams {
 			filename,
@@ -122,6 +126,10 @@ struct TaskEntry {
 	join: Mutex<Option<std::thread::JoinHandle<()>>>,
 	/// A load task's produced-project slot (shared with the behavior).
 	project_slot: Option<Arc<Mutex<Option<Arc<Mutex<oak_node::project::Project>>>>>>,
+	/// Successful waveform extraction result, transferred once to the caller.
+	waveform_slot: Option<Arc<Mutex<Option<crate::audio_analysis::WaveformData>>>>,
+	/// Successful thumbnail render result, transferred once to the caller.
+	thumbnail_slot: Option<Arc<Mutex<Option<crate::thumbnail::ThumbnailData>>>>,
 }
 
 static TASKS: OnceLock<Mutex<HashMap<u64, Arc<TaskEntry>>>> = OnceLock::new();
@@ -144,6 +152,8 @@ fn spawn_task(
 	title: String,
 	behavior: Box<dyn TaskBehavior + Send>,
 	project_slot: Option<Arc<Mutex<Option<Arc<Mutex<oak_node::project::Project>>>>>>,
+	waveform_slot: Option<Arc<Mutex<Option<crate::audio_analysis::WaveformData>>>>,
+	thumbnail_slot: Option<Arc<Mutex<Option<crate::thumbnail::ThumbnailData>>>>,
 ) -> u64 {
 	let mut task = Task::new(&title, None);
 	let entry = Arc::new(TaskEntry {
@@ -154,6 +164,8 @@ fn spawn_task(
 		cancel: task.get_cancel_atom(),
 		join: Mutex::new(None),
 		project_slot,
+		waveform_slot,
+		thumbnail_slot,
 	});
 
 	let listener_entry = entry.clone();
@@ -232,6 +244,124 @@ pub(crate) fn spawn_proxy(
 		format!("Generating Proxy {source_filename}"),
 		Box::new(oak_task::proxy::ProxyTask::new(&request, task_params)),
 		None,
+		None,
+		None,
+	)
+}
+
+struct ThumbnailRenderBehavior {
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	time: oak_core::Rational,
+	width: i32,
+	height: i32,
+	slot: Arc<Mutex<Option<crate::thumbnail::ThumbnailData>>>,
+}
+
+impl TaskBehavior for ThumbnailRenderBehavior {
+	fn run(&mut self, task: &mut Task) -> oak_task::error::Result<()> {
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		let pixels = crate::render::render_frame_f32_data(
+			self.project.clone(),
+			self.viewer,
+			self.time,
+			self.width,
+			self.height,
+		)
+		.map_err(oak_task::error::Error::Failed)?;
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		*self.slot.lock().unwrap_or_else(|e| e.into_inner()) =
+			Some(crate::thumbnail::ThumbnailData {
+				width: self.width,
+				height: self.height,
+				pixels,
+			});
+		Ok(())
+	}
+}
+
+struct WaveformExtractBehavior {
+	filename: String,
+	stream_index: i32,
+	samples_per_point: i32,
+	slot: Arc<Mutex<Option<crate::audio_analysis::WaveformData>>>,
+}
+
+impl TaskBehavior for WaveformExtractBehavior {
+	fn run(&mut self, task: &mut Task) -> oak_task::error::Result<()> {
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		let waveform = crate::audio_analysis::extract_waveform(
+			&self.filename,
+			self.stream_index,
+			self.samples_per_point,
+		)
+		.map_err(oak_task::error::Error::Failed)?;
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		*self.slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(waveform);
+		Ok(())
+	}
+}
+
+/// Starts full audio-stream peak extraction on an engine worker.
+/// Returns 0 for arguments that are known to be invalid before submission.
+pub(crate) fn spawn_waveform_extract(
+	filename: &str,
+	stream_index: i32,
+	samples_per_point: i32,
+) -> u64 {
+	if filename.is_empty() || stream_index < 0 || samples_per_point <= 0 {
+		return 0;
+	}
+	let slot = Arc::new(Mutex::new(None));
+	let behavior = WaveformExtractBehavior {
+		filename: filename.to_string(),
+		stream_index,
+		samples_per_point,
+		slot: slot.clone(),
+	};
+	spawn_task(
+		format!("Analyzing Audio {filename}"),
+		Box::new(behavior),
+		None,
+		Some(slot),
+		None,
+	)
+}
+
+/// Starts an owned F32 thumbnail render on an engine worker.
+pub(crate) fn spawn_thumbnail_render(
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	time: oak_core::Rational,
+	width: i32,
+	height: i32,
+) -> u64 {
+	if width <= 0 || height <= 0 {
+		return 0;
+	}
+	let slot = Arc::new(Mutex::new(None));
+	let behavior = ThumbnailRenderBehavior {
+		project,
+		viewer,
+		time,
+		width,
+		height,
+		slot: slot.clone(),
+	};
+	spawn_task(
+		format!("Rendering Thumbnail {width}x{height}"),
+		Box::new(behavior),
+		None,
+		None,
+		Some(slot),
 	)
 }
 
@@ -267,7 +397,7 @@ pub unsafe extern "C" fn oak_task_export(
 	let project_ref = unsafe { &*project }.project().clone();
 	let params = unsafe { &*params }.to_native(filename.to_string());
 	let export = ExportTask::new((project_ref, viewer), params);
-	spawn_task(format!("Exporting {filename}"), Box::new(export), None)
+	spawn_task(format!("Exporting {filename}"), Box::new(export), None, None, None)
 }
 
 /// Starts a project save to an interchange format (`.otio` /
@@ -290,7 +420,7 @@ pub unsafe extern "C" fn oak_task_project_save_otio(
 		project: unsafe { &*project }.project().clone(),
 		filename: filename.to_string(),
 	};
-	spawn_task(format!("Saving {filename}"), Box::new(save), None)
+	spawn_task(format!("Saving {filename}"), Box::new(save), None, None, None)
 }
 
 /// A load behavior that parks the produced project in a shared slot
@@ -336,12 +466,52 @@ pub unsafe extern "C" fn oak_task_project_load_otio(
 		format!("Loading {filename}"),
 		Box::new(behavior),
 		Some(slot),
+		None,
+		None,
 	)
 }
 
 // ---------------------------------------------------------------------------
 // Task handle operations
 // ---------------------------------------------------------------------------
+
+/// Starts asynchronous waveform extraction for one zero-based audio-stream
+/// ordinal. The result is transferred with [`oak_task_take_waveform`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_waveform_extract(
+	filename: *const u8,
+	filename_len: usize,
+	stream_index: i32,
+	samples_per_point: i32,
+) -> u64 {
+	let Some(filename) = (unsafe { str_arg(filename, filename_len) }) else {
+		return 0;
+	};
+	spawn_waveform_extract(filename, stream_index, samples_per_point)
+}
+
+/// Starts an asynchronous thumbnail render. The task owns a strong reference
+/// to the project, so a host may close its own handle while the worker runs.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_thumbnail_render(
+	project: *const ProjectHandle,
+	viewer: u64,
+	time: OakRational,
+	width: i32,
+	height: i32,
+) -> u64 {
+	let (Some(project), Some(viewer)) = (unsafe { project.as_ref() }, NodeId::from_identity(viewer))
+	else {
+		return 0;
+	};
+	spawn_thumbnail_render(
+		project.project().clone(),
+		viewer,
+		time.to_native(),
+		width,
+		height,
+	)
+}
 
 /// The task title, snprintf-style; -1 on an unknown id.
 #[unsafe(no_mangle)]
@@ -444,6 +614,47 @@ pub extern "C" fn oak_task_take_project(id: u64) -> *mut ProjectHandle {
 		Some(inner) => ProjectHandle::from_arc(inner),
 		None => std::ptr::null_mut(),
 	}
+}
+
+/// Transfers a successful waveform result out of the task registry.
+///
+/// The returned handle has one owned reference and must be released with
+/// `oak_waveform_release`. Null means unknown/wrong task type, unfinished or
+/// failed task, or that the result was already taken.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_task_take_waveform(
+	id: u64,
+) -> *const crate::audio_analysis::WaveformHandle {
+	let Some(entry) = task(id) else {
+		return std::ptr::null();
+	};
+	if entry.state.load(Ordering::SeqCst) != OAK_TASK_SUCCEEDED {
+		return std::ptr::null();
+	}
+	let data = entry
+		.waveform_slot
+		.as_ref()
+		.and_then(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).take());
+	data.map(crate::audio_analysis::WaveformHandle::from_data)
+		.unwrap_or(std::ptr::null())
+}
+
+/// Transfers a successful thumbnail result out of the task registry.
+/// The caller owns one reference and releases it with `oak_thumbnail_release`.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_task_take_thumbnail(id: u64) -> *const crate::thumbnail::ThumbnailHandle {
+	let Some(entry) = task(id) else {
+		return std::ptr::null();
+	};
+	if entry.state.load(Ordering::SeqCst) != OAK_TASK_SUCCEEDED {
+		return std::ptr::null();
+	}
+	let data = entry
+		.thumbnail_slot
+		.as_ref()
+		.and_then(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).take());
+	data.map(crate::thumbnail::ThumbnailHandle::from_data)
+		.unwrap_or(std::ptr::null())
 }
 
 #[cfg(test)]

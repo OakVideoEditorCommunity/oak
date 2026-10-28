@@ -1,7 +1,7 @@
 # P4：素材、代理、波形、同步与多机位实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P4。  
-> 状态：P4A–P4C 已完成，下一阶段为 P4D；后续阶段不提前宣称完成。
+> 状态：P4A–P4D 已完成，下一阶段为 P4E；后续阶段不提前宣称完成。
 
 ## 1. 子阶段
 
@@ -63,3 +63,30 @@
   ready 跳过和缺失输入错误路径。
 - engine / SDK 全量回归通过，其中 SDK 99 个测试通过。
 - 内部引用基线由 893 收紧至 870。
+
+## 8. P4D 范围
+
+- `task::extract_waveform` 在引擎线程提取完整音频流，`Waveform` 以引用计数
+  拥有不可变 DTO，提供真实声道数、采样率、窗口大小和逐通道 min/max；任务结果
+  只能转移一次，失败保留任务错误。
+- `task::render_thumbnail` 支持 sequence 与视频 footage，统一处理 GPU/CPU readback
+  stride，返回拥有型 F32 RGBA `Thumbnail`。app 在既有后台线程等待任务并写 PNG，
+  不再接触共享内存帧、GPU texture 或内部 render ticket。
+- `ClipSyncInfo` 提供时间线/media range 和可选源时间码；同步 eligibility 不再
+  直接读取 footage behavior。
+- SDK 暴露普通/变速 envelope 相关性估算和置信度。app 删除重复的相关性实现，
+  并在多机位向导边界显式转换 lag 符号约定，保持既有时间线放置语义。
+- 波形提取结果携带实际采样率，修复调用方固定假定 48 kHz 的隐患；音频流参数
+  使用 audio ordinal，而非容器 stream id。
+- 单一原生元数据与 ABI POD 的转换统一实现 `NativeMirror`；可变长载荷使用独立、
+  信息完整的 metadata 类型，不以丢弃数据的 `to_native` 凑接口，并有统一 roundtrip 测试。
+
+## 9. P4D 验证
+
+- SDK 真实媒体测试覆盖双声道波形、一次性结果转移、缺失文件失败、缩略图尺寸和
+  F32 像素、引用计数克隆，以及 clip sync DTO。
+- 纯算法测试覆盖普通偏移、有效窗口 mask、变速估算、多机位正负 lag 和短输入。
+- app 的 waveform、源时间/波形同步、多机位偏移和真实 PNG 异步管线定向测试通过；
+  缩略图测试不再依赖 worker/render-manager 环境。
+- oak-audio / engine / SDK 全量回归通过，其中 engine 169 个、SDK 104 个测试通过。
+- 内部引用基线由 870 收紧至 864。

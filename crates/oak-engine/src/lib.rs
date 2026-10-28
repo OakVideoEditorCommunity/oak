@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod audio_analysis;
 pub mod codec;
 pub mod colorproc;
 pub mod corestate;
@@ -16,6 +17,7 @@ pub mod ofx;
 pub mod otio;
 pub mod plugin;
 pub mod render;
+pub mod thumbnail;
 pub mod storage;
 pub mod task;
 pub mod timeline;

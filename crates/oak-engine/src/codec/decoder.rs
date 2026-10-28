@@ -195,6 +195,47 @@ pub struct OakSubtitleParams {
 	pub entry_count: i32,
 }
 
+/// Subtitle stream metadata without the variable-length subtitle entries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SubtitleMetadata {
+	/// Container stream index.
+	pub stream_index: i32,
+	/// Whether the subtitle stream is enabled.
+	pub enabled: bool,
+	/// Number of subtitle entries.
+	pub entry_count: i32,
+}
+
+impl SubtitleMetadata {
+	fn from_params(params: &oak_core::subtitleparams::SubtitleParams) -> Self {
+		Self {
+			stream_index: params.stream_index(),
+			enabled: params.enabled(),
+			entry_count: params.count(),
+		}
+	}
+}
+
+impl NativeMirror for OakSubtitleParams {
+	type Native = SubtitleMetadata;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			stream_index: native.stream_index,
+			enabled: i32::from(native.enabled),
+			entry_count: native.entry_count,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			stream_index: self.stream_index,
+			enabled: self.enabled != 0,
+			entry_count: self.entry_count,
+		}
+	}
+}
+
 /// Probes `filename` and returns its stream inventory as an opaque
 /// handle (release with `oak_codec_footage_release`). `decoder_id` null
 /// or empty tries every registered decoder in order; otherwise only the
@@ -349,11 +390,7 @@ pub unsafe extern "C" fn oak_codec_footage_get_subtitle_stream(
 	match unsafe { &*fd }.get_subtitle_stream(ordinal as usize) {
 		Some(params) => {
 			unsafe {
-				*out = OakSubtitleParams {
-					stream_index: params.stream_index(),
-					enabled: params.enabled() as i32,
-					entry_count: params.count(),
-				}
+				*out = OakSubtitleParams::from_native(&SubtitleMetadata::from_params(params));
 			};
 			true
 		}

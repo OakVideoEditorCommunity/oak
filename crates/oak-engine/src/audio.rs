@@ -1,6 +1,7 @@
 use oak_audio::manager::*;
 use oak_audio::params::AudioParams;
 use oak_core::SampleFormat;
+use crate::handle::NativeMirror;
 use crate::vecs::{IntoFfiVec, OakVecString};
 /// Audio stream parameters. Bridge to C value handle.
 #[repr(C)]
@@ -14,19 +15,22 @@ pub struct OakAudioParams{
     pub format: i32,
 }
 
-impl OakAudioParams{
-    pub fn from_audio_params(params: AudioParams) -> Self{
-        Self{
+impl NativeMirror for OakAudioParams {
+    type Native = AudioParams;
+
+    fn from_native(params: &AudioParams) -> Self {
+        Self {
             sample_rate: params.sample_rate,
             channel_layout: params.channel_layout,
             format: params.format as i32,
         }
     }
-    pub fn into_audio_params(self) -> AudioParams{
-        AudioParams{
+
+    fn to_native(&self) -> AudioParams {
+        AudioParams {
             sample_rate: self.sample_rate,
             channel_layout: self.channel_layout,
-            format: match self.format{
+            format: match self.format {
                 // Unsigned 8-bit planar.
                 0 => SampleFormat::U8Planar,
                 // Signed 16-bit planar.
@@ -193,7 +197,7 @@ pub unsafe extern "C" fn oak_audio_manager_push_to_output(params: OakAudioParams
         unsafe { std::slice::from_raw_parts_mut(error_buf, error_buf_len) }
     };
     let Some(mut inst) = instance() else { return false; };
-    inst.push_to_output(params.into_audio_params(), sample_buf, error_buf).is_ok()
+    inst.push_to_output(params.to_native(), sample_buf, error_buf).is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +294,51 @@ pub struct OakChannelStats {
 	pub vu_db: f64,
 }
 
+impl NativeMirror for OakChannelStats {
+	type Native = oak_audio::levelmeter::ChannelStats;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			peak_linear: native.peak_linear,
+			peak_db: native.peak_db,
+			rms_linear: native.rms_linear,
+			rms_db: native.rms_db,
+			vu_db: native.vu_db,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			peak_linear: self.peak_linear,
+			peak_db: self.peak_db,
+			rms_linear: self.rms_linear,
+			rms_db: self.rms_db,
+			vu_db: self.vu_db,
+		}
+	}
+}
+
+/// Aggregate level metadata without the separately returned channel vector.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LevelSummary {
+	/// Maximum peak across all channels, linear scale.
+	pub max_peak_linear: f64,
+	/// Integrated loudness in LUFS.
+	pub integrated_lufs: f64,
+	/// Whether every channel is below the silence gate.
+	pub silence: bool,
+}
+
+impl LevelSummary {
+	fn from_stats(stats: &oak_audio::levelmeter::Stats) -> Self {
+		Self {
+			max_peak_linear: stats.max_peak_linear,
+			integrated_lufs: stats.integrated_lufs,
+			silence: stats.silence,
+		}
+	}
+}
+
 /// Whole-buffer level statistics.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -300,6 +349,26 @@ pub struct OakLevelStats {
 	pub integrated_lufs: f64,
 	/// Every channel below the noise gate.
 	pub silence: i32,
+}
+
+impl NativeMirror for OakLevelStats {
+	type Native = LevelSummary;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			max_peak_linear: native.max_peak_linear,
+			integrated_lufs: native.integrated_lufs,
+			silence: i32::from(native.silence),
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			max_peak_linear: self.max_peak_linear,
+			integrated_lufs: self.integrated_lufs,
+			silence: self.silence != 0,
+		}
+	}
 }
 
 /// Analyzes a planar f32 sample buffer: `planar` points to `channels`
@@ -336,21 +405,11 @@ pub unsafe extern "C" fn oak_audio_levelmeter_analyze(
 	let stats = oak_audio::levelmeter::analyze_sample_buffer(&lanes);
 	for (i, c) in stats.channels.iter().enumerate() {
 		unsafe {
-			*channel_stats.add(i) = OakChannelStats {
-				peak_linear: c.peak_linear,
-				peak_db: c.peak_db,
-				rms_linear: c.rms_linear,
-				rms_db: c.rms_db,
-				vu_db: c.vu_db,
-			};
+			*channel_stats.add(i) = OakChannelStats::from_native(c);
 		}
 	}
 	unsafe {
-		*out = OakLevelStats {
-			max_peak_linear: stats.max_peak_linear,
-			integrated_lufs: stats.integrated_lufs,
-			silence: stats.silence as i32,
-		};
+		*out = OakLevelStats::from_native(&LevelSummary::from_stats(&stats));
 	}
 	true
 }

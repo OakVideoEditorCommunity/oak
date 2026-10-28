@@ -13,6 +13,42 @@ pub struct OakEditorMarker {
 	pub color: i32,
 }
 
+/// Marker timing/color metadata; the separately queried name is not duplicated.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkerMetadata {
+	/// Marker timeline range.
+	pub time: oak_core::TimeRange,
+	/// Application-defined marker color index.
+	pub color: i32,
+}
+
+impl MarkerMetadata {
+	fn from_marker(marker: &oak_timeline::marker::TimelineMarker) -> Self {
+		Self {
+			time: *marker.time(),
+			color: marker.color(),
+		}
+	}
+}
+
+impl NativeMirror for OakEditorMarker {
+	type Native = MarkerMetadata;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			time: OakTimeRange::from_native(&native.time),
+			color: native.color,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			time: self.time.to_native(),
+			color: self.color,
+		}
+	}
+}
+
 /// Returns the marker count, or zero for a null session.
 ///
 /// # Safety
@@ -57,10 +93,7 @@ pub unsafe extern "C" fn oak_editor_marker_at(
 		return false;
 	};
 	unsafe {
-		*out = OakEditorMarker {
-			time: OakTimeRange::from_native(marker.time()),
-			color: marker.color(),
-		}
+		*out = OakEditorMarker::from_native(&MarkerMetadata::from_marker(marker));
 	};
 	true
 }

@@ -16,6 +16,10 @@ use oak_codec::task::{
 /// C ABI mirror of oak-codec's `TaskRequest` for the submit callback.
 /// Strings are borrowed C pointers, valid only for the duration of the
 /// call; the callback must copy anything it retains.
+///
+/// This deliberately does not implement `NativeMirror`: `to_native` must return
+/// an owned native value, which cannot safely express these borrowed pointer
+/// lifetimes. Conversion stays local to the callback that owns the C strings.
 #[repr(C)]
 pub struct OakCodecTaskRequest {
 	/// `TaskKind` value (Conform = 0, Proxy = 1).

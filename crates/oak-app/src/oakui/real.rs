@@ -84,7 +84,7 @@ use oak_engine_rust_sdk::edit::EditCommand;
 use oak_engine_rust_sdk::editor::EditorSession;
 use oak_engine_rust_sdk::state::Config;
 use oak_render::manager::RenderManager;
-use oak_render::procpool::{bgra8_to_rgba8, ShmFrameRef};
+use oak_render::procpool::ShmFrameRef;
 use oak_timeline::handle::CHandle;
 use oak_timeline::util::NodeRef;
 
@@ -2586,7 +2586,7 @@ impl RealEngine {
 	/// generation job for every footage that has none yet. Entries without a
 	/// renderable frame keep the widget's placeholder.
 	fn attach_thumbnails(&self, entries: Vec<ProjectEntry>) -> Vec<ProjectEntry> {
-		let Some(project) = self.project.clone() else {
+		let Some(project) = self.editor_session().map(|session| session.project()) else {
 			return entries;
 		};
 		entries
@@ -2624,7 +2624,7 @@ impl RealEngine {
 	/// so the render stays valid when the engine drops the project mid-flight
 	/// (the drain discards the stale completion).
 	fn thumbnail_worker(
-		project: ProjectRef,
+		project: oak_engine_rust_sdk::node::Project,
 		identity: u64,
 		generation: u64,
 		tx: mpsc::Sender<ThumbEvent>,
@@ -2644,64 +2644,39 @@ impl RealEngine {
 	/// renderable footage or the render fails). The directory follows the
 	/// project's disk-cache location when it overrides the default (the
 	/// 项目属性 disk-cache setting's live consumer).
-	fn render_thumbnail(project: &ProjectRef, identity: u64) -> Option<PathBuf> {
-		let node = graphops::id_of(identity)?;
-		let (filename, cache_dir) = {
-			let guard = graphops::lock(project);
-			let filename = graphops::footage_behavior(&guard.graph, node)
-				.map(|f| f.filename.clone())
-				.filter(|f| !f.is_empty())?;
-			let dir = (guard.cache_location_setting != 0).then(|| guard.cache_path());
-			(filename, dir)
-		};
+	fn render_thumbnail(
+		project: &oak_engine_rust_sdk::node::Project,
+		identity: u64,
+	) -> Option<PathBuf> {
+		let node = oak_engine_rust_sdk::node::NodeId::from_raw(identity);
+		if project.node_kind(node) != Some(oak_engine_rust_sdk::node::NodeKind::Footage) {
+			return None;
+		}
+		let filename = project.footage_filename(node).filter(|filename| !filename.is_empty())?;
+		let (cache_mode, cache_path) = project.cache_location();
+		let cache_dir = (cache_mode != 0).then_some(cache_path);
 		let path = thumbnail_path(cache_dir.as_deref(), &filename);
 		if path.exists() {
 			return Some(path);
 		}
-		if !super::renderops::ensure_render_manager() {
-			return None;
-		}
-		// Frame zero: the timebase only scales the timestamp, so any valid
-		// pair produces time 0. M15 S2: the process backend delivers a shm
-		// slot — copy the pixels out once (counted, the PNG must outlive the
-		// slot), convert BGRA→RGBA, release the slot.
-		let rendered = super::renderops::render_footage_frame(
+		// The SDK returns owned F32 RGBA pixels, so the PNG has no shared-memory
+		// slot or GPU texture lifetime dependency.
+		let task = oak_engine_rust_sdk::task::render_thumbnail(
 			project,
 			node,
-			0,
-			(1, 1000),
-			THUMBNAIL_WIDTH,
-			THUMBNAIL_HEIGHT,
-			None,
-		)
-		.ok()?;
-		let (width, height, bytes) = match &rendered {
-			super::renderops::RenderedFrame::Shm(f) => {
-				let meta = &f.meta;
-				let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
-				let pixels = f.shm.slot_to_vec(f.slot);
-				let data = pixels.get(..meta.data_size.max(0) as usize)?;
-				(w, h, bgra8_to_rgba8(data))
-			}
-			super::renderops::RenderedFrame::CpuF32 { .. } => {
-				let (w, h, samples) = read_f32_frame(&rendered)?;
-				let bytes: Vec<u8> = samples
-					.iter()
-					.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-					.collect();
-				(w, h, bytes)
-			}
-			super::renderops::RenderedFrame::Gpu(texture) => {
-				let frame = texture.to_frame().ok()?;
-				let (w, h, samples) = samples_from_cpu_frame(&frame)?;
-				let bytes: Vec<u8> = samples
-					.iter()
-					.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
-					.collect();
-				(w, h, bytes)
-			}
-		};
-		release_rendered_frame(&rendered);
+			oak_engine_rust_sdk::types::Rational::new(0, 1),
+			(THUMBNAIL_WIDTH as u32, THUMBNAIL_HEIGHT as u32),
+		)?;
+		if !task.wait() {
+			return None;
+		}
+		let thumbnail = task.take_thumbnail()?;
+		let samples = thumbnail.pixels();
+		let bytes: Vec<u8> = samples
+			.iter()
+			.map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8)
+			.collect();
+		let (width, height) = (THUMBNAIL_WIDTH as u32, THUMBNAIL_HEIGHT as u32);
 		let image = image::RgbaImage::from_raw(width, height, bytes)?;
 		std::fs::create_dir_all(path.parent()?).ok()?;
 		// Write aside then rename so readers never see a partial file. The
@@ -2990,8 +2965,8 @@ impl RealEngine {
 	/// speed (one multi-undo).
 	fn sync_clips_by_waveform_internal(&mut self, clips: &[ClipId], allow_speed: bool) {
 		use oak_audio::synchronizer::place_by_waveform_offset;
-		use oak_audio::waveformsync::{
-			estimate_envelope_offset_valid, estimate_stretch_and_offset,
+		use oak_engine_rust_sdk::audio_analysis::{
+			estimate_envelope_offset, estimate_stretch_offset,
 		};
 
 		let Some(cache) = self.waveform_cache() else {
@@ -3107,7 +3082,7 @@ impl RealEngine {
 				target.media_len_s,
 				window_samples,
 			);
-			let mut offset = estimate_envelope_offset_valid(
+			let mut offset = estimate_envelope_offset(
 				&ref_envelope,
 				&cand_envelope,
 				&ref_valid,
@@ -3121,7 +3096,7 @@ impl RealEngine {
 				// search a rate range with a tighter offset radius.
 				let radius =
 					max_offset_windows.min((i64::from(sample_rate) * 30) / window_samples as i64);
-				let stretch = estimate_stretch_and_offset(
+				let stretch = estimate_stretch_offset(
 					&ref_envelope,
 					&cand_envelope,
 					&ref_valid,
@@ -3827,17 +3802,6 @@ impl RealEngine {
 // ---------------------------------------------------------------------------
 // EngineGateway
 // ---------------------------------------------------------------------------
-
-/// The clip's timeline length in seconds — the media-range length the C++
-/// waveform sync extracts its envelope over (`media_in + length`, speed
-/// and reverse ignored there; parity with
-/// `oakengine_clip_get_media_range_rational`).
-fn clip_media_length_seconds(g: &oak_node::graph::Graph, node: NodeId) -> f64 {
-	match graphops::clip_range(g, node) {
-		Some((in_r, out_r, _)) => (out_r - in_r).to_f64(),
-		None => 0.0,
-	}
-}
 
 impl EngineGateway for RealEngine {
 	fn project(&self) -> Option<&Project> {
@@ -6754,27 +6718,18 @@ impl AppEngine for RealEngine {
 
 	fn sync_eligibility(&self, clips: &[ClipId]) -> super::engine::SyncEligibility {
 		let mut eligibility = super::engine::SyncEligibility::default();
-		let (Some(project), Some(cache)) = (self.project.as_ref(), self.waveform_cache()) else {
+		let (Some(session), Some(cache)) = (self.editor_session(), self.waveform_cache()) else {
 			return eligibility;
 		};
-		let guard = graphops::lock(project);
 		for clip in clips {
-			let Some(node) = graphops::id_of(clip.0) else {
+			let Some(info) = session.clip_sync_info(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0)) else {
 				continue;
 			};
-			if graphops::clip_range(&guard.graph, node).is_none() {
-				continue;
-			}
-			if let Some(footage) = graphops::find_input_footage(&guard.graph, node)
-				.and_then(|f| graphops::footage_behavior(&guard.graph, f))
-			{
-				if footage.has_source_start_time {
-					eligibility.source_time += 1;
-				}
+			if info.has_source_start_time {
+				eligibility.source_time += 1;
 			}
 			if let Some(waveform) = cache.get(clip.0) {
-				let media_len = clip_media_length_seconds(&guard.graph, node);
-				if super::waveformsync::waveform_sync_eligible(&waveform, media_len) {
+				if super::waveformsync::waveform_sync_eligible(&waveform, info.media_length_seconds) {
 					eligibility.waveform += 1;
 				}
 			}
@@ -7175,44 +7130,51 @@ impl AppEngine for RealEngine {
 		// Extract each angle's RMS envelope (100 ms windows) through the
 		// audio waveform extractor over the footage's media file. The
 		// reference angle is angle 0.
-		let source_paths: Vec<(u64, String, i32)> = {
+		let source_paths: Vec<(u64, String)> = {
 			let project = self.project_ref().ok_or("no project open")?;
 			let g = graphops::lock(project);
 			let mut out = Vec::new();
 			for entry in selected {
 				let node = graphops::id_of(entry.id).ok_or("angle missing")?;
 				let f = graphops::footage_behavior(&g.graph, node).ok_or("angle is not footage")?;
-				out.push((
-					entry.id,
-					f.filename.clone(),
-					f.streams
-						.iter()
-						.find(|s| !s.is_video)
-						.map(|s| s.index)
-						.unwrap_or(1),
-				));
+				out.push((entry.id, f.filename.clone()));
 			}
 			out
 		};
 		let mut envelopes: Vec<Vec<f64>> = Vec::new();
-		for (_, filename, stream) in &source_paths {
-			let envelope = crate::oakui::waveform::extract_audio_envelope(filename, *stream)
+		for (_, filename) in &source_paths {
+			// The SDK takes an audio-stream ordinal, not the container stream ID.
+			let envelope = crate::oakui::waveform::extract_audio_envelope(filename, 0)
 				.ok_or_else(|| format!("failed to extract audio from {filename}"))?;
 			envelopes.push(envelope);
 		}
 		let reference_envelope = envelopes[0].clone();
-		let offsets =
-			super::multicam::estimate_wizard_offsets(&reference_envelope, &envelopes[1..]);
+		let offsets: Vec<oak_engine_rust_sdk::audio_analysis::OffsetEstimate> = envelopes[1..]
+			.iter()
+			.map(|candidate| {
+				oak_engine_rust_sdk::audio_analysis::estimate_envelope_offset(
+					&reference_envelope,
+					candidate,
+					&[],
+					&[],
+					1,
+					50,
+				)
+			})
+			.collect();
 		let mut out = vec![WizardSyncOffset {
 			footage: reference.id,
 			offset_s: 0.0,
 			confidence: Some(1.0),
 		}];
-		for (entry, offset_s) in selected[1..].iter().zip(offsets.iter()) {
+		for (entry, offset) in selected[1..].iter().zip(offsets.iter()) {
 			out.push(WizardSyncOffset {
 				footage: entry.id,
-				offset_s: *offset_s,
-				confidence: Some(0.0), // the wizard's confidence is UI-only for now
+				// Envelopes use 100 ms windows and window_samples=1 above.
+				// Timeline placement uses the wizard's opposite lag convention:
+				// positive means the candidate clip starts later on the timeline.
+				offset_s: -(offset.offset_samples as f64) * 0.1,
+				confidence: offset.valid.then_some(offset.confidence),
 			});
 		}
 		Ok(out)
@@ -8798,10 +8760,8 @@ mod tests {
 	#[gpui_kit::test]
 	async fn real_engine_thumbnail_pipeline_produces_png(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
-		let _worker = WorkerBinGuard::set();
-		if !crate::oakui::renderops::ensure_render_manager() {
-			panic!("the render manager failed to start");
-		}
+		let _proxy = ConfigRestore::of(CONFIG_KEY_USE_PROXY);
+		config_set_bool(CONFIG_KEY_USE_PROXY, false);
 		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
 
@@ -8823,7 +8783,13 @@ mod tests {
 				.expect("the imported footage is listed")
 				.id
 		});
-		let project = cx.read(|app| engine.read(app).project_ref().cloned().unwrap());
+		let project = cx.read(|app| {
+			engine
+				.read(app)
+				.editor_session()
+				.expect("editor session")
+				.project()
+		});
 		let rendered = RealEngine::render_thumbnail(&project, entry_id);
 		let rendered = rendered.expect("render_thumbnail produces a PNG path for the real media");
 		assert!(

@@ -633,6 +633,9 @@ pub struct ExtractOutcome {
 	pub points: Vec<SamplePerChannel>,
 	/// Channel count of the decoded stream.
 	pub channels: i32,
+	/// Native stream sample rate. Keeping this beside the peaks avoids callers
+	/// assuming 48 kHz for media with a different rate.
+	pub sample_rate: i32,
 }
 
 /// Append one decoded chunk's interleaved f32 samples to the per-channel
@@ -826,5 +829,9 @@ pub fn extract(
 	let _ = decoder.close();
 	result?;
 
-	Ok(ExtractOutcome { points, channels })
+	Ok(ExtractOutcome {
+		points,
+		channels,
+		sample_rate,
+	})
 }

@@ -40,8 +40,7 @@ unsafe extern "C" {
 	fn oak_render_swizzle_bgra8_to_rgba8(src: *const u8, dst: *mut u8, pixel_count: usize) -> bool;
 }
 
-/// Renders the frame of the viewer node `viewer` (any node id from the
-/// project traversal, typically a sequence) at `time`, returning tight
+/// Renders a sequence or video-footage viewer at `time`, returning tight
 /// F32 RGBA pixels (`width*height*4` floats). None on failure (unknown
 /// viewer, invalid size, render error).
 pub fn render_frame_f32(

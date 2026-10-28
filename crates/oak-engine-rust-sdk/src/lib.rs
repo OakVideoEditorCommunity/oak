@@ -6,6 +6,7 @@
 //! in idiomatic Rust types and error handling.
 
 pub mod audio;
+pub mod audio_analysis;
 pub mod codec;
 pub mod color;
 pub mod core;
@@ -21,6 +22,7 @@ pub mod render;
 pub mod state;
 pub mod storage;
 pub mod task;
+pub mod thumbnail;
 pub mod timeline;
 pub mod types;
 pub mod utils;

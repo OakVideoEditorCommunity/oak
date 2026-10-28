@@ -173,6 +173,7 @@ fn extract_file_and_notfound() {
 	let c_path = CString::new(path.to_str().unwrap()).unwrap();
 	let outcome = extract(&c_path, 0, 4).unwrap();
 	assert_eq!(outcome.channels, 2);
+	assert_eq!(outcome.sample_rate, 48_000);
 	assert_eq!(outcome.points.len(), 4, "2 points x 2 channels");
 	let out = &outcome.points;
 

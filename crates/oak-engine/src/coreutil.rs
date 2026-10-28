@@ -12,6 +12,7 @@ use oak_core::filefunctions::{FileFunctions, default_disk_cache_path};
 use oak_core::lut::Lut3d;
 
 use crate::codec::{copy_str_out, str_arg};
+use crate::handle::NativeMirror;
 
 // ---------------------------------------------------------------------------
 // Color math
@@ -126,6 +127,24 @@ pub struct OakXy {
 	pub y: f32,
 }
 
+impl NativeMirror for OakXy {
+	type Native = colormath::Xy;
+
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			x: native.x,
+			y: native.y,
+		}
+	}
+
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			x: self.x,
+			y: self.y,
+		}
+	}
+}
+
 /// `repr(C)` mirror of `colormath::Primaries` (RGB primaries + white
 /// point).
 #[repr(C)]
@@ -137,26 +156,25 @@ pub struct OakPrimaries {
 	pub white: OakXy,
 }
 
-fn xy(p: OakXy) -> colormath::Xy {
-	colormath::Xy { x: p.x, y: p.y }
-}
+impl NativeMirror for OakPrimaries {
+	type Native = colormath::Primaries;
 
-fn primaries(p: OakPrimaries) -> colormath::Primaries {
-	colormath::Primaries {
-		red: xy(p.red),
-		green: xy(p.green),
-		blue: xy(p.blue),
-		white: xy(p.white),
+	fn from_native(native: &Self::Native) -> Self {
+		Self {
+			red: OakXy::from_native(&native.red),
+			green: OakXy::from_native(&native.green),
+			blue: OakXy::from_native(&native.blue),
+			white: OakXy::from_native(&native.white),
+		}
 	}
-}
 
-fn oak_primaries(p: colormath::Primaries) -> OakPrimaries {
-	let cvt = |c: colormath::Xy| OakXy { x: c.x, y: c.y };
-	OakPrimaries {
-		red: cvt(p.red),
-		green: cvt(p.green),
-		blue: cvt(p.blue),
-		white: cvt(p.white),
+	fn to_native(&self) -> Self::Native {
+		Self::Native {
+			red: self.red.to_native(),
+			green: self.green.to_native(),
+			blue: self.blue.to_native(),
+			white: self.white.to_native(),
+		}
 	}
 }
 
@@ -167,13 +185,13 @@ pub extern "C" fn oak_core_colormath_chromatic_adaptation(
 	src_white: OakXy,
 	dst_white: OakXy,
 ) -> [[f32; 3]; 3] {
-	colormath::chromatic_adaptation(xy(src_white), xy(dst_white))
+	colormath::chromatic_adaptation(src_white.to_native(), dst_white.to_native())
 }
 
 /// The RGB→XYZ matrix for a set of primaries.
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colormath_rgb_to_xyz(p: OakPrimaries) -> [[f32; 3]; 3] {
-	colormath::rgb_to_xyz_matrix(primaries(p))
+	colormath::rgb_to_xyz_matrix(p.to_native())
 }
 
 /// The direct RGB→RGB conversion matrix between two primary sets.
@@ -182,7 +200,7 @@ pub extern "C" fn oak_core_colormath_rgb_to_rgb(
 	src: OakPrimaries,
 	dst: OakPrimaries,
 ) -> [[f32; 3]; 3] {
-	colormath::rgb_to_rgb_matrix(primaries(src), primaries(dst))
+	colormath::rgb_to_rgb_matrix(src.to_native(), dst.to_native())
 }
 
 macro_rules! export_primaries {
@@ -191,7 +209,7 @@ macro_rules! export_primaries {
 			#[doc = concat!("The built-in `", stringify!($native), "` primaries.")]
 			#[unsafe(no_mangle)]
 			pub extern "C" fn $name() -> OakPrimaries {
-				oak_primaries($native)
+				OakPrimaries::from_native(&$native)
 			}
 		)*
 	};

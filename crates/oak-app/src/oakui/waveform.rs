@@ -17,8 +17,7 @@
 //! M12 P4: timeline audio waveforms.
 //!
 //! The [`WaveformCache`] holds per-clip min/max peak data extracted
-//! through `oak_audio::waveform::extract` (the real FFmpeg-backed
-//! extraction; M14 R3: a direct module call, no facade); the engine
+//! through the SDK's engine-backed audio analysis API; the engine
 //! refreshes it when the timeline rebuilds. The [`OakClipDecorator`] draws
 //! the peaks into the timeline's clip body.
 //!
@@ -34,16 +33,7 @@ use crate::widgets::timeline::ClipId;
 use crate::widgets::timeline::FrameRange;
 use gpui_kit::{Bounds, Hsla, Pixels, Window};
 
-/// One min/max amplitude pair (mirror of the oakaudio waveform C ABI
-/// `MinMax`: two f32s).
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MinMax {
-	/// Minimum amplitude in the window.
-	pub min: f32,
-	/// Maximum amplitude in the window.
-	pub max: f32,
-}
+pub use oak_engine_rust_sdk::audio_analysis::MinMax;
 
 /// The cached waveform of one clip.
 #[derive(Debug, Clone)]
@@ -117,32 +107,24 @@ impl WaveformCache {
 	}
 }
 
-/// Extract a clip's waveform (first channel) via oakaudio's waveform
-/// extractor.
+/// Extract a clip's waveform (first channel) through the SDK. The caller is
+/// already on a media worker, so the blocking handle API does not stall GPUI.
 fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
-	let cname = std::ffi::CString::new(filename).ok()?;
 	const SAMPLES_PER_POINT: i32 = 256;
-	// Audio-stream index 0 (probe numbering).
-	let outcome = oak_audio::waveform::extract(&cname, 0, SAMPLES_PER_POINT).ok()?;
-	if outcome.channels <= 0 || outcome.points.is_empty() {
+	let waveform = oak_engine_rust_sdk::audio_analysis::Waveform::extract(
+		filename,
+		0,
+		SAMPLES_PER_POINT,
+	)?;
+	let info = waveform.info();
+	if info.channels <= 0 || info.point_count == 0 {
 		return None;
 	}
-	// Keep only the first channel: the points are channel-interleaved
-	// (point i channel c at index i * channels + c).
-	let channel_count = outcome.channels.max(1) as usize;
-	let count = outcome.points.len() / channel_count;
-	let mut peaks = Vec::with_capacity(count);
-	peaks.extend((0..count).map(|i| {
-		let p = outcome.points[i * channel_count];
-		MinMax {
-			min: p.min,
-			max: p.max,
-		}
-	}));
+	let peaks = waveform.peaks(0);
 	Some(ClipWaveform {
 		peaks,
-		channel_count: outcome.channels.max(1),
-		sample_rate: 48000,
+		channel_count: info.channels,
+		sample_rate: info.sample_rate,
 		samples_per_point: SAMPLES_PER_POINT,
 		duration_frames,
 	})
@@ -158,27 +140,24 @@ fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWavefo
 /// Returns `None` when the file has no decodable audio (the wizard then
 /// falls back to timecode alignment).
 pub fn extract_audio_envelope(filename: &str, stream_index: i32) -> Option<Vec<f64>> {
-	let cname = std::ffi::CString::new(filename).ok()?;
 	const SAMPLES_PER_POINT: i32 = 256;
-	const WINDOW_POINTS: usize = 10; // ~100 ms windows at 48 kHz
-	let outcome = oak_audio::waveform::extract(&cname, stream_index, SAMPLES_PER_POINT).ok()?;
-	if outcome.channels <= 0 || outcome.points.is_empty() {
+	let waveform = oak_engine_rust_sdk::audio_analysis::Waveform::extract(
+		filename,
+		stream_index,
+		SAMPLES_PER_POINT,
+	)?;
+	let info = waveform.info();
+	if info.channels <= 0 || info.point_count == 0 {
 		return None;
 	}
-	let channel_count = outcome.channels.max(1) as usize;
-	let count = outcome.points.len() / channel_count;
-	// Peaks of the first channel.
-	let mut peaks: Vec<f64> = (0..count)
-		.map(|i| {
-			let p = outcome.points[i * channel_count];
-			f64::max(f64::from(p.min).abs(), f64::from(p.max).abs())
-		})
-		.collect();
-	// Window: every WINDOW_POINTS points collapses to one max (the
-	// envelope the correlator slides).
-	let mut envelope = Vec::with_capacity(count.div_ceil(WINDOW_POINTS));
-	for chunk in peaks.chunks_mut(WINDOW_POINTS) {
-		envelope.push(chunk.iter().copied().fold(0.0, f64::max));
+	let window_points =
+		(f64::from(info.sample_rate) * 0.1 / f64::from(SAMPLES_PER_POINT)).round().max(1.0) as usize;
+	let peaks = waveform.peaks(0);
+	let mut envelope = Vec::with_capacity(peaks.len().div_ceil(window_points));
+	for chunk in peaks.chunks(window_points) {
+		envelope.push(chunk.iter().fold(0.0f64, |acc, point| {
+			acc.max(f64::from(point.min).abs()).max(f64::from(point.max).abs())
+		}));
 	}
 	Some(envelope)
 }
