@@ -9,6 +9,7 @@ pub mod editor;
 pub mod editor_commands;
 pub mod editor_dispatch;
 pub mod editor_graph;
+pub mod editor_params;
 pub mod handle;
 pub mod node;
 pub mod ofx;

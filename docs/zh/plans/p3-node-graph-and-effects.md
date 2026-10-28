@@ -1,14 +1,15 @@
 # P3：节点图、效果与参数体系实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P3。  
-> 状态：P3A/P3B 已完成，P3C 待启动；P3 整体进行中。P2B 已明确跳过；本文不把 P2A 或
+> 状态：P3A/P3B 已完成；P3C1 参数与关键帧完成，P3C2 待启动。P2B 已明确跳过；本文不把 P2A 或
 > P3 子阶段完成解释为 app 已完成切换。
 
 ## 1. 子阶段
 
 - P3A：效果库 SDK 枚举、`EditorSession` 效果链命令、静态参数写入及 undo/ABI 测试。
 - P3B：会话图快照、端口/连接 DTO、受保护节点、连接校验和图命令。
-- P3C：完整参数元数据、枚举/分组、关键帧与曲线编辑、按钮和通知。
+- P3C1：参数元数据、枚举/分组、静态值、关键帧与曲线编辑。
+- P3C2：按钮动作和独立通知订阅。
 - P3D：切换节点编辑器、效果库、效果栈与 inspector，删除 app 领域 helper。
 
 P3A 复用 engine 已有的效果链实现，不在 SDK 复制图算法。所有会话命令继续走
@@ -23,7 +24,7 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 ## 3. 完成边界
 
 只有 P3A–P3D 全部满足，且独立消费者不依赖 `oak-node` 完成建图、连图、效果、参数、
-关键帧与渲染验证后，才能把 P3 标为完成。当前处于 P3C 待启动状态。
+关键帧与渲染验证后，才能把 P3 标为完成。当前处于 P3C2 待启动状态。
 
 ## 4. P3A 实施结果
 
@@ -69,3 +70,23 @@ app 中不依赖实时工程实例的效果/节点库枚举可以先切 SDK；�
 - 新增图快照与连接校验测试：2 个通过。
 - engine / SDK 全量回归：engine 168 个、SDK 90 个测试通过。
 - 本阶段不改变 app 实时工程实例，也不宣称节点编辑器已经切换；app 切换属于 P3D。
+
+## 8. P3C1 实施结果
+
+- 新增一次性 `EditorParamHandle` 与拥有型 `ParameterSnapshot`：参数声明、标签、值类型、
+  flags、静态元素值、属性和关键帧轨道来自同一 revision。
+- DTO 保留 POD 与字符串双表示，支持 Text/StrCombo、Combo 选项、UI 属性和任意元素索引；
+  值与轨道元素通过显式枚举查询，不存在固定数组上限。
+- 新增 `UpsertNodeKeyframe`、`RemoveNodeKeyframe`、`SetNodeValueAtTime`。前两者完整保存
+  插值与 Bezier 控制点并逐轨道恢复 undo；后者复用 oak-node 的标准值/关键帧时间写入规则。
+- ABI 使用 `NativeMirror` 统一内部 DTO 与 `repr(C)` POD 转换，字符串继续走有界 UTF-8
+  缓冲区，不使用 JSON 作为参数或曲线 ABI。
+- 新增参数/文本/动画测试，覆盖 Float 静态值、Text/StrCombo、线性插值、Bezier 控制点、
+  upsert/remove、时间值插入、旧快照不变性及 undo/redo。
+
+## 9. P3C1 验证与剩余范围
+
+- 新增参数测试：2 个通过；新增命令同时纳入全变体 ABI 覆盖。
+- engine / SDK 全量回归：engine 168 个、SDK 92 个测试通过。
+- P3C2 尚未实现按钮动作与独立通知订阅；app 参数面板切换属于 P3D，因此 P3C 和 P3
+  整体均不标记完成。

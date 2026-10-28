@@ -278,4 +278,27 @@ pub enum EditCommand {
 		element: i32,
 		value: oak_node::value::OakNodeValue,
 	},
+	UpsertNodeKeyframe {
+		node: u64,
+		input_id: String,
+		element: i32,
+		time: WireRational,
+		value: oak_node::value::OakNodeValue,
+		interpolation: i32,
+		bezier_in: (f64, f64),
+		bezier_out: (f64, f64),
+	},
+	RemoveNodeKeyframe {
+		node: u64,
+		input_id: String,
+		element: i32,
+		time: WireRational,
+	},
+	SetNodeValueAtTime {
+		node: u64,
+		input_id: String,
+		element: i32,
+		time: WireRational,
+		value: oak_node::value::OakNodeValue,
+	},
 }

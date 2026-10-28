@@ -1,6 +1,7 @@
 //! Mapping from safe command variants to operation-specific ABI slots.
 
 use crate::node::NodeId;
+use crate::editor::KeyframeInterpolation;
 use crate::types::Rational;
 
 use super::super::EditCommand;
@@ -390,6 +391,53 @@ impl CommandArgs {
 				self.simple(OakEditOp::SetNodeStandardValue, node);
 				self.input_id(input_id);
 				self.params.element = element;
+				self.params.node_value = value;
+			}
+			EditCommand::UpsertNodeKeyframe {
+				node,
+				input_id,
+				element,
+				time,
+				value,
+				interpolation,
+				bezier_in,
+				bezier_out,
+			} => {
+				self.simple(OakEditOp::UpsertNodeKeyframe, node);
+				self.input_id(input_id);
+				self.params.element = element;
+				self.params.rate = time;
+				self.params.node_value = value;
+				self.params.kind = match interpolation {
+					KeyframeInterpolation::Hold => 0,
+					KeyframeInterpolation::Linear => 1,
+					KeyframeInterpolation::Bezier => 2,
+				};
+				(self.params.bezier_in_x, self.params.bezier_in_y) = bezier_in;
+				(self.params.bezier_out_x, self.params.bezier_out_y) = bezier_out;
+			}
+			EditCommand::RemoveNodeKeyframe {
+				node,
+				input_id,
+				element,
+				time,
+			} => {
+				self.simple(OakEditOp::RemoveNodeKeyframe, node);
+				self.input_id(input_id);
+				self.params.element = element;
+				self.params.rate = time;
+			}
+			EditCommand::SetNodeValueAtTime {
+				node,
+				input_id,
+				element,
+				time,
+				value,
+			} => {
+				self.simple(OakEditOp::SetNodeValueAtTime, node);
+				self.input_id(input_id);
+				self.params.element = element;
+				self.params.rate = time;
 				self.params.node_value = value;
 			}
 		}

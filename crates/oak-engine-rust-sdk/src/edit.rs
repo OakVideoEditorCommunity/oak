@@ -6,7 +6,7 @@ mod execute;
 #[cfg(test)]
 mod tests;
 
-use crate::editor::TrackKind;
+use crate::editor::{KeyframeInterpolation, TrackKind};
 use crate::node::{NodeId, NodeValue};
 use crate::types::{Rational, TimeRange};
 
@@ -288,6 +288,32 @@ pub enum EditCommand {
 		node: NodeId,
 		input_id: String,
 		element: i32,
+		value: NodeValue,
+	},
+	/// Inserts or replaces a complete keyframe and its interpolation handles.
+	UpsertNodeKeyframe {
+		node: NodeId,
+		input_id: String,
+		element: i32,
+		time: Rational,
+		value: NodeValue,
+		interpolation: KeyframeInterpolation,
+		bezier_in: (f64, f64),
+		bezier_out: (f64, f64),
+	},
+	/// Removes the keyframe at an exact rational time.
+	RemoveNodeKeyframe {
+		node: NodeId,
+		input_id: String,
+		element: i32,
+		time: Rational,
+	},
+	/// Applies oak-node's standard/keyframed value-at-time mutation rules.
+	SetNodeValueAtTime {
+		node: NodeId,
+		input_id: String,
+		element: i32,
+		time: Rational,
 		value: NodeValue,
 	},
 }

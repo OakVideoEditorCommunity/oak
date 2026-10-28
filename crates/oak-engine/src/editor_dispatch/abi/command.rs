@@ -268,5 +268,28 @@ pub(super) fn command(op: OakEditOp, p: &OakEditParams) -> Result<EditCommand, S
 			element: p.element,
 			value: p.node_value,
 		},
+		OakEditOp::UpsertNodeKeyframe => EditCommand::UpsertNodeKeyframe {
+			node: p.a,
+			input_id: text(p.input_id, p.input_id_len),
+			element: p.element,
+			time: p.rate,
+			value: p.node_value,
+			interpolation: p.kind,
+			bezier_in: (p.bezier_in_x, p.bezier_in_y),
+			bezier_out: (p.bezier_out_x, p.bezier_out_y),
+		},
+		OakEditOp::RemoveNodeKeyframe => EditCommand::RemoveNodeKeyframe {
+			node: p.a,
+			input_id: text(p.input_id, p.input_id_len),
+			element: p.element,
+			time: p.rate,
+		},
+		OakEditOp::SetNodeValueAtTime => EditCommand::SetNodeValueAtTime {
+			node: p.a,
+			input_id: text(p.input_id, p.input_id_len),
+			element: p.element,
+			time: p.rate,
+			value: p.node_value,
+		},
 	})
 }

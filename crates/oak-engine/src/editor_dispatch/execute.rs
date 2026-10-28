@@ -451,5 +451,53 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 			element,
 			value,
 		)),
+		EditCommand::UpsertNodeKeyframe {
+			node,
+			input_id,
+			element,
+			time,
+			value,
+			interpolation,
+			bezier_in,
+			bezier_out,
+		} => {
+			let interpolation = match interpolation {
+				0 => oak_node::keyframe::Interpolation::Hold,
+				1 => oak_node::keyframe::Interpolation::Linear,
+				2 => oak_node::keyframe::Interpolation::Bezier,
+				_ => return Err(format!("invalid keyframe interpolation: {interpolation}")),
+			};
+			empty(ops::upsert_keyframe(
+				project,
+				id(node)?,
+				&input_id,
+				element,
+				time.native(),
+				value,
+				interpolation,
+				bezier_in,
+				bezier_out,
+			))
+		}
+		EditCommand::RemoveNodeKeyframe {
+			node,
+			input_id,
+			element,
+			time,
+		} => empty(ops::remove_keyframe(project, id(node)?, &input_id, element, time.native())),
+		EditCommand::SetNodeValueAtTime {
+			node,
+			input_id,
+			element,
+			time,
+			value,
+		} => empty(ops::set_value_at_time(
+			project,
+			id(node)?,
+			&input_id,
+			element,
+			time.native(),
+			value,
+		)),
 	}
 }

@@ -76,6 +76,9 @@ pub enum OakEditOp {
 	EffectMove,
 	EffectSetEnabled,
 	SetNodeStandardValue,
+	UpsertNodeKeyframe,
+	RemoveNodeKeyframe,
+	SetNodeValueAtTime,
 }
 
 impl OakEditOp {
@@ -141,6 +144,9 @@ impl OakEditOp {
 			56 => Self::EffectMove,
 			57 => Self::EffectSetEnabled,
 			58 => Self::SetNodeStandardValue,
+			59 => Self::UpsertNodeKeyframe,
+			60 => Self::RemoveNodeKeyframe,
+			61 => Self::SetNodeValueAtTime,
 			_ => return None,
 		})
 	}
@@ -191,6 +197,11 @@ pub struct OakEditParams {
 	// Effect parameter element index and POD value used by SetNodeStandardValue.
 	pub element: i32,
 	pub node_value: oak_node::value::OakNodeValue,
+	// Bezier handle offsets used by UpsertNodeKeyframe.
+	pub bezier_in_x: f64,
+	pub bezier_in_y: f64,
+	pub bezier_out_x: f64,
+	pub bezier_out_y: f64,
 	// Borrowed UTF-8 strings and arrays, each with an explicit element/byte count.
 	pub name: *const u8,
 	pub name_len: usize,
@@ -235,6 +246,10 @@ impl Default for OakEditParams {
 			old_range: Default::default(),
 			element: 0,
 			node_value: oak_node::value::OakNodeValue::none(),
+			bezier_in_x: 0.0,
+			bezier_in_y: 0.0,
+			bezier_out_x: 0.0,
+			bezier_out_y: 0.0,
 			name: std::ptr::null(),
 			name_len: 0,
 			path: std::ptr::null(),

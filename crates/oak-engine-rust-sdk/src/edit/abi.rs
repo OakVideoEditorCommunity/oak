@@ -70,6 +70,9 @@ pub(crate) enum OakEditOp {
 	EffectMove,
 	EffectSetEnabled,
 	SetNodeStandardValue,
+	UpsertNodeKeyframe,
+	RemoveNodeKeyframe,
+	SetNodeValueAtTime,
 }
 
 impl OakEditOp {
@@ -131,6 +134,10 @@ pub(crate) struct OakEditParams {
 	pub old_range: TimeRange,
 	pub element: i32,
 	pub node_value: NodeValue,
+	pub bezier_in_x: f64,
+	pub bezier_in_y: f64,
+	pub bezier_out_x: f64,
+	pub bezier_out_y: f64,
 	pub name: *const u8,
 	pub name_len: usize,
 	pub path: *const u8,
@@ -173,6 +180,10 @@ impl Default for OakEditParams {
 			old_range: TimeRange::default(),
 			element: 0,
 			node_value: NodeValue::default(),
+			bezier_in_x: 0.0,
+			bezier_in_y: 0.0,
+			bezier_out_x: 0.0,
+			bezier_out_y: 0.0,
 			name: std::ptr::null(),
 			name_len: 0,
 			path: std::ptr::null(),
