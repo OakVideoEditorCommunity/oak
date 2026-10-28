@@ -187,7 +187,17 @@ crates/oak-app/src/oakui/
 全生命周期通过；app 的全局配置及非实时库操作走 SDK。实时工程仍保留的
 `oak-storage` 绑定和 `oak-node` 只读路径明确转入 P2，不宣称提前清零。
 
-### P2：时间线编辑、历史与复合命令
+### P2A：语义编辑与原生 ABI（已完成）
+
+实施记录见 [p2a-semantic-editing.md](p2a-semantic-editing.md)。
+
+- 将 `graphops.rs` 的编辑实现和测试迁入 engine，提供强类型 `EditCommand` /
+  `EditResult` 和原生 `repr(C)` ABI，不使用 JSON。
+- 覆盖轨道、放置、转场、全部修剪、移动、波纹删除、链接、调整层、标记、工作区、
+  剪贴板、嵌套和速度；每个命令只执行一次并返回 revision。
+- 以迁入测试、全变体 ABI 测试和 undo/redo/保存重开验证。
+
+### P2B：RealEngine 采用、历史与依赖收口（待 P3–P6 后执行）
 
 - RealEngine 采用 P1 的 `EditorSession`，一次性切换工程实例、write-through
   绑定和项目级 OCIO/cache/color 设置；删除剩余 `oak-storage` 直调，并用会话

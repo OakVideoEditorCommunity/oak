@@ -31,7 +31,7 @@ OCIO/cache/color 切换和图只读清零与 P2 一起完成。
 
 `crates/oak-engine-rust-sdk/src/editor.rs` 提供：
 
-- `EditorSession::{new,open,open_library,create_in_library,save,bind,close}`；
+- `EditorSession::{new,open,open_project_from_library,create_in_library,save,bind_project_to_library,close}`；
 - `project()`：同一实时工程的独立 RAII 引用；
 - `create_sequence`、`current_sequence`、`set_current_sequence`；
 - `snapshot()`：revision、工程树、素材、序列、轨道、片段、当前序列 marker 和

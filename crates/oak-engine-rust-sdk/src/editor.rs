@@ -3,9 +3,9 @@
 use std::ffi::c_void;
 
 use crate::codec::string_out;
-use crate::node::{NodeId, NodeKind, Project, StreamAudioParams, StreamVideoParams};
+use crate::node::{NodeId, Project};
 use crate::storage::StorageError;
-use crate::types::{Rational, TimeRange};
+use crate::types::TimeRange;
 
 #[cfg_attr(
 	windows,
@@ -17,7 +17,7 @@ unsafe extern "C" {
 	fn oak_editor_release(session: *const c_void);
 	fn oak_editor_new() -> *mut c_void;
 	fn oak_editor_open(uri: *const u8, uri_len: usize, version_info: *mut i32) -> *mut c_void;
-	fn oak_editor_open_library(uuid: *const u8, uuid_len: usize, error: *mut i32) -> *mut c_void;
+	fn oak_editor_open_project_from_library(uuid: *const u8, uuid_len: usize, error: *mut i32) -> *mut c_void;
 	fn oak_editor_create_library(name: *const u8, name_len: usize, error: *mut i32) -> *mut c_void;
 	fn oak_editor_project(session: *const c_void) -> *mut c_void;
 	fn oak_editor_save(
@@ -26,7 +26,7 @@ unsafe extern "C" {
 		path_len: usize,
 		options: u32,
 	) -> i32;
-	fn oak_editor_bind(session: *mut c_void) -> bool;
+	fn oak_editor_bind_project_to_library(session: *mut c_void) -> bool;
 	fn oak_editor_unbind(session: *mut c_void) -> bool;
 	fn oak_editor_storage_bound(session: *const c_void) -> bool;
 	fn oak_editor_storage_last_error(session: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
@@ -55,9 +55,12 @@ struct EditorMarkerRaw {
 /// project from write-through storage. `project()` returns an
 /// independently refcounted handle to the same live project.
 pub struct EditorSession {
-	ptr: *mut c_void,
+	pub(crate) ptr: *mut c_void,
 }
 
+// The engine serializes session/project mutation behind mutexes. The opaque
+// handle itself is refcounted and may be shared; raw pointer dereferences stay
+// inside the engine ABI rather than in SDK client threads.
 unsafe impl Send for EditorSession {}
 unsafe impl Sync for EditorSession {}
 
@@ -73,7 +76,7 @@ impl EditorSession {
 	/// Creates a new project and binds it when a default library is configured.
 	pub fn new() -> Result<Self, StorageError> {
 		let session = Self::from_raw(unsafe { oak_editor_new() })?;
-		let _ = session.bind();
+		let _ = session.bind_project_to_library();
 		Ok(session)
 	}
 
@@ -85,19 +88,21 @@ impl EditorSession {
 			return Err(StorageError(info));
 		}
 		let session = Self { ptr };
-		let _ = session.bind();
+		let _ = session.bind_project_to_library();
 		Ok(session)
 	}
 
-	/// Opens a row in the configured default library.
-	pub fn open_library(uuid: &str) -> Result<Self, StorageError> {
+	/// Opens the project identified by `uuid` in the configured default library.
+	pub fn open_project_from_library(uuid: &str) -> Result<Self, StorageError> {
 		let mut error = 0;
-		let ptr = unsafe { oak_editor_open_library(uuid.as_ptr(), uuid.len(), &mut error) };
+		let ptr = unsafe {
+			oak_editor_open_project_from_library(uuid.as_ptr(), uuid.len(), &mut error)
+		};
 		if ptr.is_null() {
 			return Err(StorageError(error));
 		}
 		let session = Self { ptr };
-		let _ = session.bind();
+		let _ = session.bind_project_to_library();
 		Ok(session)
 	}
 
@@ -109,7 +114,7 @@ impl EditorSession {
 			return Err(StorageError(error));
 		}
 		let session = Self { ptr };
-		let _ = session.bind();
+		let _ = session.bind_project_to_library();
 		Ok(session)
 	}
 
@@ -128,32 +133,42 @@ impl EditorSession {
 		}
 	}
 
-	/// Attempts the default-library binding. False means unconfigured,
-	/// which is a supported headless mode rather than a fatal error.
-	pub fn bind(&self) -> bool {
-		unsafe { oak_editor_bind(self.ptr) }
+	/// Registers this exact project for write-through persistence in the default
+	/// library. Later successful undo-path edits can be written back automatically.
+	/// Binding does not itself save or create a library row.
+	///
+	/// False commonly means that no library is configured, which is a supported
+	/// headless/non-persistent mode rather than a fatal error.
+	pub fn bind_project_to_library(&self) -> bool {
+		unsafe { oak_editor_bind_project_to_library(self.ptr) }
 	}
 
-	/// Explicitly flushes and unbinds before the session is dropped.
-	/// This is required before deleting its library row. Drop is the
-	/// same operation as a fallback, and repeated closes are harmless.
+	/// Explicitly flushes pending writes and removes the library binding.
+	/// Automatic persistence stops, but the session and in-memory project remain
+	/// usable. This is required before deleting its library row. Drop performs
+	/// the same operation as a fallback, and repeated closes are harmless.
 	pub fn close(&self) {
 		unsafe { oak_editor_unbind(self.ptr) };
 	}
 
+	/// Queries whether the project currently has an active write-through binding.
+	/// This neither binds nor saves the project and does not report write errors.
 	pub fn storage_bound(&self) -> bool {
 		unsafe { oak_editor_storage_bound(self.ptr) }
 	}
 
+	/// Returns the most recent write-through error, if the backend supplied one.
 	pub fn storage_last_error(&self) -> Option<String> {
 		string_out(|buf, len| unsafe { oak_editor_storage_last_error(self.ptr, buf, len) })
 	}
 
+	/// Returns the sequence targeted by timeline commands without an explicit ID.
 	pub fn current_sequence(&self) -> Option<NodeId> {
 		let id = NodeId::from_raw(unsafe { oak_editor_current_sequence(self.ptr) });
 		id.is_valid().then_some(id)
 	}
 
+	/// Selects the target sequence; false means the ID is not a session sequence.
 	pub fn set_current_sequence(&self, sequence: NodeId) -> bool {
 		unsafe { oak_editor_set_current_sequence(self.ptr, sequence.raw()) }
 	}
@@ -224,6 +239,7 @@ impl EditorSession {
 }
 
 impl Clone for EditorSession {
+	/// Clones the handle, not the project; both values refer to the same session.
 	fn clone(&self) -> Self {
 		unsafe { oak_editor_add_ref(self.ptr) };
 		Self { ptr: self.ptr }
@@ -236,197 +252,15 @@ impl Drop for EditorSession {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrackKind {
-	Video,
-	Audio,
-	Subtitle,
-}
-
-fn track_kind(raw: i32) -> Option<TrackKind> {
-	match raw {
-		0 => Some(TrackKind::Video),
-		1 => Some(TrackKind::Audio),
-		2 => Some(TrackKind::Subtitle),
-		_ => None,
-	}
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct EntrySnapshot {
-	pub id: NodeId,
-	pub kind: Option<NodeKind>,
-	pub name: String,
-	pub children: Vec<EntrySnapshot>,
-}
-
-fn entry_snapshot(project: &Project, id: NodeId) -> EntrySnapshot {
-	let children = if project.node_kind(id) == Some(NodeKind::Folder) {
-		(0..project.folder_child_count(id))
-			.map(|index| entry_snapshot(project, project.folder_child_at(id, index)))
-			.collect()
-	} else {
-		Vec::new()
-	};
-	EntrySnapshot {
-		id,
-		kind: project.node_kind(id),
-		name: project.node_label(id),
-		children,
-	}
-}
-
-fn collect_media(
-	project: &Project,
-	folder: NodeId,
-	sequences: &mut Vec<SequenceSnapshot>,
-	footages: &mut Vec<FootageSnapshot>,
-) {
-	for index in 0..project.folder_child_count(folder) {
-		let id = project.folder_child_at(folder, index);
-		match project.node_kind(id) {
-			Some(NodeKind::Folder) => collect_media(project, id, sequences, footages),
-			Some(NodeKind::Sequence) => sequences.push(sequence_snapshot(project, id)),
-			Some(NodeKind::Footage) => footages.push(FootageSnapshot {
-				id,
-				name: project.node_label(id),
-				filename: project.footage_filename(id),
-				duration: project.footage_duration(id),
-				video_streams: project.footage_video_stream_count(id),
-				audio_streams: project.footage_audio_stream_count(id),
-				subtitle_streams: project.footage_subtitle_stream_count(id),
-				video: project.footage_video_params(id, 0),
-				audio: project.footage_audio_params(id, 0),
-			}),
-			_ => {}
-		}
-	}
-}
-
-fn sequence_snapshot(project: &Project, id: NodeId) -> SequenceSnapshot {
-	let (width, height) = project.sequence_geometry(id).unwrap_or((0, 0));
-	let mut tracks = Vec::new();
-	for list_index in 0..project.sequence_track_list_count(id) {
-		let list = project.sequence_track_list_at(id, list_index);
-		for track_index in 0..project.tracklist_track_count(list) {
-			let track = project.tracklist_track_at(list, track_index);
-			let clips = (0..project.track_block_count(track))
-				.map(|block_index| {
-					let block = project.track_block_at(track, block_index);
-					ClipSnapshot {
-						id: block,
-						kind: project.node_kind(block),
-						name: project.node_label(block),
-						in_time: project.block_in(block),
-						out_time: project.block_out(block),
-						media_in: project.block_media_in(block),
-						media_out: project.block_media_out(block),
-						enabled: project.block_enabled(block),
-					}
-				})
-				.collect();
-			tracks.push(TrackSnapshot {
-				id: track,
-				kind: track_kind(project.track_kind(track)),
-				height: project.track_height(track),
-				muted: project.track_muted(track),
-				locked: project.track_locked(track),
-				clips,
-			});
-		}
-	}
-	SequenceSnapshot {
-		id,
-		name: project.node_label(id),
-		width,
-		height,
-		frame_rate: project.sequence_frame_rate(id),
-		interlaced: project.sequence_interlaced(id).unwrap_or(false),
-		length: project.sequence_length(id),
-		playhead: project.sequence_playhead(id),
-		tracks,
-	}
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SequenceSnapshot {
-	pub id: NodeId,
-	pub name: String,
-	pub width: i32,
-	pub height: i32,
-	pub frame_rate: Rational,
-	pub interlaced: bool,
-	pub length: Rational,
-	pub playhead: Rational,
-	pub tracks: Vec<TrackSnapshot>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TrackSnapshot {
-	pub id: NodeId,
-	pub kind: Option<TrackKind>,
-	pub height: f64,
-	pub muted: bool,
-	pub locked: bool,
-	pub clips: Vec<ClipSnapshot>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClipSnapshot {
-	pub id: NodeId,
-	pub kind: Option<NodeKind>,
-	pub name: String,
-	pub in_time: Rational,
-	pub out_time: Rational,
-	pub media_in: Rational,
-	pub media_out: Rational,
-	pub enabled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FootageSnapshot {
-	pub id: NodeId,
-	pub name: String,
-	pub filename: Option<String>,
-	pub duration: Rational,
-	pub video_streams: usize,
-	pub audio_streams: usize,
-	pub subtitle_streams: usize,
-	pub video: Option<StreamVideoParams>,
-	pub audio: Option<StreamAudioParams>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MarkerSnapshot {
-	pub name: String,
-	pub time: TimeRange,
-	pub color: i32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WorkAreaSnapshot {
-	pub range: TimeRange,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectSnapshot {
-	pub revision: i64,
-	pub name: String,
-	pub filename: String,
-	pub uuid: String,
-	pub modified: bool,
-	pub root: EntrySnapshot,
-	pub sequences: Vec<SequenceSnapshot>,
-	pub footages: Vec<FootageSnapshot>,
-	pub current_sequence: Option<NodeId>,
-	pub markers: Vec<MarkerSnapshot>,
-	pub workarea: Option<WorkAreaSnapshot>,
-}
+mod snapshot;
+pub use snapshot::*;
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::node::NodeKind;
 	use crate::state::Config;
+	use crate::types::Rational;
 
 	#[test]
 	fn file_round_trip_preserves_the_owned_snapshot() {
@@ -525,7 +359,7 @@ mod tests {
 			.set("Storage/Backend", "off")
 			.expect("disable library");
 		assert!(EditorSession::open("not-a-storage-uri").is_err());
-		assert!(EditorSession::open_library("missing").is_err());
+		assert!(EditorSession::open_project_from_library("missing").is_err());
 
 		let session = EditorSession::new().expect("new session");
 		let first = session.create_sequence("First").expect("first");

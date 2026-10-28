@@ -374,7 +374,7 @@ impl ProjectLibrary {
 		if default_library_uri().as_deref() != Some(self.uri.as_str()) {
 			return Err(StorageError(-1));
 		}
-		crate::editor::EditorSession::open_library(uuid)
+		crate::editor::EditorSession::open_project_from_library(uuid)
 	}
 }
 

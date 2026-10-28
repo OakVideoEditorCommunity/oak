@@ -6,6 +6,8 @@ pub mod coretypes;
 pub mod coreutil;
 pub mod effect;
 pub mod editor;
+pub mod editor_commands;
+pub mod editor_dispatch;
 pub mod handle;
 pub mod node;
 pub mod ofx;

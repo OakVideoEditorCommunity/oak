@@ -6,6 +6,7 @@
 //! the engine and write-through backend share.
 
 use std::sync::{Arc, Mutex};
+pub mod aux;
 
 use oak_core::handle::CHandle;
 use oak_node::id::NodeId;
@@ -16,29 +17,48 @@ use oak_timeline::marker::TimelineMarkerList;
 use oak_timeline::workarea::TimelineWorkArea;
 
 use crate::codec::{copy_str_out, str_arg};
-use crate::coretypes::OakTimeRange;
-use crate::handle::NativeMirror;
 use crate::node::{OAK_NODE_ID_INVALID, ProjectHandle};
 
-struct SessionState {
-	project: Arc<Mutex<Project>>,
-	current_sequence: NodeId,
-	markers: Arc<Mutex<TimelineMarkerList>>,
-	workarea: Arc<Mutex<TimelineWorkArea>>,
-	storage: Option<CHandle>,
+/// Mutable runtime context owned by one [`EditorSessionHandle`].
+///
+/// A session wraps one live project together with the editing state that should
+/// not be stored inside the project graph: the selected sequence, sequence-local
+/// auxiliary objects, clipboard and write-through binding. Commands receive this
+/// structure so they all operate on the same project and session context.
+///
+/// This type is engine-internal, not a C ABI value and not a serializable project
+/// format. The handle's outer mutex serializes session access; fields that can
+/// also be shared independently have their own `Arc<Mutex<_>>` ownership.
+pub(crate) struct SessionState {
+	/// The sole live project shared with project handles and write-through storage.
+	pub(crate) project: Arc<Mutex<Project>>,
+	/// Sequence used by commands that do not take an explicit sequence ID.
+	pub(crate) current_sequence: NodeId,
+	// Arc-backed marker/work-area objects can be shared with CHandle-compatible
+	// commands without creating short-lived native handles.
+	pub(crate) markers: Arc<Mutex<TimelineMarkerList>>,
+	pub(crate) workarea: Arc<Mutex<TimelineWorkArea>>,
+	/// Owned clips captured by the most recent copy operation.
+	pub(crate) clipboard: Vec<crate::editor_commands::ClipboardClip>,
+	/// Handle used to flush and detach write-through storage on unbind/session drop.
+	pub(crate) storage: Option<CHandle>,
 }
 
 impl SessionState {
+	/// Creates auxiliary state for a project without rebinding or copying it.
 	fn new(project: Arc<Mutex<Project>>) -> Self {
 		Self {
 			project,
 			current_sequence: NodeId::INVALID,
 			markers: Arc::new(Mutex::new(TimelineMarkerList::new())),
 			workarea: Arc::new(Mutex::new(TimelineWorkArea::new())),
+			clipboard: Vec::new(),
 			storage: None,
 		}
 	}
 
+	/// Takes the handle first so cleanup is idempotent even if called explicitly
+	/// before `EditorSessionHandle::drop`.
 	fn unbind(&mut self) {
 		if let Some(handle) = self.storage.take() {
 			oak_storage::writethrough::unbind_project(handle);
@@ -50,7 +70,7 @@ impl SessionState {
 /// An opaque editor session. The mutex serializes session mutations;
 /// project access additionally uses the project's own lock.
 pub struct EditorSessionHandle {
-	inner: Mutex<SessionState>,
+	pub(crate) inner: Mutex<SessionState>,
 }
 
 impl EditorSessionHandle {
@@ -74,19 +94,29 @@ impl Drop for EditorSessionHandle {
 
 crate::export_handle!(EditorSessionHandle, oak_editor_add_ref, oak_editor_release);
 
-fn into_session(project: Arc<Mutex<Project>>) -> *mut EditorSessionHandle {
+/// Builds a new opaque session directly from a shared project Arc.
+///
+/// This is the low-level constructor: it creates fresh `SessionState` and turns
+/// it into an FFI handle without copying the project or selecting a sequence.
+fn session_from_project_arc(project: Arc<Mutex<Project>>) -> *mut EditorSessionHandle {
 	crate::handle::into_ffi(EditorSessionHandle {
 		inner: Mutex::new(SessionState::new(project)),
 	}) as *mut EditorSessionHandle
 }
 
-fn from_project(project: *mut ProjectHandle) -> *mut EditorSessionHandle {
+/// Adopts a project handle into a new editor session.
+///
+/// The session retains the handle's underlying project Arc, then releases the
+/// supplied handle reference. After construction through
+/// [`session_from_project_arc`], the first sequence is selected as the default
+/// editing target. A null project handle produces a null session handle.
+fn session_from_project_handle(project: *mut ProjectHandle) -> *mut EditorSessionHandle {
 	if project.is_null() {
 		return std::ptr::null_mut();
 	}
 	let inner = unsafe { &*project }.project().clone();
 	unsafe { crate::node::oak_project_release(project) };
-	let session = into_session(inner);
+	let session = session_from_project_arc(inner);
 	if session.is_null() {
 		return session;
 	}
@@ -124,7 +154,7 @@ pub extern "C" fn oak_editor_new() -> *mut EditorSessionHandle {
 	{
 		return std::ptr::null_mut();
 	}
-	into_session(project)
+	session_from_project_arc(project)
 }
 
 /// Opens any URI supported by the storage registry.
@@ -135,7 +165,7 @@ pub unsafe extern "C" fn oak_editor_open(
 	version_info: *mut i32,
 ) -> *mut EditorSessionHandle {
 	let project = unsafe { crate::storage::oak_storage_open(uri, uri_len, version_info) };
-	let session = from_project(project);
+	let session = session_from_project_handle(project);
 	if !session.is_null() {
 		if let Some(path) = unsafe { str_arg(uri, uri_len) } {
 			let project = unsafe { &*session }.project();
@@ -147,9 +177,14 @@ pub unsafe extern "C" fn oak_editor_open(
 	session
 }
 
-/// Opens a row from the configured default library.
+/// Opens the project identified by `uuid` from the configured default library.
+///
+/// The library is the project's catalog and storage backend; this function does
+/// not open a library as an asset inside another project. On success it returns
+/// an editor session for the loaded project and reports `OAKSTORAGE_OK` through
+/// `error` when that pointer is non-null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_open_library(
+pub unsafe extern "C" fn oak_editor_open_project_from_library(
 	uuid: *const u8,
 	uuid_len: usize,
 	error: *mut i32,
@@ -205,7 +240,7 @@ pub unsafe extern "C" fn oak_editor_open_library(
 	if !error.is_null() {
 		unsafe { *error = oak_storage::error::OAKSTORAGE_OK };
 	}
-	from_project(ProjectHandle::from_arc(project))
+	session_from_project_handle(ProjectHandle::from_arc(project))
 }
 
 /// Creates a blank row in the configured default library. The returned
@@ -253,7 +288,7 @@ pub unsafe extern "C" fn oak_editor_create_library(
 	if !error.is_null() {
 		unsafe { *error = oak_storage::error::OAKSTORAGE_OK };
 	}
-	into_session(project)
+	session_from_project_arc(project)
 }
 
 /// Returns a new reference on the session's live project.
@@ -294,9 +329,21 @@ pub unsafe extern "C" fn oak_editor_save(
 	code
 }
 
-/// Binds this exact project instance to the configured default library.
+/// Binds this exact project instance to the configured default library for
+/// write-through persistence.
+///
+/// After binding, each successful undo-path command can write the project's
+/// changes back to its library row. Binding itself does not save immediately;
+/// the first undo-path operation creates the row when necessary. The returned
+/// storage handle is retained in `SessionState::storage` so explicit unbind and
+/// session destruction can flush and release the same binding.
+///
+/// A false result commonly means that no library is configured or storage is
+/// disabled; this is a supported non-persistent mode, not a project-open error.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_bind(session: *mut EditorSessionHandle) -> bool {
+pub unsafe extern "C" fn oak_editor_bind_project_to_library(
+	session: *mut EditorSessionHandle,
+) -> bool {
 	if session.is_null() {
 		return false;
 	}
@@ -321,6 +368,13 @@ pub unsafe extern "C" fn oak_editor_bind(session: *mut EditorSessionHandle) -> b
 	bound
 }
 
+/// Returns whether this session's project currently has an active
+/// write-through library binding.
+///
+/// This is a status query only: it does not bind, save or flush the project.
+/// False means a null session, no binding, or a binding disabled by storage
+/// configuration. It does not report whether the last write succeeded; use
+/// `oak_editor_storage_last_error` for that separate diagnostic.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oak_editor_storage_bound(session: *const EditorSessionHandle) -> bool {
 	if session.is_null() {
@@ -335,7 +389,13 @@ pub unsafe extern "C" fn oak_editor_storage_bound(session: *const EditorSessionH
 		.is_some_and(|handle| oak_storage::writethrough::is_bound(handle))
 }
 
-/// Explicitly closes the write-through binding. Repeated calls are no-ops.
+/// Flushes pending writes and closes the write-through library binding.
+///
+/// Explicit unbind provides deterministic cleanup before operations such as
+/// deleting the project's library row. The session and in-memory project remain
+/// alive; only automatic persistence stops. Session destruction performs the
+/// same cleanup as a fallback, and repeated unbind calls are no-ops.
+/// Returns false only for a null session.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oak_editor_unbind(session: *mut EditorSessionHandle) -> bool {
 	if session.is_null() {
@@ -349,6 +409,11 @@ pub unsafe extern "C" fn oak_editor_unbind(session: *mut EditorSessionHandle) ->
 	true
 }
 
+/// Copies the project's most recent write-through or snapshot error as UTF-8.
+///
+/// Returns the bounded-string byte count when an error exists. Returns `-1`
+/// for a null session, no binding, or no recorded error; these cases do not
+/// distinguish success from an unavailable diagnostic by themselves.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oak_editor_storage_last_error(
 	session: *const EditorSessionHandle,
@@ -408,6 +473,11 @@ pub unsafe extern "C" fn oak_editor_set_current_sequence(
 	true
 }
 
+/// Returns the raw identity of the sequence used by context-dependent edits.
+///
+/// Returns `OAK_NODE_ID_INVALID` for a null session or when no sequence has
+/// been selected. The returned ID is borrowed only as a value; no project
+/// handle or graph reference crosses the ABI.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn oak_editor_current_sequence(session: *const EditorSessionHandle) -> u64 {
 	if session.is_null() {
@@ -440,121 +510,10 @@ pub unsafe extern "C" fn oak_editor_create_sequence(
 	id
 }
 
-/// Marker row data; names use `oak_editor_marker_name_at`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct OakEditorMarker {
-	pub time: OakTimeRange,
-	pub color: i32,
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_marker_count(session: *const EditorSessionHandle) -> i32 {
-	if session.is_null() {
-		return 0;
-	}
-	let markers = unsafe { &*session }
-		.inner
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.markers
-		.clone();
-	markers.lock().unwrap_or_else(|e| e.into_inner()).size() as i32
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_marker_at(
-	session: *const EditorSessionHandle,
-	index: i32,
-	out: *mut OakEditorMarker,
-) -> bool {
-	if session.is_null() || out.is_null() || index < 0 {
-		return false;
-	}
-	let markers = unsafe { &*session }
-		.inner
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.markers
-		.clone();
-	let markers = markers.lock().unwrap_or_else(|e| e.into_inner());
-	let Some(marker) = markers.at(index as usize) else {
-		return false;
-	};
-	unsafe {
-		*out = OakEditorMarker {
-			time: OakTimeRange::from_native(marker.time()),
-			color: marker.color(),
-		}
-	};
-	true
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_marker_name_at(
-	session: *const EditorSessionHandle,
-	index: i32,
-	buf: *mut u8,
-	buf_len: usize,
-) -> i32 {
-	if session.is_null() || index < 0 {
-		return -1;
-	}
-	let markers = unsafe { &*session }
-		.inner
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.markers
-		.clone();
-	let markers = markers.lock().unwrap_or_else(|e| e.into_inner());
-	match markers.at(index as usize) {
-		Some(marker) => copy_str_out(marker.name(), buf, buf_len),
-		None => -1,
-	}
-}
-
-/// Returns whether the work area is enabled and copies its range.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn oak_editor_workarea(
-	session: *const EditorSessionHandle,
-	out: *mut OakTimeRange,
-) -> bool {
-	if session.is_null() || out.is_null() {
-		return false;
-	}
-	let workarea = unsafe { &*session }
-		.inner
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.workarea
-		.clone();
-	let workarea = workarea.lock().unwrap_or_else(|e| e.into_inner());
-	unsafe { *out = OakTimeRange::from_native(workarea.range()) };
-	workarea.enabled()
-}
-
-/// Creates the auxiliary state tests need without exposing its types.
-#[cfg(test)]
-pub(crate) fn add_marker_for_test(session: *mut EditorSessionHandle, name: &str) {
-	let markers = unsafe { &*session }
-		.inner
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.markers
-		.clone();
-	markers
-		.lock()
-		.unwrap_or_else(|e| e.into_inner())
-		.add_marker(oak_timeline::marker::TimelineMarker::with_time(
-			3,
-			oak_core::TimeRange::new(oak_core::Rational::new(1, 1), oak_core::Rational::new(2, 1)),
-			name,
-		));
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::coretypes::OakTimeRange;
 
 	#[test]
 	fn session_owns_current_sequence_and_auxiliary_queries() {
@@ -565,34 +524,34 @@ mod tests {
 			let sequence = oak_editor_create_sequence(session, name.as_ptr(), name.len());
 			assert!(crate::node::oak_node_id_is_valid(sequence));
 			assert_eq!(oak_editor_current_sequence(session), sequence);
-			assert_eq!(oak_editor_marker_count(session), 0);
-			add_marker_for_test(session, "Marker");
-			assert_eq!(oak_editor_marker_count(session), 1);
-			let mut marker = OakEditorMarker::default();
-			assert!(oak_editor_marker_at(session, 0, &mut marker));
+			assert_eq!(aux::oak_editor_marker_count(session), 0);
+			aux::add_marker_for_test(session, "Marker");
+			assert_eq!(aux::oak_editor_marker_count(session), 1);
+			let mut marker = aux::OakEditorMarker::default();
+			assert!(aux::oak_editor_marker_at(session, 0, &mut marker));
 			assert_eq!(marker.color, 3);
 			assert_eq!(marker.time.in_.num, 1);
 			assert_eq!(marker.time.out.num, 2);
 			let mut name_buf = [0u8; 16];
 			let name_len =
-				oak_editor_marker_name_at(session, 0, name_buf.as_mut_ptr(), name_buf.len());
+				aux::oak_editor_marker_name_at(session, 0, name_buf.as_mut_ptr(), name_buf.len());
 			assert_eq!(
 				std::str::from_utf8(&name_buf[..name_len as usize]).unwrap(),
 				"Marker"
 			);
-			assert!(!oak_editor_marker_at(session, 99, &mut marker));
+			assert!(!aux::oak_editor_marker_at(session, 99, &mut marker));
 			assert_eq!(
-				oak_editor_marker_name_at(session, 99, name_buf.as_mut_ptr(), 16),
+				aux::oak_editor_marker_name_at(session, 99, name_buf.as_mut_ptr(), 16),
 				-1
 			);
 			let mut range = OakTimeRange::default();
-			assert!(!oak_editor_workarea(session, &mut range));
+			assert!(!aux::oak_editor_workarea(session, &mut range));
 
 			let second = oak_editor_create_sequence(session, name.as_ptr(), name.len());
 			assert!(crate::node::oak_node_id_is_valid(second));
 			assert_eq!(oak_editor_current_sequence(session), second);
 			assert_eq!(
-				oak_editor_marker_count(session),
+				aux::oak_editor_marker_count(session),
 				0,
 				"sequence switch resets aux state"
 			);
@@ -602,28 +561,4 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn null_handles_fail_closed() {
-		unsafe {
-			assert!(oak_editor_project(std::ptr::null()).is_null());
-			assert!(!oak_editor_bind(std::ptr::null_mut()));
-			assert!(!oak_editor_unbind(std::ptr::null_mut()));
-			assert!(!oak_editor_storage_bound(std::ptr::null()));
-			assert!(!oak_editor_set_current_sequence(std::ptr::null_mut(), 0));
-			assert_eq!(
-				oak_editor_current_sequence(std::ptr::null()),
-				OAK_NODE_ID_INVALID
-			);
-			assert_eq!(oak_editor_marker_count(std::ptr::null()), 0);
-			assert_eq!(
-				oak_editor_marker_name_at(std::ptr::null(), 0, std::ptr::null_mut(), 0),
-				-1
-			);
-			assert!(!oak_editor_workarea(std::ptr::null(), std::ptr::null_mut()));
-			assert_eq!(
-				oak_editor_save(std::ptr::null(), "x".as_ptr(), 1, 0),
-				oak_storage::error::OAKSTORAGE_E_INVALID
-			);
-		}
-	}
 }

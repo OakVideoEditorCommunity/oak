@@ -1,0 +1,303 @@
+//! Strongly typed semantic editing over the native engine ABI.
+
+mod abi;
+mod execute;
+
+#[cfg(test)]
+mod tests;
+
+use crate::editor::TrackKind;
+use crate::node::NodeId;
+use crate::types::{Rational, TimeRange};
+
+/// One semantic mutation accepted by [`EditorSession::execute`](crate::editor::EditorSession::execute).
+///
+/// Commands without an explicit sequence act on the session's current sequence.
+/// Fields ending in `_ts`, plus `new_start`, `new_media_in` and `new_frame`, are
+/// integer frame timestamps in that sequence's timebase. Fields using [`Rational`]
+/// are absolute times or durations and do not use that integer frame convention.
+/// Each call executes the command once; the returned revision can be used to
+/// detect a subsequent undo, redo or edit.
+#[derive(Clone, Debug)]
+pub enum EditCommand {
+	// Track structure and state.
+	AddTrack {
+		kind: TrackKind,
+	},
+	RemoveTrack {
+		track: NodeId,
+	},
+	SetTrackHeight {
+		track: NodeId,
+		height: f64,
+	},
+	SetTrackMuted {
+		track: NodeId,
+		muted: bool,
+	},
+	SetTrackLocked {
+		track: NodeId,
+		locked: bool,
+	},
+	// Project and sequence structure. Custom sequence format options must be
+	// either all `Some` or all `None`; partial formats are rejected.
+	CreateSequence {
+		name: String,
+		width: Option<i32>,
+		height: Option<i32>,
+		rate: Option<Rational>,
+		interlaced: Option<bool>,
+	},
+	SetSequenceParameters {
+		sequence: NodeId,
+		name: String,
+		width: i32,
+		height: i32,
+		rate: Rational,
+		interlaced: bool,
+	},
+	SetSequencePlayhead {
+		sequence: NodeId,
+		time: Rational,
+	},
+	CreateFolder {
+		name: String,
+	},
+	// Project-bin and media operations.
+	CreateTextFootage,
+	ImportFootage {
+		path: String,
+	},
+	EnsureSequencesMounted,
+	ReprobeUnprobedFootage,
+	// Clip creation and placement on the current sequence.
+	CreateAdjustmentLayer {
+		track: NodeId,
+		in_ts: i64,
+		out_ts: i64,
+	},
+	PlaceFootageClip {
+		footage: NodeId,
+		kind: TrackKind,
+		track_index: usize,
+		in_ts: i64,
+		out_ts: i64,
+		media_in_ts: i64,
+	},
+	PlaceNestedSequenceClip {
+		source: NodeId,
+		track_index: usize,
+		in_ts: i64,
+		out_ts: i64,
+	},
+	PlaceTextClip {
+		text: NodeId,
+		track_index: usize,
+		in_ts: i64,
+		out_ts: i64,
+	},
+	PlaceGeneratorClip {
+		generator: NodeId,
+		track_index: usize,
+		in_ts: i64,
+		out_ts: i64,
+	},
+	PlaceFootageClipsLinked {
+		footage: NodeId,
+		placements: Vec<(TrackKind, usize)>,
+		in_ts: i64,
+		out_ts: i64,
+		media_in_ts: i64,
+	},
+	// Transitions. `half` is the duration extending to each side of a seam.
+	AddTransitionAtSeam {
+		previous: NodeId,
+		next: NodeId,
+		half: Rational,
+	},
+	AddTransitionAtEdge {
+		clip: NodeId,
+		start_edge: bool,
+		length: Rational,
+	},
+	AddDefaultTransition {
+		clips: Vec<NodeId>,
+		half: Rational,
+	},
+	SetTransitionLength {
+		clip: NodeId,
+		start_edge: bool,
+		frame: Rational,
+		length: Rational,
+	},
+	// Timeline editing. Ripple commands also move later clips where applicable.
+	SplitClip {
+		clip: NodeId,
+		time_ts: i64,
+	},
+	SplitClipsPreservingLinks {
+		clips: Vec<NodeId>,
+		time_ts: i64,
+	},
+	TrimClip {
+		clip: NodeId,
+		new_in_ts: i64,
+		new_out_ts: i64,
+	},
+	RippleTrimClip {
+		clip: NodeId,
+		start_edge: bool,
+		new_frame: i64,
+	},
+	RollEdit {
+		track: NodeId,
+		a: NodeId,
+		b: NodeId,
+		new_frame: i64,
+	},
+	SlideClip {
+		clip: NodeId,
+		new_start: i64,
+	},
+	SlipClip {
+		clip: NodeId,
+		new_media_in: i64,
+	},
+	MoveClip {
+		clip: NodeId,
+		new_in_ts: i64,
+	},
+	MoveClipToTrack {
+		clip: NodeId,
+		track: NodeId,
+		new_in_ts: i64,
+	},
+	MoveClipWithLinks {
+		clip: NodeId,
+		track: Option<NodeId>,
+		new_in_ts: i64,
+		linked: Vec<NodeId>,
+	},
+	SetClipsLinked {
+		clips: Vec<NodeId>,
+		linked: bool,
+	},
+	DeleteClip {
+		clip: NodeId,
+	},
+	RippleDeleteClip {
+		clip: NodeId,
+	},
+	DeleteArea {
+		in_ts: i64,
+		out_ts: i64,
+		ripple: bool,
+	},
+	RollClipEdgeTo {
+		clip: NodeId,
+		at_in: bool,
+		frame_ts: i64,
+	},
+	// Sequence-local markers and work area.
+	MarkerAdd {
+		time: Rational,
+		name: String,
+		color: i32,
+	},
+	MarkerRemove {
+		time: Rational,
+	},
+	WorkareaSet {
+		enabled: bool,
+		range: TimeRange,
+	},
+	WorkareaSetUndoable {
+		enabled: bool,
+		range: TimeRange,
+		old_range: TimeRange,
+	},
+	// Generic node-graph edits used by the node editor.
+	RemoveNode {
+		node: NodeId,
+	},
+	Connect {
+		from: NodeId,
+		to: NodeId,
+		input_id: String,
+	},
+	Disconnect {
+		to: NodeId,
+		input_id: String,
+	},
+	SetContextPosition {
+		node: NodeId,
+		context: NodeId,
+		x: f64,
+		y: f64,
+	},
+	// Clipboard and composite clip operations.
+	CopyClips {
+		clips: Vec<NodeId>,
+	},
+	PasteClips {
+		playhead_ts: i64,
+	},
+	SetBlocksEnabled {
+		clips: Vec<NodeId>,
+		enabled: bool,
+	},
+	SetClipsSpeed {
+		clips: Vec<NodeId>,
+		speed: f64,
+	},
+	RenameBlocks {
+		clips: Vec<NodeId>,
+		name: String,
+	},
+	DuplicateClips {
+		clips: Vec<NodeId>,
+	},
+	PasteClipsInsert {
+		playhead_ts: i64,
+	},
+	NestClips {
+		clips: Vec<NodeId>,
+	},
+}
+
+/// A clip captured by the session clipboard.
+///
+/// All timestamp fields retain the source sequence's integer frame timebase.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClipboardClip {
+	/// Source footage, nested sequence or generator node.
+	pub footage: NodeId,
+	/// Track list on which this clip should be pasted.
+	pub kind: TrackKind,
+	pub track_index: usize,
+	pub media_in_ts: i64,
+	/// Original timeline start, used to preserve relative placement.
+	pub start_ts: i64,
+	pub length_ts: i64,
+	pub speed: f64,
+}
+
+/// Owned output from one semantic edit.
+///
+/// A command populates only the fields relevant to its result; for example,
+/// creating one clip sets `primary`, paste sets `ids`, and copy sets `clipboard`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EditResult {
+	/// Main created or affected node, if the command has one.
+	pub primary: Option<NodeId>,
+	/// Ordered IDs for commands that create or affect several nodes.
+	pub ids: Vec<NodeId>,
+	/// Command-specific integer output, such as a track index or result count.
+	pub value: i64,
+	/// Command-specific rational output, such as a clamped transition length.
+	pub rational: Option<Rational>,
+	/// Global undo revision observed after the command completed.
+	pub revision: i64,
+	/// Owned clipboard contents returned by copy operations.
+	pub clipboard: Vec<ClipboardClip>,
+}
