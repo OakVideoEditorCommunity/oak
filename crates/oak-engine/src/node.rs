@@ -1687,28 +1687,42 @@ pub unsafe extern "C" fn oak_node_set_standard_value(
 	if project.is_null() {
 		return false;
 	}
-	let input = input.to_string();
-	let project_ref = unsafe { &*project }.inner.clone();
+	set_standard_value_impl(unsafe { &*project }.project(), id, input, element, value).is_ok()
+}
 
-	// Resolve the declared type and capture the previous value for undo.
-	let (declared, new_value, old_value) = {
+/// Sets one declared input's static POD value as a single undoable parameter edit.
+///
+/// The input's declared type drives conversion from the ABI value. Unknown
+/// nodes/inputs and incompatible values return an error before an undo command
+/// is constructed. The previous value is captured per input/element so undo
+/// restores exactly that value rather than resetting the whole node.
+pub(crate) fn set_standard_value_impl(
+	project_ref: &Arc<Mutex<Project>>,
+	id: NodeId,
+	input: &str,
+	element: i32,
+	value: oak_node::value::OakNodeValue,
+) -> Result<(), String> {
+	let (new_value, old_value) = {
 		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		let Some(entry) = guard.graph.get(id) else { return false };
+		let Some(entry) = guard.graph.get(id) else {
+			return Err("set parameter: node not found".into());
+		};
 		let Some(declared) = entry.core.input_data_type(&input) else {
-			return false;
+			return Err(format!("set parameter: no input \"{input}\""));
 		};
 		let Ok(new_value) = value.to_node_value(declared) else {
-			return false;
+			return Err(format!("set parameter: incompatible value for \"{input}\""));
 		};
 		let old_value = entry.core.standard_value(&input, element);
-		(declared, new_value, old_value)
+		(new_value, old_value)
 	};
 
 	let project_redo = project_ref.clone();
 	let project_undo = project_ref.clone();
-	let input_redo = input.clone();
-	let input_undo = input;
-	push_undo(
+	let input_redo = input.to_string();
+	let input_undo = input.to_string();
+	oak_undo::global::push(
 		oak_undo::undocommand::UndoCommand::from_closures(
 			move || {
 				let mut g = project_redo.lock().unwrap_or_else(|e| e.into_inner());
@@ -1725,6 +1739,7 @@ pub unsafe extern "C" fn oak_node_set_standard_value(
 		),
 		"Set Parameter",
 	)
+	.map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

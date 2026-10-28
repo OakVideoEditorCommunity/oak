@@ -56,10 +56,10 @@
       }
     },
     "crates/oak-app/src/oakui/effectchain.rs": {
-      "total": 90,
+      "total": 83,
       "crates": {
         "oak-core": 1,
-        "oak-node": 55,
+        "oak-node": 48,
         "oak-undo": 34
       }
     },
@@ -91,9 +91,9 @@
       }
     },
     "crates/oak-app/src/oakui/nodegraph.rs": {
-      "total": 39,
+      "total": 35,
       "crates": {
-        "oak-node": 24,
+        "oak-node": 20,
         "oak-timeline": 1,
         "oak-undo": 14
       }

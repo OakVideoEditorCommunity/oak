@@ -253,4 +253,29 @@ pub enum EditCommand {
 	NestClips {
 		clips: Vec<u64>,
 	},
+	// Effect-chain and static parameter operations.
+	EffectInsert {
+		host: u64,
+		index: usize,
+		type_id: String,
+	},
+	EffectRemove {
+		host: u64,
+		effect: u64,
+	},
+	EffectMove {
+		host: u64,
+		effect: u64,
+		new_index: usize,
+	},
+	EffectSetEnabled {
+		effect: u64,
+		enabled: bool,
+	},
+	SetNodeStandardValue {
+		node: u64,
+		input_id: String,
+		element: i32,
+		value: oak_node::value::OakNodeValue,
+	},
 }

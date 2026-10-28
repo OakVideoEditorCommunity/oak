@@ -423,5 +423,33 @@ pub(crate) fn execute(session: &mut SessionState, command: EditCommand) -> Resul
 			many(ops::paste_clips_insert(project, sequence, &session.clipboard, playhead_ts))
 		}
 		EditCommand::NestClips { clips } => primary(ops::nest_clips(project, sequence, &ids(&clips)?)),
+		EditCommand::EffectInsert {
+			host,
+			index,
+			type_id,
+		} => primary(crate::effect::insert_impl(project, id(host)?, index, &type_id)),
+		EditCommand::EffectRemove { host, effect } => {
+			empty(crate::effect::remove_impl(project, id(host)?, id(effect)?))
+		}
+		EditCommand::EffectMove {
+			host,
+			effect,
+			new_index,
+		} => empty(crate::effect::move_impl(project, id(host)?, id(effect)?, new_index)),
+		EditCommand::EffectSetEnabled { effect, enabled } => {
+			empty(crate::effect::set_enabled_impl(project, id(effect)?, enabled))
+		}
+		EditCommand::SetNodeStandardValue {
+			node,
+			input_id,
+			element,
+			value,
+		} => empty(crate::node::set_standard_value_impl(
+			project,
+			id(node)?,
+			&input_id,
+			element,
+			value,
+		)),
 	}
 }

@@ -74,8 +74,8 @@ const TYPE_ID_TRANSITION_BLOCK: &str = "org.olivevideoeditor.Olive.transitionblo
 /// The real factory's Add-menu entries, converted to app-owned DTOs.
 pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 	use super::engine::{NodeCategory, NodeLibraryEntry, node_category_key};
-	fn category(value: oak_node::node::Category) -> NodeCategory {
-		use oak_node::node::Category as In;
+	fn category(value: oak_engine_rust_sdk::effect::NodeCategory) -> NodeCategory {
+		use oak_engine_rust_sdk::effect::NodeCategory as In;
 		match value {
 			In::Output => NodeCategory::Output,
 			In::Effect => NodeCategory::Effect,
@@ -93,16 +93,12 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 	}
 
 	let mut out = Vec::new();
-	let factory = oak_node::factory::Factory::global();
-	for meta in factory.entries() {
-		let (core, _behavior) = (meta.create)();
-		if core.flags & oak_node::node::flags::DONT_SHOW_IN_CREATE_MENU != 0 {
+	for meta in oak_engine_rust_sdk::effect::factory_entries() {
+		if meta.flags & oak_engine_rust_sdk::effect::NODE_FLAG_DONT_SHOW_IN_CREATE_MENU != 0 {
 			continue;
 		}
 		let Some(category_key) = meta
-			.categories
-			.first()
-			.copied()
+			.category
 			.map(category)
 			.and_then(node_category_key)
 		else {
@@ -118,16 +114,9 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 			category_key,
 		});
 	}
-	for meta in factory.dynamic_entries() {
-		let Some(category_key) = meta
-			.categories
-			.first()
-			.copied()
-			.map(category)
-			.and_then(node_category_key)
-		else {
-			continue;
-		};
+	for meta in oak_engine_rust_sdk::effect::dynamic_factory_entries() {
+		let category_key = node_category_key(category(oak_engine_rust_sdk::effect::NodeCategory::OpenFx))
+			.expect("the OpenFX category is visible in the node library");
 		out.push(NodeLibraryEntry {
 			type_id: meta.type_id,
 			name: meta.name,

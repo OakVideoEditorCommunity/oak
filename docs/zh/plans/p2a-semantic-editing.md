@@ -1,7 +1,8 @@
 # P2A：语义编辑与原生 ABI 实施记录
 
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P2A。  
-> 状态：engine/SDK 编辑层完成；RealEngine 采用留待 P2B。本文不把 P2A 当成完整 P2。
+> 状态：engine/SDK 编辑层完成；P2B 已由后续决策明确跳过。本文不把 P2A 当成 app
+> 已完成接入。
 
 ## 1. 完成范围
 
@@ -42,12 +43,12 @@ oak_editor_edit(session, op, repr(C) params, result, error)
 - `marker_only_minimal_repro` 保留生命周期回归。
 - engine / SDK 全量测试通过，工作区编译通过。
 
-## 5. P2B 尚未完成的原因
+## 5. P2B 跳过决定
 
 RealEngine 的渲染、效果链、多机位和代理仍直接读取旧图对象。仅切换时间线会迫使
-app 同时维护两份工程或引入不安全的 Arc 桥接，二者都不接受。因此 RealEngine 采用
-必须在 P3–P6 的查询和会话能力齐备后原子完成。
+app 同时维护两份工程或引入不安全的 Arc 桥接，二者都不接受。本轮据此明确跳过
+P2B，不再把 RealEngine 采用、app 历史切换和 P2 依赖收口列为待执行步骤。
 
 P2A 不改变 `oak-app` 的内部依赖，也不宣称 `oak-timeline` / `oak-undo` 已清零。
-后续顺序为 P3 节点与效果、P4 素材/多机位、P5 渲染/播放、P6 OFX，最后执行 P2B
-和 P7 的依赖收口。
+后续直接进入 P3 节点与效果，再按 P4、P5、P6 推进；P2B 的未完成事项不得计入
+后续阶段的完成声明。

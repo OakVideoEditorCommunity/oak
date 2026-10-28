@@ -7,7 +7,7 @@ mod execute;
 mod tests;
 
 use crate::editor::TrackKind;
-use crate::node::NodeId;
+use crate::node::{NodeId, NodeValue};
 use crate::types::{Rational, TimeRange};
 
 /// One semantic mutation accepted by [`EditorSession::execute`](crate::editor::EditorSession::execute).
@@ -262,6 +262,33 @@ pub enum EditCommand {
 	},
 	NestClips {
 		clips: Vec<NodeId>,
+	},
+	// Effect-chain and static parameter operations. Insert/move indices use
+	// closest-to-source-first chain order and clamp to the valid end.
+	EffectInsert {
+		host: NodeId,
+		index: usize,
+		type_id: String,
+	},
+	EffectRemove {
+		host: NodeId,
+		effect: NodeId,
+	},
+	EffectMove {
+		host: NodeId,
+		effect: NodeId,
+		new_index: usize,
+	},
+	EffectSetEnabled {
+		effect: NodeId,
+		enabled: bool,
+	},
+	/// Sets one static POD input value; `element = -1` addresses a scalar input.
+	SetNodeStandardValue {
+		node: NodeId,
+		input_id: String,
+		element: i32,
+		value: NodeValue,
 	},
 }
 

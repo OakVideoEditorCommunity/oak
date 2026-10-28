@@ -197,7 +197,11 @@ crates/oak-app/src/oakui/
   剪贴板、嵌套和速度；每个命令只执行一次并返回 revision。
 - 以迁入测试、全变体 ABI 测试和 undo/redo/保存重开验证。
 
-### P2B：RealEngine 采用、历史与依赖收口（待 P3–P6 后执行）
+### P2B：RealEngine 采用、历史与依赖收口（已跳过）
+
+本轮明确跳过 P2B，直接以 P2A 的 engine/SDK 能力进入 P3。RealEngine 暂不采用
+`EditorSession`，app 的时间线、历史与编辑调用继续走旧路径；因此不能把 P2A
+记为 app 已接入或 `oak-timeline` / `oak-undo` 依赖已清零。
 
 - RealEngine 采用 P1 的 `EditorSession`，一次性切换工程实例、write-through
   绑定和项目级 OCIO/cache/color 设置；删除剩余 `oak-storage` 直调，并用会话
@@ -212,7 +216,11 @@ crates/oak-app/src/oakui/
 **出口**：独立 SDK 测试可完成粗剪和精剪；每组编辑逐项验证 redo 后状态、undo
 后完全还原、保存重开一致；app 不再直接依赖 `oak-timeline`/`oak-undo`。
 
-### P3：节点图、效果、关键帧与参数体系
+### P3：节点图、效果、关键帧与参数体系（进行中）
+
+实施记录见 [p3-node-graph-and-effects.md](p3-node-graph-and-effects.md)。P3 不依赖
+被跳过的 P2B；先完成 engine/SDK 的效果链与参数能力，再推进图快照、关键帧和
+app 切换。P3 全部出口满足前不标记完成。
 
 - 将 `nodegraph.rs` 的图查询/连接规则与 `effectchain.rs` 的链操作迁入引擎。
 - 用 SDK DTO 表达节点、端口、连接、效果顺序、参数描述、值、枚举选项、

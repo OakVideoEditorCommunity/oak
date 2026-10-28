@@ -4,7 +4,7 @@
 //! crate-private so safe SDK users never handle operation-specific pointer slots.
 //! Keep opcode order and every field synchronized with the engine definitions.
 
-use crate::node::NodeId;
+use crate::node::{NodeId, NodeValue};
 use crate::types::{Rational, TimeRange};
 
 #[repr(u32)]
@@ -65,6 +65,11 @@ pub(crate) enum OakEditOp {
 	DuplicateClips,
 	PasteClipsInsert,
 	NestClips,
+	EffectInsert,
+	EffectRemove,
+	EffectMove,
+	EffectSetEnabled,
+	SetNodeStandardValue,
 }
 
 impl OakEditOp {
@@ -124,6 +129,8 @@ pub(crate) struct OakEditParams {
 	pub rate: Rational,
 	pub range: TimeRange,
 	pub old_range: TimeRange,
+	pub element: i32,
+	pub node_value: NodeValue,
 	pub name: *const u8,
 	pub name_len: usize,
 	pub path: *const u8,
@@ -164,6 +171,8 @@ impl Default for OakEditParams {
 			rate: Rational::NULL,
 			range: TimeRange::default(),
 			old_range: TimeRange::default(),
+			element: 0,
+			node_value: NodeValue::default(),
 			name: std::ptr::null(),
 			name_len: 0,
 			path: std::ptr::null(),

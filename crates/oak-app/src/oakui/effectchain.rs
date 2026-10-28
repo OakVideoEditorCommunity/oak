@@ -161,7 +161,7 @@ pub const GROUP_KEYS: &[&str] = &[
 	"general",
 ];
 
-/// The group key of a node [`Category`](oak_node::node::Category).
+/// The group key of an SDK node category.
 ///
 /// The category enum mirrors the C++ `Node::CategoryID`, which is finer
 /// grained than the create menu: outputs, plain effects, inputs, OpenFX
@@ -169,8 +169,8 @@ pub const GROUP_KEYS: &[&str] = &[
 /// in `general`. `time` / `channel` / `transition` are part of the key
 /// set (the language packs carry their labels) but no category maps to
 /// them yet.
-pub fn category_group_key(category: oak_node::node::Category) -> &'static str {
-	use oak_node::node::Category;
+pub fn category_group_key(category: oak_engine_rust_sdk::effect::NodeCategory) -> &'static str {
+	use oak_engine_rust_sdk::effect::NodeCategory as Category;
 	match category {
 		Category::Color => "color",
 		Category::Filter => "filter",
@@ -233,37 +233,32 @@ fn type_suffix(type_id: &str) -> &str {
 /// `factorymenu.cpp` OpenFX branch).
 pub fn addable_effects() -> Vec<super::engine::EffectEntry> {
 	use super::engine::EffectEntry;
-	use oak_node::node::flags as node_flags;
+	use oak_engine_rust_sdk::effect::{NODE_FLAG_DONT_SHOW_IN_CREATE_MENU, NODE_FLAG_VIDEO_EFFECT};
 	let mut out = Vec::new();
-	for meta in oak_node::factory::Factory::global().entries() {
-		// A scratch instance per entry just to read its flags (the factory
-		// metadata carries no flag copy).
-		let (core, _behavior) = (meta.create)();
-		let flags = core.flags;
-		if flags & node_flags::VIDEO_EFFECT != 0
-			&& flags & node_flags::DONT_SHOW_IN_CREATE_MENU == 0
+	for meta in oak_engine_rust_sdk::effect::factory_entries() {
+		if meta.flags & NODE_FLAG_VIDEO_EFFECT != 0
+			&& meta.flags & NODE_FLAG_DONT_SHOW_IN_CREATE_MENU == 0
 		{
 			let name = if meta.name.is_empty() {
-				meta.type_id.to_string()
+				meta.type_id.clone()
 			} else {
-				meta.name.to_string()
+				meta.name.clone()
 			};
 			// The library shows the pack's `node.<type-id suffix>.name`; a
 			// type the packs don't know keeps the node's own English name.
-			let name = crate::i18n::tr_or(&node_name_key(meta.type_id), &name);
+			let name = crate::i18n::tr_or(&node_name_key(&meta.type_id), &name);
 			let group = meta
-				.categories
-				.first()
-				.map(|category| category_group_key(*category))
+				.category
+				.map(category_group_key)
 				.unwrap_or("general");
 			out.push(EffectEntry {
-				type_id: meta.type_id.to_string(),
+				type_id: meta.type_id,
 				name,
 				group: Some(group.to_string()),
 			});
 		}
 	}
-	for meta in oak_node::factory::Factory::global().dynamic_entries() {
+	for meta in oak_engine_rust_sdk::effect::dynamic_factory_entries() {
 		// OpenFX plugin entries: grouped by sub-category. The factory
 		// metadata carries no flags; plugin nodes are always video effects.
 		let name = if meta.name.is_empty() {
@@ -1292,7 +1287,7 @@ mod tests {
 	/// and falls back to `general`.
 	#[test]
 	fn category_group_key_maps_every_category() {
-		use oak_node::node::Category;
+		use oak_engine_rust_sdk::effect::NodeCategory as Category;
 		let all = [
 			Category::Output,
 			Category::Effect,

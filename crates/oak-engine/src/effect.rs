@@ -259,7 +259,7 @@ fn add_node_command(p: &ProjectRef, entry: oak_node::graph::NodeEntry) -> (UndoC
 /// Undoable insertion of a new effect of `type_id` at chain position
 /// `index` (0 = closest to the source; out-of-range indices clamp to the
 /// ends). One undo row ("Add Effect"). Returns the new node's id.
-fn insert_impl(
+pub(crate) fn insert_impl(
 	p: &ProjectRef,
 	host: NodeId,
 	index: usize,
@@ -319,7 +319,7 @@ fn insert_impl(
 /// the project graph: the node-transfer commands are one-way, so a
 /// reversible detach does not exist — documented limitation carried over
 /// from the facade.
-fn remove_impl(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String> {
+pub(crate) fn remove_impl(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String> {
 	let (chain_vec, pos) = {
 		let g = lock(p);
 		let chain_vec = chain(&g.graph, host);
@@ -372,7 +372,7 @@ fn remove_impl(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), Strin
 /// Undoable reorder of `effect` to chain position `new_index` (an
 /// insertion index **after** removal; `0..=len-1` where `len` is the
 /// post-removal chain length). One undo row ("Reorder Effect").
-fn move_impl(p: &ProjectRef, host: NodeId, effect: NodeId, new_index: usize) -> Result<(), String> {
+pub(crate) fn move_impl(p: &ProjectRef, host: NodeId, effect: NodeId, new_index: usize) -> Result<(), String> {
 	let (chain_vec, from) = {
 		let g = lock(p);
 		let chain_vec = chain(&g.graph, host);
@@ -462,7 +462,7 @@ fn move_impl(p: &ProjectRef, host: NodeId, effect: NodeId, new_index: usize) -> 
 
 /// Undoable enable toggle of an effect node ("Toggle Effect"; the
 /// `enabled_in` flag).
-fn set_enabled_impl(p: &ProjectRef, effect: NodeId, enabled: bool) -> Result<(), String> {
+pub(crate) fn set_enabled_impl(p: &ProjectRef, effect: NodeId, enabled: bool) -> Result<(), String> {
 	let old = {
 		let g = lock(p);
 		if !g.graph.is_valid(effect) {
