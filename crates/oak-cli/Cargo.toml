@@ -27,16 +27,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-
-# M14 R2: oak-cli is a PURE module-crate consumer — every engine call is a
-# direct Rust call into the oak* rlibs (oaknode for projects/footage,
-# oaktimeline for the track/clip commands, oakrender for the ticket arena,
-# oakcodec for the export formats/codecs, oaktask for the export task,
-# oak_core/oakcore-rs for the shared value types). No liboakengine dylib,
-# no C ABI, no build.rs link step, no host shims.
-oak-core = { path = "../oak-core" }
-oak-node = { path = "../oak-node" }
- oak-timeline = { path = "../oak-timeline" }
-oak-codec = { path = "../oak-codec" }
-oak-render = { path = "../oak-render" }
- oak-task = { path = "../oak-task" }
+# The CLI is a pure SDK consumer: project/timeline queries, edits, frames,
+# audio, probe/transcode and export all cross the oak-engine C ABI through
+# the safe Rust wrapper. It links no other Oak crate.
+oak-engine-rust-sdk = { path = "../oak-engine-rust-sdk" }

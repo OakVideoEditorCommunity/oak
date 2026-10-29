@@ -19,7 +19,7 @@
 //! (`oak_render::ipc`) so both ends of the pipe link one copy — the
 //! main-process dispatcher creates the segments and the worker attaches
 //! to them. This module re-exports the whole surface, keeping the
-//! worker-side `crate::ipc::` paths unchanged. The facade (oakengine)
+//! worker-side `crate::worker::ipc::` paths unchanged. The facade (oakengine)
 //! still keeps its own copy for the frozen `oakengine_ipc_*` C ABI.
 
 pub use oak_render::ipc::*;

@@ -26,35 +26,6 @@ name = "oak-worker"
 path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# POSIX shm_open/ftruncate/mmap/munmap/shm_unlink for the shared-memory
-# frame-slot transport (the oakrender::ipc shim above). libc also powers
-# the SIGSEGV crash hook (OAK_WORKER_CRASH_ON_TICKET) used by the crash-
-# isolation integration tests.
-libc = "0.2"
-
-# M15 S1: real per-process rendering — the worker loads the project graph
-# itself (oaknode::serializer) and runs nodes through the plugin runtime
-# (oakplugin::node_factory::install_render_executor wires the CPU render
-# executor). oakcodec/ocio-rs/ffmpeg arrive transitively through
-# oaknode/oakplugin — the same single-lib unification the engine uses.
-oak-core = { path = "../oak-core" }
-oak-node = { path = "../oak-node" }
-oak-ofx-plugin = { path = "../oak-ofx-plugin" }
-
-# M14 R2 / M15 S1: oak-worker is a PURE module-crate consumer — the
-# worker runtime (src/worker.rs) lives in this binary and calls the oak*
-# rlibs directly. oakrender supplies the render backend, the CPU
-# evaluation path and the shared ipc protocol (src/ipc.rs is a shim
-# re-exporting oakrender::ipc). No liboakengine dylib, no C ABI, no
-# build.rs link step.
-oak-render = { path = "../oak-render" }
-
-[dev-dependencies]
-# oakcodec's test-media generator (`testmedia::write_test_clip`) for the
-# graph-mode procpool integration tests — self-contained generated clips
-# instead of repo fixtures. oakcodec already links in transitively via
-# oaknode; this re-entry makes it nameable from the test binary.
-oak-codec = { path = "../oak-codec" }
+# The worker runtime (protocol, shm slots, eval) is an engine capability; the
+# binary is a thin launcher through the SDK like every other Oak consumer.
+oak-engine-rust-sdk = { path = "../oak-engine-rust-sdk" }

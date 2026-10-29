@@ -319,6 +319,9 @@ jobs:
       - name: App engine boundary guard
         run: python3 tooling/check_app_engine_boundary.py
 
+      - name: SDK consumer guard (app/cli/worker/example)
+        run: python3 tooling/check_sdk_consumers.py
+
       - name: Engine C header is current
         run: python3 tooling/gen_c_header.py --check
 

@@ -61,9 +61,28 @@ fn bundle_parent(tag: &str) -> Option<PathBuf> {
 	Some(root)
 }
 
-fn host(plugin_dir: &Path, args: Vec<String>, max_failures: u32) -> Arc<OfxHost> {
+/// The worker executable: `OAK_WORKER_BIN`, else the workspace target dir.
+/// Tests skip when it is not built (e.g. `cargo test -p oak-engine` alone).
+fn worker_binary() -> Option<PathBuf> {
+	if let Some(path) = std::env::var_os("OAK_WORKER_BIN") {
+		let path = PathBuf::from(path);
+		return path.is_file().then_some(path);
+	}
+	let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+	["debug/oak-worker", "release/oak-worker"]
+		.into_iter()
+		.map(|relative| target.join(relative))
+		.find(|path| path.is_file())
+}
+
+fn host(
+	bin: PathBuf,
+	plugin_dir: &Path,
+	args: Vec<String>,
+	max_failures: u32,
+) -> Arc<OfxHost> {
 	OfxHost::new(OfxHostConfig {
-		host_bin: Some(PathBuf::from(env!("CARGO_BIN_EXE_oak-worker"))),
+		host_bin: Some(bin),
 		max_failures,
 		host_args: args,
 		env: vec![(
@@ -108,6 +127,10 @@ fn first_pixel(frame: &oak_core::texture::Frame) -> [f32; 4] {
 
 #[test]
 fn host_renders_plugin_job_and_forwards_progress() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the OFX host process tests");
+		return;
+	};
 	let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let dir = bundle_parent("render")
 		.expect("the bundled test plugin must exist (build.rs compiles it)");
@@ -119,7 +142,7 @@ fn host_renders_plugin_job_and_forwards_progress() {
 			.push((label, message, fraction));
 	})));
 
-	let client = host(&dir, Vec::new(), 3);
+	let client = host(bin.clone(), &dir, Vec::new(), 3);
 	let src = source_texture(16, 16);
 	let out = client
 		.submit(&plugin_spec(&src), &src)
@@ -150,11 +173,16 @@ fn host_renders_plugin_job_and_forwards_progress() {
 
 #[test]
 fn host_respawns_and_reposts_after_a_crash() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the OFX host process tests");
+		return;
+	};
 	let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let dir = bundle_parent("respawn")
 		.expect("the bundled test plugin must exist (build.rs compiles it)");
 	let marker = dir.join("crash-once.marker");
 	let client = host(
+		bin.clone(),
 		&dir,
 		vec![
 			"--ofx-crash-once".to_string(),
@@ -177,9 +205,13 @@ fn host_respawns_and_reposts_after_a_crash() {
 
 #[test]
 fn host_cancels_an_in_flight_slow_render() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the OFX host process tests");
+		return;
+	};
 	let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let dir = bundle_parent("cancel").expect("the bundled test plugin must exist");
-	let client = host(&dir, Vec::new(), 3);
+	let client = host(bin.clone(), &dir, Vec::new(), 3);
 	let src = source_texture(16, 16);
 	let spec = JobSpec::Plugin {
 		instance: 0,
@@ -222,9 +254,13 @@ fn host_cancels_an_in_flight_slow_render() {
 
 #[test]
 fn host_serializes_concurrent_submits() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the OFX host process tests");
+		return;
+	};
 	let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let dir = bundle_parent("concurrent").expect("the bundled test plugin must exist");
-	let client = host(&dir, Vec::new(), 3);
+	let client = host(bin.clone(), &dir, Vec::new(), 3);
 	let src = source_texture(16, 16);
 
 	let a = client.clone();
@@ -249,10 +285,14 @@ fn host_serializes_concurrent_submits() {
 
 #[test]
 fn host_gives_up_after_three_consecutive_crashes() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the OFX host process tests");
+		return;
+	};
 	let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 	let dir = bundle_parent("giveup")
 		.expect("the bundled test plugin must exist (build.rs compiles it)");
-	let client = host(&dir, vec!["--ofx-crash-always".to_string()], 3);
+	let client = host(bin.clone(), &dir, vec!["--ofx-crash-always".to_string()], 3);
 	let src = source_texture(8, 8);
 	let err = client
 		.submit(&plugin_spec(&src), &src)
@@ -267,4 +307,54 @@ fn host_gives_up_after_three_consecutive_crashes() {
 
 	client.shutdown();
 	let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Binary-level contract (moved from oak-worker/tests/worker.rs)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn backend_none_exits_one_like_the_cpp_main() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the binary contract tests");
+		return;
+	};
+	let out = std::process::Command::new(bin)
+		.args(["--backend", "none"])
+		.output()
+		.expect("spawn oak-worker");
+	assert_eq!(out.status.code(), Some(1));
+	let stderr = String::from_utf8_lossy(&out.stderr);
+	assert!(
+		stderr.contains("no renderer initialized"),
+		"stderr: {stderr}"
+	);
+}
+
+#[test]
+fn backend_cpu_is_headless_but_fully_operational() {
+	let Some(bin) = worker_binary() else {
+		eprintln!("SKIP: build oak-worker to run the binary contract tests");
+		return;
+	};
+	let mut child = std::process::Command::new(bin)
+		.args(["--backend", "cpu"])
+		.stdin(std::process::Stdio::piped())
+		.stdout(std::process::Stdio::piped())
+		.stderr(std::process::Stdio::piped())
+		.spawn()
+		.expect("spawn oak-worker");
+	drop(child.stdin.take());
+	let out = child.wait_with_output().expect("wait oak-worker");
+	assert_eq!(out.status.code(), Some(0));
+	let stdout = String::from_utf8_lossy(&out.stdout);
+	let first = stdout.lines().next().unwrap_or("");
+	assert!(
+		first.contains("\"type\":\"handshake\""),
+		"startup handshake on stdout, got: {stdout:?}"
+	);
+	assert!(
+		first.contains("\"protocol_version\":1"),
+		"protocol version 1, got: {first:?}"
+	);
 }

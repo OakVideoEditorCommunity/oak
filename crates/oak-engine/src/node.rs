@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use oak_node::block::{AdjustmentBlockBehavior, ClipBlockBehavior, GapBlockBehavior, TransitionBlockBehavior};
 use oak_node::footage::FootageBehavior;
 use oak_node::folder::FolderBehavior;
-use oak_node::graph::Graph;
 use oak_node::id::NodeId;
 use oak_node::project::Project;
 use oak_node::sequence::SequenceBehavior;
@@ -20,7 +19,7 @@ use oak_node::track::{TrackBehavior, TrackListBehavior};
 use oak_timeline::util::GraphBlockRange;
 
 use crate::codec::{copy_str_out, str_arg};
-use crate::coretypes::{OakRational, OakTimeRange};
+use crate::coretypes::OakRational;
 use crate::handle::NativeMirror;
 
 /// The null node token (`NodeId::INVALID`'s identity).
@@ -1652,7 +1651,7 @@ mod tests {
 
 use oak_node::value::NodeValue;
 use oak_timeline::util::NodeRef;
-use oak_undo::undocommand::{Command, UndoCommand};
+use oak_undo::undocommand::UndoCommand;
 
 fn with_project_mut<R>(project: *const ProjectHandle, f: impl FnOnce(&mut Project) -> R) -> Option<R> {
 	if project.is_null() {

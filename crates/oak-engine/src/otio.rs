@@ -27,7 +27,7 @@ use oak_otio::model::{
 	Clip, Composable, ExternalReference, Gap, MediaReference, RationalTime, Serializable,
 	TimeRange, Track, Transition,
 };
-use oak_otio::model::{Stack, Timeline};
+use oak_otio::model::Timeline;
 
 use crate::codec::{copy_str_out, str_arg};
 use crate::handle::NativeMirror;

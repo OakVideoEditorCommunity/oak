@@ -20,6 +20,9 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
 oak-audio = { version = "=0.5.2", path = "../oak-audio" }
 oak-codec = { version = "=0.5.2", path = "../oak-codec" }
 oak-core = { version = "=0.5.2", path = "../oak-core" }

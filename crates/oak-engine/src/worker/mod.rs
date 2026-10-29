@@ -28,7 +28,7 @@
 //!     through `render_batch`.
 //!   - **The session.** [`WorkerSession`] holds the renderer, the
 //!     loaded node graph, the shared-memory frame-slot pools
-//!     ([`crate::ipc::FrameSlotPool`]) and the shutdown flag, and answers
+//!     ([`crate::worker::ipc::FrameSlotPool`]) and the shutdown flag, and answers
 //!     one NDJSON control message at a time.
 //!   - **The main loop.** [`worker_main`] creates the session, loads the
 //!     runtime config (including the oakplugin render executor), writes
@@ -47,6 +47,14 @@
 //! footage decode, montage compositing) directly into the main-assigned
 //! shm slots and publish `frame_ready` / `frame_failed` (protocol v2).
 
+mod framecache;
+mod ipc;
+#[cfg(test)]
+mod process_tests;
+#[cfg(test)]
+mod procpool_integration;
+pub(crate) mod ofx_host;
+
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -59,15 +67,22 @@ use oak_core::{PixelFormat, Rational};
 use oak_render::eval;
 use oak_render::ticket::{AdjustmentSpan, AudioTicketParams, MontageClip, VideoTicketParams};
 
-use crate::framecache::FrameCache;
-use crate::ipc::{
+use crate::worker::framecache::FrameCache;
+use crate::worker::ipc::{
 	error_message, write_message, AudioTicketSpec, BatchTicketSpec, FrameSlotMeta, FrameSlotPool,
 	HandshakeMsg, LoadGraphMsg, PluginProgressMsg, RenderAudioBatchMsg, RenderBatchMsg,
 	RenderFrameMsg, SharedMemoryRegion, ShmMode, SLOT_FORMAT_AUDIO_F32, SLOT_FORMAT_BGRA8,
 	TYPE_CANCEL, TYPE_HANDSHAKE, TYPE_LOAD_GRAPH, TYPE_PLUGIN_CANCEL, TYPE_RENDER_AUDIO_BATCH,
 	TYPE_RENDER_BATCH, TYPE_RENDER_FRAME, TYPE_SHUTDOWN,
 };
-use crate::{log_error, PROTOCOL_VERSION};
+
+/// Protocol version announced in the startup handshake.
+pub const PROTOCOL_VERSION: i32 = 1;
+
+/// Log a worker-side message to stderr (the `worker: ` prefix).
+pub fn log_error(message: &str) {
+	eprintln!("worker: {message}");
+}
 
 /// Serializes unit tests that install or drive the process-global
 /// plugin/progress factories (the `ofx_host` tests share this lock: the
@@ -297,7 +312,7 @@ pub struct WorkerSession {
 	f32_scratch: Vec<u8>,
 	/// LRU byte-budgeted memo of rendered F32 frames, keyed by the
 	/// render-deterministic ticket-spec subset (M16 S2; see
-	/// [`crate::framecache`]).
+	/// [`crate::worker::framecache`]).
 	frame_cache: FrameCache,
 }
 
@@ -546,7 +561,7 @@ impl WorkerSession {
 		// capability announcement (worker.cpp left the response empty;
 		// main now waits for hello_caps to mark the worker alive).
 		Some(json!({
-			"type": crate::ipc::TYPE_HELLO_CAPS,
+			"type": crate::worker::ipc::TYPE_HELLO_CAPS,
 			"protocol_version": PROTOCOL_VERSION,
 			"formats": [PixelFormat::F32 as i32, SLOT_FORMAT_BGRA8, SLOT_FORMAT_AUDIO_F32],
 			"max_slot_bytes": hs.slot_data_bytes,
@@ -740,7 +755,7 @@ impl WorkerSession {
 			}
 		}
 		Some(json!({
-			"type": crate::ipc::TYPE_FRAME_READY,
+			"type": crate::worker::ipc::TYPE_FRAME_READY,
 			"ticket": render.ticket,
 			"slot": slot,
 		}))
@@ -765,7 +780,7 @@ impl WorkerSession {
 		// built by hand because [`BatchAcceptedMsg`] only carries the
 		// payload fields.
 		let accepted = json!({
-			"type": crate::ipc::TYPE_BATCH_ACCEPTED,
+			"type": crate::worker::ipc::TYPE_BATCH_ACCEPTED,
 			"batch_id": batch.batch_id,
 			"tickets": batch.tickets.iter().map(|t| t.ticket).collect::<Vec<_>>(),
 		});
@@ -781,14 +796,14 @@ impl WorkerSession {
 
 			let response = match self.render_ticket_to_slot(spec) {
 				Ok(slot) => json!({
-					"type": crate::ipc::TYPE_FRAME_READY,
+					"type": crate::worker::ipc::TYPE_FRAME_READY,
 					"ticket": spec.ticket,
 					"slot": slot,
 				}),
 				Err(e) => {
 					log_error(&format!("render_batch: ticket {} failed: {e}", spec.ticket));
 					json!({
-						"type": crate::ipc::TYPE_FRAME_FAILED,
+						"type": crate::worker::ipc::TYPE_FRAME_FAILED,
 						"ticket": spec.ticket,
 						"error": e,
 					})
@@ -918,7 +933,7 @@ impl WorkerSession {
 		};
 
 		let accepted = json!({
-			"type": crate::ipc::TYPE_BATCH_ACCEPTED,
+			"type": crate::worker::ipc::TYPE_BATCH_ACCEPTED,
 			"batch_id": batch.batch_id,
 			"tickets": batch.tickets.iter().map(|t| t.ticket).collect::<Vec<_>>(),
 		});
@@ -930,7 +945,7 @@ impl WorkerSession {
 
 			let response = match self.render_audio_ticket_to_slot(spec) {
 				Ok(slot) => json!({
-					"type": crate::ipc::TYPE_FRAME_READY,
+					"type": crate::worker::ipc::TYPE_FRAME_READY,
 					"ticket": spec.ticket,
 					"slot": slot,
 				}),
@@ -940,7 +955,7 @@ impl WorkerSession {
 						spec.ticket
 					));
 					json!({
-						"type": crate::ipc::TYPE_FRAME_FAILED,
+						"type": crate::worker::ipc::TYPE_FRAME_FAILED,
 						"ticket": spec.ticket,
 						"error": e,
 					})
@@ -1038,7 +1053,7 @@ impl WorkerSession {
 				effects: c
 					.effects
 					.iter()
-					.map(crate::ipc::montage_effect_from)
+					.map(crate::worker::ipc::montage_effect_from)
 					.collect(),
 			})
 			.collect();
@@ -1125,9 +1140,9 @@ impl WorkerSession {
 		// delivery, not picture — an F32 and a BGRA8 request for the same
 		// frame share one entry). A hit is a copy (plus the end-of-pipe
 		// convert for BGRA8 slots); a miss renders as before and memoizes
-		// the F32 bytes. See [`crate::framecache`].
+		// the F32 bytes. See [`crate::worker::framecache`].
 		let f32_need = (w as usize) * (h as usize) * 16;
-		let key = crate::framecache::spec_cache_key(spec);
+		let key = crate::worker::framecache::spec_cache_key(spec);
 		let mut cached = self.frame_cache.get(&key).map(|b| b.to_vec());
 		if let Some(c) = &cached {
 			if c.len() < f32_need {
@@ -1223,7 +1238,7 @@ impl WorkerSession {
 				effects: c
 					.effects
 					.iter()
-					.map(crate::ipc::montage_effect_from)
+					.map(crate::worker::ipc::montage_effect_from)
 					.collect(),
 			})
 			.collect();
@@ -1563,7 +1578,7 @@ pub fn worker_main(backend: &str) -> i32 {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ipc::{
+	use crate::worker::ipc::{
 		FrameSlotPool, SharedMemoryRegion, ShmMode, WireEffectParam, WireMontageClip,
 		WireMontageEffect, WireNodeValue,
 	};
@@ -1614,7 +1629,7 @@ mod tests {
 	impl EnvGuard {
 		fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
 			let previous = std::env::var_os(name);
-			std::env::set_var(name, value);
+			unsafe { std::env::set_var(name, value) };
 			Self { name, previous }
 		}
 	}
@@ -1622,8 +1637,8 @@ mod tests {
 	impl Drop for EnvGuard {
 		fn drop(&mut self) {
 			match self.previous.take() {
-				Some(value) => std::env::set_var(self.name, value),
-				None => std::env::remove_var(self.name),
+				Some(value) => unsafe { std::env::set_var(self.name, value) },
+				None => unsafe { std::env::remove_var(self.name) },
 			}
 		}
 	}
@@ -1784,7 +1799,7 @@ mod tests {
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
 		// Protocol v2: a successful attach answers the geometry handshake
 		// with the capability announcement.
-		assert_eq!(resp["type"], crate::ipc::TYPE_HELLO_CAPS);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_HELLO_CAPS);
 		assert_eq!(resp["protocol_version"], PROTOCOL_VERSION);
 		let formats: Vec<i64> = resp["formats"]
 			.as_array()
@@ -1837,7 +1852,7 @@ mod tests {
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
 		assert_eq!(
 			resp["type"],
-			crate::ipc::TYPE_HELLO_CAPS,
+			crate::worker::ipc::TYPE_HELLO_CAPS,
 			"handshake failed: {resp}"
 		);
 		assert!(s.input_pool.is_some());
@@ -2123,7 +2138,7 @@ mod tests {
 		let mut s = WorkerSession::create("none").unwrap();
 		let (hs, out_region, _in) = parent_side(4, 4 * 4 * 16, false);
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
-		assert_eq!(resp["type"], crate::ipc::TYPE_HELLO_CAPS);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_HELLO_CAPS);
 
 		// The v1 single-frame path renders the pipeline's generated frame
 		// (transparent black F32; format -1 = pipeline default) into an
@@ -2168,7 +2183,7 @@ mod tests {
 		// Slots sized for 8x8 BGRA8.
 		let (hs, out_region, _in) = parent_side(4, 8 * 8 * 4, false);
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
-		assert_eq!(resp["type"], crate::ipc::TYPE_HELLO_CAPS);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_HELLO_CAPS);
 
 		let batch = json!({
 			"type": "render_batch",
@@ -2228,7 +2243,7 @@ mod tests {
 		let slot_bytes = 2000 * 2 * 4;
 		let (hs, out_region, _in) = parent_side(4, slot_bytes as i64, false);
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
-		assert_eq!(resp["type"], crate::ipc::TYPE_HELLO_CAPS);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_HELLO_CAPS);
 
 		let batch = json!({
 			"type": "render_audio_batch",
@@ -2320,7 +2335,7 @@ mod tests {
 		// Slot sized for 1/48 s of stereo audio (2000 bytes).
 		let (hs, out_region, _in) = parent_side(4, 2000, false);
 		let resp = s.handle_line(&hs.to_string()).expect("hello_caps response");
-		assert_eq!(resp["type"], crate::ipc::TYPE_HELLO_CAPS);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_HELLO_CAPS);
 
 		let batch = json!({
 			"type": "render_audio_batch",
@@ -2515,7 +2530,7 @@ mod tests {
 			.map(|line| serde_json::from_str(line).unwrap())
 			.collect();
 		assert_eq!(events.len(), 3, "start + update + end");
-		assert_eq!(events[0]["type"], crate::ipc::TYPE_PLUGIN_PROGRESS);
+		assert_eq!(events[0]["type"], crate::worker::ipc::TYPE_PLUGIN_PROGRESS);
 		assert_eq!(events[0]["label"], "render");
 		assert_eq!(events[0]["message"], "frame 1");
 		assert_eq!(events[0]["fraction"], 0.0);
@@ -2732,7 +2747,7 @@ mod tests {
 		let (hs, _out, _in) = parent_side(2, 256, false);
 		assert_eq!(
 			s.handle_line(&hs.to_string()).unwrap()["type"],
-			crate::ipc::TYPE_HELLO_CAPS
+			crate::worker::ipc::TYPE_HELLO_CAPS
 		);
 		let resp = s
 			.handle_line(
@@ -2868,7 +2883,7 @@ mod tests {
 		// A 2x2 frame fits exactly; a stale entry smaller than this
 		// geometry is defensively discarded and re-rendered.
 		let spec = batch_spec(4, 0, 2, 2, PixelFormat::F32 as i32);
-		let key = crate::framecache::spec_cache_key(&spec);
+		let key = crate::worker::framecache::spec_cache_key(&spec);
 		s.frame_cache.insert(key.clone(), vec![0u8; 4]);
 		s.render_spec_pixels(&spec, &pool).expect("2x2 fits");
 		let cached = s.frame_cache.get(&key).expect("re-rendered and memoized");
@@ -3350,7 +3365,7 @@ mod tests {
 		assert!(s.handle_line(&hs.to_string()).is_some());
 		let pool = s.output_pool.clone().unwrap();
 		let spec = batch_spec(71, 0, 2, 2, PixelFormat::F32 as i32);
-		let key = crate::framecache::spec_cache_key(&spec);
+		let key = crate::worker::framecache::spec_cache_key(&spec);
 		let known: Vec<u8> = (0..64).map(|i| i as u8).collect();
 		s.frame_cache.insert(key.clone(), known.clone());
 		s.render_spec_pixels(&spec, &pool).expect("cache hit");
@@ -3374,7 +3389,7 @@ mod tests {
 		assert!(s.handle_line(&hs.to_string()).is_some());
 		let pool = s.output_pool.clone().unwrap();
 		let spec = batch_spec(72, 0, 2, 2, SLOT_FORMAT_BGRA8);
-		let key = crate::framecache::spec_cache_key(&spec);
+		let key = crate::worker::framecache::spec_cache_key(&spec);
 		// Four opaque-white F32 pixels.
 		let white: Vec<u8> = std::iter::repeat_n(1.0f32.to_le_bytes(), 2 * 2 * 4)
 			.flatten()
@@ -3446,4 +3461,50 @@ mod tests {
 			"no free shm slot (shutdown or timeout)"
 		);
 	}
+}
+
+
+// ---------------------------------------------------------------------------
+// C ABI used by the thin `oak-worker` launcher through the Rust SDK
+// ---------------------------------------------------------------------------
+
+/// Runs the ticket worker loop with `backend` (`opengl`, `vulkan`, `cpu`,
+/// `none`, ...). Returns the process exit code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_worker_run(
+	backend: *const u8,
+	backend_len: usize,
+) -> i32 {
+	let backend = if backend.is_null() {
+		String::new()
+	} else {
+		String::from_utf8_lossy(unsafe {
+			std::slice::from_raw_parts(backend, backend_len)
+		})
+		.into_owned()
+	};
+	let backend = if backend.is_empty() {
+		"opengl".to_string()
+	} else {
+		backend
+	};
+	std::panic::catch_unwind(|| worker_main(&backend)).unwrap_or(1)
+}
+
+/// Runs the single OpenFX host loop. `args` is newline-separated argv
+/// (including the program name) for the crash-hook test flags.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_worker_ofx_host(args: *const u8, args_len: usize) -> i32 {
+	let text = if args.is_null() {
+		String::new()
+	} else {
+		String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(args, args_len) })
+			.into_owned()
+	};
+	let args: Vec<String> = if text.is_empty() {
+		Vec::new()
+	} else {
+		text.split('\n').map(str::to_owned).collect()
+	};
+	std::panic::catch_unwind(|| ofx_host::ofx_host_main(&args)).unwrap_or(1)
 }

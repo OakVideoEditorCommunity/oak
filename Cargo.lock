@@ -5359,12 +5359,7 @@ name = "oak-cli"
 version = "0.5.2"
 dependencies = [
  "clap",
- "oak-codec",
- "oak-core",
- "oak-node",
- "oak-render",
- "oak-task",
- "oak-timeline",
+ "oak-engine-rust-sdk",
 ]
 
 [[package]]
@@ -5403,6 +5398,7 @@ dependencies = [
 name = "oak-engine"
 version = "0.5.2"
 dependencies = [
+ "libc",
  "oak-audio",
  "oak-codec",
  "oak-core",
@@ -5415,6 +5411,8 @@ dependencies = [
  "oak-task",
  "oak-timeline",
  "oak-undo",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5534,14 +5532,7 @@ dependencies = [
 name = "oak-worker"
 version = "0.5.2"
 dependencies = [
- "libc",
- "oak-codec",
- "oak-core",
- "oak-node",
- "oak-ofx-plugin",
- "oak-render",
- "serde",
- "serde_json",
+ "oak-engine-rust-sdk",
 ]
 
 [[package]]

@@ -914,7 +914,7 @@ mod tests {
 
 		// Wrong wire types: OfxJobMsg deserialization fails.
 		let resp = handle_job(json!({ "job": "five" }), &pools);
-		assert_eq!(resp["type"], crate::ipc::TYPE_ERROR);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_ERROR);
 		assert!(
 			resp["message"]
 				.as_str()
@@ -933,7 +933,7 @@ mod tests {
 			}),
 			&pools,
 		);
-		assert_eq!(resp["type"], crate::ipc::TYPE_OFX_RESULT);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_OFX_RESULT);
 		assert_eq!(resp["job"], 9);
 		assert_eq!(resp["slot"], -1);
 		assert_eq!(resp["error"], "input slot missing");
@@ -1033,7 +1033,7 @@ mod tests {
 			}),
 			&pools,
 		);
-		assert_eq!(resp["type"], crate::ipc::TYPE_OFX_RESULT);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_OFX_RESULT);
 		assert_eq!(resp["job"], 21);
 		assert!(resp["slot"].as_i64().unwrap() >= 0, "{resp}");
 		assert_eq!(resp["error"], "");
@@ -1206,7 +1206,7 @@ mod tests {
 		eval::set_plugin_instance_factory(None);
 		eval::set_plugin_executor(None);
 
-		assert_eq!(resp["type"], crate::ipc::TYPE_OFX_RESULT);
+		assert_eq!(resp["type"], crate::worker::ipc::TYPE_OFX_RESULT);
 		assert_eq!(resp["job"], 41);
 		assert_eq!(resp["slot"], -1);
 		assert_eq!(resp["error"], "output pool is full");

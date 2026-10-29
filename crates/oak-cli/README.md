@@ -1,7 +1,7 @@
 # oak-cli (Rust)
 
-Headless command-line consumer of the oak editor module crates — the Rust
-rewrite of `cli/main.cpp` (which stays in the tree until cutover). Same
+Headless command-line consumer of `oak-engine-rust-sdk` — the Rust rewrite
+of `cli/main.cpp` (which stays in the tree until cutover). Same
 subcommands, same output format, same exit codes:
 
 | exit | meaning |
@@ -18,10 +18,11 @@ cargo build --release      # binary: target/release/oak-cli
 cargo test                 # unit + integration tests
 ```
 
-The crate is **self-contained** (M14 R2): it links the oak* module rlibs
-directly (`oaknode`, `oaktimeline`, `oakcodec`, `oakrender`, `oaktask`,
-`oak_core`) — no `liboakengine` dylib, no C ABI, no build.rs link step.
-`cargo test -p oak-cli` stands alone.
+The crate is a pure **SDK consumer**: `Cargo.toml` depends only on
+`oak-engine-rust-sdk` (plus `clap`), and every project query, edit, frame,
+audio block, probe and export crosses the engine ABI through the SDK.
+`cargo test -p oak-cli` stands alone; `python3 tooling/check_sdk_consumers.py`
+enforces the boundary.
 
 ## Subcommands
 

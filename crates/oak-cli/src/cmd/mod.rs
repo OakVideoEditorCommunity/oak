@@ -16,20 +16,16 @@
 
 //! Subcommand implementations.
 //!
-//! Every subcommand is a REAL implementation over the oak* module crates
-//! ([`crate::engine`] + the modules directly) — M14 R2 cut the facade
-//! dylib out of this crate:
+//! Every subcommand is a real implementation over `oak-engine-rust-sdk`:
+//! the CLI links no other Oak crate.
 //!
-//!   - `probe`     → an `oak_node::footage::FootageBehavior` probe
-//!   - `info`      → `crate::engine::load_project` + the project graph
-//!     walks
-//!   - `render`    → `crate::engine::render_manager_init` + the video/
-//!     audio montage tickets
-//!   - `transcode` → sequence assembly + the montage tickets (ppm) or the
-//!     module export task (mp4)
+//!   - `probe`     → the SDK codec probe (`codec::decoder_probe`)
+//!   - `info`      → the SDK project/session queries
+//!   - `render`    → SDK frame/audio tasks written as PPM/WAV
+//!   - `transcode` → a temporary SDK session + render/export tasks
 //!
-//! Exit codes: 0 success, 1 general error, 2 rendering unavailable,
-//! 64 usage error.
+//! Exit codes are shared by every command (see [`EXIT_OK`],
+//! [`EXIT_ERROR`], [`EXIT_USAGE`], [`EXIT_RENDER_UNAVAILABLE`]).
 
 pub mod info;
 pub mod probe;

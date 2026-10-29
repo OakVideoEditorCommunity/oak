@@ -180,6 +180,7 @@ impl NativeMirror for OakPrimaries {
 
 /// The Bradford chromatic adaptation matrix between two white points.
 /// Mat3 is `[[f32; 3]; 3]` — plain C layout, returned by value.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colormath_chromatic_adaptation(
 	src_white: OakXy,
@@ -189,12 +190,14 @@ pub extern "C" fn oak_core_colormath_chromatic_adaptation(
 }
 
 /// The RGB→XYZ matrix for a set of primaries.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colormath_rgb_to_xyz(p: OakPrimaries) -> [[f32; 3]; 3] {
 	colormath::rgb_to_xyz_matrix(p.to_native())
 }
 
 /// The direct RGB→RGB conversion matrix between two primary sets.
+#[allow(improper_ctypes_definitions)]
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colormath_rgb_to_rgb(
 	src: OakPrimaries,

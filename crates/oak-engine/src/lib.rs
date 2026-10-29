@@ -25,3 +25,5 @@ pub mod task;
 pub mod timeline;
 pub mod undo;
 pub mod vecs;
+
+mod worker;

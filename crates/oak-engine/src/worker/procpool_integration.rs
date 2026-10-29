@@ -53,13 +53,30 @@ fn lock_test() -> std::sync::MutexGuard<'static, ()> {
 	TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn worker_bin() -> std::path::PathBuf {
-	env!("CARGO_BIN_EXE_oak-worker").into()
+fn worker_bin() -> Option<std::path::PathBuf> {
+	if let Some(path) = std::env::var_os("OAK_WORKER_BIN") {
+		let path = std::path::PathBuf::from(path);
+		return path.is_file().then_some(path);
+	}
+	let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+	["debug/oak-worker", "release/oak-worker"]
+		.into_iter()
+		.map(|relative| target.join(relative))
+		.find(|path| path.is_file())
+}
+
+fn skip_without_worker() -> bool {
+	if worker_bin().is_none() {
+		eprintln!("SKIP: build oak-worker to run the process-pool integration tests");
+		true
+	} else {
+		false
+	}
 }
 
 fn config(workers: usize, slots: u32) -> DispatcherConfig {
 	DispatcherConfig {
-		worker_bin: Some(worker_bin()),
+		worker_bin: worker_bin(),
 		workers,
 		slots_per_worker: slots,
 		width: 64,
@@ -153,6 +170,9 @@ fn pump_until(dispatcher: &ProcessDispatcher, results: &Mutex<Vec<TicketResult>>
 /// flow control), exactly like [`two_workers_render_two_waves_zero_copy`].
 #[test]
 fn pool_resize_drains_shrunk_workers_and_regrows() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let dispatcher = ProcessDispatcher::new(config(3, 4)).expect("dispatcher config");
 	dispatcher.start().expect("workers start + handshake");
@@ -229,6 +249,9 @@ fn pool_resize_drains_shrunk_workers_and_regrows() {
 /// the remaining tickets flowing).
 #[test]
 fn two_workers_render_two_waves_zero_copy() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let dispatcher = ProcessDispatcher::new(config(2, 4)).expect("dispatcher config");
 	dispatcher.start().expect("workers start + handshake");
@@ -313,6 +336,9 @@ fn two_workers_render_two_waves_zero_copy() {
 /// ticket still completes with a rendered frame.
 #[test]
 fn crash_isolation_restarts_worker_and_frame_still_renders() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 
 	// One-shot crash hook: the worker dies with SIGSEGV while rendering
@@ -321,13 +347,13 @@ fn crash_isolation_restarts_worker_and_frame_still_renders() {
 	let marker =
 		std::env::temp_dir().join(format!("oak-procpool-crash-marker-{}", std::process::id()));
 	let _ = std::fs::remove_file(&marker);
-	std::env::set_var("OAK_WORKER_CRASH_ON_TICKET", "1");
-	std::env::set_var("OAK_WORKER_CRASH_MARKER", &marker);
+	unsafe { std::env::set_var("OAK_WORKER_CRASH_ON_TICKET", "1") };
+	unsafe { std::env::set_var("OAK_WORKER_CRASH_MARKER", &marker) };
 	struct EnvGuard;
 	impl Drop for EnvGuard {
 		fn drop(&mut self) {
-			std::env::remove_var("OAK_WORKER_CRASH_ON_TICKET");
-			std::env::remove_var("OAK_WORKER_CRASH_MARKER");
+			unsafe { std::env::remove_var("OAK_WORKER_CRASH_ON_TICKET") };
+			unsafe { std::env::remove_var("OAK_WORKER_CRASH_MARKER") };
 		}
 	}
 	let _env_guard = EnvGuard;
@@ -372,6 +398,9 @@ fn crash_isolation_restarts_worker_and_frame_still_renders() {
 /// `tests/demo.mp4` is decoded, scaled and converted into a BGRA8 slot.
 #[test]
 fn worker_decodes_real_footage_into_slot() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../oak-app/tests/demo.mp4");
 	assert!(demo.exists(), "repo fixture tests/demo.mp4 missing");
@@ -423,6 +452,9 @@ fn worker_decodes_real_footage_into_slot() {
 /// transparent black halves again via the halved alpha).
 #[test]
 fn montage_effects_render_through_the_worker() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../oak-app/tests/demo.mp4");
 	assert!(demo.exists(), "repo fixture tests/demo.mp4 missing");
@@ -583,6 +615,9 @@ fn submit_audio(
 /// the copy counter stays 0) and releases the slots.
 #[test]
 fn audio_tickets_roundtrip_through_shm_slots() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let dispatcher = ProcessDispatcher::new(config(2, 4)).expect("dispatcher config");
 	dispatcher.start().expect("workers start");
@@ -641,6 +676,9 @@ fn audio_tickets_roundtrip_through_shm_slots() {
 /// during playback — this is the regression guard.
 #[test]
 fn mixed_audio_video_batch_keeps_slot_assignment_order() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	// One worker, four slots: the first four posts dispatch singly (post
 	// pumps once itself), the remaining posts queue behind the busy
@@ -697,6 +735,9 @@ fn mixed_audio_video_batch_keeps_slot_assignment_order() {
 /// the samples still arrive.
 #[test]
 fn audio_crash_isolation_restarts_worker_and_audio_still_renders() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 
 	let marker = std::env::temp_dir().join(format!(
@@ -704,13 +745,13 @@ fn audio_crash_isolation_restarts_worker_and_audio_still_renders() {
 		std::process::id()
 	));
 	let _ = std::fs::remove_file(&marker);
-	std::env::set_var("OAK_WORKER_CRASH_ON_TICKET", "1");
-	std::env::set_var("OAK_WORKER_CRASH_MARKER", &marker);
+	unsafe { std::env::set_var("OAK_WORKER_CRASH_ON_TICKET", "1") };
+	unsafe { std::env::set_var("OAK_WORKER_CRASH_MARKER", &marker) };
 	struct EnvGuard;
 	impl Drop for EnvGuard {
 		fn drop(&mut self) {
-			std::env::remove_var("OAK_WORKER_CRASH_ON_TICKET");
-			std::env::remove_var("OAK_WORKER_CRASH_MARKER");
+			unsafe { std::env::remove_var("OAK_WORKER_CRASH_ON_TICKET") };
+			unsafe { std::env::remove_var("OAK_WORKER_CRASH_MARKER") };
 		}
 	}
 	let _env_guard = EnvGuard;
@@ -763,6 +804,9 @@ fn audio_crash_isolation_restarts_worker_and_audio_still_renders() {
 /// instead of forcing a giant shared-memory segment.
 #[test]
 fn oversized_audio_ticket_is_refused_by_process_backend() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let dispatcher = ProcessDispatcher::new(config(1, 4)).expect("dispatcher config");
 	dispatcher.start().expect("worker starts");
@@ -821,6 +865,9 @@ fn oversized_audio_ticket_is_refused_by_process_backend() {
 /// through BGRA8.
 #[test]
 fn f32_ticket_gets_f32_slot_and_bgra8_stays_bgra8() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 	let dispatcher = ProcessDispatcher::new(config(1, 4)).expect("dispatcher config");
 	dispatcher.start().expect("worker starts");
@@ -1085,6 +1132,9 @@ fn assert_graph_frame_opaque(dispatcher: &ProcessDispatcher, payload: TicketResu
 /// renders the sequence's clip through the graph path into the slot.
 #[test]
 fn graph_mode_renders_sequence_viewer_from_snapshot() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 
 	let clip = std::env::temp_dir().join(format!(
@@ -1140,6 +1190,9 @@ fn graph_mode_renders_sequence_viewer_from_snapshot() {
 /// ticket (no restart needed).
 #[test]
 fn set_graph_snapshot_after_start_reroutes_tickets() {
+	if skip_without_worker() {
+		return;
+	}
 	let _guard = lock_test();
 
 	let clip = std::env::temp_dir().join(format!(

@@ -38,7 +38,7 @@
 //! project/sequence/argument failures exit 1; bad seconds exit 64
 //! (usage). Frame progress goes to stderr (`frame N: T s`).
 
-use oak_core::TimeRange;
+use oak_engine_rust_sdk::types::{Rational, TimeRange};
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_RENDER_UNAVAILABLE, EXIT_USAGE};
 use crate::engine;
@@ -84,7 +84,7 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		let _ = std::env::set_current_dir(dir);
 	}
 
-	let project_ref = match engine::load_project(&abs.to_string_lossy()) {
+	let loaded = match engine::load_project(&abs.to_string_lossy()) {
 		Ok(p) => p,
 		Err(detail) => {
 			if detail.is_empty() {
@@ -103,10 +103,8 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		return EXIT_RENDER_UNAVAILABLE;
 	}
 
-	let sequences = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		engine::sequence_ids(&guard)
-	};
+	let project_ref = &loaded.project;
+	let sequences = engine::sequence_ids(project_ref);
 	let seq_id = match sequences.first() {
 		Some(id) => *id,
 		None => {
@@ -117,10 +115,9 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	};
 
 	let (fr_num, fr_den, width, height) = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		let fr = engine::sequence_frame_rate(&guard, seq_id);
-		let (w, h) = engine::sequence_geometry(&guard, seq_id);
-		(fr.numerator() as i32, fr.denominator() as i32, w, h)
+		let fr = engine::sequence_frame_rate(project_ref, seq_id);
+		let (w, h) = engine::sequence_geometry(project_ref, seq_id);
+		(fr.num as i32, fr.den as i32, w, h)
 	};
 	if fr_num <= 0 || fr_den <= 0 {
 		eprintln!("error: render: invalid sequence frame rate {fr_num}/{fr_den}");
@@ -148,9 +145,8 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		if time >= end {
 			break;
 		}
-		let time_r = oak_core::Rational::new(index * i64::from(fr_den), i64::from(fr_num));
-		let montage = engine::video_montage(&project_ref, seq_id, time_r);
-		let frame = match engine::render_frame(seq_id, time_r, montage, width, height) {
+		let time_r = Rational::new(index * i64::from(fr_den), i64::from(fr_num));
+		let frame = match engine::render_frame(project_ref, seq_id, time_r, width, height) {
 			Ok(f) => f,
 			Err(e) => {
 				let msg = if e.is_empty() {
@@ -183,14 +179,13 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	let start_ts = (start * fr_num as f64 / fr_den as f64).round() as i64;
 	let length_ts = ((end - start) * fr_num as f64 / fr_den as f64).round() as i64;
 	let range = TimeRange::new(
-		oak_core::Rational::new(start_ts * i64::from(fr_den), i64::from(fr_num)),
-		oak_core::Rational::new(
+		Rational::new(start_ts * i64::from(fr_den), i64::from(fr_num)),
+		Rational::new(
 			(start_ts + length_ts) * i64::from(fr_den),
 			i64::from(fr_num),
 		),
 	);
-	let montage = engine::audio_montage(&project_ref, seq_id, range);
-	let code = match engine::render_audio(seq_id, range, montage) {
+	let code = match engine::render_audio(project_ref, seq_id, range) {
 		Ok(audio) => write_audio_wav(&audio, out_dir),
 		Err(e) => {
 			let msg = if e.is_empty() {

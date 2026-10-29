@@ -50,7 +50,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::ipc::BatchTicketSpec;
+use crate::worker::ipc::BatchTicketSpec;
 
 /// The default frame-cache budget in bytes (64 MiB).
 const DEFAULT_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
@@ -192,7 +192,7 @@ struct SpecKey {
 	height: i32,
 	footage_file: String,
 	footage_stream: i32,
-	montage: Vec<crate::ipc::WireMontageClip>,
+	montage: Vec<crate::worker::ipc::WireMontageClip>,
 	viewer_node: u64,
 	project_key: String,
 }
@@ -228,7 +228,7 @@ mod tests {
 			time_den: 25,
 			width: 1920,
 			height: 1080,
-			format: crate::ipc::SLOT_FORMAT_BGRA8,
+			format: crate::worker::ipc::SLOT_FORMAT_BGRA8,
 			channels: 4,
 			..Default::default()
 		}

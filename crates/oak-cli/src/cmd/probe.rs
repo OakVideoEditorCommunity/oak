@@ -18,14 +18,13 @@
 //! duration and video/audio/subtitle streams (port of `cmd_probe()` in
 //! cli/main.cpp).
 //!
-//! Runs entirely through the module crates (M14 R2): an
-//! [`oak_node::footage::FootageBehavior`] probes the file through the
-//! oakcodec decoder registry and the CLI prints what the module records:
-//! the decoder id, the footage duration and the probed stream inventory
-//! (per-stream duration in rational seconds). A missing file prints
+//! Runs through the SDK codec probe (`codec::decoder_probe`): the engine's
+//! decoder registry returns the decoder id, the per-stream inventory and
+//! each stream's duration in rational seconds. A missing file prints
 //! `error: probe: file does not exist: <path>` on stderr and exits 1.
 
-use oak_node::footage::FootageBehavior;
+use oak_engine_rust_sdk::codec;
+use oak_engine_rust_sdk::types::Rational;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::fmt;
@@ -42,70 +41,80 @@ fn run_probe(mediafile: &str) -> i32 {
 		return EXIT_ERROR;
 	}
 
-	// The module probe records the decoder id and the stream inventory
-	// (best effort; a failed probe leaves the footage unprobed with empty
-	// streams, exactly like the facade's footage create).
-	let mut footage = FootageBehavior::new(mediafile);
-	let _ = footage.probe();
+	// The engine probes through the codec decoder registry and returns an
+	// owned stream inventory.
+	let Some(footage) = codec::decoder_probe(None, mediafile, None) else {
+		eprintln!("error: probe: could not probe \"{mediafile}\"");
+		return EXIT_ERROR;
+	};
 
-	println!("{}", fmt::decoder_line(&footage.decoder));
+	println!("{}", fmt::decoder_line(&footage.decoder_name()));
 
-	let duration = footage.duration();
+	// Stream durations are `duration` ticks in each stream's time base.
+	let video: Vec<_> = (0..footage.video_stream_count())
+		.filter_map(|ordinal| footage.video_stream(ordinal).map(|params| (ordinal, params)))
+		.collect();
+	let audio: Vec<_> = (0..footage.audio_stream_count())
+		.filter_map(|ordinal| footage.audio_stream(ordinal).map(|params| (ordinal, params)))
+		.collect();
+	let video_durations: Vec<Rational> = video
+		.iter()
+		.map(|(_, params)| {
+			stream_duration(params.duration, params.time_base_num, params.time_base_den)
+		})
+		.collect();
+	let audio_durations: Vec<Rational> = audio
+		.iter()
+		.map(|(_, params)| {
+			stream_duration(params.duration, params.time_base_num, params.time_base_den)
+		})
+		.collect();
+	let duration = video_durations
+		.iter()
+		.chain(audio_durations.iter())
+		.copied()
+		.fold(Rational::new(0, 1), |longest, value| {
+			if value > longest { value } else { longest }
+		});
 	println!("{}", fmt::duration_line(rational_secs(duration)));
 
-	let total = footage.total_stream_count();
-	let mut video_index = 0i64;
-	let mut audio_index = 0i64;
-	println!("{}", fmt::video_streams_line(footage.video_stream_count() as i64));
-	for i in 0..total {
-		let Some(stream) = footage.stream_at(i) else { continue };
-		if !stream.is_video {
-			continue;
-		}
-		if let Some(params) = stream.video {
-			let fr = params.frame_rate;
-			println!(
-				"{}",
-				fmt::video_stream(
-					video_index,
-					stream.index as i64,
-					params.width as i64,
-					params.height as i64,
-					fr.numerator(),
-					fr.denominator(),
-					stream.duration.numerator(),
-					stream.duration.denominator(),
-					rational_secs(stream.duration),
-					0,
-					0,
-					false,
-				)
-			);
-			video_index += 1;
-		}
+	println!("{}", fmt::video_streams_line(video.len() as i64));
+	for (index, ((ordinal, params), duration)) in video.iter().zip(video_durations).enumerate() {
+		println!(
+			"{}",
+			fmt::video_stream(
+				index as i64,
+				params.stream_index as i64,
+				params.width as i64,
+				params.height as i64,
+				params.frame_rate_num as i64,
+				params.frame_rate_den as i64,
+				duration.num,
+				duration.den,
+				rational_secs(duration),
+				0,
+				0,
+				false,
+			)
+		);
+		let _ = ordinal;
 	}
 
-	println!("{}", fmt::audio_streams_line(footage.audio_stream_count() as i64));
-	for i in 0..total {
-		let Some(stream) = footage.stream_at(i) else { continue };
-		if stream.is_video {
-			continue;
-		}
-		if let Some(params) = stream.audio {
-			println!(
-				"{}",
-				fmt::audio_stream(
-					audio_index,
-					stream.index as i64,
-					params.sample_rate as i64,
-					params.channel_layout.count_ones() as i64,
-					stream.duration.numerator(),
-					stream.duration.denominator(),
-					rational_secs(stream.duration),
-				)
-			);
-			audio_index += 1;
-		}
+	println!("{}", fmt::audio_streams_line(audio.len() as i64));
+	for (index, ((ordinal, params), duration)) in audio.iter().zip(audio_durations).enumerate() {
+		println!(
+			"{}",
+			fmt::audio_stream(
+				index as i64,
+				params.stream_index as i64,
+				params.sample_rate as i64,
+				params.channel_layout.count_ones() as i64,
+				duration.num,
+				duration.den,
+				rational_secs(duration),
+			)
+		);
+		let _ = ordinal;
 	}
 
 	println!("{}", fmt::subtitle_streams_line(footage.subtitle_stream_count() as i64));
@@ -113,10 +122,21 @@ fn run_probe(mediafile: &str) -> i32 {
 	EXIT_OK
 }
 
+/// `duration` ticks in `(num, den)` time base as rational seconds.
+fn stream_duration(duration: i64, time_base_num: i32, time_base_den: i32) -> Rational {
+	if duration <= 0 || time_base_num <= 0 || time_base_den <= 0 {
+		return Rational::new(0, 1);
+	}
+	Rational::new(
+		duration.saturating_mul(i64::from(time_base_num)),
+		i64::from(time_base_den),
+	)
+}
+
 /// A rational as floating-point seconds (0 on a zero denominator).
-fn rational_secs(r: oak_core::Rational) -> f64 {
-	if r.denominator() != 0 {
-		r.numerator() as f64 / r.denominator() as f64
+fn rational_secs(r: Rational) -> f64 {
+	if r.den != 0 {
+		r.num as f64 / r.den as f64
 	} else {
 		0.0
 	}
