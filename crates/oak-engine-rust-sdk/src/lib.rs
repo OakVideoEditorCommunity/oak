@@ -4,6 +4,8 @@
 //! (`#[link]`) and talks to it exclusively through its exported
 //! `extern "C"` symbols — the same surface a C consumer sees — wrapped
 //! in idiomatic Rust types and error handling.
+//!
+#![doc = include_str!("../README.md")]
 
 pub mod audio;
 pub mod audio_analysis;

@@ -387,6 +387,53 @@ pub struct NodeValue {
 	pub f: [f64; 4],
 }
 
+impl NodeValue {
+	/// The null value.
+	pub fn none() -> Self {
+		Self::default()
+	}
+
+	/// A float value (`FLOAT`).
+	pub fn float(value: f64) -> Self {
+		let mut raw = Self {
+			kind: 2,
+			..Self::default()
+		};
+		raw.f[0] = value;
+		raw
+	}
+
+	/// An integer value (`INT`).
+	pub fn int(value: i64) -> Self {
+		Self {
+			kind: 1,
+			num: value,
+			den: 1,
+			..Self::default()
+		}
+	}
+
+	/// A boolean value (`BOOL`).
+	pub fn bool(value: bool) -> Self {
+		Self {
+			kind: 3,
+			num: i64::from(value),
+			den: 1,
+			..Self::default()
+		}
+	}
+
+	/// A rational-seconds value (`RATIONAL`).
+	pub fn rational(value: Rational) -> Self {
+		Self {
+			kind: 4,
+			num: value.num,
+			den: value.den,
+			..Self::default()
+		}
+	}
+}
+
 /// An open project. `Clone` adds a reference, `Drop` releases.
 pub struct Project {
 	ptr: *mut c_void,
@@ -1240,6 +1287,16 @@ pub(crate) static UNDO_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// Layout assertions shared with `include/oak_engine.h`.
+	#[test]
+	fn abi_mirror_layout_matches_c_header() {
+		assert_eq!(std::mem::size_of::<NodeValue>(), 56);
+		assert_eq!(
+			std::mem::size_of::<crate::editor::StorageProjectHandle>(),
+			32
+		);
+	}
 
 	/// History navigation/inspection and the observer hook (the undo
 	/// stack is process-global; serialize).

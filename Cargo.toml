@@ -39,6 +39,10 @@ resolver = "2"
 # Single source of truth for the release version: the app package
 # inherits it, and with it cargo-packager and the CD packaging scripts.
 version = "0.5.2"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/OakVideoEditorCommunity/oak"
+authors = ["Oak Team"]
+rust-version = "1.85"
 
 [profile.release]
 # FFI discipline: every module crate exports an `extern "C"` ABI whose

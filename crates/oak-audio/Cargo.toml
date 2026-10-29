@@ -9,9 +9,9 @@ license = "GPL-3.0-or-later"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-oak-ffmpeg-link = { path = "../oak-ffmpeg-link" }
-oak-core = { path = "../oak-core" }
-oak-codec = { path = "../oak-codec" }
+oak-ffmpeg-link = { version = "=0.5.2", path = "../oak-ffmpeg-link" }
+oak-core = { version = "=0.5.2", path = "../oak-core" }
+oak-codec = { version = "=0.5.2", path = "../oak-codec" }
 # Real resample/channel-convert/time-stretch filter graph. The C++
 # ffmpeg_bridge library existed only to absorb FFmpeg API churn; the Rust
 # crate calls ffmpeg-next directly (same as oakcodec). The oak-ffmpeg-link

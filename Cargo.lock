@@ -7479,6 +7479,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdk_editor"
+version = "0.1.0"
+dependencies = [
+ "oak-engine-rust-sdk",
+]
+
+[[package]]
 name = "sea-bae"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -319,6 +319,14 @@ jobs:
       - name: App engine boundary guard
         run: python3 tooling/check_app_engine_boundary.py
 
+      - name: Engine C header is current
+        run: python3 tooling/gen_c_header.py --check
+
+      - name: Engine C header compiles (C11)
+        run: |
+          printf '#include "oak_engine.h"\nint main(void) { return 0; }\n' > "$RUNNER_TEMP/oak_header_test.c"
+          cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -I crates/oak-engine/include "$RUNNER_TEMP/oak_header_test.c"
+
       # `cargo check` (not build): the Test step links the test binaries
       # anyway, and a full build would codegen every workspace crate twice
       # (once without and once with cfg(test)).

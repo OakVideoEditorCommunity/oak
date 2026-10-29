@@ -9,7 +9,7 @@ license = "GPL-3.0-or-later"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-oak-core = { path = "../oak-core" }
+oak-core = { version = "=0.5.2", path = "../oak-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Timestamp columns in the database schema (plan M13 §1: TIMESTAMP NOT
@@ -22,9 +22,9 @@ thiserror = "2"
 # The node graph engine: project + serializer families power the ove-xml
 # backend; the sequence/track/block model powers the otio interchange
 # (see src/bridge/node.rs — direct Rust calls, single-lib unification).
-oak-node = { path = "../oak-node" }
+oak-node = { version = "=0.5.2", path = "../oak-node" }
 # Native OTIO JSON model (project-local; see src/bindings/oakotio).
-oak-otio = { path = "../oak-otio" }
+oak-otio = { version = "=0.5.2", path = "../oak-otio" }
 # Database backends via SeaORM (sync facade: a private current-thread
 # runtime drives the async API behind the synchronous C ABI; see
 # backends/database.rs). sqlx-postgres + sqlx-sqlite cover PG/SQLite.
@@ -34,7 +34,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 # the oakundo process-wide undo stack's command-success observers, so a
 # recorded command immediately journals every bound project (M14 R1: the
 # former facade-side binding/snapshot/flush logic, now module-owned).
- oak-undo = { path = "../oak-undo" }
+ oak-undo = { version = "=0.5.2", path = "../oak-undo" }
 
 [dev-dependencies]
 # oakcodec is also reachable through oaknode; the dev-dependency re-entry

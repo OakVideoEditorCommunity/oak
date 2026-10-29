@@ -18,22 +18,22 @@ crate-type = ["staticlib", "rlib"]
 real-oakrender = []
 
 [dependencies]
-oak-core = { path = "../oak-core" }
-oak-undo = { path = "../oak-undo" }
-oak-codec = { path = "../oak-codec" }
-oak-node = { path = "../oak-node" }
+oak-core = { version = "=0.5.2", path = "../oak-core" }
+oak-undo = { version = "=0.5.2", path = "../oak-undo" }
+oak-codec = { version = "=0.5.2", path = "../oak-codec" }
+oak-node = { version = "=0.5.2", path = "../oak-node" }
 
 # Pure-Rust OpenTimelineIO JSON binding (serde model of the OTIO JSON format
 # covering exactly the object graph the C++ loadotio/saveotio tasks use).
 # Registered in README decision #6: OTIO no longer stays on the C++ side —
 # LoadOTIOTask/SaveOTIOTask parse/serialize through this crate.
-oak-otio = { path = "../oak-otio" }
+oak-otio = { version = "=0.5.2", path = "../oak-otio" }
 
 # oakrender is a regular path dependency (single-lib: the direct ticket
 # arena in `oakrender::ticket` will back the render loop once the
 # CHandle-based loop is rewired; until then `src/stubs.rs` stands in for
 # the deleted ticket C ABI). The `real-oakrender` marker feature keeps the
 # old render-real integration test's cargo invocation parsing (see above).
-oak-render = { path = "../oak-render" }
+oak-render = { version = "=0.5.2", path = "../oak-render" }
 # Error trait derive for the crate-internal error enum.
 thiserror = "2"

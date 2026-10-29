@@ -363,6 +363,14 @@ pub struct SubtitleParams {
 mod tests {
 	use super::*;
 
+	/// The C header asserts these sizes with `_Static_assert`; keep the
+	/// Rust mirrors and the published header in lockstep.
+	#[test]
+	fn abi_mirror_layout_matches_c_header() {
+		assert_eq!(std::mem::size_of::<Rational>(), 16);
+		assert_eq!(std::mem::size_of::<TimeRange>(), 32);
+	}
+
 	#[test]
 	fn rational_reduce_ops_and_sentinels() {
 		assert_eq!(Rational::new(2, 4), Rational { num: 1, den: 2 });

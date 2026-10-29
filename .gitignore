@@ -122,3 +122,7 @@ tarpaulin-out/
 # CD packaging artifacts
 /*.dmg
 perf.data
+
+# Python bytecode from the tooling scripts
+tooling/__pycache__/
+*.pyc

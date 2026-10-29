@@ -2,21 +2,36 @@
 name = "oak-engine"
 edition = "2024"
 version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Oak video engine: domain facade and the stable C ABI consumed by frontends"
+readme = "README.md"
+keywords = ["video", "editor", "media", "ffmpeg", "c-abi"]
+categories = ["multimedia::video", "api-bindings"]
+include = ["src/**/*.rs", "include/**/*.h", "README.md", "Cargo.toml"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.release]
+publish-order = 1
 
 [lib]
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-oak-audio = { path = "../oak-audio" }
-oak-codec = { path = "../oak-codec" }
-oak-core = { path = "../oak-core" }
-oak-ffmpeg-link = { path = "../oak-ffmpeg-link" }
-oak-node = { path = "../oak-node" }
-oak-ofx-plugin = { path = "../oak-ofx-plugin" }
-oak-otio = { path = "../oak-otio" }
-oak-render = { path = "../oak-render" }
-oak-storage = { path = "../oak-storage" }
-oak-task = { path = "../oak-task" }
-oak-timeline = { path = "../oak-timeline" }
-oak-undo = { path = "../oak-undo" }
+oak-audio = { version = "=0.5.2", path = "../oak-audio" }
+oak-codec = { version = "=0.5.2", path = "../oak-codec" }
+oak-core = { version = "=0.5.2", path = "../oak-core" }
+oak-ffmpeg-link = { version = "=0.5.2", path = "../oak-ffmpeg-link" }
+oak-node = { version = "=0.5.2", path = "../oak-node" }
+oak-ofx-plugin = { version = "=0.5.2", path = "../oak-ofx-plugin" }
+oak-otio = { version = "=0.5.2", path = "../oak-otio" }
+oak-render = { version = "=0.5.2", path = "../oak-render" }
+oak-storage = { version = "=0.5.2", path = "../oak-storage" }
+oak-task = { version = "=0.5.2", path = "../oak-task" }
+oak-timeline = { version = "=0.5.2", path = "../oak-timeline" }
+oak-undo = { version = "=0.5.2", path = "../oak-undo" }
