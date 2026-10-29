@@ -4,6 +4,7 @@
 //! the C ABI.
 
 use std::ffi::{CString, c_char, c_void};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use oak_ofx_plugin::host::Host;
@@ -167,6 +168,8 @@ pub unsafe extern "C" fn oak_ofx_plugin_context_at(
 /// allocated but inert (their render entry short-circuits).
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_ofx_shutdown() {
+	crate::ofx::interact::shutdown();
+	unsafe { oak_ofx_set_progress_handler(None, None, std::ptr::null_mut()) };
 	Host::global().shutdown();
 }
 
@@ -359,14 +362,15 @@ unsafe impl Send for CProgressReporter {}
 
 impl UiProgressReporter for CProgressReporter {
 	fn update(&mut self, progress: f64) -> bool {
-		unsafe {
+		let accepted = unsafe {
 			(self.cb)(
 				self.label.as_ptr(),
 				self.message.as_ptr(),
 				progress,
 				self.userdata,
 			)
-		}
+		};
+		accepted && !RENDER_CANCEL.load(Ordering::Relaxed)
 	}
 	fn end(&mut self) {
 		if let Some(end) = self.end_cb {
@@ -387,6 +391,26 @@ impl UiProgressReporter for SilentReporter {
 
 static PROGRESS_HANDLER: Mutex<(Option<OakOfxProgressFn>, Option<OakOfxProgressEndFn>, usize)> =
 	Mutex::new((None, None, 0));
+static RENDER_CANCEL: AtomicBool = AtomicBool::new(false);
+
+fn install_worker_progress_handler() {
+	oak_render::procpool::set_plugin_progress_cb(Some(Arc::new(|label, message, fraction| {
+		let (cb, _, userdata) = *PROGRESS_HANDLER.lock().unwrap_or_else(|e| e.into_inner());
+		let Some(cb) = cb else {
+			return;
+		};
+		let label = CString::new(label).unwrap_or_default();
+		let message = CString::new(message).unwrap_or_default();
+		unsafe {
+			cb(
+				label.as_ptr(),
+				message.as_ptr(),
+				fraction,
+				userdata as *mut c_void,
+			);
+		}
+	})));
+}
 
 /// Registers the progress handler (or with a null `cb` clears it).
 /// The handler bridges into the OFX progress suite's reporter
@@ -403,12 +427,15 @@ pub unsafe extern "C" fn oak_ofx_set_progress_handler(
 		None => {
 			*slot = (None, None, 0);
 			drop(slot);
+			oak_render::procpool::set_plugin_progress_cb(None);
 			oak_ofx_plugin::progress::set_reporter_factory(None);
 		}
 		Some(_) => {
 			*slot = (cb, end_cb, userdata as usize);
 			drop(slot);
+			install_worker_progress_handler();
 			oak_ofx_plugin::progress::set_reporter_factory(Some(Arc::new(|label, message| {
+				RENDER_CANCEL.store(false, Ordering::Relaxed);
 				let (cb, end_cb, userdata) =
 					*PROGRESS_HANDLER.lock().unwrap_or_else(|e| e.into_inner());
 				let Some(cb) = cb else {
@@ -424,6 +451,14 @@ pub unsafe extern "C" fn oak_ofx_set_progress_handler(
 			})));
 		}
 	}
+}
+
+/// Cancels inline and process-worker plugin renders at their next progress
+/// boundary. A fresh progressStart clears the inline cancellation flag.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_ofx_cancel_render() {
+	RENDER_CANCEL.store(true, Ordering::Relaxed);
+	oak_render::procpool::request_plugin_cancel_all();
 }
 
 /// Whether a progress handler is registered.

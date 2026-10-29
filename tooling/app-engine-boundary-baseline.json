@@ -88,13 +88,6 @@
         "oak-timeline": 1
       }
     },
-    "crates/oak-app/src/oakui/ofx.rs": {
-      "total": 53,
-      "crates": {
-        "oak-ofx-plugin": 51,
-        "oak-render": 2
-      }
-    },
     "crates/oak-app/src/oakui/projectbrowser.rs": {
       "total": 4,
       "crates": {
@@ -102,27 +95,25 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 180,
+      "total": 168,
       "crates": {
         "oak-audio": 18,
         "oak-codec": 16,
-        "oak-core": 68,
+        "oak-core": 64,
         "oak-node": 50,
-        "oak-ofx-plugin": 1,
-        "oak-render": 11,
+        "oak-render": 4,
         "oak-storage": 1,
         "oak-timeline": 11,
         "oak-undo": 4
       }
     },
     "crates/oak-app/src/oakui/renderops.rs": {
-      "total": 159,
+      "total": 158,
       "crates": {
         "oak-codec": 21,
         "oak-core": 59,
         "oak-node": 59,
         "oak-render": 18,
-        "oak-task": 1,
         "oak-timeline": 1
       }
     },
@@ -143,12 +134,6 @@
       "crates": {
         "oak-node": 1,
         "oak-timeline": 1
-      }
-    },
-    "crates/oak-app/src/panels/ofx_params.rs": {
-      "total": 19,
-      "crates": {
-        "oak-ofx-plugin": 19
       }
     },
     "crates/oak-app/src/panels/timeline.rs": {

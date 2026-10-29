@@ -3439,8 +3439,7 @@ impl RealEngine {
 			// The OpenFX plugin badge: the persistent-message count (the
 			// simplified 徽标/计数 of stage 6b). Built-in effects show none.
 			let badge = plugin_handle.and_then(|handle| {
-				let count = oak_ofx_plugin::suites::message::persistent_message_count(handle as usize);
-				(count > 0).then_some(count)
+				oak_engine_rust_sdk::ofx::persistent_message_count(handle).filter(|count| *count > 0)
 			});
 			let subtitle = plugin_handle.map(|_| {
 				// A muted secondary line identifying the plugin effect as an

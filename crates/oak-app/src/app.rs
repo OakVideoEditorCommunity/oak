@@ -1072,7 +1072,10 @@ impl<E: AppEngine> OakApp<E> {
 				.engine
 				.update(cx, |engine, cx| engine.close_project(cx)),
 			A::Export => self.open_export_dialog(None, cx),
-			A::Exit => cx.quit(),
+			A::Exit => {
+				crate::oakui::ofx::shutdown();
+				cx.quit();
+			}
 			// --- Edit ------------------------------------------------------
 			A::Undo => self.engine.update(cx, |engine, cx| engine.undo(cx)),
 			A::Redo => self.engine.update(cx, |engine, cx| engine.redo(cx)),
@@ -4185,6 +4188,7 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 		cx.activate(true);
 		cx.on_window_closed(|cx, _| {
 			if cx.windows().is_empty() {
+				crate::oakui::ofx::shutdown();
 				// Persist the preferences (config.ini), then drain the
 				// write-through backlog (save + snapshot of every still-bound
 				// project) and stop oakstorage's snapshot thread.

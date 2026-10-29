@@ -55,6 +55,7 @@ unsafe extern "C" {
 	fn oak_ofx_install_render_executor();
 	fn oak_ofx_set_project_extent(width: f64, height: f64);
 	fn oak_ofx_set_viewer_time(time: f64, range_min: f64, range_max: f64);
+	fn oak_ofx_cancel_render();
 
 	fn oak_ofx_set_progress_handler(
 		cb: Option<ProgressFn>,
@@ -208,6 +209,11 @@ unsafe extern "C" {
 		out: *mut OakOfxCurvePoint,
 	) -> bool;
 	fn oak_ofx_curveset_upsert_point(set: *const c_void, curve: i32, key: f64, value: f64) -> bool;
+	fn oak_ofx_curveset_push_point(
+		set: *const c_void,
+		curve: i32,
+		point: OakOfxCurvePoint,
+	) -> bool;
 	fn oak_ofx_curveset_delete_point(set: *const c_void, curve: i32, index: i32) -> bool;
 	fn oak_ofx_curveset_clear_curve(set: *const c_void, curve: i32) -> bool;
 	fn oak_ofx_curveset_evaluate(set: *const c_void, curve: i32, x: f64) -> f64;
@@ -381,6 +387,11 @@ pub fn set_viewer_time(time: f64, range_min: f64, range_max: f64) {
 	unsafe { oak_ofx_set_viewer_time(time, range_min, range_max) }
 }
 
+/// Cancels inline and worker plugin renders at their next progress boundary.
+pub fn cancel_render() {
+	unsafe { oak_ofx_cancel_render() }
+}
+
 // ---------------------------------------------------------------------------
 // Progress handler
 // ---------------------------------------------------------------------------
@@ -496,6 +507,13 @@ pub struct Instance {
 /// Number of registered instances (diagnostic).
 pub fn instance_count() -> usize {
 	unsafe { oak_ofx_instance_count() }.max(0) as usize
+}
+
+/// Reads an existing instance's persistent-message count without taking
+/// ownership of its registry handle.
+pub fn persistent_message_count(instance: u64) -> Option<usize> {
+	let count = unsafe { oak_ofx_instance_persistent_message_count(instance) };
+	(count >= 0).then_some(count as usize)
 }
 
 impl Instance {
@@ -850,6 +868,13 @@ impl From<OakOfxRectD> for RectD {
 // Interacts
 // ---------------------------------------------------------------------------
 
+/// Creates an overlay interact from an existing instance registry id. The
+/// caller owns the returned interact; the instance remains owned by its node.
+pub fn create_interact(instance: u64) -> Option<Interact> {
+	let id = unsafe { oak_ofx_interact_create(instance) };
+	(id != 0).then_some(Interact { id })
+}
+
 /// A plugin's overlay interact (custom UI on the viewer). Drop
 /// destroys it. Action methods return OFX status codes ([`status`]).
 #[derive(Debug)]
@@ -858,6 +883,17 @@ pub struct Interact {
 }
 
 impl Interact {
+	/// The engine registry id.
+	pub fn id(&self) -> u64 {
+		self.id
+	}
+
+	/// Explicitly destroys the interact now. Other clones become inert, and
+	/// their later drops are no-ops.
+	pub fn destroy(&self) {
+		unsafe { oak_ofx_interact_destroy(self.id) }
+	}
+
 	/// The draw action: the plugin paints its overlay into the
 	/// currently bound framebuffer (acquire the GL bridge first — see
 	/// [`gl`]). `viewport` is the viewport size in pixels,
@@ -1047,6 +1083,21 @@ impl CurveSet {
 		unsafe { oak_ofx_curveset_upsert_point(self.ptr, curve as i32, key, value) }
 	}
 
+	/// Inserts a control point while preserving its explicit Hermite slope.
+	pub fn push_point(&self, curve: usize, point: ControlPoint) -> bool {
+		unsafe {
+			oak_ofx_curveset_push_point(
+				self.ptr,
+				curve as i32,
+				OakOfxCurvePoint {
+					key: point.key,
+					value: point.value,
+					slope: point.slope,
+				},
+			)
+		}
+	}
+
 	/// Deletes the control point at `index`.
 	pub fn delete_point(&self, curve: usize, index: usize) -> bool {
 		unsafe { oak_ofx_curveset_delete_point(self.ptr, curve as i32, index as i32) }
@@ -1078,6 +1129,73 @@ impl Drop for CurveSet {
 	fn drop(&mut self) {
 		unsafe { oak_ofx_curveset_release(self.ptr) };
 	}
+}
+
+/// An owned parametric curve DTO used by UI editors and SDK consumers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Curve {
+	pub points: Vec<ControlPoint>,
+}
+
+impl Curve {
+	/// An empty curve (evaluates as identity).
+	pub fn empty() -> Self {
+		Self::default()
+	}
+
+	/// An identity curve over `[lo, hi]`, with host-computed slopes.
+	pub fn identity(lo: f64, hi: f64) -> Self {
+		let set = CurveSet::new();
+		let Some(index) = set.add_identity_curve(lo, hi) else {
+			return Self::empty();
+		};
+		curve_from_set(&set, index)
+	}
+
+	/// Builds a curve from key/value pairs, with host-computed slopes.
+	pub fn from_pairs(pairs: &[(f64, f64)]) -> Self {
+		let set = CurveSet::new();
+		let Some(index) = set.add_curve() else {
+			return Self::empty();
+		};
+		for (key, value) in pairs {
+			set.upsert_point(index, *key, *value);
+		}
+		curve_from_set(&set, index)
+	}
+}
+
+fn curve_from_set(set: &CurveSet, index: usize) -> Curve {
+	let count = set.point_count(index).unwrap_or(0);
+	Curve {
+		points: (0..count)
+			.filter_map(|point| set.point_at(index, point))
+			.collect(),
+	}
+}
+
+/// Parses curve-set JSON into an owned UI-independent DTO.
+pub fn curves_from_json(json: &str) -> Option<Vec<Curve>> {
+	let set = CurveSet::from_json(json)?;
+	Some(
+		(0..set.curve_count())
+			.map(|index| curve_from_set(&set, index))
+			.collect(),
+	)
+}
+
+/// Serializes owned curves through the engine's canonical JSON codec.
+pub fn curves_to_json(curves: &[Curve]) -> String {
+	let set = CurveSet::new();
+	for curve in curves {
+		let Some(index) = set.add_curve() else {
+			continue;
+		};
+		for point in &curve.points {
+			set.push_point(index, *point);
+		}
+	}
+	set.to_json()
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,6 +1350,17 @@ mod tests {
 	}
 
 	#[test]
+	fn owned_curve_dto_preserves_explicit_slopes() {
+		let mut curve = Curve::from_pairs(&[(0.0, 0.0), (0.5, 0.25), (1.0, 1.0)]);
+		curve.points[1].slope = 0.0;
+		let json = curves_to_json(&[curve.clone()]);
+		let parsed = curves_from_json(&json).expect("curve DTO JSON");
+		assert_eq!(parsed, vec![curve]);
+		assert_eq!(Curve::identity(0.0, 1.0).points.len(), 2);
+		assert!(curves_from_json("{").is_none());
+	}
+
+	#[test]
 	fn host_scan_enumerate_instance_params_render() {
 		let _guard = HOST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(dir) = test_plugin_scan_dir() else {
@@ -1327,9 +1456,11 @@ mod tests {
 		assert!(scan_path(&dir.to_string_lossy()));
 		let inst =
 			Instance::create("org.oak.test-plugin.interact", None).expect("interact instance");
-		let Some(interact) = inst.create_interact() else {
+		let Some(interact) = create_interact(inst.id()) else {
 			panic!("the interact variant declares an overlay interact");
 		};
+		assert_eq!(persistent_message_count(inst.id()), inst.persistent_message_count());
+		cancel_render();
 		assert_eq!(interact.idle(), status::OK);
 		// The test plugin leaves the focus actions unhandled
 		// (ReplyDefault = "not consumed; the host may continue").
@@ -1347,5 +1478,11 @@ mod tests {
 		// A plugin without an interact yields None.
 		let plain = Instance::create("org.oak.test-plugin", None).expect("plain instance");
 		assert!(plain.create_interact().is_none());
+
+		set_progress_handler(|_, _, _| true, || {});
+		assert!(has_progress_handler());
+		shutdown();
+		assert!(!has_progress_handler());
+		assert_eq!(interact.idle(), status::ERR_BAD_HANDLE);
 	}
 }

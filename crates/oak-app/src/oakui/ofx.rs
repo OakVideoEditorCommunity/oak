@@ -14,25 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! OFX plugin startup wiring (stage 6b).
+//! SDK OFX lifecycle and interact display adapters.
 //!
-//! The app is the only place that holds both the oakplugin host and the UI
-//! services the OFX suites consult at runtime, so the wiring lives here:
-//!
-//! - [`init`] scans the standard plugin paths ([`oak_ofx_plugin::host::Host`]
-//!   default path set, `host.rs:440-449`), registers every discovered
-//!   plugin into the node factory (the effect library and the add-effect
-//!   menu consume those entries), installs the render executor and the
-//!   plugin-node duplicator (both idempotent), and registers the
-//!   progress-reporter factory plus the active-viewer provider.
-//! - [`update_project_extent`] / [`update_viewer_time`] keep the
-//!   oakplugin side's fallback project size and timeline time in sync with
-//!   the current sequence (the engine calls them on open / seek / tick).
-//! - [`set_progress_tx`] wires a progress-event channel the app drains in
-//!   its tick loop to drive the progress dialog.
-//!
-//! Every failure degrades to a log: plugin support is an optional
-//! capability, never a startup dependency.
+//! The engine owns plugin discovery, node registration, progress/cancel,
+//! viewer time and project extent. The app keeps only its progress channel,
+//! viewport/key mapping and GL overlay compositing. Every failure degrades to
+//! the base frame or a log: plugin support is an optional capability.
 //!
 //! ## Rendering topology and progress
 //!
@@ -47,14 +34,10 @@
 //! reporter); the dialog's Cancel button broadcasts `plugin_cancel` to the
 //! workers ([`cancel_plugin_render`]).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui_kit::{Keystroke, Point, RenderImage, Size};
-use oak_ofx_plugin::progress::{ReporterFactory, UiProgressReporter};
-use oak_ofx_plugin::suites::interact::Interact;
-use oak_ofx_plugin::suites::status;
-use oak_ofx_plugin::suites::timeline::{ActiveViewerProvider, ViewerTimeInfo};
+use oak_engine_rust_sdk::ofx::{status, Interact};
 
 /// One progress event a plugin reporter pushed to the app channel (drained
 /// by the app tick, which drives a progress dialog).
@@ -71,32 +54,6 @@ pub struct PluginProgressEvent {
 /// The app's progress-event channel (registered by [`set_progress_tx`]).
 static PROGRESS_TX: OnceLock<Mutex<Option<std::sync::mpsc::Sender<PluginProgressEvent>>>> =
 	OnceLock::new();
-
-/// The sticky cancel flag read by every live reporter (`update` returns
-/// false once set; the progress dialog's cancel button sets it).
-static CANCEL: AtomicBool = AtomicBool::new(false);
-
-/// The last active-viewer time snapshot (the timeline-suite provider reads
-/// it; the engine refreshes it on seek / tick).
-static VIEWER_TIME: OnceLock<Mutex<ViewerTimeInfo>> = OnceLock::new();
-
-/// The last known project extent (normalised-coordinate default conversion;
-/// the engine refreshes it whenever the sequence changes).
-static PROJECT_EXTENT: OnceLock<Mutex<(f64, f64)>> = OnceLock::new();
-
-fn viewer_slot() -> &'static Mutex<ViewerTimeInfo> {
-	VIEWER_TIME.get_or_init(|| {
-		Mutex::new(ViewerTimeInfo {
-			time: 0.0,
-			range_min: 0.0,
-			range_max: 0.0,
-		})
-	})
-}
-
-fn extent_slot() -> &'static Mutex<(f64, f64)> {
-	PROJECT_EXTENT.get_or_init(|| Mutex::new((1920.0, 1080.0)))
-}
 
 // ---------------------------------------------------------------------------
 // App-driven state sync
@@ -124,19 +81,13 @@ fn progress_tx() -> Option<std::sync::mpsc::Sender<PluginProgressEvent>> {
 /// Updates the active-viewer time snapshot the timeline suite falls back
 /// to when no render context is live (engine seek / tick path).
 pub fn update_viewer_time(time: f64, range_min: f64, range_max: f64) {
-	*viewer_slot().lock().unwrap_or_else(|e| e.into_inner()) = ViewerTimeInfo {
-		time,
-		range_min,
-		range_max,
-	};
+	oak_engine_rust_sdk::ofx::set_viewer_time(time, range_min, range_max);
 }
 
 /// Updates the project extent (width/height) the OFX normalised-coordinate
 /// default conversion uses, and pushes it into oakplugin.
 pub fn update_project_extent(width: f64, height: f64) {
-	let (w, h) = (width.max(1.0), height.max(1.0));
-	*extent_slot().lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
-	oak_ofx_plugin::node_factory::set_project_extent(w, h);
+	oak_engine_rust_sdk::ofx::set_project_extent(width, height);
 }
 
 /// Requests cancellation of the running plugin render (the progress
@@ -144,55 +95,7 @@ pub fn update_project_extent(width: f64, height: f64) {
 /// forwards the cancel to the render workers (their progress reporters
 /// answer false from the next batch boundary on).
 pub fn cancel_plugin_render() {
-	CANCEL.store(true, Ordering::Relaxed);
-	// The worker-process plugin renders are cancelled through the control
-	// plane (`plugin_cancel`); the in-flight frame completes (batch
-	// granularity — the worker processes messages between batches).
-	oak_render::procpool::request_plugin_cancel_all();
-}
-
-// ---------------------------------------------------------------------------
-// Reporters / providers
-// ---------------------------------------------------------------------------
-
-/// A reporter that forwards (label, message, fraction) to the app channel
-/// and honours the global cancel flag.
-struct ChannelProgressReporter {
-	tx: Option<std::sync::mpsc::Sender<PluginProgressEvent>>,
-	label: String,
-	message: String,
-}
-
-impl UiProgressReporter for ChannelProgressReporter {
-	fn update(&mut self, progress: f64) -> bool {
-		if let Some(tx) = &self.tx {
-			let _ = tx.send(PluginProgressEvent {
-				label: self.label.clone(),
-				message: self.message.clone(),
-				fraction: progress,
-			});
-		}
-		!CANCEL.load(Ordering::Relaxed)
-	}
-}
-
-fn reporter_factory() -> ReporterFactory {
-	Arc::new(|label, message| {
-		// A fresh render begins: reset the sticky cancel flag.
-		CANCEL.store(false, Ordering::Relaxed);
-		Box::new(ChannelProgressReporter {
-			tx: progress_tx(),
-			label: label.to_string(),
-			message: message.to_string(),
-		})
-	})
-}
-
-fn viewer_provider() -> ActiveViewerProvider {
-	Arc::new(|| {
-		let info = *viewer_slot().lock().unwrap_or_else(|e| e.into_inner());
-		Some(info)
-	})
+	oak_engine_rust_sdk::ofx::cancel_render();
 }
 
 // ---------------------------------------------------------------------------
@@ -205,39 +108,33 @@ fn viewer_provider() -> ActiveViewerProvider {
 /// the active-viewer provider. Returns the number of plugin node types
 /// registered (0 when no plugins were discovered or the scan failed).
 pub fn init() -> usize {
-	// 1. Scan the standard OFX plugin directories (host.rs:440-449 default
-	//    path set: ~/.OFX/Plugins, ~/.local/share/OFX/Plugins, ...
-	//    plus the OLIVE_OFX_PLUGIN_PATH / OLIVE_PLUGIN_PATH /
-	//    OFX_PLUGIN_PATH environment variables). A scan failure only
-	//    logs — plugins are optional.
-	if let Err(e) = oak_ofx_plugin::host::Host::global().cache.scan() {
-		eprintln!("[ofx] plugin scan failed: {e}");
+	if oak_engine_rust_sdk::ofx::scan().is_none() {
+		eprintln!("[ofx] plugin scan failed");
 	}
-	// 2. Register discovered plugins into the node factory (idempotent;
-	//    also installs the render executor and the plugin-node duplicator).
-	let registered = oak_ofx_plugin::node_factory::register_plugin_nodes();
-	// 3. Progress reporter factory -> the app progress channel.
-	oak_ofx_plugin::progress::set_reporter_factory(Some(reporter_factory()));
-	// 4. Active-viewer time provider (timeline suite fallback).
-	oak_ofx_plugin::suites::timeline::set_active_viewer_provider(Some(viewer_provider()));
-	// 5. Worker-forwarded plugin progress (the render workers run plugin
-	//    renders in their own process and stream `plugin_progress` NDJSON
-	//    events over the control plane; the dispatcher hands them to this
-	//    callback, which feeds the same channel the inline reporter uses).
-	oak_render::procpool::set_plugin_progress_cb(Some(Arc::new(|label, message, fraction| {
-		if let Some(tx) = progress_tx() {
-			let _ = tx.send(PluginProgressEvent {
-				label,
-				message,
-				fraction,
-			});
-		}
-	})));
-	// 6. Project extent (the engine refreshes it whenever the sequence
-	//    changes; keep the oakplugin side in sync with the default).
-	let (w, h) = *extent_slot().lock().unwrap_or_else(|e| e.into_inner());
-	oak_ofx_plugin::node_factory::set_project_extent(w, h);
-	registered.len()
+	let registered = oak_engine_rust_sdk::ofx::register_plugin_nodes();
+	oak_engine_rust_sdk::ofx::install_render_executor();
+	oak_engine_rust_sdk::ofx::set_progress_handler(
+		|label, message, fraction| {
+			if let Some(tx) = progress_tx() {
+				let _ = tx.send(PluginProgressEvent {
+					label: label.to_string(),
+					message: message.to_string(),
+					fraction,
+				});
+			}
+			true
+		},
+		|| {},
+	);
+	oak_engine_rust_sdk::ofx::set_project_extent(1920.0, 1080.0);
+	registered
+}
+
+/// Unregisters progress callbacks, destroys interacts, then closes the host.
+pub fn shutdown() {
+	sync_active_interact(None);
+	oak_engine_rust_sdk::ofx::clear_progress_handler();
+	oak_engine_rust_sdk::ofx::shutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -270,13 +167,8 @@ impl InteractViewport {
 	}
 }
 
-/// The app-side holder of the selected effect's live interact.
-///
-/// The interact is created on the *main process* `oak_ofx_plugin::Instance` of
-/// the selected plugin effect node (the same registry the inspector's
-/// push-button path uses), distinct from the worker-process render
-/// instances — OFX allows a plugin to have several instances, and the
-/// interact is a UI-event host, not a renderer.
+/// The app-side holder of the selected effect's SDK interact, distinct from
+/// worker-process render instances.
 struct ActiveInteract {
 	/// The oakplugin instance registry key (the plugin node's
 	/// `plugin_instance_handle`).
@@ -330,24 +222,16 @@ pub fn sync_active_interact(instance: Option<u64>) {
 	let Some(id) = instance else {
 		return;
 	};
-	let Some(inst) = oak_ofx_plugin::node_factory::instance_from_id(id) else {
-		// The node/instance is gone (effect deleted): nothing to attach to.
-		return;
-	};
-	let Some(interact) = inst.value.new_interact() else {
+	let Some(interact) = oak_engine_rust_sdk::ofx::create_interact(id) else {
 		// The plugin has no interact: normal no-op.
 		return;
 	};
-	// Complete the instance sequence (ofxInteract.h: NewInteract →
-	// Describe → CreateInstance before any draw/pen/key action).
-	interact.describe();
-	interact.create_instance();
 	let mut slot = active_interact_slot()
 		.lock()
 		.unwrap_or_else(|e| e.into_inner());
 	*slot = Some(ActiveInteract {
 		instance: id,
-		interact,
+		interact: Arc::new(interact),
 		viewport: InteractViewport {
 			width: 0.0,
 			height: 0.0,
@@ -405,16 +289,6 @@ fn bgra_image_to_f32_rgba(img: &RenderImage) -> Option<(u32, u32, Vec<f32>)> {
 		out.push(px[3] as f32 / 255.0); // A
 	}
 	Some((w as u32, h as u32, out))
-}
-
-/// Reads an `oakplugin` F32 RGBA image into a tightly packed `Vec<f32>`.
-fn read_image_f32(img: &oak_ofx_plugin::image::Image) -> Vec<f32> {
-	img.pixels()
-		.as_chunks::<4>()
-		.0
-		.iter()
-		.map(|c| f32::from_ne_bytes(c[0..4].try_into().unwrap()))
-		.collect()
 }
 
 /// Composites the straight-alpha overlay over `base` (both tightly packed
@@ -488,47 +362,37 @@ pub fn draw_interact_composite(
 	if bw != w as u32 || bh != h as u32 {
 		return None;
 	}
-	let mut params = oak_ofx_plugin::render::VideoParams::default();
-	params.width = w;
-	params.height = h;
-	params.format = oak_ofx_plugin::render::PIXEL_FORMAT_F32;
-
-	let _guard = oak_ofx_plugin::gl_bridge::acquire().ok()?;
-	let tex = oak_ofx_plugin::gl_bridge::create_output_texture(w, h, &params).ok()?;
-	let fbo = match oak_ofx_plugin::gl_bridge::create_fbo(tex, w, h) {
-		Ok(fbo) => fbo,
-		Err(_) => {
-			oak_ofx_plugin::gl_bridge::delete_gl_texture(tex);
+	use oak_engine_rust_sdk::ofx::gl;
+	let _guard = gl::acquire()?;
+	let tex = gl::create_output_texture(w, h)?;
+	let fbo = match gl::create_fbo(tex, w, h) {
+		Some(fbo) => fbo,
+		None => {
+			gl::delete_texture(tex);
 			return None;
 		}
 	};
-	oak_ofx_plugin::gl_bridge::bind_fbo(fbo);
-	oak_ofx_plugin::gl_bridge::set_viewport(w, h);
+	gl::bind_fbo(fbo);
+	gl::set_viewport(w, h);
 	// Clear to transparent black: the plugin's strokes composite "over"
 	// nothing, so the readback holds straight alpha (see
 	// [`composite_overlay`]).
-	oak_ofx_plugin::gl_bridge::gl_clear_color(0.0, 0.0, 0.0, 0.0);
-	oak_ofx_plugin::gl_bridge::gl_clear();
+	gl::clear_color(0.0, 0.0, 0.0, 0.0);
+	gl::clear();
 
 	let st = interact.draw(
 		(viewport.width, viewport.height),
 		viewport.pixel_scale,
 		time,
-		// Background image: Phase 1 passes no composited background (the
-		// interact draws over a flat transparent clear; the frame is
-		// composited on the app side afterwards).
-		None,
 	);
-	let overlay = oak_ofx_plugin::gl_bridge::read_pixels_to_image(w, h, &params);
-	oak_ofx_plugin::gl_bridge::delete_fbo(fbo);
-	oak_ofx_plugin::gl_bridge::delete_gl_texture(tex);
-	let (Ok(overlay), st) = (overlay, st) else {
-		return None;
-	};
-	if st != status::OK {
+	let mut overlay = vec![0.0f32; (w * h * 4) as usize];
+	let read = gl::read_pixels_f32(w, h, &mut overlay);
+	gl::delete_fbo(fbo);
+	gl::delete_texture(tex);
+	if st != status::OK || read.is_none() {
 		return None;
 	}
-	let merged = composite_overlay(&read_image_f32(&overlay), &base_f32)?;
+	let merged = composite_overlay(&overlay, &base_f32)?;
 	note_interact_viewport(instance, *viewport);
 	Some(Arc::new(super::frames::f32_rgba_to_bgra_image(
 		bw, bh, &merged,
@@ -566,32 +430,30 @@ pub fn viewport_pixel_to_pen(
 	Some((fx, fy))
 }
 
-/// Maps a gpui keystroke to the OFX key symbol (`ofxKeySyms.h` values from
-/// `oak_ofx_plugin::host::KEY_*`) and the key-string character
+/// Maps a gpui keystroke to the SDK OFX key symbol and key-string character
 /// (`kOfxPropKeyString`: the UTF-8 character, empty for keys without one).
 ///
 /// Covers the common keys — alphanumerics, the arrows, return, escape,
 /// backspace/delete, tab, home/end, page up/down and the function keys;
-/// anything else maps to [`oak_ofx_plugin::host::KEY_UNKNOWN`] with an empty
-/// string.
+/// anything else maps to the SDK's unknown key with an empty string.
 pub fn key_symbol(keystroke: &Keystroke) -> (i32, String) {
-	use oak_ofx_plugin::host as ofx_key;
+	use oak_engine_rust_sdk::ofx::key as ofx_key;
 	let key = keystroke.key.as_str();
 	let named = match key {
-		"space" => Some(ofx_key::KEY_SPACE),
-		"enter" | "return" => Some(ofx_key::KEY_RETURN),
-		"escape" => Some(ofx_key::KEY_ESCAPE),
-		"backspace" => Some(ofx_key::KEY_BACKSPACE),
-		"delete" => Some(ofx_key::KEY_DELETE),
-		"tab" => Some(ofx_key::KEY_TAB),
-		"home" => Some(ofx_key::KEY_HOME),
-		"end" => Some(ofx_key::KEY_END),
-		"left" => Some(ofx_key::KEY_LEFT),
-		"right" => Some(ofx_key::KEY_RIGHT),
-		"up" => Some(ofx_key::KEY_UP),
-		"down" => Some(ofx_key::KEY_DOWN),
-		"pageup" => Some(ofx_key::KEY_PAGE_UP),
-		"pagedown" => Some(ofx_key::KEY_PAGE_DOWN),
+		"space" => Some(ofx_key::SPACE),
+		"enter" | "return" => Some(ofx_key::RETURN),
+		"escape" => Some(ofx_key::ESCAPE),
+		"backspace" => Some(ofx_key::BACKSPACE),
+		"delete" => Some(ofx_key::DELETE),
+		"tab" => Some(ofx_key::TAB),
+		"home" => Some(ofx_key::HOME),
+		"end" => Some(ofx_key::END),
+		"left" => Some(ofx_key::LEFT),
+		"right" => Some(ofx_key::RIGHT),
+		"up" => Some(ofx_key::UP),
+		"down" => Some(ofx_key::DOWN),
+		"pageup" => Some(ofx_key::PAGE_UP),
+		"pagedown" => Some(ofx_key::PAGE_DOWN),
 		_ => None,
 	};
 	if let Some(sym) = named {
@@ -601,7 +463,7 @@ pub fn key_symbol(keystroke: &Keystroke) -> (i32, String) {
 	if let Some(rest) = key.strip_prefix('f') {
 		if let Ok(n) = rest.parse::<u32>() {
 			if (1..=35).contains(&n) {
-				return (ofx_key::KEY_F1 + (n as i32 - 1), String::new());
+				return (ofx_key::F1 + (n as i32 - 1), String::new());
 			}
 		}
 	}
@@ -611,7 +473,7 @@ pub fn key_symbol(keystroke: &Keystroke) -> (i32, String) {
 	if key.len() == 1 && key.is_ascii() {
 		return (key.as_bytes()[0] as i32, key.to_string());
 	}
-	(ofx_key::KEY_UNKNOWN, String::new())
+	(ofx_key::UNKNOWN, String::new())
 }
 
 /// The idle pump for the active interact. The program viewer calls this
@@ -641,33 +503,26 @@ pub fn pump_interact_idle() {
 mod tests {
 	use super::*;
 
+	mod ofx_key {
+		pub use oak_engine_rust_sdk::ofx::key::{
+			A as KEY_A, BACKSPACE as KEY_BACKSPACE, DELETE as KEY_DELETE, DOWN as KEY_DOWN,
+			END as KEY_END, ESCAPE as KEY_ESCAPE, F1 as KEY_F1, HOME as KEY_HOME,
+			LEFT as KEY_LEFT, PAGE_DOWN as KEY_PAGE_DOWN, PAGE_UP as KEY_PAGE_UP,
+			RETURN as KEY_RETURN, RIGHT as KEY_RIGHT, SPACE as KEY_SPACE, TAB as KEY_TAB,
+			UNKNOWN as KEY_UNKNOWN, UP as KEY_UP, Z as KEY_Z,
+		};
+	}
+
 	#[test]
-	fn viewer_time_roundtrip() {
+	fn viewer_time_and_extent_are_safe_to_update() {
 		update_viewer_time(42.5, 10.0, 200.0);
-		let provider = viewer_provider();
-		let info = provider().expect("provider always reports a snapshot");
-		assert_eq!(info.time, 42.5);
-		assert_eq!((info.range_min, info.range_max), (10.0, 200.0));
-	}
-
-	#[test]
-	fn cancel_is_sticky_until_a_new_reporter() {
-		CANCEL.store(false, Ordering::Relaxed);
-		let factory = reporter_factory();
-		let mut a = factory("a", "b");
-		assert!(a.update(0.1));
-		cancel_plugin_render();
-		assert!(!a.update(0.5), "a cancelled render reports no");
-		// A fresh progressStart resets the flag.
-		let mut b = factory("a", "b");
-		assert!(b.update(0.1));
-	}
-
-	#[test]
-	fn project_extent_is_forwarded() {
 		update_project_extent(1280.0, 720.0);
-		let slot = extent_slot();
-		assert_eq!(*slot.lock().unwrap(), (1280.0, 720.0));
+	}
+
+	#[test]
+	fn cancel_is_safe_and_idempotent() {
+		cancel_plugin_render();
+		cancel_plugin_render();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -722,7 +577,6 @@ mod tests {
 	/// single characters carry their ASCII symbol + the character string.
 	#[test]
 	fn key_symbol_maps_common_keys() {
-		use oak_ofx_plugin::host as ofx_key;
 		let ks = |key: &str| gpui_kit::Keystroke::parse(key).unwrap();
 		// Alphanumerics: symbol = ASCII code, string = the char.
 		assert_eq!(key_symbol(&ks("a")), (ofx_key::KEY_A, "a".to_string()));
@@ -908,15 +762,11 @@ mod tests {
 			println!("SKIP: minimal test plugin not built");
 			return false;
 		};
-		if oak_ofx_plugin::host::Host::global()
-			.cache
-			.scan_path(&dir)
-			.is_err()
-		{
+		if !oak_engine_rust_sdk::ofx::scan_path(&dir.to_string_lossy()) {
 			println!("SKIP: test plugin scan failed");
 			return false;
 		}
-		oak_ofx_plugin::node_factory::register_plugin_nodes();
+		oak_engine_rust_sdk::ofx::register_plugin_nodes();
 		true
 	}
 
@@ -952,10 +802,9 @@ mod tests {
 		// (1) app-layer creation: `sync_active_interact` on the plugin
 		// instance handle creates the interact (new_interact → describe →
 		// create_instance).
-		let inst = oak_ofx_plugin::host::Host::global()
-			.create_instance(INTERACT_PLUGIN_ID, None)
+		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
+		let handle = inst.id();
 		sync_active_interact(Some(handle));
 
 		let (active_handle, interact, _viewport) =
@@ -976,11 +825,11 @@ mod tests {
 
 		// (3) keys and idle.
 		assert_eq!(
-			interact.key_down(oak_ofx_plugin::host::KEY_A, "a", 5.0),
+			interact.key_down(oak_engine_rust_sdk::ofx::key::A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(
-			interact.key_up(oak_ofx_plugin::host::KEY_A, "a", 5.0),
+			interact.key_up(oak_engine_rust_sdk::ofx::key::A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(interact.idle(), status::OK);
@@ -1051,7 +900,7 @@ mod tests {
 			"idle not recorded: {lines:?}"
 		);
 
-		oak_ofx_plugin::host::Host::global().shutdown();
+		oak_engine_rust_sdk::ofx::shutdown();
 	}
 
 	/// End-to-end overlay: the plugin's draw action really renders into the
@@ -1071,10 +920,9 @@ mod tests {
 		let _ = std::fs::remove_file(&marker);
 		let _marker_env = MarkerEnvGuard::set(&marker);
 
-		let inst = oak_ofx_plugin::host::Host::global()
-			.create_instance(INTERACT_PLUGIN_ID, None)
+		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
+		let handle = inst.id();
 		sync_active_interact(Some(handle));
 		let (_, interact, _) = active_interact().expect("active interact created");
 
@@ -1130,7 +978,7 @@ mod tests {
 		);
 
 		sync_active_interact(None);
-		oak_ofx_plugin::host::Host::global().shutdown();
+		oak_engine_rust_sdk::ofx::shutdown();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1154,28 +1002,6 @@ mod tests {
 		assert!(bgra_image_to_f32_rgba(&empty).is_none());
 	}
 
-	/// `read_image_f32` unpacks the plugin image's native-endian F32 RGBA
-	/// bytes.
-	#[test]
-	fn read_image_f32_unpacks_native_float_samples() {
-		use oak_ofx_plugin::image::{BitDepth, Components, Image};
-		use oak_ofx_plugin::instance::OfxRectD;
-		let mut img = Image::allocate(
-			BitDepth::Float,
-			Components::Rgba,
-			OfxRectD {
-				x1: 0.0,
-				y1: 0.0,
-				x2: 2.0,
-				y2: 1.0,
-			},
-		);
-		let samples: [f32; 8] = [0.25, 0.5, 0.75, 1.0, -1.0, 2.0, 0.0, 0.5];
-		let bytes: Vec<u8> = samples.iter().flat_map(|v| v.to_ne_bytes()).collect();
-		img.pixels_mut()[..bytes.len()].copy_from_slice(&bytes);
-		assert_eq!(read_image_f32(&img), samples);
-	}
-
 	/// `composite_overlay` rejects buffers that are not whole RGBA pixels
 	/// and clamps out-of-range alpha.
 	#[test]
@@ -1196,7 +1022,6 @@ mod tests {
 	/// suffixes fall through to the unknown symbol.
 	#[test]
 	fn key_symbol_function_keys_and_unknown_multi_char_keys() {
-		use oak_ofx_plugin::host as ofx_key;
 		let ks = |key: &str| gpui_kit::Keystroke::parse(key).unwrap();
 		assert_eq!(
 			key_symbol(&ks("f35")),
@@ -1230,7 +1055,7 @@ mod tests {
 	fn sync_active_interact_missing_instance_is_a_noop() {
 		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		assert!(
-			oak_ofx_plugin::node_factory::instance_from_id(u64::MAX - 7).is_none(),
+			oak_engine_rust_sdk::ofx::create_interact(u64::MAX - 7).is_none(),
 			"the probe handle is not registered"
 		);
 		// The node/instance is gone: nothing to attach.
@@ -1251,7 +1076,7 @@ mod tests {
 			"a second init must not register duplicates (the first registered {first} plugin type(s))"
 		);
 		assert!(
-			oak_ofx_plugin::progress::has_reporter_factory(),
+			oak_engine_rust_sdk::ofx::has_progress_handler(),
 			"init installs the progress reporter factory"
 		);
 	}
@@ -1271,10 +1096,9 @@ mod tests {
 		if !scan_interact_plugin() {
 			return;
 		}
-		let inst = oak_ofx_plugin::host::Host::global()
-			.create_instance(INTERACT_PLUGIN_ID, None)
+		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
-		let handle = oak_ofx_plugin::node_factory::register_instance(inst);
+		let handle = inst.id();
 		sync_active_interact(Some(handle));
 
 		// Re-targeting the same instance keeps the live interact (the
@@ -1324,16 +1148,15 @@ mod tests {
 
 		// A plugin that does not declare an overlay interact reports
 		// `new_interact() == None` and stays inert.
-		let plain = oak_ofx_plugin::host::Host::global()
-			.create_instance("org.oak.test-plugin", None)
+		let plain = oak_engine_rust_sdk::ofx::Instance::create("org.oak.test-plugin", None)
 			.expect("plain effect variant instance");
-		let plain_handle = oak_ofx_plugin::node_factory::register_instance(plain);
+		let plain_handle = plain.id();
 		sync_active_interact(Some(plain_handle));
 		assert!(
 			active_interact().is_none(),
 			"a plugin without an interact installs nothing"
 		);
 
-		oak_ofx_plugin::host::Host::global().shutdown();
+		oak_engine_rust_sdk::ofx::shutdown();
 	}
 }

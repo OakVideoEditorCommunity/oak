@@ -421,8 +421,6 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		frame: &std::sync::Arc<gpui_kit::RenderImage>,
 		cx: &mut Context<Self>,
 	) -> std::sync::Arc<gpui_kit::RenderImage> {
-		use std::sync::atomic::Ordering;
-
 		let Some((instance, interact, _)) = crate::oakui::ofx::active_interact() else {
 			self.overlay = None;
 			return frame.clone();
@@ -437,8 +435,7 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		// interactRedraw / interactSwapBuffers (polled and cleared here —
 		// outside the cache predicate so a redraw request during a cache-miss
 		// frame is not replayed).
-		let plugin_redraw = interact.redraw_requested.swap(false, Ordering::Relaxed)
-			|| interact.swap_requested.swap(false, Ordering::Relaxed);
+		let plugin_redraw = interact.take_redraw() || interact.take_swap();
 		let stale = plugin_redraw
 			|| self.overlay.as_ref().is_none_or(|o| {
 				!std::sync::Arc::ptr_eq(&o.frame, frame)

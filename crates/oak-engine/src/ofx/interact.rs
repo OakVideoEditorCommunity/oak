@@ -33,6 +33,17 @@ fn interact(id: u64) -> Option<Arc<Interact>> {
 		.cloned()
 }
 
+/// Destroys every live interact before the plugin host shuts down.
+pub(crate) fn shutdown() {
+	let live: Vec<Arc<Interact>> = {
+		let mut registry = interacts().lock().unwrap_or_else(|e| e.into_inner());
+		registry.drain().map(|(_, interact)| interact).collect()
+	};
+	for interact in live {
+		interact.destroy();
+	}
+}
+
 /// Creates the overlay interact of the instance `instance` (registry
 /// id), running describe + createInstance. Returns the interact
 /// handle, or 0 when the instance is unknown or the plugin declares

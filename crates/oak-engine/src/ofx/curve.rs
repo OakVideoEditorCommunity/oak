@@ -218,6 +218,33 @@ pub unsafe extern "C" fn oak_ofx_curveset_upsert_point(
 	true
 }
 
+/// Inserts a control point with its explicit Hermite slope preserved.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_ofx_curveset_push_point(
+	set: *const OfxCurveSet,
+	curve: i32,
+	point: OakOfxCurvePoint,
+) -> bool {
+	if set.is_null() || curve < 0 {
+		return false;
+	}
+	let mut curves = unsafe { &*set }
+		.curves
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
+	let Some(curve) = curves.get_mut(curve as usize) else {
+		return false;
+	};
+	let point = point.to_native();
+	let index = curve.points.partition_point(|existing| existing.key < point.key);
+	if curve.points.get(index).is_some_and(|existing| existing.key == point.key) {
+		curve.points[index] = point;
+	} else {
+		curve.points.insert(index, point);
+	}
+	true
+}
+
 /// Deletes control point `index` of curve `curve` (slopes are
 /// recomputed). False on a null handle or an out-of-range index.
 #[unsafe(no_mangle)]
