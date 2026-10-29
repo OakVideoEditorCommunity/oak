@@ -1,7 +1,7 @@
 # oak-app 纯 SDK 化与引擎门面补全实施计划
 
-> 状态：待实施  
-> 现状核验：`ed049df68f`（2026-10-25）  
+> 状态：P0–P7 已完成，P8 待启动
+> 现状核验：`ed049df68f`（2026-10-25）；P1–P7 收口于 2026-10-30
 > 目标：将 Oak 的领域能力完整收口到 `oak-engine`，由
 > `oak-engine-rust-sdk` 提供安全、稳定的 Rust API，使第三方只依赖这两个
 > Oak crate 就能编写一个功能完整的新视频剪辑软件。
@@ -64,7 +64,8 @@ oak-codec / oak-audio / oak-task / oak-storage / oak-ofx-plugin / ...
 
 ## 2. 现状与主要缺口
 
-`oak-app/Cargo.toml` 当前直接依赖 10 个 Oak 内部 crate，尚未依赖 Rust SDK。
+（迁移前现状，记录用）`oak-app/Cargo.toml` 曾直接依赖 10 个 Oak 内部 crate；
+P7 完成后普通依赖只剩 `oak-engine-rust-sdk`，边界守卫为 0 引用 / 0 内部依赖。
 `RealEngine` 明确采用“直接驱动模块 crate、无 C ABI”的 M14 R3 路线。直接引用
 分布在 25 个源码文件及 `waveform_e2e.rs`，不是只改 `real.rs` 就能完成。
 
@@ -197,12 +198,14 @@ crates/oak-app/src/oakui/
   剪贴板、嵌套和速度；每个命令只执行一次并返回 revision。
 - 以迁入测试、全变体 ABI 测试和 undo/redo/保存重开验证。
 
-### P2B：RealEngine 采用、历史与依赖收口（历史统一已完成，其余收口转入 P7）
+### P2B：RealEngine 采用、历史与依赖收口（已完成：历史统一 + P7B 依赖收口）
 
 本轮先在 P3D 发现 engine dylib 与 app rlib 双 undo 栈的问题，随后统一为 engine
 历史栈：graphops 的遗留 `UndoCommand` 通过迁移期 owned 转移入口写入同一栈，
 RealEngine 的 undo/redo/history/jump/group 全部改走 SDK。P3D 必需的历史语义已验证，
-但 `oak-timeline` / `oak-undo` 类型与其他内部依赖的完全清零仍转入 P7。
+`oak-timeline` / `oak-undo` 类型与其他内部依赖的完全清零由 P7B 完成：app 的
+`ProjectRef` 改为 SDK `Project` 句柄，`graphops`/`real` 的图与时间线适配只走
+SDK 查询与命令，10 个内部 crate 依赖全部删除。
 
 - RealEngine 采用 P1 的 `EditorSession`，一次性切换工程实例、write-through
   绑定和项目级 OCIO/cache/color 设置；删除剩余 `oak-storage` 直调，并用会话
@@ -246,7 +249,7 @@ engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参�
 **出口**：独立消费者能从媒体导入走到代理、多机位和同步；app 不再直接依赖
 `oak-codec`/`oak-audio` 的媒体与同步 API。
 
-### P5：渲染、异步预览、播放与导出
+### P5：渲染、异步预览、播放与导出（已完成）
 
 - 将 montage、render ticket、进程池帧句柄和音频块调度迁入引擎；保留现有
   M15/M16 线程与 worker 拓扑，不能为了封装改成 UI 同步渲染。
@@ -262,7 +265,7 @@ engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参�
 **出口**：独立消费者能连续播放、暂停、逐帧、渲染音频和导出；现有黄金帧、
 音频长度、取消、worker 故障隔离和非 UI 线程渲染测试保持通过。
 
-### P6：OFX 与高级交互收尾
+### P6：OFX 与高级交互收尾（已完成）
 
 - 把 OFX 初始化、active viewer、project extent、进度与取消统一到 SDK 生命周期。
 - 为 interact 定义与 UI 无关的指针/键盘/视口命令及 overlay 绘制数据；确需原生
@@ -274,7 +277,7 @@ engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参�
 **出口**：不直接依赖 `oak-ofx-plugin` 的消费者可发现和使用插件效果；交互插件
 能力有明确降级，不再有 app 私有注册或回调。
 
-### P7：oak-app 依赖清零与文档收口
+### P7：oak-app 依赖清零与文档收口（已完成）
 
 - 删除已经失去调用者的 app 领域模块与重复 RAII helper；保留必要的 UI 单测，
   将领域测试迁到真正拥有实现的 engine/SDK。
@@ -363,10 +366,10 @@ app 和独立消费者不得未定义引用内部模块符号，所有 Oak 引�
 
 只有以下条件全部满足，本计划才可归档到 `completed/`：
 
-- [ ] `oak-app` 普通及开发依赖中的 Oak 引擎项只剩 `oak-engine-rust-sdk`。
-- [ ] app 源码/测试无内部 crate 引用、私有 FFI、动态符号绕行和领域实现副本。
-- [ ] P1–P6 的每类能力都有 engine 实现、C ABI 测试和 SDK 集成测试。
-- [ ] 现有 UI、编辑、历史、预览、音频、导出及工程兼容性测试无回归。
+- [x] `oak-app` 普通及开发依赖中的 Oak 引擎项只剩 `oak-engine-rust-sdk`。
+- [x] app 源码/测试无内部 crate 引用、私有 FFI、动态符号绕行和领域实现副本。
+- [x] P1–P6 的每类能力都有 engine 实现、C ABI 测试和 SDK 集成测试。
+- [x] 现有 UI、编辑、历史、预览、音频、导出及工程兼容性测试无回归。
 - [ ] `examples/sdk_editor` 不依赖 `oak-app` 或其他 Oak 内部 crate，完整工作流通过。
 - [ ] SDK 有面向新前端的生命周期、线程、错误、所有权和任务/事件使用文档。
 - [ ] 三平台 CI 构建、链接和冒烟通过，依赖与源码守卫持续启用。
