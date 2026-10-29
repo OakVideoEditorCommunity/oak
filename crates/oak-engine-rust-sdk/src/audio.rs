@@ -80,18 +80,31 @@ pub struct PushError(pub String);
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SampleFormat {
+	/// An invalid or unrecognized format.
 	Invalid = -1,
+	/// Planar unsigned 8-bit.
 	U8Planar = 0,
+	/// Planar signed 16-bit.
 	S16Planar = 1,
+	/// Planar signed 32-bit.
 	S32Planar = 2,
+	/// Planar signed 64-bit.
 	S64Planar = 3,
+	/// Planar 32-bit float.
 	F32Planar = 4,
+	/// Planar 64-bit float.
 	F64Planar = 5,
+	/// Interleaved unsigned 8-bit.
 	U8 = 6,
+	/// Interleaved signed 16-bit.
 	S16 = 7,
+	/// Interleaved signed 32-bit.
 	S32 = 8,
+	/// Interleaved signed 64-bit.
 	S64 = 9,
+	/// Interleaved 32-bit float.
 	F32 = 10,
+	/// Interleaved 64-bit float.
 	F64 = 11,
 }
 
@@ -110,6 +123,7 @@ pub struct AudioParams {
 }
 
 impl AudioParams {
+	/// Creates a new value.
 	pub fn new(sample_rate: i32, channel_layout: u64, format: SampleFormat) -> Self {
 		Self {
 			sample_rate,
@@ -118,6 +132,7 @@ impl AudioParams {
 		}
 	}
 
+	/// The `format` operation.
 	pub fn format(&self) -> SampleFormat {
 		match self.format {
 			0 => SampleFormat::U8Planar,
@@ -153,10 +168,12 @@ pub fn destroy_instance() {
 	unsafe { oak_audio_manager_destroy_instance() };
 }
 
+/// The `output_device_names` operation.
 pub fn output_device_names() -> VecString {
 	unsafe { VecString::from_raw(oak_audio_manager_output_device_names()) }
 }
 
+/// The `input_device_names` operation.
 pub fn input_device_names() -> VecString {
 	unsafe { VecString::from_raw(oak_audio_manager_input_device_names()) }
 }

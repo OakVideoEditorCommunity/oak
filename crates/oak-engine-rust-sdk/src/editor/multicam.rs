@@ -36,10 +36,15 @@ struct RawMulticamState {
 /// Resolved multicam node, source sequence and current angle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MulticamState {
+	/// The `sequence` field.
 	pub sequence: NodeId,
+	/// The `multicam` field.
 	pub multicam: NodeId,
+	/// The `clip` field.
 	pub clip: NodeId,
+	/// The `source_count` field.
 	pub source_count: i32,
+	/// The `current_source` field.
 	pub current_source: i32,
 }
 impl EditorSession {

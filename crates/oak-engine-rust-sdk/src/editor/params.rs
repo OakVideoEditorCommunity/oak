@@ -17,27 +17,49 @@ use raw::*;
 /// preserved instead of being collapsed into a valid built-in type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParameterValueType {
+	/// No value.
 	None,
+	/// An integer value.
 	Int,
+	/// A floating-point value.
 	Float,
+	/// A rational-seconds value.
 	Rational,
+	/// A boolean value.
 	Boolean,
+	/// An RGBA color.
 	Color,
+	/// A 4x4 matrix.
 	Matrix,
+	/// A text value.
 	Text,
+	/// A texture sample.
 	Texture,
+	/// An audio sample buffer.
 	Samples,
+	/// A two-component vector.
 	Vec2,
+	/// A three-component vector.
 	Vec3,
+	/// A four-component vector.
 	Vec4,
+	/// An integer combo selection.
 	Combo,
+	/// A string combo selection.
 	StrCombo,
+	/// Video stream parameters.
 	VideoParams,
+	/// Audio stream parameters.
 	AudioParams,
+	/// Opaque binary data.
 	Binary,
+	/// A push-button action.
 	PushButton,
+	/// A node reference.
 	NodeRef,
+	/// A parametric curve.
 	Parametric,
+	/// A value of a type not modeled here.
 	Other(i32),
 }
 
@@ -73,42 +95,59 @@ impl ParameterValueType {
 /// POD and/or string representation of a parameter value.
 #[derive(Clone, Debug)]
 pub struct ParameterValue {
+	/// The `pod` field.
 	pub pod: Option<NodeValue>,
+	/// The `text` field.
 	pub text: Option<String>,
 }
 
 /// One input property such as a combo option, UI group or numeric bound.
 #[derive(Clone, Debug)]
 pub struct ParameterProperty {
+	/// The `key` field.
 	pub key: String,
+	/// The `value` field.
 	pub value: ParameterValue,
 }
 
 /// Interpolation to the next keyframe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyframeInterpolation {
+	/// Holds the previous value until the next key.
 	Hold,
+	/// Interpolates linearly between keys.
 	Linear,
+	/// Interpolates with Bezier handles.
 	Bezier,
 }
 
 /// One owned keyframe with relative bezier handles.
 #[derive(Clone, Debug)]
 pub struct ParameterKeyframe {
+	/// The `time` field.
 	pub time: Rational,
+	/// The `value` field.
 	pub value: ParameterValue,
+	/// The `interpolation` field.
 	pub interpolation: KeyframeInterpolation,
+	/// The `bezier_in` field.
 	pub bezier_in: (f64, f64),
+	/// The `bezier_out` field.
 	pub bezier_out: (f64, f64),
 }
 
 /// One visible declared parameter and all of its element data.
 #[derive(Clone, Debug)]
 pub struct Parameter {
+	/// The `input_id` field.
 	pub input_id: String,
+	/// The `label` field.
 	pub label: String,
+	/// The `value_type` field.
 	pub value_type: ParameterValueType,
+	/// The `flags` field.
 	pub flags: u32,
+	/// The `properties` field.
 	pub properties: Vec<ParameterProperty>,
 	/// Static values keyed by element; scalar inputs use element `-1`.
 	pub values: Vec<(i32, ParameterValue)>,
@@ -134,7 +173,9 @@ impl Parameter {
 /// Immutable parameter state for one node at `revision`.
 #[derive(Clone, Debug)]
 pub struct ParameterSnapshot {
+	/// The `revision` field.
 	pub revision: i64,
+	/// The `params` field.
 	pub params: Vec<Parameter>,
 }
 

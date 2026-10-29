@@ -109,7 +109,9 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RationalTime {
+	/// The `value` field.
 	pub value: f64,
+	/// The `rate` field.
 	pub rate: f64,
 }
 
@@ -129,7 +131,9 @@ impl RationalTime {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TimeRange {
+	/// The `start_time` field.
 	pub start_time: RationalTime,
+	/// The `duration` field.
 	pub duration: RationalTime,
 }
 
@@ -146,7 +150,9 @@ impl TimeRange {
 /// The root kind of a [`Document`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DocumentKind {
+	/// An OpenTimelineIO Timeline.
 	Timeline,
+	/// An OpenTimelineIO Collection.
 	Collection,
 	/// An unrecognized root schema (kept whole for round-tripping).
 	Raw,
@@ -155,8 +161,11 @@ pub enum DocumentKind {
 /// The kind of a [`Composable`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComposableKind {
+	/// A Clip composable.
 	Clip,
+	/// A Gap composable.
 	Gap,
+	/// A Transition composable.
 	Transition,
 	/// Nested track/stack or an unrecognized schema (kept whole).
 	Other,
@@ -164,7 +173,9 @@ pub enum ComposableKind {
 
 /// OTIO track kinds.
 pub mod track_kind {
+	/// The `VIDEO` constant.
 	pub const VIDEO: &str = "Video";
+	/// The `AUDIO` constant.
 	pub const AUDIO: &str = "Audio";
 }
 

@@ -10,8 +10,11 @@ use crate::types::{Rational, TimeRange};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Track-list kind exposed without depending on engine-internal track types.
 pub enum TrackKind {
+	/// A video track.
 	Video,
+	/// An audio track.
 	Audio,
+	/// A subtitle track.
 	Subtitle,
 }
 
@@ -28,9 +31,13 @@ pub(crate) fn track_kind(raw: i32) -> Option<TrackKind> {
 #[derive(Clone, Debug, PartialEq)]
 /// One project-explorer entry. Only folders have recursive `children`.
 pub struct EntrySnapshot {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `kind` field.
 	pub kind: Option<NodeKind>,
+	/// The `name` field.
 	pub name: String,
+	/// The `children` field.
 	pub children: Vec<EntrySnapshot>,
 }
 
@@ -130,25 +137,40 @@ pub(crate) fn sequence_snapshot(project: &Project, id: NodeId) -> SequenceSnapsh
 #[derive(Clone, Debug, PartialEq)]
 /// Sequence format, playback state and flattened track contents.
 pub struct SequenceSnapshot {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `name` field.
 	pub name: String,
+	/// The `width` field.
 	pub width: i32,
+	/// The `height` field.
 	pub height: i32,
+	/// The `frame_rate` field.
 	pub frame_rate: Rational,
+	/// The `interlaced` field.
 	pub interlaced: bool,
+	/// The `length` field.
 	pub length: Rational,
+	/// The `playhead` field.
 	pub playhead: Rational,
+	/// The `tracks` field.
 	pub tracks: Vec<TrackSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 /// One timeline track and its blocks in timeline order.
 pub struct TrackSnapshot {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `kind` field.
 	pub kind: Option<TrackKind>,
+	/// The `height` field.
 	pub height: f64,
+	/// The `muted` field.
 	pub muted: bool,
+	/// The `locked` field.
 	pub locked: bool,
+	/// The `clips` field.
 	pub clips: Vec<ClipSnapshot>,
 }
 
@@ -156,41 +178,62 @@ pub struct TrackSnapshot {
 /// Block timing on the sequence (`in_time`/`out_time`) and in its source media
 /// (`media_in`/`media_out`). Ranges are half-open.
 pub struct ClipSnapshot {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `kind` field.
 	pub kind: Option<NodeKind>,
+	/// The `name` field.
 	pub name: String,
+	/// The `in_time` field.
 	pub in_time: Rational,
+	/// The `out_time` field.
 	pub out_time: Rational,
+	/// The `media_in` field.
 	pub media_in: Rational,
+	/// The `media_out` field.
 	pub media_out: Rational,
+	/// The `enabled` field.
 	pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 /// Project-bin footage metadata and first-stream decode parameters.
 pub struct FootageSnapshot {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `name` field.
 	pub name: String,
+	/// The `filename` field.
 	pub filename: Option<String>,
+	/// The `duration` field.
 	pub duration: Rational,
+	/// The `video_streams` field.
 	pub video_streams: usize,
+	/// The `audio_streams` field.
 	pub audio_streams: usize,
+	/// The `subtitle_streams` field.
 	pub subtitle_streams: usize,
+	/// The `video` field.
 	pub video: Option<StreamVideoParams>,
+	/// The `audio` field.
 	pub audio: Option<StreamAudioParams>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 /// One sequence-local marker.
 pub struct MarkerSnapshot {
+	/// The `name` field.
 	pub name: String,
+	/// The `time` field.
 	pub time: TimeRange,
+	/// The `color` field.
 	pub color: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 /// Enabled sequence work area; absence is represented by `None` in the project.
 pub struct WorkAreaSnapshot {
+	/// The `range` field.
 	pub range: TimeRange,
 }
 
@@ -200,16 +243,27 @@ pub struct WorkAreaSnapshot {
 /// `root` preserves the explorer hierarchy; `sequences` and `footages` provide
 /// flattened access without walking that hierarchy.
 pub struct ProjectSnapshot {
+	/// The `revision` field.
 	pub revision: i64,
+	/// The `name` field.
 	pub name: String,
+	/// The `filename` field.
 	pub filename: String,
+	/// The `uuid` field.
 	pub uuid: String,
+	/// The `modified` field.
 	pub modified: bool,
+	/// The `root` field.
 	pub root: EntrySnapshot,
+	/// The `sequences` field.
 	pub sequences: Vec<SequenceSnapshot>,
+	/// The `footages` field.
 	pub footages: Vec<FootageSnapshot>,
+	/// The `current_sequence` field.
 	pub current_sequence: Option<NodeId>,
+	/// The `markers` field.
 	pub markers: Vec<MarkerSnapshot>,
+	/// The `workarea` field.
 	pub workarea: Option<WorkAreaSnapshot>,
 }
 

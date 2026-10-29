@@ -8,6 +8,7 @@ use crate::codec::string_out;
 
 #[cfg_attr(windows, link(name = "oak_engine.dll.lib", kind = "dylib", modifiers = "+verbatim"))]
 #[cfg_attr(not(windows), link(name = "oak_engine", kind = "dylib"))]
+#[allow(improper_ctypes)]
 unsafe extern "C" {
 	fn oak_core_colormath_working_to_display_target(
 		data: *mut f32,
@@ -205,7 +206,9 @@ pub fn lut_display_domain() -> ([f32; 3], [f32; 3]) {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Xy {
+	/// The `x` field.
 	pub x: f32,
+	/// The `y` field.
 	pub y: f32,
 }
 
@@ -213,9 +216,13 @@ pub struct Xy {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Primaries {
+	/// The `red` field.
 	pub red: Xy,
+	/// The `green` field.
 	pub green: Xy,
+	/// The `blue` field.
 	pub blue: Xy,
+	/// The `white` field.
 	pub white: Xy,
 }
 

@@ -19,7 +19,9 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ThumbnailInfo {
+	/// The `width` field.
 	pub width: i32,
+	/// The `height` field.
 	pub height: i32,
 	/// Number of F32 values; equals `width * height * 4` for valid results.
 	pub pixel_count: usize,

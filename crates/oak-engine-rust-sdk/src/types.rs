@@ -50,7 +50,9 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Rational {
+	/// The `num` field.
 	pub num: i64,
+	/// The `den` field.
 	pub den: i64,
 }
 
@@ -64,6 +66,7 @@ impl Rational {
 		unsafe { oak_core_rational_new(num, den) }
 	}
 
+	/// The `is_null` operation.
 	pub fn is_null(self) -> bool {
 		unsafe { oak_core_rational_is_null(self) }
 	}
@@ -73,6 +76,7 @@ impl Rational {
 		unsafe { oak_core_rational_is_nan(self) }
 	}
 
+	/// The `to_f64` operation.
 	pub fn to_f64(self) -> f64 {
 		unsafe { oak_core_rational_to_f64(self) }
 	}
@@ -194,11 +198,17 @@ impl TimeRange {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PixelFormat {
+	/// An invalid pixel format.
 	Invalid = -1,
+	/// Unsigned 8-bit.
 	U8 = 0,
+	/// Unsigned 10-bit.
 	U10 = 1,
+	/// Unsigned 16-bit.
 	U16 = 2,
+	/// 16-bit float.
 	F16 = 3,
+	/// 32-bit float.
 	F32 = 4,
 }
 
@@ -212,10 +222,12 @@ impl PixelFormat {
 		}
 	}
 
+	/// The `bytes_per_channel` operation.
 	pub fn bytes_per_channel(self) -> i32 {
 		unsafe { oak_core_pixelformat_bytes_per_channel(self as i32) }
 	}
 
+	/// The `bytes_per_pixel` operation.
 	pub fn bytes_per_pixel(self, channels: i32) -> i32 {
 		unsafe { oak_core_pixelformat_bytes_per_pixel(self as i32, channels) }
 	}
@@ -233,29 +245,53 @@ impl PixelFormat {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct VideoParams {
+	/// The `width` field.
 	pub width: i32,
+	/// The `height` field.
 	pub height: i32,
+	/// The `depth` field.
 	pub depth: i32,
+	/// The `time_base_num` field.
 	pub time_base_num: i32,
+	/// The `time_base_den` field.
 	pub time_base_den: i32,
+	/// The `frame_rate_num` field.
 	pub frame_rate_num: i32,
+	/// The `frame_rate_den` field.
 	pub frame_rate_den: i32,
+	/// The `pixel_aspect_num` field.
 	pub pixel_aspect_num: i32,
+	/// The `pixel_aspect_den` field.
 	pub pixel_aspect_den: i32,
+	/// The `format` field.
 	pub format: i32,
+	/// The `channel_count` field.
 	pub channel_count: i32,
+	/// The `interlacing` field.
 	pub interlacing: i32,
+	/// The `divider` field.
 	pub divider: i32,
+	/// The `enabled` field.
 	pub enabled: i32,
+	/// The `x` field.
 	pub x: f32,
+	/// The `y` field.
 	pub y: f32,
+	/// The `stream_index` field.
 	pub stream_index: i32,
+	/// The `video_type` field.
 	pub video_type: i32,
+	/// The `start_time` field.
 	pub start_time: i64,
+	/// The `duration` field.
 	pub duration: i64,
+	/// The `premultiplied_alpha` field.
 	pub premultiplied_alpha: i32,
+	/// The `color_range` field.
 	pub color_range: i32,
+	/// The `color_primaries` field.
 	pub color_primaries: i32,
+	/// The `color_transfer` field.
 	pub color_transfer: i32,
 	/// Colorspace name, NUL-terminated (63 bytes max).
 	colorspace: [u8; 64],
@@ -339,12 +375,19 @@ impl Default for VideoParams {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AudioStreamParams {
+	/// The `sample_rate` field.
 	pub sample_rate: i32,
+	/// The `channel_layout` field.
 	pub channel_layout: u64,
+	/// The `format` field.
 	pub format: i32,
+	/// The `stream_index` field.
 	pub stream_index: i32,
+	/// The `duration` field.
 	pub duration: i64,
+	/// The `time_base_num` field.
 	pub time_base_num: i32,
+	/// The `time_base_den` field.
 	pub time_base_den: i32,
 }
 
@@ -354,8 +397,11 @@ pub struct AudioStreamParams {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SubtitleParams {
+	/// The `stream_index` field.
 	pub stream_index: i32,
+	/// The `enabled` field.
 	pub enabled: i32,
+	/// The `entry_count` field.
 	pub entry_count: i32,
 }
 

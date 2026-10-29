@@ -18,8 +18,11 @@ unsafe extern "C" {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameOrigin {
+	/// The frame was produced on the CPU.
 	Cpu = 0,
+	/// The frame lives in a GPU texture.
 	Gpu = 1,
+	/// The frame came from a worker shared-memory slot.
 	SharedMemory = 2,
 }
 
@@ -33,7 +36,9 @@ impl Default for FrameOrigin {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VideoPixelFormat {
+	/// Tight F32 RGBA samples.
 	F32Rgba = 0,
+	/// Packed BGRA8 bytes.
 	Bgra8 = 1,
 }
 
@@ -47,11 +52,17 @@ impl Default for VideoPixelFormat {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VideoFrameInfo {
+	/// The `width` field.
 	pub width: i32,
+	/// The `height` field.
 	pub height: i32,
+	/// The `linesize` field.
 	pub linesize: i32,
+	/// The `origin` field.
 	pub origin: FrameOrigin,
+	/// The `pixel_format` field.
 	pub pixel_format: VideoPixelFormat,
+	/// The `byte_count` field.
 	pub byte_count: usize,
 }
 

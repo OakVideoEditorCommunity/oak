@@ -242,46 +242,82 @@ unsafe extern "C" {
 /// OFX action status codes (`kOfxStat*`); interact action entry
 /// points return these.
 pub mod status {
+	/// The `OK` constant.
 	pub const OK: i32 = 0;
+	/// The `FAILED` constant.
 	pub const FAILED: i32 = 1;
+	/// The `ERR_FATAL` constant.
 	pub const ERR_FATAL: i32 = 2;
+	/// The `ERR_UNKNOWN` constant.
 	pub const ERR_UNKNOWN: i32 = 3;
+	/// The `ERR_MISSING_HOST_FEATURE` constant.
 	pub const ERR_MISSING_HOST_FEATURE: i32 = 4;
+	/// The `ERR_UNSUPPORTED` constant.
 	pub const ERR_UNSUPPORTED: i32 = 5;
+	/// The `ERR_EXISTS` constant.
 	pub const ERR_EXISTS: i32 = 6;
+	/// The `ERR_FORMAT` constant.
 	pub const ERR_FORMAT: i32 = 7;
+	/// The `ERR_MEMORY` constant.
 	pub const ERR_MEMORY: i32 = 8;
+	/// The `ERR_BAD_HANDLE` constant.
 	pub const ERR_BAD_HANDLE: i32 = 9;
+	/// The `ERR_BAD_INDEX` constant.
 	pub const ERR_BAD_INDEX: i32 = 10;
+	/// The `ERR_VALUE` constant.
 	pub const ERR_VALUE: i32 = 11;
+	/// The `REPLY_YES` constant.
 	pub const REPLY_YES: i32 = 12;
+	/// The `REPLY_NO` constant.
 	pub const REPLY_NO: i32 = 13;
+	/// The `REPLY_DEFAULT` constant.
 	pub const REPLY_DEFAULT: i32 = 14;
 }
 
 /// ofxKeySyms values for [`Interact::key_down`]/[`Interact::key_up`]
 /// (printable ASCII keys carry their ASCII code as the symbol).
 pub mod key {
+	/// The `UNKNOWN` constant.
 	pub const UNKNOWN: i32 = 0x0;
+	/// The `BACKSPACE` constant.
 	pub const BACKSPACE: i32 = 0xFF08;
+	/// The `TAB` constant.
 	pub const TAB: i32 = 0xFF09;
+	/// The `RETURN` constant.
 	pub const RETURN: i32 = 0xFF0D;
+	/// The `ESCAPE` constant.
 	pub const ESCAPE: i32 = 0xFF1B;
+	/// The `DELETE` constant.
 	pub const DELETE: i32 = 0xFFFF;
+	/// The `HOME` constant.
 	pub const HOME: i32 = 0xFF50;
+	/// The `LEFT` constant.
 	pub const LEFT: i32 = 0xFF51;
+	/// The `UP` constant.
 	pub const UP: i32 = 0xFF52;
+	/// The `RIGHT` constant.
 	pub const RIGHT: i32 = 0xFF53;
+	/// The `DOWN` constant.
 	pub const DOWN: i32 = 0xFF54;
+	/// The `PAGE_UP` constant.
 	pub const PAGE_UP: i32 = 0xFF55;
+	/// The `PAGE_DOWN` constant.
 	pub const PAGE_DOWN: i32 = 0xFF56;
+	/// The `END` constant.
 	pub const END: i32 = 0xFF57;
+	/// The `F1` constant.
 	pub const F1: i32 = 0xFFBE;
+	/// The `SHIFT_L` constant.
 	pub const SHIFT_L: i32 = 0xFFE1;
+	/// The `CONTROL_L` constant.
 	pub const CONTROL_L: i32 = 0xFFE3;
+	/// The `ALT_L` constant.
 	pub const ALT_L: i32 = 0xFFE9;
+	/// The `SPACE` constant.
 	pub const SPACE: i32 = 0x020;
+	/// The `A` constant.
 	pub const A: i32 = 0x061;
+	/// The `Z` constant.
 	pub const Z: i32 = 0x07a;
 }
 
@@ -838,9 +874,13 @@ impl Drop for Instance {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RectD {
+	/// The `x1` field.
 	pub x1: f64,
+	/// The `y1` field.
 	pub y1: f64,
+	/// The `x2` field.
 	pub x2: f64,
+	/// The `y2` field.
 	pub y2: f64,
 }
 
@@ -997,8 +1037,11 @@ impl Drop for Interact {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ControlPoint {
+	/// The `key` field.
 	pub key: f64,
+	/// The `value` field.
 	pub value: f64,
+	/// The `slope` field.
 	pub slope: f64,
 }
 
@@ -1134,6 +1177,7 @@ impl Drop for CurveSet {
 /// An owned parametric curve DTO used by UI editors and SDK consumers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Curve {
+	/// The `points` field.
 	pub points: Vec<ControlPoint>,
 }
 
@@ -1204,7 +1248,7 @@ pub fn curves_to_json(curves: &[Curve]) -> String {
 
 /// The offscreen GL bridge behind interact drawing and GL-mode
 /// renders. Texture/FBO creation and deletion require an acquired
-/// context ([`acquire`]); everything fails closed when GL is
+/// context ([`gl::acquire`]); everything fails closed when GL is
 /// unavailable.
 pub mod gl {
 	use super::*;

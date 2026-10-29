@@ -126,9 +126,13 @@ pub fn block_set_enabled(project: &Project, block: NodeId, enabled: bool) -> boo
 /// How a trim moves the block/neighbours.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrimMode {
+	/// No trim.
 	None,
+	/// A move edit.
 	Move,
+	/// Trim the in point.
 	TrimIn,
+	/// Trim the out point.
 	TrimOut,
 }
 

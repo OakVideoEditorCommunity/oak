@@ -92,11 +92,17 @@ struct GraphEdgeRaw {
 /// Semantic node role in the graph view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphNodeRole {
+	/// An effect node.
 	Effect,
+	/// The sequence output node.
 	Sequence,
+	/// A clip host node.
 	Clip,
+	/// A footage source node.
 	Footage,
+	/// The virtual graph input.
 	InputEndpoint,
+	/// The virtual graph output.
 	OutputEndpoint,
 }
 
@@ -116,7 +122,9 @@ impl GraphNodeRole {
 /// Stream media accepted by a visible graph port.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphMediaType {
+	/// A texture port.
 	Texture,
+	/// An audio-samples port.
 	Samples,
 }
 
@@ -125,25 +133,36 @@ pub enum GraphMediaType {
 pub struct GraphPort {
 	/// Empty only for an implicit main output; otherwise the declared input ID.
 	pub id: String,
+	/// The `label` field.
 	pub label: String,
+	/// The `declaration_index` field.
 	pub declaration_index: usize,
+	/// The `media_type` field.
 	pub media_type: Option<GraphMediaType>,
+	/// The `connected` field.
 	pub connected: bool,
+	/// The `connectable` field.
 	pub connectable: bool,
 }
 
 /// One detached graph node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GraphNode {
+	/// The `id` field.
 	pub id: NodeId,
+	/// The `type_id` field.
 	pub type_id: String,
+	/// The `label` field.
 	pub label: String,
+	/// The `role` field.
 	pub role: GraphNodeRole,
 	/// Sequence and virtual endpoint nodes must not be deleted or renamed.
 	pub protected: bool,
+	/// The `enabled` field.
 	pub enabled: bool,
 	/// Persisted nonzero position in the current sequence context, if present.
 	pub position: Option<(f64, f64)>,
+	/// The `inputs` field.
 	pub inputs: Vec<GraphPort>,
 	/// `None` only for the output endpoint, which is a pure sink.
 	pub output: Option<GraphPort>,
@@ -152,9 +171,13 @@ pub struct GraphNode {
 /// One real or synthetic graph connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphEdge {
+	/// The `from` field.
 	pub from: NodeId,
+	/// The `to` field.
 	pub to: NodeId,
+	/// The `input_id` field.
 	pub input_id: String,
+	/// The `element` field.
 	pub element: i32,
 	/// True for the full view's display-only clip-to-sequence output wire.
 	pub synthetic: bool,
@@ -163,8 +186,11 @@ pub struct GraphEdge {
 /// A consistent, fully owned graph view at `revision`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GraphSnapshot {
+	/// The `revision` field.
 	pub revision: i64,
+	/// The `nodes` field.
 	pub nodes: Vec<GraphNode>,
+	/// The `edges` field.
 	pub edges: Vec<GraphEdge>,
 }
 

@@ -101,32 +101,48 @@ unsafe extern "C" {
 pub struct EncodingParams {
 	/// Export format id.
 	pub format: i32,
+	/// The `video_enabled` field.
 	pub video_enabled: bool,
+	/// The `video_codec` field.
 	pub video_codec: i32,
+	/// The `video_width` field.
 	pub video_width: i32,
+	/// The `video_height` field.
 	pub video_height: i32,
 	/// Frame duration rational (numerator/denominator).
 	pub video_time_base_num: i32,
+	/// The `video_time_base_den` field.
 	pub video_time_base_den: i32,
 	/// Delivery pixel format.
 	pub video_pixel_format: i32,
+	/// The `audio_enabled` field.
 	pub audio_enabled: bool,
+	/// The `audio_codec` field.
 	pub audio_codec: i32,
+	/// The `audio_sample_rate` field.
 	pub audio_sample_rate: i32,
+	/// The `audio_channel_layout` field.
 	pub audio_channel_layout: u64,
+	/// The `subtitles_enabled` field.
 	pub subtitles_enabled: bool,
 	/// Export length, rational seconds.
 	pub export_length_num: i32,
+	/// The `export_length_den` field.
 	pub export_length_den: i32,
 	/// Whether `[custom_range_in, custom_range_out)` replaces the whole
 	/// viewer length.
 	pub has_custom_range: bool,
+	/// The `custom_range_in_num` field.
 	pub custom_range_in_num: i32,
+	/// The `custom_range_in_den` field.
 	pub custom_range_in_den: i32,
+	/// The `custom_range_out_num` field.
 	pub custom_range_out_num: i32,
+	/// The `custom_range_out_den` field.
 	pub custom_range_out_den: i32,
 	/// 0 = codec default.
 	pub video_bit_rate: i64,
+	/// The `audio_bit_rate` field.
 	pub audio_bit_rate: i64,
 	/// 0 = the project's output spec; 1 = apply the color_* fields.
 	pub color_override_enabled: bool,
@@ -141,9 +157,13 @@ pub struct EncodingParams {
 /// A task's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskState {
+	/// The task is still running.
 	Running,
+	/// The task completed successfully.
 	Succeeded,
+	/// The task failed.
 	Failed,
+	/// The task was cancelled.
 	Cancelled,
 }
 

@@ -323,14 +323,23 @@ fn the_id(raw: u64) -> Option<NodeId> {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeKind {
+	/// A project-bin folder.
 	Folder = 1,
+	/// A footage (media) node.
 	Footage = 2,
+	/// A sequence.
 	Sequence = 3,
+	/// A track.
 	Track = 4,
+	/// A clip block.
 	Clip = 5,
+	/// A gap block.
 	Gap = 6,
+	/// A transition block.
 	Transition = 7,
+	/// An adjustment layer.
 	Adjustment = 8,
+	/// A track list.
 	TrackList = 9,
 }
 
@@ -355,11 +364,17 @@ impl NodeKind {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StreamVideoParams {
+	/// The `width` field.
 	pub width: i32,
+	/// The `height` field.
 	pub height: i32,
+	/// The `frame_rate` field.
 	pub frame_rate: Rational,
+	/// The `pixel_format` field.
 	pub pixel_format: i32,
+	/// The `channels` field.
 	pub channels: i32,
+	/// The `interlaced` field.
 	pub interlaced: i32,
 }
 
@@ -367,8 +382,11 @@ pub struct StreamVideoParams {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StreamAudioParams {
+	/// The `sample_rate` field.
 	pub sample_rate: i32,
+	/// The `channel_layout` field.
 	pub channel_layout: u64,
+	/// The `format` field.
 	pub format: i32,
 }
 
@@ -383,7 +401,7 @@ pub struct NodeValue {
 	pub num: i64,
 	/// RATIONAL denominator.
 	pub den: i64,
-	/// FLOAT f[0]; VEC2/3/4 f[0..n-1]; COLOR r,g,b,a.
+	/// FLOAT `f[0]`; VEC2/3/4 `f[0..n-1]`; COLOR r,g,b,a.
 	pub f: [f64; 4],
 }
 
@@ -582,14 +600,17 @@ impl Project {
 		unsafe { oak_footage_total_stream_count(self.ptr, footage.0) as usize }
 	}
 
+	/// The `footage_video_stream_count` operation.
 	pub fn footage_video_stream_count(&self, footage: NodeId) -> usize {
 		unsafe { oak_footage_video_stream_count(self.ptr, footage.0) as usize }
 	}
 
+	/// The `footage_audio_stream_count` operation.
 	pub fn footage_audio_stream_count(&self, footage: NodeId) -> usize {
 		unsafe { oak_footage_audio_stream_count(self.ptr, footage.0) as usize }
 	}
 
+	/// The `footage_subtitle_stream_count` operation.
 	pub fn footage_subtitle_stream_count(&self, footage: NodeId) -> usize {
 		unsafe { oak_footage_subtitle_stream_count(self.ptr, footage.0) as usize }
 	}
@@ -745,14 +766,17 @@ impl Project {
 		unsafe { oak_track_kind(self.ptr, track.0) }
 	}
 
+	/// The `track_height` operation.
 	pub fn track_height(&self, track: NodeId) -> f64 {
 		unsafe { oak_track_height(self.ptr, track.0) }
 	}
 
+	/// The `track_muted` operation.
 	pub fn track_muted(&self, track: NodeId) -> bool {
 		unsafe { oak_track_muted(self.ptr, track.0) }
 	}
 
+	/// The `track_locked` operation.
 	pub fn track_locked(&self, track: NodeId) -> bool {
 		unsafe { oak_track_locked(self.ptr, track.0) }
 	}

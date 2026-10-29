@@ -66,10 +66,12 @@ macro_rules! define_vec {
 					Self { ptr }
 				}
 
+				/// The `len` operation.
 				pub fn len(&self) -> usize {
 					unsafe { len_raw(self.ptr) }
 				}
 
+				/// The `is_empty` operation.
 				pub fn is_empty(&self) -> bool {
 					self.len() == 0
 				}
@@ -99,10 +101,12 @@ macro_rules! define_vec {
 					unsafe { clear_raw(self.ptr) };
 				}
 
+				/// The `iter` operation.
 				pub fn iter(&self) -> impl Iterator<Item = &str> + '_ {
 					(0..self.len()).filter_map(move |i| self.get(i))
 				}
 
+				/// The `to_vec` operation.
 				pub fn to_vec(&self) -> Vec<String> {
 					self.iter().map(str::to_owned).collect()
 				}
@@ -177,10 +181,12 @@ macro_rules! define_vec {
 					Self { ptr }
 				}
 
+				/// The `len` operation.
 				pub fn len(&self) -> usize {
 					unsafe { len_raw(self.ptr) }
 				}
 
+				/// The `is_empty` operation.
 				pub fn is_empty(&self) -> bool {
 					self.len() == 0
 				}
@@ -196,6 +202,7 @@ macro_rules! define_vec {
 					}
 				}
 
+				/// The `push` operation.
 				pub fn push(&mut self, value: $elem) {
 					unsafe { push_raw(self.ptr, value) };
 				}
@@ -211,10 +218,12 @@ macro_rules! define_vec {
 					unsafe { clear_raw(self.ptr) };
 				}
 
+				/// The `iter` operation.
 				pub fn iter(&self) -> impl Iterator<Item = $elem> + '_ {
 					(0..self.len()).map(move |i| self.get(i).expect("index < len"))
 				}
 
+				/// The `to_vec` operation.
 				pub fn to_vec(&self) -> Vec<$elem> {
 					self.iter().collect()
 				}

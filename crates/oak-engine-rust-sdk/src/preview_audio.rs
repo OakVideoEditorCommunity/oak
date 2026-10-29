@@ -22,9 +22,13 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AudioBlockInfo {
+	/// The `range` field.
 	pub range: TimeRange,
+	/// The `sample_rate` field.
 	pub sample_rate: i32,
+	/// The `channel_layout` field.
 	pub channel_layout: u64,
+	/// The `channel_count` field.
 	pub channel_count: i32,
 	/// Number of F32 values (`frames * channels`), not frame count.
 	pub sample_count: usize,

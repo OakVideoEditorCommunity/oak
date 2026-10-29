@@ -19,7 +19,9 @@ pub struct PreviewAudioRequest {
 
 /// A completed audio block tagged with its submission generation.
 pub struct PreviewAudio {
+	/// The `generation` field.
 	pub generation: u64,
+	/// The `block` field.
 	pub block: crate::preview_audio::AudioBlock,
 }
 
@@ -61,7 +63,9 @@ impl PreviewAudioRequest {
 /// The viewer domain targeted by a preview session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewKind {
+	/// The source monitor.
 	Source,
+	/// The program monitor.
 	Program,
 }
 
@@ -113,8 +117,11 @@ impl PreviewFrameRequest {
 
 /// An owned, timestamped F32 RGBA preview frame.
 pub struct PreviewFrame {
+	/// The `time` field.
 	pub time: Rational,
+	/// The `generation` field.
 	pub generation: u64,
+	/// The `frame` field.
 	pub frame: crate::preview_video::VideoFrame,
 }
 

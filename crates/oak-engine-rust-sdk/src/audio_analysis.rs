@@ -66,8 +66,11 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SourceClip {
+	/// The `source_start_time` field.
 	pub source_start_time: crate::types::Rational,
+	/// The `media_in` field.
 	pub media_in: crate::types::Rational,
+	/// The `has_source_start_time` field.
 	pub has_source_start_time: bool,
 }
 
@@ -75,7 +78,9 @@ pub struct SourceClip {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SyncPlacement {
+	/// The `timeline_in` field.
 	pub timeline_in: crate::types::Rational,
+	/// The `valid` field.
 	pub valid: bool,
 }
 
@@ -107,8 +112,11 @@ pub fn place_by_waveform_offset(
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OffsetEstimate {
+	/// The `offset_samples` field.
 	pub offset_samples: i64,
+	/// The `confidence` field.
 	pub confidence: f64,
+	/// The `valid` field.
 	pub valid: bool,
 }
 
@@ -116,9 +124,13 @@ pub struct OffsetEstimate {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StretchEstimate {
+	/// The `rate` field.
 	pub rate: f64,
+	/// The `offset_samples` field.
 	pub offset_samples: i64,
+	/// The `confidence` field.
 	pub confidence: f64,
+	/// The `valid` field.
 	pub valid: bool,
 }
 
@@ -200,7 +212,9 @@ pub struct WaveformInfo {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MinMax {
+	/// The `min` field.
 	pub min: f32,
+	/// The `max` field.
 	pub max: f32,
 }
 

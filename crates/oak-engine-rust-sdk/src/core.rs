@@ -28,10 +28,15 @@ pub use crate::utils;
 
 /// oak-core's error codes (`OAKCORE_*`).
 pub const OK: i32 = 0;
+/// The `E_INVALID` constant.
 pub const E_INVALID: i32 = -10001;
+/// The `E_STATE` constant.
 pub const E_STATE: i32 = -10002;
+/// The `E_FAILED` constant.
 pub const E_FAILED: i32 = -10003;
+/// The `E_NOT_FOUND` constant.
 pub const E_NOT_FOUND: i32 = -10004;
+/// The `E_NOMEM` constant.
 pub const E_NOMEM: i32 = -10005;
 
 /// The config-store key for the on-screen presentation bit depth.
@@ -40,7 +45,9 @@ pub const CONFIG_KEY_DISPLAY_BIT_DEPTH: &str = "DisplayBitDepth";
 /// On-screen presentation bit depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayBitDepth {
+	/// 8-bit output.
 	Bit8,
+	/// 10-bit output.
 	Bit10,
 }
 
@@ -65,7 +72,9 @@ impl DisplayBitDepth {
 /// The project's output gamut and transfer settings as owned strings.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputColorSpec {
+	/// The `gamut` field.
 	pub gamut: String,
+	/// The `transfer` field.
 	pub transfer: String,
 }
 
@@ -91,6 +100,7 @@ pub const DECIBEL_MINIMUM: f64 = -200.0;
 
 /// The default render size.
 pub const DEFAULT_WIDTH: i32 = 1920;
+/// The `DEFAULT_HEIGHT` constant.
 pub const DEFAULT_HEIGHT: i32 = 1080;
 
 /// The pipeline's internal channel count (RGBA F32).
@@ -98,12 +108,14 @@ pub const INTERNAL_CHANNEL_COUNT: i32 = 4;
 
 /// RGB/RGBA channel counts (flattened from `VideoParams`).
 pub const RGB_CHANNEL_COUNT: i32 = 3;
+/// The `RGBA_CHANNEL_COUNT` constant.
 pub const RGBA_CHANNEL_COUNT: i32 = 4;
 
 /// The display LUT's edge size (65³ grid).
 pub const DISPLAY_EDGE: u32 = 65;
 /// The display LUT's input domain: working-space scene-linear values.
 pub const DISPLAY_LO: [f32; 3] = [-0.25, -0.25, -0.25];
+/// The `DISPLAY_HI` constant.
 pub const DISPLAY_HI: [f32; 3] = [4.0, 4.0, 4.0];
 
 /// The supported LUT file extensions (dot-less, case-insensitive).

@@ -172,7 +172,9 @@ pub fn uri_is_valid(uri: &str) -> bool {
 /// A registered backend (name + URI scheme).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendInfo {
+	/// The `name` field.
 	pub name: String,
+	/// The `scheme` field.
 	pub scheme: String,
 }
 
@@ -200,13 +202,21 @@ pub fn backend_for_uri(uri: &str) -> Option<String> {
 /// A project in the library (uuid + display name).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibraryProject {
+	/// The `uuid` field.
 	pub uuid: String,
+	/// The `name` field.
 	pub name: String,
+	/// The `created_at` field.
 	pub created_at: i64,
+	/// The `modified_at` field.
 	pub modified_at: i64,
+	/// The `duration_ms` field.
 	pub duration_ms: i64,
+	/// The `track_count` field.
 	pub track_count: i32,
+	/// The `clip_count` field.
 	pub clip_count: i32,
+	/// The `footage_count` field.
 	pub footage_count: i32,
 }
 
@@ -288,6 +298,7 @@ pub struct ProjectLibrary {
 }
 
 impl ProjectLibrary {
+	/// Creates a new value.
 	pub fn new(uri: impl Into<String>) -> Result<Self, StorageError> {
 		let uri = uri.into();
 		if !uri_is_valid(&uri) || backend_for_uri(&uri).as_deref() != Some("oakdb") {
@@ -296,18 +307,22 @@ impl ProjectLibrary {
 		Ok(Self { uri })
 	}
 
+	/// The `configured` operation.
 	pub fn configured() -> Result<Option<Self>, StorageError> {
 		Ok(default_library_uri().map(|uri| Self { uri }))
 	}
 
+	/// The `uri` operation.
 	pub fn uri(&self) -> &str {
 		&self.uri
 	}
 
+	/// The `projects` operation.
 	pub fn projects(&self) -> Result<Vec<LibraryProject>, StorageError> {
 		library_projects(&self.uri)
 	}
 
+	/// The `create` operation.
 	pub fn create(&self, name: &str) -> Result<String, StorageError> {
 		string_result(|buf, len| unsafe {
 			oak_storage_library_create(
@@ -321,14 +336,17 @@ impl ProjectLibrary {
 		})
 	}
 
+	/// The `delete` operation.
 	pub fn delete(&self, uuid: &str) -> Result<(), StorageError> {
 		library_delete(&self.uri, uuid)
 	}
 
+	/// The `rename` operation.
 	pub fn rename(&self, uuid: &str, name: &str) -> Result<(), StorageError> {
 		library_rename(&self.uri, uuid, name)
 	}
 
+	/// The `duplicate` operation.
 	pub fn duplicate(&self, uuid: &str) -> Result<String, StorageError> {
 		string_result(|buf, len| unsafe {
 			oak_storage_library_duplicate(
@@ -342,6 +360,7 @@ impl ProjectLibrary {
 		})
 	}
 
+	/// The `import` operation.
 	pub fn import(&self, file_uri: &str) -> Result<String, StorageError> {
 		string_result(|buf, len| unsafe {
 			oak_storage_library_import(
@@ -355,6 +374,7 @@ impl ProjectLibrary {
 		})
 	}
 
+	/// The `export` operation.
 	pub fn export(&self, uuid: &str, file_uri: &str) -> Result<(), StorageError> {
 		check(unsafe {
 			oak_storage_library_export(

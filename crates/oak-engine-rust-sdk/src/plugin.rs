@@ -124,8 +124,11 @@ impl PluginDescriptor {
 /// One contributed command (a menu item).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginCommand {
+	/// The `id` field.
 	pub id: String,
+	/// The `title` field.
 	pub title: String,
+	/// The `menu_path` field.
 	pub menu_path: String,
 }
 
@@ -133,6 +136,7 @@ pub struct PluginCommand {
 /// reachable).
 type BoxedCallback = Box<dyn Fn(&str) + Send>;
 
+/// The `Plugin` type.
 pub struct Plugin {
 	index: i32,
 	// Thin pointer to a boxed callback (double-boxed so the pointer is

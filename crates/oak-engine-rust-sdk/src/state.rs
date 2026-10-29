@@ -153,26 +153,32 @@ impl Config {
 		config_set(None, key, value)
 	}
 
+	/// The `get_bool` operation.
 	pub fn get_bool(self, key: &str, fallback: bool) -> bool {
 		config_get_bool(None, key, fallback)
 	}
 
+	/// The `set_bool` operation.
 	pub fn set_bool(self, key: &str, value: bool) -> Result<(), Error> {
 		config_set_bool(None, key, value)
 	}
 
+	/// The `get_i64` operation.
 	pub fn get_i64(self, key: &str, fallback: i64) -> i64 {
 		config_get_i64(None, key, fallback)
 	}
 
+	/// The `set_i64` operation.
 	pub fn set_i64(self, key: &str, value: i64) -> Result<(), Error> {
 		config_set_i64(None, key, value)
 	}
 
+	/// The `get_f64` operation.
 	pub fn get_f64(self, key: &str, fallback: f64) -> f64 {
 		config_get_f64(None, key, fallback)
 	}
 
+	/// The `set_f64` operation.
 	pub fn set_f64(self, key: &str, value: f64) -> Result<(), Error> {
 		config_set_f64(None, key, value)
 	}
@@ -220,6 +226,7 @@ pub fn config_get_bool(group: Option<&str>, key: &str, fallback: bool) -> bool {
 	unsafe { oak_core_config_get_bool(g, gl, k, kl, fallback as i32) != 0 }
 }
 
+/// The `config_set_bool` operation.
 pub fn config_set_bool(group: Option<&str>, key: &str, value: bool) -> Result<(), Error> {
 	let (g, gl) = opt_arg(group);
 	let (k, kl) = arg(key);
@@ -237,6 +244,7 @@ pub fn config_get_i64(group: Option<&str>, key: &str, fallback: i64) -> i64 {
 	unsafe { oak_core_config_get_int64(g, gl, k, kl, fallback) }
 }
 
+/// The `config_set_i64` operation.
 pub fn config_set_i64(group: Option<&str>, key: &str, value: i64) -> Result<(), Error> {
 	let (g, gl) = opt_arg(group);
 	let (k, kl) = arg(key);
@@ -254,6 +262,7 @@ pub fn config_get_f64(group: Option<&str>, key: &str, fallback: f64) -> f64 {
 	unsafe { oak_core_config_get_double(g, gl, k, kl, fallback) }
 }
 
+/// The `config_set_f64` operation.
 pub fn config_set_f64(group: Option<&str>, key: &str, value: f64) -> Result<(), Error> {
 	let (g, gl) = opt_arg(group);
 	let (k, kl) = arg(key);

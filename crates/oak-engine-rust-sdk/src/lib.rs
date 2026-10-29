@@ -4,6 +4,9 @@
 //! (`#[link]`) and talks to it exclusively through its exported
 //! `extern "C"` symbols — the same surface a C consumer sees — wrapped
 //! in idiomatic Rust types and error handling.
+
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
 //!
 #![doc = include_str!("../README.md")]
 
@@ -30,6 +33,7 @@ pub mod thumbnail;
 pub mod timeline;
 pub mod types;
 pub mod utils;
+pub mod worker;
 pub mod vecs;
 
 #[cfg(test)]

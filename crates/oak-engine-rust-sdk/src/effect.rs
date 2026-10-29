@@ -84,17 +84,29 @@ pub const NODE_FLAG_DONT_SHOW_IN_CREATE_MENU: u64 = 0x8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
 pub enum NodeCategory {
+	/// An output node.
 	Output = 0,
+	/// A filter/effect node.
 	Effect = 1,
+	/// A generator node.
 	Generator = 2,
+	/// An input node.
 	Input = 3,
+	/// A math node.
 	Math = 4,
+	/// A color node.
 	Color = 5,
+	/// A distortion node.
 	Distort = 6,
+	/// A filter node.
 	Filter = 7,
+	/// A keying node.
 	Keying = 8,
+	/// An OpenFX plugin node.
 	OpenFx = 9,
+	/// A timeline-structural node.
 	Timeline = 10,
+	/// A group node.
 	Group = 11,
 }
 

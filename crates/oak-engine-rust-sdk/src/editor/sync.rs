@@ -28,9 +28,13 @@ unsafe extern "C" {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClipSyncInfo {
+	/// The `timeline_in` field.
 	pub timeline_in: Rational,
+	/// The `timeline_out` field.
 	pub timeline_out: Rational,
+	/// The `media_in` field.
 	pub media_in: Rational,
+	/// The `source_start_time` field.
 	pub source_start_time: Rational,
 	/// False means `source_start_time` is unset and must not be used to align.
 	pub has_source_start_time: bool,

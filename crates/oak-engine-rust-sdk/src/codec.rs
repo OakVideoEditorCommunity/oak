@@ -246,24 +246,43 @@ pub(crate) fn string_out(f: impl Fn(*mut u8, usize) -> i32) -> Option<String> {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Codec {
+	/// Avid DNxHD video.
 	DNxHD = 0,
+	/// H.264 / AVC video.
 	H264 = 1,
+	/// H.264 in RGB.
 	H264RGB = 2,
+	/// H.265 / HEVC video.
 	H265 = 3,
+	/// OpenEXR image sequence.
 	OpenEXR = 4,
+	/// PNG image sequence.
 	PNG = 5,
+	/// Apple ProRes video.
 	ProRes = 6,
+	/// GoPro CineForm video.
 	CineForm = 7,
+	/// TIFF image sequence.
 	TIFF = 8,
+	/// VP9 video.
 	VP9 = 9,
+	/// MPEG-1 Layer II audio.
 	MP2 = 10,
+	/// MPEG-1 Layer III audio.
 	MP3 = 11,
+	/// AAC audio.
 	AAC = 12,
+	/// Uncompressed PCM audio.
 	PCM = 13,
+	/// Opus audio.
 	Opus = 14,
+	/// Vorbis audio.
 	Vorbis = 15,
+	/// FLAC lossless audio.
 	FLAC = 16,
+	/// SubRip subtitles.
 	SRT = 17,
+	/// AV1 video.
 	AV1 = 18,
 }
 
@@ -308,20 +327,35 @@ impl Codec {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
+	/// Avid DNxHD video.
 	DNxHD = 0,
+	/// Matroska (MKV) container.
 	Matroska = 1,
+	/// MP4 container.
 	MPEG4Video = 2,
+	/// OpenEXR image sequence.
 	OpenEXR = 3,
+	/// QuickTime (MOV) container.
 	QuickTime = 4,
+	/// PNG image sequence.
 	PNG = 5,
+	/// TIFF image sequence.
 	TIFF = 6,
+	/// RIFF WAVE audio.
 	WAV = 7,
+	/// AIFF audio.
 	AIFF = 8,
+	/// MPEG-1 Layer III audio.
 	MP3 = 9,
+	/// FLAC lossless audio.
 	FLAC = 10,
+	/// Ogg container.
 	Ogg = 11,
+	/// WebM container.
 	WebM = 12,
+	/// SubRip subtitles.
 	SRT = 13,
+	/// MPEG-4 audio (M4A).
 	MPEG4Audio = 14,
 }
 
@@ -372,9 +406,13 @@ impl Format {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProxyState {
+	/// No proxy file exists.
 	Missing = 0,
+	/// A proxy transcode is running.
 	Generating = 1,
+	/// A ready proxy file exists.
 	Ready = 2,
+	/// The last proxy job failed.
 	Failed = 3,
 }
 
@@ -445,18 +483,22 @@ impl ProxyParams {
 		Ok(())
 	}
 
+	/// The `extension` operation.
 	pub fn extension(&self) -> &str {
 		Self::read_cstr(&self.extension)
 	}
 
+	/// The `preset` operation.
 	pub fn preset(&self) -> &str {
 		Self::read_cstr(&self.preset)
 	}
 
+	/// The `set_extension` operation.
 	pub fn set_extension(&mut self, value: &str) -> Result<(), ProxyParamsError> {
 		Self::write_cstr(&mut self.extension, value)
 	}
 
+	/// The `set_preset` operation.
 	pub fn set_preset(&mut self, value: &str) -> Result<(), ProxyParamsError> {
 		Self::write_cstr(&mut self.preset, value)
 	}
@@ -515,7 +557,9 @@ struct OakCodecProxyResult {
 /// The outcome of [`proxy_get_or_start`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProxyResult {
+	/// The `state` field.
 	pub state: ProxyState,
+	/// The `filename` field.
 	pub filename: String,
 }
 
@@ -555,7 +599,9 @@ pub fn proxy_get_or_start(
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskKind {
+	/// Conform (transcode) task.
 	Conform = 0,
+	/// Proxy-generation task.
 	Proxy = 1,
 }
 
@@ -563,14 +609,23 @@ pub enum TaskKind {
 /// call only.
 #[derive(Clone, Debug)]
 pub struct TaskRequest<'a> {
+	/// The `kind` field.
 	pub kind: TaskKind,
+	/// The `input_filename` field.
 	pub input_filename: &'a str,
+	/// The `output_filename` field.
 	pub output_filename: &'a str,
+	/// The `stream_index` field.
 	pub stream_index: i32,
+	/// The `sample_rate` field.
 	pub sample_rate: i32,
+	/// The `channel_layout` field.
 	pub channel_layout: u64,
+	/// The `sample_format` field.
 	pub sample_format: i32,
+	/// The `proxy_width` field.
 	pub proxy_width: i32,
+	/// The `proxy_height` field.
 	pub proxy_height: i32,
 }
 
@@ -719,6 +774,7 @@ impl Frame {
 		}
 	}
 
+	/// The `is_allocated` operation.
 	pub fn is_allocated(&self) -> bool {
 		unsafe { oak_codec_frame_is_allocated(self.ptr) }
 	}
@@ -739,18 +795,22 @@ impl Frame {
 		unsafe { oak_codec_frame_allocated_size(self.ptr) }
 	}
 
+	/// The `linesize_bytes` operation.
 	pub fn linesize_bytes(&self) -> i32 {
 		unsafe { oak_codec_frame_linesize_bytes(self.ptr) }
 	}
 
+	/// The `linesize_pixels` operation.
 	pub fn linesize_pixels(&self) -> i32 {
 		unsafe { oak_codec_frame_linesize_pixels(self.ptr) }
 	}
 
+	/// The `width` operation.
 	pub fn width(&self) -> i32 {
 		unsafe { oak_codec_frame_width(self.ptr) }
 	}
 
+	/// The `height` operation.
 	pub fn height(&self) -> i32 {
 		unsafe { oak_codec_frame_height(self.ptr) }
 	}
@@ -761,6 +821,7 @@ impl Frame {
 			.unwrap_or(PixelFormat::Invalid)
 	}
 
+	/// The `channel_count` operation.
 	pub fn channel_count(&self) -> i32 {
 		unsafe { oak_codec_frame_channel_count(self.ptr) }
 	}
@@ -770,6 +831,7 @@ impl Frame {
 		unsafe { oak_codec_frame_timestamp(self.ptr) }
 	}
 
+	/// The `set_timestamp` operation.
 	pub fn set_timestamp(&mut self, ts: Rational) {
 		unsafe { oak_codec_frame_set_timestamp(self.ptr, ts) };
 	}
@@ -888,8 +950,11 @@ pub fn remove_digit_placeholder(filename: &str) -> Option<String> {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamType {
+	/// A video stream.
 	Video = 0,
+	/// An audio stream.
 	Audio = 1,
+	/// A subtitle stream.
 	Subtitle = 2,
 }
 
@@ -957,14 +1022,17 @@ impl FootageDescription {
 		StreamType::from_i32(unsafe { oak_codec_footage_stream_type(self.ptr, index as i32) })
 	}
 
+	/// The `video_stream_count` operation.
 	pub fn video_stream_count(&self) -> usize {
 		unsafe { oak_codec_footage_video_stream_count(self.ptr) as usize }
 	}
 
+	/// The `audio_stream_count` operation.
 	pub fn audio_stream_count(&self) -> usize {
 		unsafe { oak_codec_footage_audio_stream_count(self.ptr) as usize }
 	}
 
+	/// The `subtitle_stream_count` operation.
 	pub fn subtitle_stream_count(&self) -> usize {
 		unsafe { oak_codec_footage_subtitle_stream_count(self.ptr) as usize }
 	}
@@ -1052,6 +1120,7 @@ unsafe impl Send for RetrieveParams {}
 unsafe impl Sync for RetrieveParams {}
 
 impl RetrieveParams {
+	/// Creates a new value.
 	pub fn new() -> Self {
 		Self {
 			ptr: unsafe { oak_codec_retrieve_params_new() },
@@ -1144,10 +1213,15 @@ impl Drop for RetrieveParams {
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrieveAudioStatus {
+	/// The request succeeded.
 	Success = 0,
+	/// The requested range is invalid.
 	InvalidRange = 1,
+	/// The codec or format does not support the request.
 	Unsupported = 2,
+	/// The stream needs conforming first.
 	ConformNeeded = 3,
+	/// The decoder reported an error.
 	DecoderError = 4,
 }
 
@@ -1259,52 +1333,85 @@ pub struct EncodingParams {
 	filename: [u8; 1024],
 	/// [`Format`] discriminant.
 	pub format: i32,
+	/// The `video_enabled` field.
 	pub video_enabled: i32,
 	/// [`Codec`] discriminant.
 	pub video_codec: i32,
+	/// The `video_width` field.
 	pub video_width: i32,
+	/// The `video_height` field.
 	pub video_height: i32,
+	/// The `video_time_base_num` field.
 	pub video_time_base_num: i32,
+	/// The `video_time_base_den` field.
 	pub video_time_base_den: i32,
 	/// [`crate::types::PixelFormat`] discriminant.
 	pub video_pixel_format: i32,
+	/// The `video_interlacing` field.
 	pub video_interlacing: i32,
+	/// The `video_pixel_aspect_num` field.
 	pub video_pixel_aspect_num: i32,
+	/// The `video_pixel_aspect_den` field.
 	pub video_pixel_aspect_den: i32,
+	/// The `video_bit_rate` field.
 	pub video_bit_rate: i64,
+	/// The `video_min_bit_rate` field.
 	pub video_min_bit_rate: i64,
+	/// The `video_max_bit_rate` field.
 	pub video_max_bit_rate: i64,
+	/// The `video_buffer_size` field.
 	pub video_buffer_size: i64,
+	/// The `video_threads` field.
 	pub video_threads: i32,
 	/// Encoded pixel format name (e.g. "yuv420p"), NUL-terminated.
 	video_pix_fmt: [u8; 64],
+	/// The `video_is_image_sequence` field.
 	pub video_is_image_sequence: i32,
+	/// The `video_scaling_method` field.
 	pub video_scaling_method: i32,
+	/// The `audio_enabled` field.
 	pub audio_enabled: i32,
 	/// [`Codec`] discriminant.
 	pub audio_codec: i32,
+	/// The `audio_sample_rate` field.
 	pub audio_sample_rate: i32,
+	/// The `audio_channel_layout` field.
 	pub audio_channel_layout: u64,
 	/// [`crate::audio::SampleFormat`] discriminant.
 	pub audio_sample_format: i32,
+	/// The `audio_bit_rate` field.
 	pub audio_bit_rate: i64,
+	/// The `subtitles_enabled` field.
 	pub subtitles_enabled: i32,
+	/// The `subtitles_codec` field.
 	pub subtitles_codec: i32,
+	/// The `subtitles_are_sidecar` field.
 	pub subtitles_are_sidecar: i32,
+	/// The `subtitles_sidecar_format` field.
 	pub subtitles_sidecar_format: i32,
 	/// Output OCIO colorspace name; empty = reference space.
 	color_transform_output: [u8; 256],
+	/// The `export_length_num` field.
 	pub export_length_num: i32,
+	/// The `export_length_den` field.
 	pub export_length_den: i32,
+	/// The `has_custom_range` field.
 	pub has_custom_range: i32,
+	/// The `custom_range_in_num` field.
 	pub custom_range_in_num: i64,
+	/// The `custom_range_in_den` field.
 	pub custom_range_in_den: i64,
+	/// The `custom_range_out_num` field.
 	pub custom_range_out_num: i64,
+	/// The `custom_range_out_den` field.
 	pub custom_range_out_den: i64,
 	/// H.273 code points written into the container (0 = leave unset).
 	pub color_primaries: i32,
+	/// The `color_trc` field.
 	pub color_trc: i32,
+	/// The `color_space` field.
 	pub color_space: i32,
+	/// The `color_range` field.
 	pub color_range: i32,
 }
 
@@ -1315,6 +1422,7 @@ impl Default for EncodingParams {
 }
 
 impl EncodingParams {
+	/// Creates a new value.
 	pub fn new() -> Self {
 		Self::default()
 	}
@@ -1341,26 +1449,32 @@ impl EncodingParams {
 		Ok(())
 	}
 
+	/// The `filename` operation.
 	pub fn filename(&self) -> &str {
 		Self::read_cstr(&self.filename)
 	}
 
+	/// The `set_filename` operation.
 	pub fn set_filename(&mut self, value: &str) -> Result<(), ParamsStringError> {
 		Self::write_cstr(&mut self.filename, "filename", value)
 	}
 
+	/// The `video_pix_fmt` operation.
 	pub fn video_pix_fmt(&self) -> &str {
 		Self::read_cstr(&self.video_pix_fmt)
 	}
 
+	/// The `set_video_pix_fmt` operation.
 	pub fn set_video_pix_fmt(&mut self, value: &str) -> Result<(), ParamsStringError> {
 		Self::write_cstr(&mut self.video_pix_fmt, "video_pix_fmt", value)
 	}
 
+	/// The `color_transform_output` operation.
 	pub fn color_transform_output(&self) -> &str {
 		Self::read_cstr(&self.color_transform_output)
 	}
 
+	/// The `set_color_transform_output` operation.
 	pub fn set_color_transform_output(&mut self, value: &str) -> Result<(), ParamsStringError> {
 		Self::write_cstr(&mut self.color_transform_output, "color_transform_output", value)
 	}

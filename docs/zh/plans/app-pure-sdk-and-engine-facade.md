@@ -1,6 +1,6 @@
 # oak-app 纯 SDK 化与引擎门面补全实施计划
 
-> 状态：P0–P8 已完成
+> 状态：P0–P9 已完成（P9 为 worker/CLI 收口与 SDK 文档）
 > 现状核验：`ed049df68f`（2026-10-25）；P1–P7 收口于 2026-10-30
 > 目标：将 Oak 的领域能力完整收口到 `oak-engine`，由
 > `oak-engine-rust-sdk` 提供安全、稳定的 Rust API，使第三方只依赖这两个
