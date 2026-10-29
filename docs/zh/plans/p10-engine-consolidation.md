@@ -51,6 +51,27 @@ ffmpeg-link（无代码，只有 links/build.rs）─> codec/audio
 engine ─> 以上全部
 ```
 
+上图是简化的分层示意（省略了部分跨层边）。**已用 `cargo metadata` 的
+完整内部依赖边做过环检测**：normal/build/dev 三种边合计 41 条，强连通分量
+为 0，Kahn 拓扑排序覆盖全部 13 个 crate（含 `oak-engine`），不存在任何
+循环依赖。依赖优先的拓扑序为：
+
+```text
+oak-core -> oak-ffmpeg-link -> oak-undo -> oak-codec -> oak-node
+-> oak-otio -> oak-render -> oak-audio -> oak-timeline -> oak-storage
+-> oak-task -> oak-ofx-plugin -> oak-engine
+```
+
+说明：
+
+- Cargo 本身禁止 normal/build 依赖成环；唯一一条内部 dev-dependency 是
+  `oak-otio --dev--> oak-core`，方向与它的 normal 依赖一致，因此把 dev 边
+  也算进去仍然无环。
+- `oak-engine` 位于最上层、依赖其余全部 crate；没有任何内部 crate 反向
+  依赖 engine（否则 Cargo 也无法构建）。
+- 合并后 crate 边界消失，Rust 允许模块间互相引用，但现有分层仍原样保留，
+  不需要为“解环”做额外设计。
+
 没有外部 crate 依赖这些内部 crate：`oak-app` / `oak-cli` / `oak-worker` /
 `examples/sdk_editor` 已全部只依赖 SDK（`tooling/check_sdk_consumers.py`
 守卫）。因此合并不会破坏任何第一方消费者。
