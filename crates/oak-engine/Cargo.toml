@@ -15,9 +15,6 @@ include = ["src/**/*.rs", "include/**/*.h", "README.md", "Cargo.toml"]
 [package.metadata.docs.rs]
 all-features = true
 
-[package.metadata.release]
-publish-order = 1
-
 [lib]
 path = "src/lib.rs"
 crate-type = ["cdylib"]

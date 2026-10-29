@@ -15,9 +15,6 @@ include = ["src/**/*.rs", "README.md", "Cargo.toml"]
 [package.metadata.docs.rs]
 all-features = true
 
-[package.metadata.release]
-publish-order = 2
-
 [lib]
 crate-type = ["rlib"]
 
