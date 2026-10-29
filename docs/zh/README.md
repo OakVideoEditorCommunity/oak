@@ -24,6 +24,11 @@ Oak 视频编辑器是 Olive 的重命名分支，目标是打造更完善、更
 ## 构建说明
 请查看[构建指南](build.md)
 
+## 二次开发
+
+- Rust SDK 与 C ABI：[SDK 使用指南](sdk-guide.md)
+- 独立消费者示例：[`examples/sdk_editor`](../examples/sdk_editor)
+
 ## 路线图
 
 | 版本 | 主题 | 核心交付物 |
