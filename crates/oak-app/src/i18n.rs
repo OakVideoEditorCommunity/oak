@@ -411,8 +411,8 @@ mod tests {
 		let en = tables.get("en-US").expect("en-US pack");
 		let zh = tables.get("zh-CN").expect("zh-CN pack");
 		let mut nodes = 0usize;
-		for meta in oak_node::factory::Factory::global().entries() {
-			let suffix = meta.type_id.rsplit('.').next().unwrap_or(meta.type_id);
+		for meta in oak_engine_rust_sdk::effect::factory_entries() {
+			let suffix = meta.type_id.rsplit('.').next().unwrap_or(&meta.type_id);
 			let key = format!("node.{suffix}.name");
 			let en_value = en
 				.get(&key)

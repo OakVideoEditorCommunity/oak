@@ -34,6 +34,12 @@ unsafe extern "C" {
 	fn oak_render_manager_init(backend: i32) -> bool;
 	fn oak_render_manager_is_initialized() -> bool;
 	fn oak_render_manager_shutdown();
+	fn oak_render_manager_poll();
+	fn oak_render_manager_set_workspace_size(width: i32, height: i32, fps: u32);
+	fn oak_render_manager_set_inline_project(project: *const c_void) -> bool;
+	fn oak_render_manager_set_graph_snapshot(project: *const c_void, revision: u64) -> bool;
+	fn oak_render_manager_resync_graph_snapshot(project: *const c_void, revision: u64) -> bool;
+	fn oak_render_manager_clear_graph_snapshot();
 	fn oak_render_textengine_install();
 	fn oak_render_textengine_font_family_count() -> i32;
 	fn oak_render_textengine_font_family_at(index: i32, buf: *mut u8, buf_len: usize) -> i32;
@@ -127,6 +133,36 @@ pub fn manager_is_initialized() -> bool {
 /// Shuts the render manager down (drains pending work).
 pub fn manager_shutdown() {
 	unsafe { oak_render_manager_shutdown() }
+}
+
+/// Pumps the manager's completion dispatcher; call once per UI tick.
+pub fn manager_poll() {
+	unsafe { oak_render_manager_poll() }
+}
+
+/// Sizes the worker pool's workspace for the current sequence resolution.
+pub fn manager_set_workspace_size(width: i32, height: i32, fps: u32) {
+	unsafe { oak_render_manager_set_workspace_size(width, height, fps) }
+}
+
+/// Points the inline backend at the live project (same shared project).
+pub fn manager_set_inline_project(project: &Project) -> bool {
+	unsafe { oak_render_manager_set_inline_project(project.as_raw()) }
+}
+
+/// Uploads the project snapshot at `revision` to the worker pool.
+pub fn manager_set_graph_snapshot(project: &Project, revision: u64) -> bool {
+	unsafe { oak_render_manager_set_graph_snapshot(project.as_raw(), revision) }
+}
+
+/// Re-uploads the snapshot although the undo revision did not change.
+pub fn manager_resync_graph_snapshot(project: &Project, revision: u64) -> bool {
+	unsafe { oak_render_manager_resync_graph_snapshot(project.as_raw(), revision) }
+}
+
+/// Drops the manager's current snapshot (project close).
+pub fn manager_clear_graph_snapshot() {
+	unsafe { oak_render_manager_clear_graph_snapshot() }
 }
 
 /// Installs the text measure/render backends (idempotent; text nodes

@@ -25,6 +25,20 @@ unsafe extern "C" {
 		icc_path: *const u8,
 		icc_path_len: usize,
 	) -> *mut c_void;
+	fn oak_core_colorproc_create_display_icc_bgra8(
+		src_space: *const u8,
+		src_space_len: usize,
+		icc_path: *const u8,
+		icc_path_len: usize,
+	) -> *mut c_void;
+	fn oak_core_colorproc_create_display_icc_xyz(
+		icc_path: *const u8,
+		icc_path_len: usize,
+	) -> *mut c_void;
+	fn oak_core_colorproc_create_display_icc_xyz_bgra8(
+		icc_path: *const u8,
+		icc_path_len: usize,
+	) -> *mut c_void;
 	fn oak_core_colorproc_pass_through() -> *mut c_void;
 	fn oak_core_colorproc_is_valid(this: *const c_void) -> bool;
 	fn oak_core_colorproc_cache_id(this: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
@@ -106,6 +120,32 @@ impl ColorProcessor {
 				icc_path.as_ptr(),
 				icc_path.len(),
 			)
+		})
+	}
+
+	/// A BGRA8 processor converting `src_space` to the display ICC profile.
+	pub fn create_display_icc_bgra8(src_space: &str, icc_path: &str) -> Option<Self> {
+		Self::from_raw(unsafe {
+			oak_core_colorproc_create_display_icc_bgra8(
+				src_space.as_ptr(),
+				src_space.len(),
+				icc_path.as_ptr(),
+				icc_path.len(),
+			)
+		})
+	}
+
+	/// A processor converting CIE XYZ (D65) to the display ICC profile.
+	pub fn create_display_icc_xyz(icc_path: &str) -> Option<Self> {
+		Self::from_raw(unsafe {
+			oak_core_colorproc_create_display_icc_xyz(icc_path.as_ptr(), icc_path.len())
+		})
+	}
+
+	/// The BGRA8 variant of [`ColorProcessor::create_display_icc_xyz`].
+	pub fn create_display_icc_xyz_bgra8(icc_path: &str) -> Option<Self> {
+		Self::from_raw(unsafe {
+			oak_core_colorproc_create_display_icc_xyz_bgra8(icc_path.as_ptr(), icc_path.len())
 		})
 	}
 

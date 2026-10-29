@@ -113,6 +113,7 @@ unsafe extern "C" {
 		frame_rate_num: i32,
 		frame_rate_den: i32,
 	) -> bool;
+	fn oak_sequence_set_interlaced(project: *const c_void, id: u64, interlaced: bool) -> bool;
 	fn oak_node_label(project: *const c_void, id: u64, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_node_set_label(project: *const c_void, id: u64, label: *const u8, label_len: usize) -> bool;
 	fn oak_tracklist_kind(project: *const c_void, id: u64) -> i32;
@@ -126,6 +127,25 @@ unsafe extern "C" {
 	fn oak_track_block_at(project: *const c_void, id: u64, index: i32) -> u64;
 	fn oak_track_block_containing_time(project: *const c_void, id: u64, time: Rational) -> u64;
 	fn oak_track_length(project: *const c_void, id: u64) -> Rational;
+	fn oak_track_list(project: *const c_void, id: u64) -> u64;
+	fn oak_track_height_pixels(project: *const c_void, id: u64) -> f64;
+	fn oak_track_internal_height_from_pixels(pixels: i32) -> f64;
+	fn oak_generator_create(
+		project: *const c_void,
+		type_id: *const u8,
+		type_id_len: usize,
+	) -> u64;
+	fn oak_project_unset_setting(
+		project: *const c_void,
+		key: *const u8,
+		key_len: usize,
+	) -> bool;
+	fn oak_project_graph_endpoints(
+		project: *const c_void,
+		input: *mut u64,
+		output: *mut u64,
+	) -> bool;
+	fn oak_track_index(project: *const c_void, id: u64) -> i32;
 
 	fn oak_block_in(project: *const c_void, id: u64) -> Rational;
 	fn oak_block_out(project: *const c_void, id: u64) -> Rational;
@@ -133,6 +153,16 @@ unsafe extern "C" {
 	fn oak_block_media_in(project: *const c_void, id: u64) -> Rational;
 	fn oak_block_media_out(project: *const c_void, id: u64) -> Rational;
 	fn oak_block_enabled(project: *const c_void, id: u64) -> bool;
+	fn oak_block_track(project: *const c_void, id: u64) -> u64;
+	fn oak_block_speed(project: *const c_void, id: u64) -> f64;
+	fn oak_block_link_count(project: *const c_void, id: u64) -> i32;
+	fn oak_block_link_at(project: *const c_void, id: u64, index: i32) -> u64;
+	fn oak_node_color(project: *const c_void, id: u64) -> i32;
+	fn oak_block_footage(project: *const c_void, id: u64) -> u64;
+	fn oak_block_multicam_source(project: *const c_void, id: u64) -> u64;
+	fn oak_block_transition_width(project: *const c_void, id: u64, start_edge: bool) -> Rational;
+	fn oak_project_node_count(project: *const c_void) -> i32;
+	fn oak_project_node_at(project: *const c_void, index: i32) -> u64;
 
 	fn oak_node_standard_value(
 		project: *const c_void,
@@ -246,7 +276,7 @@ unsafe extern "C" {
 
 /// A node identity token (packed generational id). `INVALID` names no
 /// node; ids are stable within a session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(u64);
 
 impl NodeId {
@@ -269,6 +299,24 @@ impl NodeId {
 	pub fn raw(self) -> u64 {
 		self.0
 	}
+}
+
+/// Creates a generator node from the factory table (unknown/non-generator
+/// type ids return `None`).
+pub fn create_generator(project: &Project, type_id: &str) -> Option<NodeId> {
+	the_id(unsafe { oak_generator_create(project.ptr, type_id.as_ptr(), type_id.len()) })
+}
+
+/// Converts a pixel track height to the graph's internal height units.
+pub fn internal_height_from_pixels(pixels: i32) -> f64 {
+	unsafe { oak_track_internal_height_from_pixels(pixels) }
+}
+
+/// Converts a raw ABI token to `Some(id)` unless it is the engine's null
+/// token.
+fn the_id(raw: u64) -> Option<NodeId> {
+	let id = NodeId::from_raw(raw);
+	id.is_valid().then_some(id)
 }
 
 /// A node's coarse kind.
@@ -582,6 +630,11 @@ impl Project {
 		unsafe { oak_sequence_geometry(self.ptr, sequence.0, &mut w, &mut h) }.then_some((w, h))
 	}
 
+	/// Sets the sequence's interlaced flag (true when it was a sequence).
+	pub fn sequence_set_interlaced(&self, sequence: NodeId, interlaced: bool) -> bool {
+		unsafe { oak_sequence_set_interlaced(self.ptr, sequence.0, interlaced) }
+	}
+
 	/// Whether the sequence uses interlaced video (`None` for a stale id).
 	pub fn sequence_interlaced(&self, sequence: NodeId) -> Option<bool> {
 		match unsafe { oak_sequence_interlaced(self.ptr, sequence.0) } {
@@ -707,6 +760,93 @@ impl Project {
 	/// The block's standard enabled flag.
 	pub fn block_enabled(&self, block: NodeId) -> bool {
 		unsafe { oak_block_enabled(self.ptr, block.0) }
+	}
+
+	/// The track's display height in pixels (24px floor, 64px default).
+	pub fn track_height_pixels(&self, track: NodeId) -> f64 {
+		unsafe { oak_track_height_pixels(self.ptr, track.0) }
+	}
+
+	/// The track's owning track list, if any.
+	pub fn track_list(&self, track: NodeId) -> Option<NodeId> {
+		the_id(unsafe { oak_track_list(self.ptr, track.0) })
+	}
+
+	/// The track's index inside its list (-1 when not a track).
+	pub fn track_index(&self, track: NodeId) -> i32 {
+		unsafe { oak_track_index(self.ptr, track.0) }
+	}
+
+	/// The block's owning track, if any.
+	pub fn block_track(&self, block: NodeId) -> Option<NodeId> {
+		the_id(unsafe { oak_block_track(self.ptr, block.0) })
+	}
+
+	/// The block's playback speed (`1.0` when unknown).
+	pub fn block_speed(&self, block: NodeId) -> f64 {
+		unsafe { oak_block_speed(self.ptr, block.0) }
+	}
+
+	/// The block's linked partners (the A/V link group).
+	pub fn block_links(&self, block: NodeId) -> Vec<NodeId> {
+		let count = unsafe { oak_block_link_count(self.ptr, block.0) }.max(0);
+		(0..count)
+			.filter_map(|index| the_id(unsafe { oak_block_link_at(self.ptr, block.0, index) }))
+			.collect()
+	}
+
+	/// Whether the block belongs to a linked group.
+	pub fn block_is_linked(&self, block: NodeId) -> bool {
+		!self.block_links(block).is_empty()
+	}
+
+	/// The node's creation-time color override (-1 when unset).
+	pub fn node_color(&self, id: NodeId) -> i32 {
+		unsafe { oak_node_color(self.ptr, id.0) }
+	}
+
+	/// The clip's connected footage, if it is a clip.
+	pub fn block_footage(&self, block: NodeId) -> Option<NodeId> {
+		the_id(unsafe { oak_block_footage(self.ptr, block.0) })
+	}
+
+	/// The multicam source the block reads from, when its texture input is
+	/// a multicam node.
+	pub fn block_multicam_source(&self, block: NodeId) -> Option<NodeId> {
+		the_id(unsafe { oak_block_multicam_source(self.ptr, block.0) })
+	}
+
+	/// The width of the transition on one edge of the clip, if any.
+	pub fn block_transition_width(&self, clip: NodeId, start_edge: bool) -> Option<Rational> {
+		let width = unsafe { oak_block_transition_width(self.ptr, clip.0, start_edge) };
+		(width.den != 0).then_some(width)
+	}
+
+	/// Removes a project setting key.
+	pub fn unset_setting(&self, key: &str) -> bool {
+		unsafe { oak_project_unset_setting(self.ptr, key.as_ptr(), key.len()) }
+	}
+
+	/// The graph's virtual input/output endpoints, when present.
+	pub fn graph_endpoints(&self) -> Option<(NodeId, NodeId)> {
+		let (mut input, mut output) = (0u64, 0u64);
+		unsafe { oak_project_graph_endpoints(self.ptr, &mut input, &mut output) }
+			.then(|| (NodeId::from_raw(input), NodeId::from_raw(output)))
+	}
+
+	/// Number of live nodes in the graph.
+	pub fn node_count(&self) -> usize {
+		unsafe { oak_project_node_count(self.ptr) }.max(0) as usize
+	}
+
+	/// The `index`-th live node token in arena order.
+	pub fn node_at(&self, index: usize) -> Option<NodeId> {
+		the_id(unsafe { oak_project_node_at(self.ptr, index as i32) })
+	}
+
+	/// Every live node in arena order.
+	pub fn node_ids(&self) -> Vec<NodeId> {
+		(0..self.node_count()).filter_map(|i| self.node_at(i)).collect()
 	}
 
 	// -- node parameters -------------------------------------------------

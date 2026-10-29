@@ -4102,9 +4102,9 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 		// choice through the process environment. Read by gpui_wgpu as
 		// OAK_DISPLAY_BIT_DEPTH ("8" opts into the 8-bit pair; anything
 		// else requests 10-bit).
-		let bit_depth = oak_core::backend::DisplayBitDepth::from_config_string(
+		let bit_depth = oak_engine_rust_sdk::core::DisplayBitDepth::from_config_string(
 			&crate::oakui::real::config_get_string(
-                oak_core::backend::CONFIG_KEY_DISPLAY_BIT_DEPTH,
+                oak_engine_rust_sdk::core::CONFIG_KEY_DISPLAY_BIT_DEPTH,
 			),
 		);
 		// SAFETY: single-threaded startup, before any window exists.
@@ -4145,14 +4145,6 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 						.map(|c| c.downcast::<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>())
 					{
 						crate::oakui::gpu::register_context(ctx.0, ctx.1);
-					}
-					// macOS/Windows: gpui does not expose its device, so the
-					// engine's shared context is the app's render device —
-					// mark it as such so the decoder's zero-copy import
-					// (host-gated) can engage on those platforms (M5).
-					#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-					{
-						let _ = crate::oakui::gpu::register_engine_context();
 					}
 					// Compact pro-app text metrics: gpui's default rem is
 					// 16px (desktop-app large); 14px matches the design's

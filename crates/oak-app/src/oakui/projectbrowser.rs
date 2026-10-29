@@ -25,70 +25,66 @@
 
 use crate::widgets::project_explorer::ProjectEntry;
 
-use oak_node::folder::FolderBehavior;
-use oak_node::id::NodeId;
-
-use crate::oakui::graphops::{self, ProjectRef};
+use crate::oakui::graphops::ProjectRef;
 
 /// One child entry of a folder with its identity.
-fn child_entry(g: &oak_node::graph::Graph, child: NodeId) -> Option<ProjectEntry> {
-	let entry = g.get(child)?;
-	let mut name = entry.core.label.clone();
-	if name.is_empty() {
-		name = entry.behavior.name().to_string();
-	}
-	Some(ProjectEntry::new(
-		child.identity(),
-		name,
-		graphops::is_folder(g, child),
-	))
+fn child_entry(snapshot: &oak_engine_rust_sdk::editor::EntrySnapshot) -> ProjectEntry {
+	ProjectEntry::new(
+		snapshot.id.raw(),
+		snapshot.name.clone(),
+		snapshot.kind == Some(oak_engine_rust_sdk::node::NodeKind::Folder),
+	)
 }
 
 /// The children of a folder node.
-fn folder_children(g: &oak_node::graph::Graph, folder: NodeId) -> Vec<ProjectEntry> {
-	let Some(f) = g
-		.get(folder)
-		.and_then(|e| e.behavior.as_any())
-		.and_then(|a| a.downcast_ref::<FolderBehavior>())
-	else {
-		return Vec::new();
-	};
-	f.children
+fn folder_children(snapshot: &oak_engine_rust_sdk::editor::EntrySnapshot) -> Vec<ProjectEntry> {
+	snapshot
+		.children
 		.iter()
-		.filter_map(|&child| child_entry(g, child))
+		.map(child_entry)
 		.collect()
+}
+
+fn find_snapshot<'a>(
+	entry: &'a oak_engine_rust_sdk::editor::EntrySnapshot,
+	identity: u64,
+) -> Option<&'a oak_engine_rust_sdk::editor::EntrySnapshot> {
+	if entry.id.raw() == identity {
+		return Some(entry);
+	}
+	entry
+		.children
+		.iter()
+		.find_map(|child| find_snapshot(child, identity))
 }
 
 /// The top-level entries: the project root folder's children.
 pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
-	let guard = graphops::lock(project);
-	if !guard.root.valid() {
+	let Ok(session) = super::real::editor_session_for_project(project) else {
 		return Vec::new();
-	}
-	folder_children(&guard.graph, guard.root)
+	};
+	folder_children(&session.snapshot().root)
 }
 
 /// The children of the folder whose identity is `parent_id` (empty when
 /// not found or not a folder).
 pub fn children(project: &ProjectRef, parent_id: u64) -> Vec<ProjectEntry> {
-	let Some(folder) = find_by_identity(project, parent_id) else {
+	let Ok(session) = super::real::editor_session_for_project(project) else {
 		return Vec::new();
 	};
-	let guard = graphops::lock(project);
-	if !graphops::is_folder(&guard.graph, folder) {
-		return Vec::new();
-	}
-	folder_children(&guard.graph, folder)
+	let snapshot = session.snapshot();
+	find_snapshot(&snapshot.root, parent_id)
+		.filter(|entry| entry.kind == Some(oak_engine_rust_sdk::node::NodeKind::Folder))
+		.map(folder_children)
+		.unwrap_or_default()
 }
 
 /// The project node with `identity` (validated against the graph), or
 /// `None`.
-pub fn find_by_identity(project: &ProjectRef, identity: u64) -> Option<NodeId> {
-	let id = graphops::id_of(identity)?;
-	let guard = graphops::lock(project);
-	if guard.graph.is_valid(id) {
-		Some(id)
-	} else {
-		None
-	}
+pub fn find_by_identity(
+	project: &ProjectRef,
+	identity: u64,
+) -> Option<oak_engine_rust_sdk::node::NodeId> {
+	let session = super::real::editor_session_for_project(project).ok()?;
+	find_snapshot(&session.snapshot().root, identity).map(|entry| entry.id)
 }

@@ -757,6 +757,32 @@ pub extern "C" fn oak_effect_is_enabled(project: *const ProjectHandle, effect: u
 	crate::node::with_project(project, |p| is_enabled(&p.graph, effect)).unwrap_or(false)
 }
 
+/// Returns an OpenFX node's instance registry id, or 0 for built-in/unknown
+/// nodes and for plugin nodes without a live instance.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_effect_plugin_instance_handle(
+	project: *const ProjectHandle,
+	node: u64,
+) -> u64 {
+	let Some(project) = (unsafe { project.as_ref() }) else {
+		return 0;
+	};
+	let Some(node) = NodeId::from_identity(node) else {
+		return 0;
+	};
+	let project = project.project().lock().unwrap_or_else(|e| e.into_inner());
+	project
+		.graph
+		.get(node)
+		.and_then(|entry| entry.behavior.as_any())
+		.and_then(|behavior| behavior.downcast_ref::<oak_node::nodes::plugin::PluginNode>())
+		.and_then(|plugin| {
+			let handle = plugin.instance_handle();
+			(!handle.is_null()).then_some(handle.0)
+		})
+		.unwrap_or(0)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

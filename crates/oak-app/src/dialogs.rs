@@ -59,7 +59,7 @@ use crate::oakui::real::{
 // The `DisplayBitDepth` config key lives with the format mapping it
 // drives (oak-render's backend); the preferences dropdown and the
 // window-layer consumer share the same key.
-use oak_core::backend::CONFIG_KEY_DISPLAY_BIT_DEPTH;
+use oak_engine_rust_sdk::core::CONFIG_KEY_DISPLAY_BIT_DEPTH;
 
 // ---------------------------------------------------------------------------
 // Preferences
@@ -1084,10 +1084,9 @@ impl ExportDialogContent {
 				.map(|(i, code)| {
 					ComboBoxOption::new(
 						i,
-						oak_codec::exportcodec::Codec::get_codec_name(
-							oak_codec::exportcodec::Codec::from_i32(*code)
-								.unwrap_or(oak_codec::exportcodec::Codec::H264),
-						),
+						oak_engine_rust_sdk::codec::Codec::from_i32(*code)
+							.unwrap_or(oak_engine_rust_sdk::codec::Codec::H264)
+							.name(),
 					)
 				})
 				.collect::<Vec<_>>()
@@ -1253,10 +1252,9 @@ impl ExportDialogContent {
 			.map(|(i, code)| {
 				ComboBoxOption::new(
 					i,
-					oak_codec::exportcodec::Codec::get_codec_name(
-						oak_codec::exportcodec::Codec::from_i32(*code)
-							.unwrap_or(oak_codec::exportcodec::Codec::H264),
-					),
+					oak_engine_rust_sdk::codec::Codec::from_i32(*code)
+						.unwrap_or(oak_engine_rust_sdk::codec::Codec::H264)
+						.name(),
 				)
 			})
 			.collect::<Vec<_>>();
@@ -1266,10 +1264,9 @@ impl ExportDialogContent {
 			.map(|(i, code)| {
 				ComboBoxOption::new(
 					i,
-					oak_codec::exportcodec::Codec::get_codec_name(
-						oak_codec::exportcodec::Codec::from_i32(*code)
-							.unwrap_or(oak_codec::exportcodec::Codec::AAC),
-					),
+					oak_engine_rust_sdk::codec::Codec::from_i32(*code)
+						.unwrap_or(oak_engine_rust_sdk::codec::Codec::AAC)
+						.name(),
 				)
 			})
 			.collect::<Vec<_>>();
@@ -1364,23 +1361,25 @@ impl ExportDialogContent {
 /// The video codecs the container `format` accepts (the compatibility
 /// table; the dialog only offers these).
 pub fn compatible_video_codecs(format: i32) -> Vec<i32> {
-	let Some(container) = oak_codec::exportformat::Format::from_i32(format) else {
+	let Some(container) = oak_engine_rust_sdk::codec::Format::from_i32(format) else {
 		return vec![1]; // H.264 fallback
 	};
-	oak_codec::exportformat::Format::get_video_codecs(container)
+	container
+		.video_codecs()
 		.iter()
-		.map(|c| *c as i32)
+		.map(|c| c as i32)
 		.collect()
 }
 
 /// The audio codecs the container `format` accepts.
 pub fn compatible_audio_codecs(format: i32) -> Vec<i32> {
-	let Some(container) = oak_codec::exportformat::Format::from_i32(format) else {
+	let Some(container) = oak_engine_rust_sdk::codec::Format::from_i32(format) else {
 		return vec![12]; // AAC fallback
 	};
-	oak_codec::exportformat::Format::get_audio_codecs(container)
+	container
+		.audio_codecs()
 		.iter()
-		.map(|c| *c as i32)
+		.map(|c| c as i32)
 		.collect()
 }
 
@@ -2004,19 +2003,31 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		let (working, gamut, transfer) = engine.read(cx).project_color_settings();
 		working_space.update(cx, |combo, cx| {
 			combo.set_selected(
-				Some(oak_core::colormath::WorkingColorSpace::from_setting(&working) as usize),
+				Some(match working.as_str() {
+					"srgb" | "srgb_legacy" | "legacy" => 1,
+					_ => 0,
+				}),
 				cx,
 			)
 		});
 		output_gamut.update(cx, |combo, cx| {
 			combo.set_selected(
-				Some(oak_core::colormath::OutputGamut::from_setting(&gamut) as usize),
+				Some(match gamut.as_str() {
+					"displayp3" | "p3" => 1,
+					"bt2020" | "rec2020" | "2020" => 2,
+					_ => 0,
+				}),
 				cx,
 			)
 		});
 		output_transfer.update(cx, |combo, cx| {
 			combo.set_selected(
-				Some(oak_core::colormath::OutputTransfer::from_setting(&transfer) as usize),
+				Some(match transfer.as_str() {
+					"gamma22" | "2.2" => 1,
+					"pq" | "st2084" => 2,
+					"hlg" => 3,
+					_ => 0,
+				}),
 				cx,
 			)
 		});
@@ -2111,42 +2122,37 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 	/// The color pipeline settings currently selected in the combos, as
 	/// the canonical persisted strings.
 	fn color_settings(&self, cx: &App) -> (String, String, String) {
-		use oak_core::colormath::{OutputGamut, OutputTransfer, WorkingColorSpace};
 		let working = self
 			.working_space
 			.read(cx)
 			.selected()
-			.map(|i| match i {
-				1 => WorkingColorSpace::SrgbLegacy,
-				_ => WorkingColorSpace::AcesCg,
-			})
-			.unwrap_or_default();
+			.map(|i| if i == 1 { "srgb_legacy" } else { "acescg" })
+			.unwrap_or("acescg")
+			.to_string();
 		let gamut = self
 			.output_gamut
 			.read(cx)
 			.selected()
 			.map(|i| match i {
-				1 => OutputGamut::DisplayP3,
-				2 => OutputGamut::Bt2020,
-				_ => OutputGamut::Srgb,
+				1 => "displayp3",
+				2 => "bt2020",
+				_ => "srgb",
 			})
-			.unwrap_or_default();
+			.unwrap_or("srgb")
+			.to_string();
 		let transfer = self
 			.output_transfer
 			.read(cx)
 			.selected()
 			.map(|i| match i {
-				1 => OutputTransfer::Gamma22,
-				2 => OutputTransfer::Pq,
-				3 => OutputTransfer::Hlg,
-				_ => OutputTransfer::Srgb,
+				1 => "gamma22",
+				2 => "pq",
+				3 => "hlg",
+				_ => "srgb",
 			})
-			.unwrap_or_default();
-		(
-			working.as_setting().to_string(),
-			gamut.as_setting().to_string(),
-			transfer.as_setting().to_string(),
-		)
+			.unwrap_or("srgb")
+			.to_string();
+		(working, gamut, transfer)
 	}
 
 	/// The error shown under the OCIO row after a rejected commit.
@@ -5782,8 +5788,6 @@ mod tests {
 	/// canonical setting string.
 	#[gpui_kit::test]
 	async fn project_properties_commit_and_color_settings(cx: &mut gpui_kit::TestAppContext) {
-		use oak_core::colormath::{OutputGamut, OutputTransfer, WorkingColorSpace};
-
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -5872,15 +5876,15 @@ mod tests {
 				dialog.color_settings(cx)
 			})
 		});
-		assert_eq!(working, WorkingColorSpace::AcesCg.as_setting());
-		assert_eq!(gamut, OutputGamut::DisplayP3.as_setting());
-		assert_eq!(transfer, OutputTransfer::Pq.as_setting());
+		assert_eq!(working, "acescg");
+		assert_eq!(gamut, "displayp3");
+		assert_eq!(transfer, "pq");
 
 		// Index → setting mapping for every combo value, and the default
 		// when nothing is selected.
 		let cases = [
-			(0, WorkingColorSpace::AcesCg),
-			(1, WorkingColorSpace::SrgbLegacy),
+			(0, "acescg"),
+			(1, "srgb_legacy"),
 		];
 		for (index, expected) in cases {
 			let got = cx.update(|cx| {
@@ -5891,12 +5895,12 @@ mod tests {
 					dialog.color_settings(cx).0
 				})
 			});
-			assert_eq!(got, expected.as_setting());
+			assert_eq!(got, expected);
 		}
 		for (index, expected) in [
-			(0, OutputGamut::Srgb),
-			(1, OutputGamut::DisplayP3),
-			(2, OutputGamut::Bt2020),
+			(0, "srgb"),
+			(1, "displayp3"),
+			(2, "bt2020"),
 		] {
 			let got = cx.update(|cx| {
 				content.update(cx, |dialog, cx| {
@@ -5906,13 +5910,13 @@ mod tests {
 					dialog.color_settings(cx).1
 				})
 			});
-			assert_eq!(got, expected.as_setting());
+			assert_eq!(got, expected);
 		}
 		for (index, expected) in [
-			(0, OutputTransfer::Srgb),
-			(1, OutputTransfer::Gamma22),
-			(2, OutputTransfer::Pq),
-			(3, OutputTransfer::Hlg),
+			(0, "srgb"),
+			(1, "gamma22"),
+			(2, "pq"),
+			(3, "hlg"),
 		] {
 			let got = cx.update(|cx| {
 				content.update(cx, |dialog, cx| {
@@ -5922,7 +5926,7 @@ mod tests {
 					dialog.color_settings(cx).2
 				})
 			});
-			assert_eq!(got, expected.as_setting());
+			assert_eq!(got, expected);
 		}
 		let (working, gamut, transfer) = cx.update(|cx| {
 			content.update(cx, |dialog, cx| {
@@ -5938,9 +5942,9 @@ mod tests {
 				dialog.color_settings(cx)
 			})
 		});
-		assert_eq!(working, WorkingColorSpace::default().as_setting());
-		assert_eq!(gamut, OutputGamut::default().as_setting());
-		assert_eq!(transfer, OutputTransfer::default().as_setting());
+		assert_eq!(working, "acescg");
+		assert_eq!(gamut, "srgb");
+		assert_eq!(transfer, "srgb");
 
 		// The clean form renders without the error row, then with it when a
 		// rejected commit is reported.

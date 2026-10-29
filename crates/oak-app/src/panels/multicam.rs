@@ -36,8 +36,7 @@
 //!
 //! Switch requests during playback are queued (the C++ `play_queue_`
 //! semantics) and applied when the program playhead reaches the target
-//! time. Every switch goes through `oak_timeline::multicam::multicam_switch`
-//! on the global undo stack.
+//! time. Every switch goes through the SDK multicam session commands.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -52,7 +51,7 @@ use gpui_kit::{
 };
 use crate::widgets::viewer::PlaybackClock;
 
-use oak_node::nodes::multicamnode::MultiCamNode;
+use oak_engine_rust_sdk::editor::multicam::{rows_and_columns, rows_cols_to_index};
 
 use crate::oakui::timecode::format_timecode;
 use crate::oakui::{AppEngine, MulticamState};
@@ -275,7 +274,7 @@ impl<E: AppEngine> MulticamPanel<E> {
 		{
 			return;
 		}
-		let (rows, cols) = MultiCamNode::rows_and_columns(state.source_count);
+		let (rows, cols) = rows_and_columns(state.source_count);
 		let multi = rows.max(cols).max(1);
 		let cell_w = f32::from(self.grid_bounds.size.width) / multi as f32;
 		let cell_h = f32::from(self.grid_bounds.size.height) / multi as f32;
@@ -287,7 +286,7 @@ impl<E: AppEngine> MulticamPanel<E> {
 		if c >= cols || r >= rows {
 			return;
 		}
-		let source = MultiCamNode::rows_cols_to_index(r, c, rows, cols);
+		let source = rows_cols_to_index(r, c, rows, cols);
 		if (0..state.source_count).contains(&source) {
 			self.request_switch(source, true, cx);
 		}
@@ -335,7 +334,7 @@ impl<E: AppEngine> MulticamPanel<E> {
 
 	/// The angle grid: rows×cols cells filling the container.
 	fn grid(&mut self, state: MulticamState, colors: &Colors) -> AnyElement {
-		let (rows, cols) = MultiCamNode::rows_and_columns(state.source_count);
+		let (rows, cols) = rows_and_columns(state.source_count);
 		let multi = rows.max(cols).max(1);
 		let cell_w = f32::from(self.grid_bounds.size.width) / multi as f32;
 		let cell_h = f32::from(self.grid_bounds.size.height) / multi as f32;
@@ -498,7 +497,7 @@ mod tests {
 	/// The grid conversion helpers used by the panel (rows/cols from the
 	/// node, index round-trips) plus the panel's click math.
 	fn rows_cols(sources: i32) -> (i32, i32) {
-		MultiCamNode::rows_and_columns(sources)
+		rows_and_columns(sources)
 	}
 
 	/// Click-point → source index with the same math [`MulticamPanel`]
@@ -520,7 +519,7 @@ mod tests {
 		if c >= cols || r >= rows {
 			return None;
 		}
-		let source = MultiCamNode::rows_cols_to_index(r, c, rows, cols);
+		let source = rows_cols_to_index(r, c, rows, cols);
 		(0..sources).contains(&source).then_some(source)
 	}
 

@@ -85,6 +85,56 @@ pub unsafe extern "C" fn oak_core_colorproc_create_display_icc(
 	}
 }
 
+/// A BGRA8 processor converting `src_space` to the display ICC profile.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colorproc_create_display_icc_bgra8(
+	src_space: *const u8,
+	src_space_len: usize,
+	icc_path: *const u8,
+	icc_path_len: usize,
+) -> *mut ColorProcessor {
+	let (Some(src), Some(icc)) = (
+		unsafe { str_arg(src_space, src_space_len) },
+		unsafe { str_arg(icc_path, icc_path_len) },
+	) else {
+		return std::ptr::null_mut();
+	};
+	match ColorProcessor::create_display_icc_bgra8(src, icc) {
+		Some(p) => into_ffi(p) as *mut ColorProcessor,
+		None => std::ptr::null_mut(),
+	}
+}
+
+/// A processor converting CIE XYZ (D65) to the display ICC profile.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colorproc_create_display_icc_xyz(
+	icc_path: *const u8,
+	icc_path_len: usize,
+) -> *mut ColorProcessor {
+	let Some(icc) = (unsafe { str_arg(icc_path, icc_path_len) }) else {
+		return std::ptr::null_mut();
+	};
+	match ColorProcessor::create_display_icc_xyz(icc) {
+		Some(p) => into_ffi(p) as *mut ColorProcessor,
+		None => std::ptr::null_mut(),
+	}
+}
+
+/// The BGRA8 variant of [`oak_core_colorproc_create_display_icc_xyz`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_core_colorproc_create_display_icc_xyz_bgra8(
+	icc_path: *const u8,
+	icc_path_len: usize,
+) -> *mut ColorProcessor {
+	let Some(icc) = (unsafe { str_arg(icc_path, icc_path_len) }) else {
+		return std::ptr::null_mut();
+	};
+	match ColorProcessor::create_display_icc_xyz_bgra8(icc) {
+		Some(p) => into_ffi(p) as *mut ColorProcessor,
+		None => std::ptr::null_mut(),
+	}
+}
+
 /// A pass-through processor (no config needed).
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_core_colorproc_pass_through() -> *mut ColorProcessor {

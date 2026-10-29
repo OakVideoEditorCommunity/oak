@@ -12,7 +12,6 @@ pub mod color;
 pub mod core;
 pub mod effect;
 pub mod editor;
-pub mod migration;
 pub mod edit;
 pub mod node;
 pub mod ofx;

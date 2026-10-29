@@ -140,6 +140,15 @@ fn node_id(token: u64) -> Option<NodeId> {
 	NodeId::from_identity(token)
 }
 
+/// Clones the project's shared `Arc` out of its handle (for manager APIs
+/// that take the same `Arc<Mutex<Project>>` the app and workers share).
+pub(crate) fn project_arc(project: *const ProjectHandle) -> Option<Arc<Mutex<Project>>> {
+	if project.is_null() {
+		return None;
+	}
+	Some(unsafe { &*project }.inner.clone())
+}
+
 fn behavior_as<T: 'static>(project: &Project, id: NodeId) -> Option<&T> {
 	project
 		.graph
@@ -767,6 +776,296 @@ block_rational! {
 	oak_block_media_out => |c| c.media_out(),
 }
 
+/// The track's display height in pixels (24px floor, 64px default).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_height_pixels(
+	project: *const ProjectHandle,
+	id: u64,
+) -> f64 {
+	let Some(id) = node_id(id) else { return 64.0 };
+	with_project(project, |p| {
+		behavior_as::<TrackBehavior>(p, id)
+			.map(|t| {
+				f64::from(
+					oak_node::track::internal_height_to_pixel_height(t.height).max(24),
+				)
+			})
+			.unwrap_or(64.0)
+	})
+	.unwrap_or(64.0)
+}
+
+/// The track's owning track-list token (invalid when not a track).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_list(project: *const ProjectHandle, id: u64) -> u64 {
+	let Some(id) = node_id(id) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	with_project(project, |p| {
+		behavior_as::<TrackBehavior>(p, id)
+			.and_then(|t| t.track_list)
+			.map(|l| l.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// The track's index inside its list (-1 when not a track).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_track_index(project: *const ProjectHandle, id: u64) -> i32 {
+	let Some(id) = node_id(id) else { return -1 };
+	with_project(project, |p| behavior_as::<TrackBehavior>(p, id).map(|t| t.index))
+		.flatten()
+		.unwrap_or(-1)
+}
+
+/// Creates a generator node from the factory table (invalid when the type
+/// id is unknown or not a generator).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_generator_create(
+	project: *const ProjectHandle,
+	type_id: *const u8,
+	type_id_len: usize,
+) -> u64 {
+	let Some(type_id) = (unsafe { str_arg(type_id, type_id_len) }) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	with_project_mut(project, |g| {
+		let Some((core, behavior)) = oak_node::factory::Factory::global().create_any(type_id)
+		else {
+			return OAK_NODE_ID_INVALID;
+		};
+		if !behavior.categories().contains(&oak_node::node::Category::Generator) {
+			return OAK_NODE_ID_INVALID;
+		}
+		g.graph.add_node(core, behavior).identity()
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// Removes a project setting key (false on null/missing key or project).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_unset_setting(
+	project: *const ProjectHandle,
+	key: *const u8,
+	key_len: usize,
+) -> bool {
+	let Some(key) = (unsafe { str_arg(key, key_len) }) else {
+		return false;
+	};
+	if key.is_empty() {
+		return false;
+	}
+	with_project_mut(project, |g| {
+		let removed = g.settings.remove(key).is_some();
+		if removed {
+			g.set_modified(true);
+		}
+		removed
+	})
+	.unwrap_or(false)
+}
+
+/// Converts a pixel track height to the graph's internal height units.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_track_internal_height_from_pixels(pixels: i32) -> f64 {
+	oak_node::track::pixel_height_to_internal_height(pixels)
+}
+
+/// The graph's virtual input/output endpoint tokens (`false` when the
+/// project has no endpoints).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_graph_endpoints(
+	project: *const ProjectHandle,
+	input: *mut u64,
+	output: *mut u64,
+) -> bool {
+	if input.is_null() || output.is_null() {
+		return false;
+	}
+	with_project(project, |p| p.graph.endpoints())
+		.flatten()
+		.map(|(i, o)| {
+			unsafe {
+				*input = i.identity();
+				*output = o.identity();
+			}
+			true
+		})
+		.unwrap_or(false)
+}
+
+/// The block's owning track token (invalid when trackless).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_track(project: *const ProjectHandle, id: u64) -> u64 {
+	let Some(id) = node_id(id) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	with_project(project, |p| {
+		block_core(p, id)
+			.and_then(|c| c.track)
+			.map(|t| t.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// The block's playback speed (`1.0` for non-blocks).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_speed(project: *const ProjectHandle, id: u64) -> f64 {
+	let Some(id) = node_id(id) else { return 1.0 };
+	with_project(project, |p| block_core(p, id).map(|c| c.speed))
+		.flatten()
+		.unwrap_or(1.0)
+}
+
+/// Number of block links (the linked A/V group).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_link_count(project: *const ProjectHandle, id: u64) -> i32 {
+	let Some(id) = node_id(id) else { return 0 };
+	with_project(project, |p| {
+		block_core(p, id).map(|c| c.links.len() as i32)
+	})
+	.flatten()
+	.unwrap_or(0)
+}
+
+/// One linked block token (invalid when out of range).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_link_at(
+	project: *const ProjectHandle,
+	id: u64,
+	index: i32,
+) -> u64 {
+	let Some(id) = node_id(id) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	if index < 0 {
+		return OAK_NODE_ID_INVALID;
+	}
+	with_project(project, |p| {
+		block_core(p, id)
+			.and_then(|c| c.links.get(index as usize).copied())
+			.map(|l| l.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// The node's creation-time color override (-1 when unset).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_node_color(project: *const ProjectHandle, id: u64) -> i32 {
+	let Some(id) = node_id(id) else { return -1 };
+	with_project(project, |p| p.graph.get(id).map(|e| e.core.override_color))
+		.flatten()
+		.unwrap_or(-1)
+}
+
+/// The clip's connected footage token (invalid when not a clip).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_footage(project: *const ProjectHandle, id: u64) -> u64 {
+	let Some(id) = node_id(id) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	with_project(project, |p| {
+		behavior_as::<ClipBlockBehavior>(p, id)
+			.and_then(|c| c.footage)
+			.map(|f| f.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// The multicam source the block reads from, when its texture input is a
+/// multicam node (invalid otherwise).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_multicam_source(
+	project: *const ProjectHandle,
+	id: u64,
+) -> u64 {
+	let Some(id) = node_id(id) else {
+		return OAK_NODE_ID_INVALID;
+	};
+	with_project(project, |p| {
+		p.graph
+			.connected_output(id, oak_node::block::clip_input::TEXTURE_INPUT, -1)
+			.filter(|&source| {
+				p.graph
+					.get(source)
+					.is_some_and(|e| e.behavior.type_id() == "org.olivevideoeditor.Olive.multicam")
+			})
+			.map(|s| s.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
+/// Width (seconds) of the transition drawn on one edge of `clip`: the
+/// transition before it for `start_edge`, after it otherwise. `0/0` when
+/// the edge carries no transition.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_block_transition_width(
+	project: *const ProjectHandle,
+	id: u64,
+	start_edge: bool,
+) -> OakRational {
+	let null = OakRational { num: 0, den: 0 };
+	let Some(id) = node_id(id) else { return null };
+	with_project(project, |p| {
+		let core = block_core(p, id)?;
+		let track = core.track?;
+		let blocks = &behavior_as::<TrackBehavior>(p, track)?.blocks;
+		let index = blocks.iter().position(|&b| b == id)?;
+		let candidate = if start_edge {
+			blocks.get(index.checked_sub(1)?).copied()?
+		} else {
+			blocks.get(index + 1).copied()?
+		};
+		let input = if start_edge {
+			oak_node::block::transition_input::IN_BLOCK
+		} else {
+			oak_node::block::transition_input::OUT_BLOCK
+		};
+		if p.graph.connected_output(candidate, input, -1) != Some(id) {
+			return None;
+		}
+		let transition = behavior_as::<TransitionBlockBehavior>(p, candidate)?;
+		Some(OakRational::from_native(if start_edge {
+			&transition.out_offset
+		} else {
+			&transition.in_offset
+		}))
+	})
+	.flatten()
+	.unwrap_or(null)
+}
+
+/// Number of live nodes in the project graph (arena order).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_node_count(project: *const ProjectHandle) -> i32 {
+	with_project(project, |p| p.graph.node_ids().len() as i32).unwrap_or(0)
+}
+
+/// The `index`-th live node token in arena order (invalid when out of
+/// range).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_node_at(
+	project: *const ProjectHandle,
+	index: i32,
+) -> u64 {
+	if index < 0 {
+		return OAK_NODE_ID_INVALID;
+	}
+	with_project(project, |p| {
+		p.graph
+			.node_ids()
+			.get(index as usize)
+			.map(|id| id.identity())
+			.unwrap_or(OAK_NODE_ID_INVALID)
+	})
+	.unwrap_or(OAK_NODE_ID_INVALID)
+}
+
 // ---------------------------------------------------------------------------
 // Node parameter reads (OakNodeValue POD mirror)
 // ---------------------------------------------------------------------------
@@ -1012,6 +1311,33 @@ pub unsafe extern "C" fn oak_sequence_set_video_params(
 				i64::from(frame_rate_num),
 				i64::from(frame_rate_den),
 			);
+		}
+		true
+	})
+	.unwrap_or(false)
+}
+
+/// Sets the sequence's interlaced flag (no-op on null/non-sequence).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_sequence_set_interlaced(
+	project: *const ProjectHandle,
+	id: u64,
+	interlaced: bool,
+) -> bool {
+	let Some(id) = NodeId::from_identity(id) else {
+		return false;
+	};
+	with_project_mut(project, |g| {
+		let Some(s) = g
+			.graph
+			.get_mut(id)
+			.and_then(|e| e.behavior.as_any_mut())
+			.and_then(|a| a.downcast_mut::<SequenceBehavior>())
+		else {
+			return false;
+		};
+		if let Some(v) = s.video_params.first_mut() {
+			v.interlaced = interlaced;
 		}
 		true
 	})

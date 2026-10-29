@@ -37,6 +37,55 @@ pub const E_NOMEM: i32 = -10005;
 /// The config-store key for the on-screen presentation bit depth.
 pub const CONFIG_KEY_DISPLAY_BIT_DEPTH: &str = "DisplayBitDepth";
 
+/// On-screen presentation bit depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayBitDepth {
+	Bit8,
+	Bit10,
+}
+
+impl DisplayBitDepth {
+	/// Parses the settings string; unknown values select the 10-bit default.
+	pub fn from_config_string(value: &str) -> Self {
+		match value.trim() {
+			"8" => Self::Bit8,
+			_ => Self::Bit10,
+		}
+	}
+
+	/// Returns the persisted settings value.
+	pub fn to_config_string(self) -> &'static str {
+		match self {
+			Self::Bit8 => "8",
+			Self::Bit10 => "10",
+		}
+	}
+}
+
+/// The project's output gamut and transfer settings as owned strings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputColorSpec {
+	pub gamut: String,
+	pub transfer: String,
+}
+
+impl Default for OutputColorSpec {
+	fn default() -> Self {
+		Self {
+			gamut: "srgb".into(),
+			transfer: "srgb".into(),
+		}
+	}
+}
+
+/// Returns the current project output specification.
+pub fn pipeline_output_spec() -> OutputColorSpec {
+	OutputColorSpec {
+		gamut: crate::state::color_output_gamut(),
+		transfer: crate::state::color_output_transfer(),
+	}
+}
+
 /// The minimum decibel level (the logarithmic slider floor).
 pub const DECIBEL_MINIMUM: f64 = -200.0;
 

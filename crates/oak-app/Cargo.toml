@@ -69,16 +69,6 @@ serde_json = "1"
 log = "0.4"
 
 
-oak-audio = { path = "../oak-audio" }
-oak-codec = { path = "../oak-codec" }
-oak-core = { path = "../oak-core" }
-oak-node = { path = "../oak-node" }
-oak-ofx-plugin = { path = "../oak-ofx-plugin" }
-oak-render = { path = "../oak-render" }
-oak-storage = { path = "../oak-storage" }
-oak-task = { path = "../oak-task" }
-oak-timeline = { path = "../oak-timeline" }
-oak-undo = { path = "../oak-undo" }
 oak-engine-rust-sdk = { path = "../oak-engine-rust-sdk" }
 [features]
 default = []

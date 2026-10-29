@@ -191,10 +191,18 @@ fn host_cancels_an_in_flight_slow_render() {
 	};
 	let submitter = client.clone();
 	let src_for_job = src.clone();
+	let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+	oak_render::procpool::set_plugin_progress_cb(Some(Arc::new(move |label, _, _| {
+		if label == "slow-render" {
+			let _ = progress_tx.send(());
+		}
+	})));
 	let job = std::thread::spawn(move || submitter.submit(&spec, &src_for_job));
-	// The slow plugin renders for ~2 s in 20 ms progress steps; cancel
-	// lands while it is in flight and the next progressUpdate aborts it.
-	std::thread::sleep(Duration::from_millis(200));
+	// Wait for the actual render to start rather than racing plugin/host
+	// initialization: the next progressUpdate must observe the cancel.
+	progress_rx
+		.recv_timeout(Duration::from_secs(5))
+		.expect("the slow plugin starts rendering");
 	client.cancel();
 	let result = job.join().expect("the submit thread must not panic");
 	assert!(
@@ -208,6 +216,7 @@ fn host_cancels_an_in_flight_slow_render() {
 	);
 
 	client.shutdown();
+	oak_render::procpool::set_plugin_progress_cb(None);
 	let _ = std::fs::remove_dir_all(&dir);
 }
 

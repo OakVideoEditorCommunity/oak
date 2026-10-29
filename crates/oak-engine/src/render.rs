@@ -69,6 +69,84 @@ pub extern "C" fn oak_render_manager_shutdown() {
 	oak_render::manager::RenderManager::shutdown();
 }
 
+/// Pumps the render manager's completion dispatcher. The host calls this
+/// once per UI tick; ticket completions (pre-render windows, full-res
+/// fills) are delivered from this poll loop.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_poll() {
+	if let Some(manager) = oak_render::manager::RenderManager::global() {
+		manager.poll();
+	}
+}
+
+/// Sizes the worker pool's per-frame workspace for the current sequence
+/// (the per-worker VRAM budget grows with the pixel count). No-op for
+/// non-positive sizes or without a manager.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_set_workspace_size(width: i32, height: i32, fps: u32) {
+	if width <= 0 || height <= 0 || fps == 0 {
+		return;
+	}
+	if let Some(manager) = oak_render::manager::RenderManager::global() {
+		manager.set_workspace_size(width, height, fps);
+	}
+}
+
+/// Points the inline (test) render backend at the live project so it
+/// evaluates through the traverser, like the worker pool's snapshot.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_set_inline_project(
+	project: *const ProjectHandle,
+) -> bool {
+	let Some(project) = crate::node::project_arc(project) else {
+		return false;
+	};
+	let Some(manager) = oak_render::manager::RenderManager::global() else {
+		return false;
+	};
+	manager.set_inline_project(project);
+	true
+}
+
+/// Uploads a full project snapshot at `revision` for the worker pool.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_set_graph_snapshot(
+	project: *const ProjectHandle,
+	revision: u64,
+) -> bool {
+	let Some(project) = crate::node::project_arc(project) else {
+		return false;
+	};
+	let Some(manager) = oak_render::manager::RenderManager::global() else {
+		return false;
+	};
+	manager.set_graph_snapshot(&project, revision).is_ok()
+}
+
+/// Re-uploads the snapshot even though the undo revision did not change
+/// (project settings that workers derive from the serialized graph).
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_resync_graph_snapshot(
+	project: *const ProjectHandle,
+	revision: u64,
+) -> bool {
+	let Some(project) = crate::node::project_arc(project) else {
+		return false;
+	};
+	let Some(manager) = oak_render::manager::RenderManager::global() else {
+		return false;
+	};
+	manager.resync_graph_snapshot(&project, revision).is_ok()
+}
+
+/// Drops the manager's current snapshot (project close).
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_render_manager_clear_graph_snapshot() {
+	if let Some(manager) = oak_render::manager::RenderManager::global() {
+		manager.clear_graph_snapshot();
+	}
+}
+
 /// Installs the text measure/render backends (idempotent; text nodes
 /// render empty without them).
 #[unsafe(no_mangle)]

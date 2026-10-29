@@ -66,6 +66,7 @@ unsafe extern "C" {
 	fn oak_effect_set_enabled(project: *const std::ffi::c_void, effect: u64, enabled: bool)
 		-> bool;
 	fn oak_effect_is_enabled(project: *const std::ffi::c_void, effect: u64) -> bool;
+	fn oak_effect_plugin_instance_handle(project: *const std::ffi::c_void, node: u64) -> u64;
 	fn oak_effect_input_id(project: *const std::ffi::c_void, node: u64, buf: *mut u8, len: usize) -> i32;
 }
 
@@ -158,6 +159,18 @@ pub fn factory_entries() -> Vec<FactoryEntry> {
 		.collect()
 }
 
+/// The display name of a factory entry (static first, then dynamic),
+/// `None` for unknown type ids.
+pub fn factory_name(type_id: &str) -> Option<String> {
+	if let Some(entry) = factory_entries().into_iter().find(|e| e.type_id == type_id) {
+		return Some(entry.name);
+	}
+	dynamic_factory_entries()
+		.into_iter()
+		.find(|e| e.type_id == type_id)
+		.map(|e| e.name)
+}
+
 /// The runtime-registered (OpenFX plugin) factory table, in registration
 /// order. Empty until `crate::ofx::scan` + `register_plugin_nodes` ran.
 pub fn dynamic_factory_entries() -> Vec<DynamicFactoryEntry> {
@@ -241,6 +254,12 @@ impl Project {
 	/// Whether the effect node is enabled.
 	pub fn effect_is_enabled(&self, effect: NodeId) -> bool {
 		unsafe { oak_effect_is_enabled(self.as_raw(), effect.raw()) }
+	}
+
+	/// Returns an OpenFX node's instance registry id without taking ownership.
+	pub fn plugin_instance_handle(&self, node: NodeId) -> Option<u64> {
+		let handle = unsafe { oak_effect_plugin_instance_handle(self.as_raw(), node.raw()) };
+		(handle != 0).then_some(handle)
 	}
 }
 

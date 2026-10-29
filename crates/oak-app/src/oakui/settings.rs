@@ -11,7 +11,6 @@
 //! `AppEngine` contract contains no engine-internal types or calls; P1
 //! moves these operations behind the engine SDK.
 
-use oak_codec::proxymanager::ProxyParams;
 use oak_engine_rust_sdk::codec::ProxyParams as SdkProxyParams;
 use oak_engine_rust_sdk::state::Config;
 
@@ -70,71 +69,9 @@ pub fn proxy_params_from_config() -> ProxyParamsUi {
 	}
 }
 
-pub fn proxy_params_to_codec(ui: &ProxyParamsUi) -> ProxyParams {
-	let mut params = ProxyParams::default();
-	params.width = ui.width;
-	params.height = ui.height;
-	params.divider = ui.divider;
-	params.crf = ui.crf;
-	params.include_audio = if ui.include_audio { 1 } else { 0 };
-	let bytes = ui.preset.as_bytes();
-	let len = bytes.len().min(31);
-	params.preset[..len].copy_from_slice(&bytes[..len]);
-	params
-}
-
-#[cfg(test)]
-pub fn proxy_params_from_codec(codec: &ProxyParams) -> ProxyParamsUi {
-	let end = codec
-		.preset
-		.iter()
-		.position(|&byte| byte == 0)
-		.unwrap_or(codec.preset.len());
-	ProxyParamsUi {
-		width: codec.width,
-		height: codec.height,
-		divider: codec.divider,
-		crf: codec.crf,
-		preset: String::from_utf8_lossy(&codec.preset[..end]).into_owned(),
-		include_audio: codec.include_audio != 0,
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn proxy_params_round_trip_through_the_codec_type() {
-		let codec = ProxyParams {
-			width: 1280,
-			height: 720,
-			divider: 2,
-			crf: 23,
-			include_audio: 0,
-			..ProxyParams::default()
-		};
-		let ui = proxy_params_from_codec(&codec);
-		assert_eq!(ui.width, 1280);
-		assert_eq!(ui.height, 720);
-		assert_eq!(ui.divider, 2);
-		assert_eq!(ui.crf, 23);
-		assert!(!ui.include_audio);
-		let back = proxy_params_to_codec(&ui);
-		assert_eq!(back.width, 1280);
-		assert_eq!(back.divider, 2);
-		assert_eq!(back.include_audio, 0);
-
-		let long = ProxyParamsUi {
-			preset: "x".repeat(40),
-			include_audio: true,
-			..ui
-		};
-		let codec = proxy_params_to_codec(&long);
-		assert_eq!(&codec.preset[..31], "x".repeat(31).as_bytes());
-		assert_eq!(codec.preset[31], 0);
-		assert_eq!(codec.include_audio, 1);
-	}
 
 	#[test]
 	fn proxy_params_from_config_returns_the_defaults() {

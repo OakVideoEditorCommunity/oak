@@ -246,7 +246,8 @@ impl EditorSession {
 		}
 	}
 
-	fn markers(&self) -> Vec<MarkerSnapshot> {
+	/// The session's markers (owned DTOs).
+	pub fn markers(&self) -> Vec<MarkerSnapshot> {
 		let count = unsafe { oak_editor_marker_count(self.ptr) }.max(0);
 		(0..count)
 			.filter_map(|index| {
@@ -267,8 +268,16 @@ impl EditorSession {
 	}
 
 	fn workarea(&self) -> Option<WorkAreaSnapshot> {
+		let (enabled, range) = self.workarea_state();
+		enabled.then_some(WorkAreaSnapshot { range })
+	}
+
+	/// The session's work area: the enabled flag and its range (the range
+	/// is meaningful even while disabled).
+	pub fn workarea_state(&self) -> (bool, TimeRange) {
 		let mut range = TimeRange::default();
-		unsafe { oak_editor_workarea(self.ptr, &mut range) }.then_some(WorkAreaSnapshot { range })
+		let enabled = unsafe { oak_editor_workarea(self.ptr, &mut range) };
+		(enabled, range)
 	}
 }
 

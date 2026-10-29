@@ -22,12 +22,10 @@
 //! the main layout from the design (`design/`), dockable panels built from
 //! the `oak_widgets` library, and an engine seam (`oakui`) with two
 //! backends: the mock ([`oakui::MockEngine`]) feeding demo data, and the
-//! real engine ([`oakui::RealEngine`]) driving the oak* module crates
-//! directly (M14 R3: project open/save through the oaknode serializer,
-//! timeline edits through the oaktimeline edit commands on the oakundo
-//! global stack, the oakrender ticket arena for the viewers, the oaktask
-//! export path, the oak_core config store, and the oakstorage
-//! write-through library — no `liboakengine` dylib, no C ABI).
+//! real engine ([`oakui::RealEngine`]), a pure `oak-engine-rust-sdk`
+//! consumer. P7 removed every other Oak dependency: project sessions,
+//! semantic edits, preview/export tasks, configuration, storage and OFX all
+//! cross the SDK facade, and the app links no internal module crate.
 //!
 //! # Layout
 //!
@@ -67,7 +65,6 @@ pub mod oakui;
 pub mod panels;
 pub mod update;
 pub mod widgets;
-mod handle;
 
 /// The application entry point (called from `main.rs`).
 pub fn run() {

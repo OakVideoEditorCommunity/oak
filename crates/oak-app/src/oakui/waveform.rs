@@ -242,7 +242,11 @@ mod tests {
 			std::process::id()
 		));
 		if media {
-			oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("test media");
+			std::fs::copy(
+				std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4"),
+				&path,
+			)
+			.expect("copy test media");
 		} else {
 			std::fs::write(&path, b"not media").expect("write");
 		}

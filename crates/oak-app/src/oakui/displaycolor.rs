@@ -52,7 +52,7 @@
 //! ## The content space
 //!
 //! The chain starts from the project's output spec
-//! ([`oak_core::color::pipeline_output_spec`]): sRGB content runs
+//! ([`oak_engine_rust_sdk::core::pipeline_output_spec`]): sRGB content runs
 //! through the named sRGB/Rec.709 space of the active OCIO config, and
 //! non-sRGB content (P3/BT.2020 gamuts, PQ/HLG transfers) is converted to
 //! CIE XYZ (D65, unit luminance) first and flows through the ICC's
@@ -82,9 +82,10 @@
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use oak_core::color::{pipeline_output_spec, ColorProcessor};
-use oak_core::colormath::{output_spec_to_xyz_d65, OutputColorSpec, OutputGamut, OutputTransfer};
+use oak_engine_rust_sdk::color::ColorProcessor;
+use oak_engine_rust_sdk::core::{pipeline_output_spec, OutputColorSpec};
 use oak_engine_rust_sdk::state::Config;
+use oak_engine_rust_sdk::utils::output_spec_to_xyz_d65;
 
 /// Config key: the display color management mode ("icc" / "off"). The
 /// preference only applies where the platform policy allows self-management
@@ -186,7 +187,7 @@ pub fn display_policy() -> DisplayPolicy {
 	// sRGB; a non-sRGB project output can't be honored through it — warn
 	// once so the degradation is visible in the log.
 	#[cfg(target_os = "windows")]
-	if oak_core::displayicc::windows_acm_active() {
+	if oak_engine_rust_sdk::state::displayicc_windows_acm_active() {
 		if pipeline_output_spec() != OutputColorSpec::default() {
 			static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 			WARNED.get_or_init(|| {
@@ -278,7 +279,7 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 	#[cfg(target_os = "windows")]
 	{
 		let id = u64::from(window.display(cx)?.id());
-		return oak_core::displayicc::windows_monitor_fingerprint(id);
+		return oak_engine_rust_sdk::state::displayicc_windows_monitor_fingerprint(id);
 	}
 	#[cfg(target_os = "linux")]
 	{
@@ -286,7 +287,7 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 		let center = window.bounds().center();
 		let x = f64::from(center.x) * f64::from(window.scale_factor());
 		let y = f64::from(center.y) * f64::from(window.scale_factor());
-		oak_core::displayicc::x11_monitor_fingerprint_at(x, y)
+		oak_engine_rust_sdk::state::displayicc_x11_monitor_fingerprint_at(x, y)
 	}
 	#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 	{
@@ -309,7 +310,7 @@ fn current_key() -> (DisplayPolicy, String, String, String, String) {
 		.unwrap_or_default();
 	let space = if space.is_empty() {
 		let spec = pipeline_output_spec();
-		format!("{}:{}", spec.gamut.as_setting(), spec.transfer.as_setting())
+		format!("{}:{}", spec.gamut, spec.transfer)
 	} else {
 		format!("override:{space}")
 	};
@@ -410,10 +411,8 @@ fn current() -> Option<State> {
 /// inside `system_display_icc_for`); an unknown one (empty or malformed)
 /// falls back to the main-display profile — the pre-multi-monitor behavior.
 fn monitor_icc_path(monitor: &str) -> Option<String> {
-	match oak_core::displayicc::monitor_ref_from_fingerprint(monitor) {
-		Some(monitor) => oak_core::displayicc::system_display_icc_for(&monitor),
-		None => oak_core::displayicc::system_display_icc(),
-	}
+	oak_engine_rust_sdk::state::displayicc_system_display_icc_for(monitor)
+		.or_else(oak_engine_rust_sdk::state::displayicc_system_display_icc)
 }
 
 fn clone_state(state: &State) -> Option<State> {
@@ -463,16 +462,16 @@ pub fn apply_to_window(window: &mut gpui_kit::Window) {
 fn content_colorspace() -> gpui_kit::WindowContentColorspace {
 	let spec = pipeline_output_spec();
 	gpui_kit::WindowContentColorspace {
-		primaries: match spec.gamut {
-			OutputGamut::Srgb => gpui_kit::ContentPrimaries::Srgb,
-			OutputGamut::DisplayP3 => gpui_kit::ContentPrimaries::DisplayP3,
-			OutputGamut::Bt2020 => gpui_kit::ContentPrimaries::Bt2020,
+		primaries: match spec.gamut.as_str() {
+			"displayp3" => gpui_kit::ContentPrimaries::DisplayP3,
+			"bt2020" => gpui_kit::ContentPrimaries::Bt2020,
+			_ => gpui_kit::ContentPrimaries::Srgb,
 		},
-		transfer: match spec.transfer {
-			OutputTransfer::Srgb => gpui_kit::ContentTransfer::Srgb,
-			OutputTransfer::Gamma22 => gpui_kit::ContentTransfer::Gamma22,
-			OutputTransfer::Pq => gpui_kit::ContentTransfer::Pq,
-			OutputTransfer::Hlg => gpui_kit::ContentTransfer::Hlg,
+		transfer: match spec.transfer.as_str() {
+			"gamma22" => gpui_kit::ContentTransfer::Gamma22,
+			"pq" => gpui_kit::ContentTransfer::Pq,
+			"hlg" => gpui_kit::ContentTransfer::Hlg,
+			_ => gpui_kit::ContentTransfer::Srgb,
 		},
 	}
 }
@@ -488,7 +487,8 @@ pub fn apply_f32_rgba(samples: &mut [f32], pixels: i64) {
 		// encoded form — linearize the transfer and gamut-map to CIE XYZ
 		// (D65, unit luminance) first, then let the ICC chain map the
 		// connection space to the display.
-		output_spec_to_xyz_d65(samples, pipeline_output_spec());
+		let spec = pipeline_output_spec();
+		output_spec_to_xyz_d65(samples, &spec.gamut, &spec.transfer);
 		let _ = xyz.convert_f32_rgba(samples, pixels);
 	} else if let Some(processor) = &state.f32 {
 		let _ = processor.convert_f32_rgba(samples, pixels);
@@ -565,8 +565,8 @@ mod tests {
 		assert_eq!(key.4, "");
 		assert_eq!(key.3, format!(
 			"{}:{}",
-			pipeline_output_spec().gamut.as_setting(),
-			pipeline_output_spec().transfer.as_setting()
+			pipeline_output_spec().gamut,
+			pipeline_output_spec().transfer
 		));
 	}
 

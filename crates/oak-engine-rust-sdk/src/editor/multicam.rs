@@ -24,7 +24,6 @@ unsafe extern "C" {
 	fn oak_editor_multicam_sequence(session: *const c_void, multicam: u64) -> u64;
 	fn oak_editor_multicam_source_track(session: *const c_void, multicam: u64, source: i32) -> u64;
 }
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 struct RawMulticamState {
@@ -34,7 +33,6 @@ struct RawMulticamState {
 	source_count: i32,
 	current_source: i32,
 }
-
 /// Resolved multicam node, source sequence and current angle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MulticamState {
@@ -44,7 +42,6 @@ pub struct MulticamState {
 	pub source_count: i32,
 	pub current_source: i32,
 }
-
 impl EditorSession {
 	/// Resolves a clip's multicam state, or `None` when multicam is not enabled.
 	pub fn multicam_state(&self, clip: NodeId) -> Option<MulticamState> {
@@ -360,4 +357,23 @@ mod tests {
 		let _ = std::fs::remove_file(media_a);
 		let _ = std::fs::remove_file(media_b);
 	}
+}
+/// Square-ish grid layout for `sources` source angles.
+pub fn rows_and_columns(sources: i32) -> (i32, i32) {
+	let mut rows = 1;
+	let mut cols = 1;
+	while rows * cols < sources {
+		if rows < cols {
+			rows += 1;
+		} else {
+			cols += 1;
+		}
+	}
+	(rows, cols)
+}
+
+/// Converts a grid row/column to a source index.
+pub fn rows_cols_to_index(row: i32, col: i32, total_rows: i32, total_cols: i32) -> i32 {
+	let _ = total_rows;
+	col + row * total_cols
 }
