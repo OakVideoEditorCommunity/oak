@@ -362,5 +362,27 @@ mod tests {
 				pixel_count: 144 * 96 * 4,
 			},
 		);
+		assert_roundtrip::<crate::preview_audio::OakAudioBufferInfo>(
+			&crate::preview_audio::AudioBufferMetadata {
+				range: oak_core::TimeRange::new(
+					oak_core::Rational::new(0, 1),
+					oak_core::Rational::new(1, 4),
+				),
+				sample_rate: 48_000,
+				channel_layout: 0x3,
+				channel_count: 2,
+				sample_count: 24_000,
+			},
+		);
+		assert_roundtrip::<crate::preview_video::OakVideoBufferInfo>(
+			&crate::preview_video::VideoBufferMetadata {
+				width: 16,
+				height: 12,
+				linesize: 64,
+				origin: crate::preview_video::FrameOrigin::SharedMemory,
+				pixel_format: crate::preview_video::VideoPixelFormat::Bgra8,
+				byte_count: 16 * 12 * 4,
+			},
+		);
 	}
 }

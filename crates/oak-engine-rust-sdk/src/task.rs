@@ -55,6 +55,43 @@ unsafe extern "C" {
 		height: i32,
 	) -> u64;
 	fn oak_task_take_thumbnail(id: u64) -> *const c_void;
+	fn oak_task_audio_render(
+		project: *const c_void,
+		viewer: u64,
+		range: crate::types::TimeRange,
+		sample_rate: i32,
+		channel_layout: u64,
+	) -> u64;
+	fn oak_task_take_audio(id: u64) -> *const c_void;
+	fn oak_task_video_render(
+		project: *const c_void,
+		viewer: u64,
+		time: crate::types::Rational,
+		width: i32,
+		height: i32,
+		pixel_format: i32,
+	) -> u64;
+	fn oak_task_video_render_playback(
+		project: *const c_void,
+		viewer: u64,
+		time: crate::types::Rational,
+		width: i32,
+		height: i32,
+		pixel_format: i32,
+		frame: i64,
+		distance: i64,
+		generation: u64,
+	) -> u64;
+	fn oak_task_video_render_track(
+		project: *const c_void,
+		viewer: u64,
+		track: u64,
+		time: crate::types::Rational,
+		width: i32,
+		height: i32,
+		pixel_format: i32,
+	) -> u64;
+	fn oak_task_take_video(id: u64) -> *const c_void;
 }
 
 /// `repr(C)` mirror of the engine's encoding parameters for
@@ -116,6 +153,22 @@ pub struct Task {
 	id: u64,
 }
 
+/// A lightweight cancellation handle for a task owned by another thread.
+///
+/// It never releases the task registry entry, so it is safe to clone and call
+/// after the owning [`Task`] has finished: cancellation then becomes a no-op.
+#[derive(Clone)]
+pub struct TaskCancellation {
+	id: u64,
+}
+
+impl TaskCancellation {
+	/// Requests cooperative cancellation without joining the worker.
+	pub fn cancel(&self) {
+		unsafe { oak_task_cancel(self.id) };
+	}
+}
+
 impl Task {
 	pub(crate) fn new(id: u64) -> Option<Task> {
 		(id != 0).then_some(Task { id })
@@ -124,6 +177,11 @@ impl Task {
 	/// Returns the registry identity for session/task correlation APIs.
 	pub(crate) fn id(&self) -> u64 {
 		self.id
+	}
+
+	/// Returns an independent cancellation handle for a UI/session owner.
+	pub fn cancellation(&self) -> TaskCancellation {
+		TaskCancellation { id: self.id }
 	}
 
 	/// The task title.
@@ -178,6 +236,16 @@ impl Task {
 	/// Takes the owned result of a successful thumbnail render exactly once.
 	pub fn take_thumbnail(&self) -> Option<crate::thumbnail::Thumbnail> {
 		crate::thumbnail::Thumbnail::from_raw(unsafe { oak_task_take_thumbnail(self.id) })
+	}
+
+	/// Takes the owned result of a successful audio mix exactly once.
+	pub fn take_audio(&self) -> Option<crate::preview_audio::AudioBlock> {
+		crate::preview_audio::AudioBlock::from_raw(unsafe { oak_task_take_audio(self.id) })
+	}
+
+	/// Takes the owned result of a successful video render exactly once.
+	pub fn take_video(&self) -> Option<crate::preview_video::VideoFrame> {
+		crate::preview_video::VideoFrame::from_raw(unsafe { oak_task_take_video(self.id) })
 	}
 }
 
@@ -236,6 +304,105 @@ pub fn render_thumbnail(
 	})
 }
 
+/// Starts asynchronous audio mixing for a sequence or footage range.
+pub fn render_audio(
+	project: &Project,
+	viewer: NodeId,
+	range: crate::types::TimeRange,
+	sample_rate: i32,
+	channel_layout: u64,
+) -> Option<Task> {
+	if range.out <= range.in_ || sample_rate <= 0 || channel_layout == 0 {
+		return None;
+	}
+	Task::new(unsafe {
+		oak_task_audio_render(
+			project.as_raw(),
+			viewer.raw(),
+			range,
+			sample_rate,
+			channel_layout,
+		)
+	})
+}
+
+/// Starts asynchronous sequence/footage video rendering into an owned frame.
+pub fn render_video(
+	project: &Project,
+	viewer: NodeId,
+	time: crate::types::Rational,
+	size: (u32, u32),
+	pixel_format: crate::preview_video::VideoPixelFormat,
+) -> Option<Task> {
+	if size.0 == 0 || size.1 == 0 {
+		return None;
+	}
+	Task::new(unsafe {
+		oak_task_video_render(
+			project.as_raw(),
+			viewer.raw(),
+			time,
+			size.0 as i32,
+			size.1 as i32,
+			pixel_format as i32,
+		)
+	})
+}
+
+/// Starts an asynchronous Playback-priority preview frame render.
+pub fn render_playback_video(
+	project: &Project,
+	viewer: NodeId,
+	time: crate::types::Rational,
+	size: (u32, u32),
+	pixel_format: crate::preview_video::VideoPixelFormat,
+	frame: i64,
+	distance: i64,
+	generation: u64,
+) -> Option<Task> {
+	if size.0 == 0 || size.1 == 0 {
+		return None;
+	}
+	Task::new(unsafe {
+		oak_task_video_render_playback(
+			project.as_raw(),
+			viewer.raw(),
+			time,
+			size.0 as i32,
+			size.1 as i32,
+			pixel_format as i32,
+			frame,
+			distance,
+			generation,
+		)
+	})
+}
+
+/// Starts an asynchronous multicam-angle render of one video track.
+pub fn render_track_video(
+	project: &Project,
+	viewer: NodeId,
+	track: NodeId,
+	time: crate::types::Rational,
+	size: (u32, u32),
+	pixel_format: crate::preview_video::VideoPixelFormat,
+) -> Option<Task> {
+	if size.0 == 0 || size.1 == 0 {
+		return None;
+	}
+	Task::new(unsafe {
+		oak_task_video_render_track(
+			project.as_raw(),
+			viewer.raw(),
+			track.raw(),
+			time,
+			size.0 as i32,
+			size.1 as i32,
+			pixel_format as i32,
+		)
+	})
+}
+
 /// Starts an export of the viewer node (a sequence or footage) to
 /// `filename` with `params`. None on invalid input.
 pub fn export(
@@ -275,6 +442,21 @@ pub fn load_otio(filename: &str) -> Option<Task> {
 mod tests {
 	use super::*;
 
+	fn export_params(length_seconds: i32) -> EncodingParams {
+		EncodingParams {
+			format: crate::codec::Format::MPEG4Video as i32,
+			video_enabled: true,
+			video_codec: crate::codec::Codec::H264 as i32,
+			video_width: 64,
+			video_height: 64,
+			video_time_base_num: 1,
+			video_time_base_den: 25,
+			export_length_num: length_seconds,
+			export_length_den: 1,
+			..EncodingParams::default()
+		}
+	}
+
 	/// Save → load round-trip through the task path.
 	#[test]
 	fn save_then_load_otio_roundtrip() {
@@ -308,5 +490,68 @@ mod tests {
 		drop(load);
 
 		let _ = std::fs::remove_file(&path);
+	}
+
+	/// Real export tasks preserve success, cooperative cancellation and errors.
+	#[test]
+	fn export_success_cancel_and_failure() {
+		let _guard = crate::node::UNDO_SERIAL
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		if !crate::render::manager_init(crate::render::RenderBackend::Threads) {
+			assert!(crate::render::manager_is_initialized());
+		}
+		let session = crate::editor::EditorSession::new().expect("session");
+		let sequence = session.create_sequence("Export").expect("sequence");
+		let media = crate::test_support::make_test_clip("sdk_export");
+		let footage = session.project().import_footage(&media).expect("footage");
+		session
+			.execute(crate::edit::EditCommand::PlaceFootageClip {
+				footage,
+				kind: crate::editor::TrackKind::Video,
+				track_index: 0,
+				in_ts: 0,
+				out_ts: 25,
+				media_in_ts: 0,
+			})
+			.expect("place clip");
+		let path = std::env::temp_dir()
+			.join(format!("oak_sdk_export_{}.mp4", std::process::id()))
+			.to_string_lossy()
+			.into_owned();
+		let task = export(&session.project(), sequence, &path, &export_params(1)).expect("export");
+		assert!(task.wait(), "export failed: {}", task.error());
+		assert_eq!(task.state(), TaskState::Succeeded);
+		assert!(std::path::Path::new(&path).is_file());
+
+		let cancelled_path = std::env::temp_dir()
+			.join(format!("oak_sdk_export_cancel_{}.mp4", std::process::id()))
+			.to_string_lossy()
+			.into_owned();
+		let cancelled = export(
+			&session.project(),
+			sequence,
+			&cancelled_path,
+			&export_params(10_000),
+		)
+		.expect("cancellable export");
+		cancelled.cancellation().cancel();
+		assert!(!cancelled.wait());
+		assert_eq!(cancelled.state(), TaskState::Cancelled);
+
+		let failed = export(
+			&session.project(),
+			sequence,
+			"/nonexistent/oak-sdk-export/output.mp4",
+			&export_params(1),
+		)
+		.expect("invalid output fails asynchronously");
+		assert!(!failed.wait());
+		assert_eq!(failed.state(), TaskState::Failed);
+		assert!(!failed.error().is_empty());
+
+		let _ = std::fs::remove_file(path);
+		let _ = std::fs::remove_file(cancelled_path);
+		let _ = std::fs::remove_file(media);
 	}
 }

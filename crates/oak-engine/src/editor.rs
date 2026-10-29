@@ -158,6 +158,20 @@ fn session_from_project_handle(project: *mut ProjectHandle) -> *mut EditorSessio
 	session
 }
 
+/// Creates a fresh session around an existing engine project handle.
+///
+/// The handle is consumed exactly once. The new session has independent
+/// transport/selection state but shares the same live project Arc.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_editor_from_project_handle(
+	project: *mut ProjectHandle,
+) -> *mut EditorSessionHandle {
+	if project.is_null() {
+		return std::ptr::null_mut();
+	}
+	session_from_project_handle(project)
+}
+
 /// Creates an uninitialized-session around a new, initialized project.
 #[unsafe(no_mangle)]
 pub extern "C" fn oak_editor_new() -> *mut EditorSessionHandle {

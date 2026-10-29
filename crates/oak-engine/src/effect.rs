@@ -42,7 +42,7 @@ use crate::node::{OAK_NODE_ID_INVALID, ProjectHandle};
 
 /// The effect-input id of `node`, or `None` when the node cannot host
 /// effects (C++ `Node::GetEffectInputID`).
-fn effect_input_of(g: &Graph, node: NodeId) -> Option<String> {
+pub(crate) fn effect_input_of(g: &Graph, node: NodeId) -> Option<String> {
 	let id = &g.get(node)?.core.effect_input;
 	if id.is_empty() { None } else { Some(id.clone()) }
 }
@@ -82,7 +82,7 @@ pub(crate) fn chain(g: &Graph, host: NodeId) -> Vec<NodeId> {
 
 /// Whether `node` is enabled (the `enabled_in` standard value; the effect
 /// stack's enable toggle).
-fn is_enabled(g: &Graph, node: NodeId) -> bool {
+pub(crate) fn is_enabled(g: &Graph, node: NodeId) -> bool {
 	g.get(node)
 		.map(|e| {
 			matches!(

@@ -53,11 +53,11 @@
 //!
 //! # Threading note
 //!
-//! Long renders (full-resolution fills, exports) run on background
-//! threads; the export task's event listener delivers progress through a
-//! channel the app drains on its tick loop. The background full-res
-//! worker holds the project's `Arc`, so a project drop mid-render is a
-//! non-event (the drained frame is discarded by the generation check).
+//! Preview frames, audio and exports run on SDK engine workers. The app polls
+//! task state without waiting on its UI thread and converts owned SDK pixels
+//! for the viewer and scopes. Background requests retain the project Arc, so
+//! a project drop only makes their completion stale through the generation
+//! check.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -84,7 +84,6 @@ use oak_engine_rust_sdk::edit::EditCommand;
 use oak_engine_rust_sdk::editor::EditorSession;
 use oak_engine_rust_sdk::state::Config;
 use oak_render::manager::RenderManager;
-use oak_render::procpool::ShmFrameRef;
 use oak_timeline::handle::CHandle;
 
 use super::engine::{
@@ -93,7 +92,8 @@ use super::engine::{
 };
 use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image, synthetic_frame_samples};
 use super::graphops::{self, ProjectRef};
-use super::scopes::{analyze_bgra8, analyze_f32_rgba};
+#[cfg(test)]
+use super::scopes::analyze_f32_rgba;
 use super::settings::proxy_params_from_config;
 use super::transport::TransportState;
 
@@ -107,6 +107,18 @@ fn proxy_ui_from_sdk(params: &oak_engine_rust_sdk::codec::ProxyParams) -> super:
 		preset: params.preset().to_string(),
 		include_audio: params.include_audio != 0,
 	}
+}
+
+/// Creates a migration session over an existing live project Arc.
+pub(crate) fn editor_session_for_project(project: &ProjectRef) -> Result<EditorSession, String> {
+	let handle = graphops::storage_bind(project);
+	EditorSession::adopt_storage_project_handle(oak_engine_rust_sdk::editor::StorageProjectHandle {
+		ctx: handle.ctx,
+		addref: handle.addref,
+		release: handle.release,
+		abi_version: handle.abi_version,
+	})
+	.map_err(|error| error.to_string())
 }
 
 /// Converts the SDK's codec-neutral proxy state into the app facade's UI state.
@@ -158,19 +170,6 @@ struct AuxHandle(CHandle);
 // impls exist so the gpui entity can carry it.
 unsafe impl Send for AuxHandle {}
 unsafe impl Sync for AuxHandle {}
-
-/// The lifecycle state of a monitor's render path (the renders are
-/// stateless ticket submissions; the slot only remembers whether the path
-/// ever failed so a broken setup doesn't retry — and re-log — on every
-/// frame).
-enum RendererSlot {
-	/// No render attempted yet; the next `cpu_frame` tries one.
-	Untried,
-	/// The render path works for this monitor.
-	Ready,
-	/// The last render failed; don't retry until the project changes.
-	Unavailable,
-}
 
 // ---------------------------------------------------------------------------
 // Full-resolution frame cache (M12 P5a)
@@ -283,16 +282,11 @@ enum FullResTarget {
 // Playback pre-render window (M15 S2)
 // ---------------------------------------------------------------------------
 //
-// During playback the engine feeds the forward window (default 120 frames,
-// config `PlaybackPreRenderFrames`) to the `PreviewScheduler` through the
-// process dispatcher: the scheduler interleaves the frames across the
-// workers, so by the time the playhead reaches a frame its pixels are
-// already sitting in a shm slot. `cpu_frame` hits this slot cache first
-// (zero copy — build the display image from the slot bytes, then release
-// the slot); a miss falls back to the last displayed proxy frame (the
-// synchronous render is the cold-cache fallback only). Frames
-// that fall out of the window (or whose params were invalidated) release
-// their slots back to the workers.
+// During playback the engine feeds the forward window (config
+// `PlaybackPreRenderFrames`) to Playback-priority SDK tasks. Completed owned
+// frames wait in this cache; `cpu_frame` converts them for display and scopes.
+// A miss falls back to the last displayed proxy, while a cold cache gets a
+// temporary pattern. Stale requests are cancelled and stale frames dropped.
 
 /// The default forward pre-render window (frames). Kept small: each
 /// frame is slow on some hardware (multi-clip montage decodes through
@@ -305,8 +299,8 @@ pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 12;
 /// Config key for the forward pre-render window size (frames).
 pub const CONFIG_KEY_PREVIEW_WINDOW: &str = "PlaybackPreRenderFrames";
 
-/// One monitor's playback pre-render state (UI-thread-owned; the completions
-/// delivered by the dispatcher's poll run on the UI thread too).
+/// One monitor's playback pre-render state. SDK tasks are polled on the UI
+/// thread, but all rendering and waiting stays on engine workers.
 #[derive(Default)]
 struct PreviewWindow {
 	/// The node identity the window renders (sequence / footage).
@@ -316,34 +310,18 @@ struct PreviewWindow {
 	generation: u64,
 	/// Frames already submitted to the scheduler (pending or in flight).
 	submitted: BTreeSet<i64>,
-	/// Rendered frames held in shm slots, keyed by frame number. A frame
-	/// is consumed by `cpu_frame` (slot released after the display image
-	/// is built) or released when it falls out of the window.
+	/// Pollable SDK renders. Terminal tasks are drained without waiting.
+	requests: BTreeMap<i64, oak_engine_rust_sdk::task::Task>,
+	/// Cancelled renders retained until terminal, so dropping them never joins
+	/// a running worker on the UI thread.
+	retired: Vec<oak_engine_rust_sdk::task::Task>,
+	/// Owned rendered frames, keyed by frame number. A frame is consumed by
+	/// `cpu_frame` or dropped when it falls out of the window.
 	slots: BTreeMap<i64, PreviewSlot>,
 }
 
-/// A finished frame in the playback pre-render window: a process-backend
-/// shm slot (released back to its worker) or an in-process pipeline
-/// texture (M4; dropped, the engine texture lease frees it).
-enum PreviewSlot {
-	/// Process backend: a frame in a worker's shm slot.
-	Shm(ShmFrameRef),
-	/// Thread pipeline: an engine texture (GPU-resident on a shared
-	/// device, or an in-process CPU frame).
-	Video(oak_core::texture::Texture),
-}
-
-impl PreviewSlot {
-	/// Release the slot's backend resource (no-op for pipeline textures,
-	/// whose `Drop` returns the GPU token / pixels).
-	fn release(self) {
-		if let PreviewSlot::Shm(frame) = self {
-			if let Some(m) = RenderManager::global() {
-				m.release_frame(&frame);
-			}
-		}
-	}
-}
+/// A finished, backend-independent frame in the playback pre-render window.
+type PreviewSlot = oak_engine_rust_sdk::preview_video::VideoFrame;
 
 // ---------------------------------------------------------------------------
 // Playback audio prefetch (M15 S3; M16 S3: rendered on the audio thread)
@@ -708,6 +686,14 @@ impl MulticamFrameCache {
 /// samples)` when the frame is the in-process F32 variant (the shm
 /// variant is BGRA8 and is read as bytes instead).
 fn read_f32_frame(frame: &super::renderops::RenderedFrame) -> Option<(u32, u32, Vec<f32>)> {
+	if let super::renderops::RenderedFrame::Sdk(frame) = frame {
+		let info = frame.info();
+		if info.pixel_format != oak_engine_rust_sdk::preview_video::VideoPixelFormat::F32Rgba {
+			return None;
+		}
+		let samples = repack_f32_row_bytes(info.width, info.height, info.linesize, &frame.bytes())?;
+		return Some((info.width.max(0) as u32, info.height.max(0) as u32, samples));
+	}
 	let super::renderops::RenderedFrame::CpuF32 {
 		width,
 		height,
@@ -755,6 +741,18 @@ fn release_rendered_frame(rendered: &super::renderops::RenderedFrame) {
 /// slot; the in-process variant converts F32→BGRA8.
 fn rendered_to_owned_image(rendered: &super::renderops::RenderedFrame) -> Option<Arc<RenderImage>> {
 	match rendered {
+		super::renderops::RenderedFrame::Sdk(_) => {
+			let (image, _scope, samples) = rendered.to_display()?;
+			if let Some(samples) = samples {
+				super::gpu::register_display_frame(
+					image.id.0,
+					rendered.width().max(0) as u32,
+					rendered.height().max(0) as u32,
+					&samples,
+				);
+			}
+			Some(Arc::new(image))
+		}
 		super::renderops::RenderedFrame::Shm(f) => {
 			let meta = &f.meta;
 			let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
@@ -1270,13 +1268,11 @@ pub struct RealEngine {
 	/// Phase counter driving the (silent) audio levels.
 	meter_phase: u32,
 	/// Cache of the CPU frames handed to the viewers, keyed by monitor.
-	/// Each monitor holds its proxy frame (rendered synchronously on the UI
-	/// thread, with the scope samples analyzed in the same pass) plus the
+	/// Each monitor holds its proxy frame (rendered by an SDK worker, with
+	/// the scope samples analyzed from the same owned pixels) plus the
 	/// full-resolution fill the background worker lands when the playhead
-	/// rests (see [`MonitorFrameCache`]). Both monitors hold real rendered
-	/// frames (see [`RealEngine::render_program_frame`] /
-	/// [`RealEngine::render_source_frame`]); the synthetic pattern is only
-	/// the failure fallback.
+	/// rests (see [`MonitorFrameCache`]). The synthetic pattern is only a
+	/// cold-cache placeholder while the first request is in flight.
 	cpu_frame_cache: Mutex<HashMap<Monitor, MonitorFrameCache>>,
 	/// The display-color transform generation the frame cache was built
 	/// against (a change drops every cached image — they were produced
@@ -1302,14 +1298,6 @@ pub struct RealEngine {
 	full_res_rx: Mutex<mpsc::Receiver<FullResEvent>>,
 	/// The sending half of `full_res_rx` (cloned into every job).
 	full_res_tx: Mutex<mpsc::Sender<FullResEvent>>,
-	/// The program monitor's render-path state (see [`RendererSlot`]).
-	/// Reset to [`RendererSlot::Untried`] in [`RealEngine::drop_project`].
-	renderer: Mutex<RendererSlot>,
-	/// The source monitor's render-path state (same slot semantics as
-	/// `renderer`). Reset when the selection changes or the project is
-	/// dropped — the render binds the footage node, so a new selection
-	/// must re-render the new node.
-	source_renderer: Mutex<RendererSlot>,
 	/// Material-bin thumbnail cache (finished PNGs + in-flight jobs).
 	thumbnails: Mutex<ThumbnailState>,
 	/// Generation counter invalidating in-flight thumbnail jobs on project
@@ -1369,8 +1357,7 @@ pub struct RealEngine {
 
 impl RealEngine {
 	/// Render one tick's worth of audio at the program playhead and queue
-	/// it for playback (M12 P1; M15 S3: worker-pool prefetch; M16 S3: each
-	/// chunk is queued on the dedicated audio-render thread — see
+	/// it for playback (each chunk is mixed on an SDK engine worker — see
 	/// [`renderops::submit_audio_chunk`](super::renderops::submit_audio_chunk)
 	/// — and delivered asynchronously into the channel, drained below, so
 	/// the render never runs on the UI tick). The chunks are submitted AHEAD
@@ -1379,10 +1366,13 @@ impl RealEngine {
 	/// degrade to silence; when the audio thread is down the channel stays
 	/// empty and playback continues video-only.
 	fn pull_audio_tick(&mut self, cx: &mut Context<Self>) {
-		let (Some(project), Some(seq)) = (self.project.clone(), self.sequence) else {
+		let (Some(_), Some(seq)) = (self.project.clone(), self.sequence) else {
 			return;
 		};
 		let Some(tb) = self.time_base() else {
+			return;
+		};
+		let Some(session) = self.editor_session() else {
 			return;
 		};
 		let frame = self.clock_frame(Monitor::Program, cx).0;
@@ -1421,8 +1411,9 @@ impl RealEngine {
 		let mut submitted = 0i32;
 		while st.next_submit < target {
 			let ts = st.next_submit;
-			let p = project.clone();
-			if super::renderops::submit_audio_chunk(&p, seq, ts, chunk, tb, tx.clone()).is_err() {
+			if super::renderops::submit_audio_chunk(&session, seq, ts, chunk, tb, tx.clone())
+				.is_err()
+			{
 				break;
 			}
 			st.next_submit += chunk;
@@ -1594,8 +1585,6 @@ impl RealEngine {
 			preview_generation: 0,
 			full_res_rx: Mutex::new(full_res_rx),
 			full_res_tx: Mutex::new(full_res_tx),
-			renderer: Mutex::new(RendererSlot::Untried),
-			source_renderer: Mutex::new(RendererSlot::Untried),
 			thumbnails: Mutex::new(ThumbnailState::default()),
 			thumb_generation: 0,
 			thumb_rx: Mutex::new(thumb_rx),
@@ -1634,14 +1623,7 @@ impl RealEngine {
 	/// graph/effect SDK calls never reload or fork the current document.
 	fn editor_session(&self) -> Option<EditorSession> {
 		let project = self.project.clone()?;
-		let handle = graphops::storage_bind(&project);
-		EditorSession::adopt_storage_project_handle(oak_engine_rust_sdk::editor::StorageProjectHandle {
-			ctx: handle.ctx,
-			addref: handle.addref,
-			release: handle.release,
-			abi_version: handle.abi_version,
-		})
-		.ok()
+	editor_session_for_project(&project).ok()
 	}
 
 	/// The sequence's timebase `(rate_den, rate_num)`, if a sequence with
@@ -1691,11 +1673,8 @@ impl RealEngine {
 	}
 
 	/// The proxy resolution the viewer renders at: the sequence's aspect
-	/// scaled to a small long edge. Rendering is a synchronous call made
-	/// from `cpu_frame` (a `&self` read on the UI thread), so the geometry
-	/// stays tiny to keep the block short; the background job renders the
-	/// full-resolution frame off-thread at the divider-scaled size (M12
-	/// P5a, see [`RealEngine::schedule_full_res`]).
+	/// scaled to a small long edge. SDK workers render both this proxy and
+	/// the divider-scaled resting fill off the UI thread.
 	fn proxy_render_size(&self) -> Option<(i32, i32)> {
 		let info = self.sequence_info.as_ref()?;
 		let (w, h) = (info.format.width.max(1), info.format.height.max(1));
@@ -1710,59 +1689,6 @@ impl RealEngine {
 		Some((width as i32, height as i32))
 	}
 
-	/// Renders one program-monitor frame through the oakrender ticket
-	/// arena: builds the sequence's montage at `frame`, renders at the
-	/// proxy geometry, and produces the viewer display image plus the
-	/// scope samples (M15 S2: the process backend delivers a BGRA8 shm
-	/// slot; the display image is built straight from the slot bytes —
-	/// the GPU-upload staging copy — and the slot released). Returns
-	/// `None` (the caller falls back to the synthetic pattern) when no
-	/// sequence is open, the render manager is unavailable, or the render
-	/// itself fails.
-	fn render_program_frame(&self, frame: Frame) -> Option<(RenderImage, ScopeData)> {
-		let project = self.project_ref()?.clone();
-		let seq = self.sequence?;
-		let tb = self.time_base()?;
-		if !super::renderops::ensure_render_manager() {
-			return None;
-		}
-		let mut slot = self.renderer.lock().unwrap();
-		if matches!(*slot, RendererSlot::Unavailable) {
-			return None;
-		}
-		let (width, height) = self.proxy_render_size()?;
-		match super::renderops::render_sequence_frame(
-			&project,
-			seq,
-			frame.0,
-			tb,
-			width,
-			height,
-			Some(oak_core::PixelFormat::F32),
-		) {
-			Ok(rendered) => {
-				*slot = RendererSlot::Ready;
-				let (image, scope, samples) = rendered.to_display()?;
-				if let Some(samples) = samples {
-					super::gpu::register_display_frame(
-						image.id.0,
-						width as u32,
-						height as u32,
-						&samples,
-					);
-				}
-				release_rendered_frame(&rendered);
-				Some((image, scope))
-			}
-			Err(error) => {
-				println!("[real engine] render_frame failed: {error}");
-				// Don't retry (and re-log) on every frame.
-				*slot = RendererSlot::Unavailable;
-				None
-			}
-		}
-	}
-
 	/// The selected entry's footage node (M12 P3: entry ids are the
 	/// nodes' stable identities), or `None` when the selection is a folder
 	/// or absent.
@@ -1771,55 +1697,6 @@ impl RealEngine {
 		let id = graphops::id_of(self.selected_item?)?;
 		let guard = graphops::lock(project);
 		graphops::footage_behavior(&guard.graph, id).map(|_| id)
-	}
-
-	/// Renders one source-monitor frame through the ticket arena: the
-	/// currently selected footage node decoded at the proxy geometry (same
-	/// pipeline as the program monitor, M15 S2 shm slot + release).
-	/// Returns `None` (the caller falls back to the synthetic pattern)
-	/// when no footage is selected, the render manager is unavailable, or
-	/// the render itself fails.
-	fn render_source_frame(&self, frame: Frame) -> Option<(RenderImage, ScopeData)> {
-		let project = self.project_ref()?.clone();
-		let node = self.selected_footage_node()?;
-		let tb = self.time_base()?;
-		if !super::renderops::ensure_render_manager() {
-			return None;
-		}
-		let mut slot = self.source_renderer.lock().unwrap();
-		if matches!(*slot, RendererSlot::Unavailable) {
-			return None;
-		}
-		let (width, height) = self.proxy_render_size()?;
-		match super::renderops::render_footage_frame(
-			&project,
-			node,
-			frame.0,
-			tb,
-			width,
-			height,
-			Some(oak_core::PixelFormat::F32),
-		) {
-			Ok(rendered) => {
-				*slot = RendererSlot::Ready;
-				let (image, scope, samples) = rendered.to_display()?;
-				if let Some(samples) = samples {
-					super::gpu::register_display_frame(
-						image.id.0,
-						width as u32,
-						height as u32,
-						&samples,
-					);
-				}
-				release_rendered_frame(&rendered);
-				Some((image, scope))
-			}
-			Err(error) => {
-				println!("[real engine] source render_frame failed: {error}");
-				*slot = RendererSlot::Unavailable;
-				None
-			}
-		}
 	}
 
 	/// Builds the background full-res job for `monitor` at `frame` (the
@@ -1891,9 +1768,8 @@ impl RealEngine {
 				),
 			};
 			if let Ok(rendered) = rendered {
-				// M15 S2: the process backend delivers a shm slot — copy the
-				// pixels out once (counted, long-lived cache) and release the
-				// slot.
+				// The SDK owns and releases backend resources; the app only
+				// converts the owned pixels for its long-lived display cache.
 				let image = rendered_to_owned_image(&rendered);
 				release_rendered_frame(&rendered);
 				if let Some(image) = image {
@@ -2131,20 +2007,12 @@ impl RealEngine {
 	// M15 S2: playback pre-render window
 	// -----------------------------------------------------------------------
 
-	/// Feeds the playback pre-render window for `monitor` into the
-	/// scheduler (M15 S2): while playing, the forward window's frames are
-	/// submitted at Playback priority (ordered by playhead distance), so
-	/// workers render them ahead of the playhead into shm slots. The
-	/// window rebuilds when the node or the render-params generation
-	/// changed; slots that fell behind the playhead are released (credit
-	/// returns to the workers).
+	/// Feeds the playback pre-render window through Playback-priority SDK
+	/// tasks. Paused/cold monitors request only the current proxy frame.
 	fn update_preview_window(&mut self, monitor: Monitor, cx: &mut Context<Self>) {
-		// Only during playback: a paused viewer displays the last proxy
-		// frame (the resting full-res fill replaces it).
+		// Playback fills the forward window; a paused/cold viewer requests only
+		// its current proxy frame. Both paths poll SDK tasks without waiting.
 		let playing = self.clock(monitor).read(cx).transport.is_playing();
-		if !playing {
-			return;
-		}
 		let Some(project) = self.project.clone() else {
 			return;
 		};
@@ -2167,22 +2035,13 @@ impl RealEngine {
 			Monitor::Program => self.sequence_length().0,
 			Monitor::Source => self.source_length().0,
 		};
-		let Some(m) = RenderManager::global() else {
-			return;
-		};
-
 		let forward = config_get_int(CONFIG_KEY_PREVIEW_WINDOW, DEFAULT_PREVIEW_WINDOW_FORWARD)
 			.clamp(8, 1200);
-		// Cap the window to the pool's slot headroom: a window that can
-		// hold every slot starves interactive (this frame's synchronous
-		// render) and audio tickets of credit, and since the slot-releasing
-		// cleanup runs on this same UI thread, a synchronous wait then
-		// deadlocks playback. Keep one slot per worker in reserve.
-		let forward = match m.dispatch.preview_window_capacity() {
-			Some(capacity) => forward.min(capacity as i64).max(1),
-			None => forward,
+		let end = if playing {
+			length.max(playhead).min(playhead + forward)
+		} else {
+			playhead + 1
 		};
-		let end = length.max(playhead).min(playhead + forward);
 
 		// Reset / rebuild when the node changed or an invalidation bumped the
 		// generation (the old pending/claimed requests are cancelled).
@@ -2191,14 +2050,12 @@ impl RealEngine {
 			.lock()
 			.unwrap_or_else(|e| e.into_inner());
 		let window = windows.entry(monitor).or_default();
-		// Cancel/release calls fire completions synchronously and those
-		// completions lock `preview_windows`, so they must run AFTER this
-		// guard is dropped (calling them here self-deadlocks the UI thread).
-		let mut stale_sequences: Vec<u64> = Vec::new();
-		let mut stale_keys: Vec<(u64, i64, u64)> = Vec::new();
 		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
 		if window.sequence != node_id || window.generation != self.preview_generation {
-			stale_sequences.push(window.sequence);
+			for (_, task) in std::mem::take(&mut window.requests) {
+				task.cancel();
+				window.retired.push(task);
+			}
 			stale_slots.extend(std::mem::take(&mut window.slots).into_values());
 			window.submitted.clear();
 			window.sequence = node_id;
@@ -2235,112 +2092,69 @@ impl RealEngine {
 			.filter(|f| *f < keep_from && !window.slots.contains_key(f))
 			.collect();
 		for f in stale_pending {
-			stale_keys.push((window.sequence, f, window.generation));
+			if let Some(task) = window.requests.remove(&f) {
+				task.cancel();
+				window.retired.push(task);
+			}
 			window.submitted.remove(&f);
+		}
+		// Reap only terminal tasks. Dropping a running SDK Task joins its worker,
+		// so cancelled requests stay in `retired` until a later tick.
+		window
+			.retired
+			.retain(|task| task.state() == oak_engine_rust_sdk::task::TaskState::Running);
+		let finished: Vec<i64> = window
+			.requests
+			.iter()
+			.filter(|(_, task)| task.state() != oak_engine_rust_sdk::task::TaskState::Running)
+			.map(|(frame, _)| *frame)
+			.collect();
+		for frame in finished {
+			let Some(task) = window.requests.remove(&frame) else {
+				continue;
+			};
+			if task.state() == oak_engine_rust_sdk::task::TaskState::Succeeded {
+				if let Some(frame_data) = task.take_video() {
+					window.slots.insert(frame, frame_data);
+				} else {
+					window.submitted.remove(&frame);
+				}
+			} else {
+				window.submitted.remove(&frame);
+			}
 		}
 		let new_frames: Vec<i64> = (playhead.max(0)..end)
 			.filter(|f| !window.submitted.contains(f))
 			.collect();
 		drop(windows);
 
-		// Fire the deferred cancels/releases outside the `preview_windows`
-		// lock (see the comment at the guard above). Cancels come before the
-		// new submissions below: a sequence cancel drops every pending
-		// request of that sequence regardless of version.
-		for sequence in stale_sequences {
-			m.cancel_preview_sequence(sequence);
-		}
-		for (sequence, frame, version) in stale_keys {
-			m.dispatch.cancel_preview_frame(sequence, frame, version);
-		}
-		for slot in stale_slots {
-			slot.release();
-		}
+		drop(stale_slots);
 
 		for frame in new_frames {
-			let params = match monitor {
-				Monitor::Program => super::renderops::sequence_frame_params(
-					&project,
-					node,
-					frame,
-					tb,
-					width,
-					height,
-					Some(oak_core::PixelFormat::F32),
-				),
-				Monitor::Source => super::renderops::footage_frame_params(
-					&project,
-					node,
-					frame,
-					tb,
-					width,
-					height,
-					Some(oak_core::PixelFormat::F32),
-				),
+			let Ok(task) = super::renderops::submit_playback_video_frame(
+				&project,
+				node,
+				frame,
+				tb,
+				width,
+				height,
+				Some(oak_core::PixelFormat::F32),
+				playhead,
+				self.preview_generation,
+			) else {
+				continue;
 			};
-			let Ok(params) = params else { continue };
-			let distance = frame.saturating_sub(playhead).abs();
-			let version = self.preview_generation;
-			let preview_windows = self.preview_windows.clone();
-			let done: oak_render::ticket::Completion = Box::new(move |result| {
-				// Generation gate: a completion queued before a window
-				// rebuild (edit/generation bump) must not land in the new
-				// window — the stale render would display at this frame
-				// and its `submitted` entry would reject the fresh
-				// request. The stale slot's credit goes back instead.
-				let mut stale_slot = None;
-				{
-					let mut windows = preview_windows.lock().unwrap_or_else(|e| e.into_inner());
-					let window = windows.entry(monitor).or_default();
-					if window.sequence == node_id && window.generation == version {
-						match result {
-							// The rendered frame is cached (shm slot for the
-							// process pool, engine texture for the M4 thread
-							// pipeline) until the playhead reaches it
-							// (cpu_frame) or it falls out of the window.
-							Ok(oak_render::ticket::TicketPayload::ShmFrame(slot)) => {
-								window.slots.insert(frame, PreviewSlot::Shm(slot));
-							}
-							Ok(oak_render::ticket::TicketPayload::Video(texture)) => {
-								window.slots.insert(frame, PreviewSlot::Video(texture));
-							}
-							_ => {
-								// Render failed / cancelled: allow a re-request.
-								window.submitted.remove(&frame);
-							}
-						}
-					} else {
-						stale_slot = match result {
-							Ok(oak_render::ticket::TicketPayload::ShmFrame(slot)) => {
-								Some(PreviewSlot::Shm(slot))
-							}
-							Ok(oak_render::ticket::TicketPayload::Video(texture)) => {
-								Some(PreviewSlot::Video(texture))
-							}
-							_ => None,
-						};
-					}
-				}
-				if let Some(slot) = stale_slot {
-					slot.release();
-				}
-			});
-			m.tickets
-				.submit_playback(params, frame, distance, version, done);
-			self.preview_windows
+			let mut windows = self
+				.preview_windows
 				.lock()
-				.unwrap_or_else(|e| e.into_inner())
-				.entry(monitor)
-				.or_default()
-				.submitted
-				.insert(frame);
+				.unwrap_or_else(|e| e.into_inner());
+			let window = windows.entry(monitor).or_default();
+			window.requests.insert(frame, task);
+			window.submitted.insert(frame);
 		}
 	}
 
-	/// Looks a frame up in the pre-rendered playback window's shm slot
-	/// cache (M15 S2): builds the viewer display image + scope samples
-	/// straight from the slot bytes (the GPU-upload staging copy) and
-	/// releases the slot. Returns `None` when the frame is not cached.
+	/// Converts a cached SDK frame into the viewer image and matching scopes.
 	fn preview_slot_frame(
 		&self,
 		monitor: Monitor,
@@ -2360,85 +2174,31 @@ impl RealEngine {
 			return None;
 		}
 		let slot = window.slots.remove(&frame.0)?;
-		match slot {
-			PreviewSlot::Shm(slot) => {
-				let out = {
-					let meta = &slot.meta;
-					let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
-					if meta.format == super::renderops::PIXEL_FORMAT_F32 {
-						// M15 S3: the worker rendered F32 (the 10-bit display
-						// path) — repack/transform via `to_display` and register
-						// the RGBA16F texture for the viewer; the BGRA8 image it
-						// also builds is the CPU fallback only.
-						let (image, scope, samples) =
-							super::renderops::RenderedFrame::Shm(slot.clone()).to_display()?;
-						if let Some(samples) = samples {
-							super::gpu::register_display_frame(image.id.0, w, h, &samples);
-						}
-						(Arc::new(image), scope)
-					} else {
-						let data = slot
-							.shm
-							.slot_bytes(slot.slot)
-							.get(..meta.data_size.max(0) as usize)?;
-						let image = bgra_bytes_to_render_image(w, h, data)?;
-						let scope = analyze_bgra8(w, h, data);
-						(Arc::new(image), scope)
-					}
-				};
-				if let Some(m) = RenderManager::global() {
-					m.release_frame(&slot);
-				}
-				Some(out)
-			}
-			PreviewSlot::Video(texture) => {
-				// M4: the thread pipeline keeps frames on the GPU (or as an
-				// in-process CPU texture); `to_display` presents a GPU frame
-				// zero-copy when the device is shared and registers it for
-				// the viewer, or hands back samples for the staging upload.
-				let (w, h) = texture.size();
-				let (image, scope, samples) =
-					super::renderops::RenderedFrame::Gpu(texture).to_display()?;
-				if let Some(samples) = samples {
-					super::gpu::register_display_frame(
-						image.id.0,
-						w.max(0) as u32,
-						h.max(0) as u32,
-						&samples,
-					);
-				}
-				Some((Arc::new(image), scope))
-			}
+		let (width, height) = {
+			let info = slot.info();
+			(info.width.max(0) as u32, info.height.max(0) as u32)
+		};
+		let rendered = super::renderops::RenderedFrame::Sdk(slot);
+		let (image, scope, samples) = rendered.to_display()?;
+		if let Some(samples) = samples {
+			super::gpu::register_display_frame(image.id.0, width, height, &samples);
 		}
+		Some((Arc::new(image), scope))
 	}
 
-	/// Cancels every monitor's pre-render window and releases its held
-	/// slots (edit / selection change / project drop / preview-media
-	/// invalidation).
+	/// Cancels every monitor's pre-render window and drops its owned frames.
 	fn cancel_preview_windows(&mut self) {
-		// Collect the teardown work under the lock, then run it outside:
-		// `cancel_preview_sequence` fires completions synchronously and those
-		// completions lock `preview_windows` (self-deadlock otherwise).
-		let mut pending: Vec<(u64, Vec<PreviewSlot>)> = Vec::new();
-		{
-			let mut windows = self
-				.preview_windows
-				.lock()
-				.unwrap_or_else(|e| e.into_inner());
-			for window in windows.values_mut() {
-				let slots: Vec<PreviewSlot> =
-					std::mem::take(&mut window.slots).into_values().collect();
-				pending.push((window.sequence, slots));
-				window.submitted.clear();
+		let mut windows = self
+			.preview_windows
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		for window in windows.values_mut() {
+			for (_, task) in std::mem::take(&mut window.requests) {
+				task.cancel();
+				window.retired.push(task);
 			}
-		}
-		if let Some(m) = RenderManager::global() {
-			for (sequence, slots) in pending {
-				m.cancel_preview_sequence(sequence);
-				for slot in slots {
-					slot.release();
-				}
-			}
+			window.submitted.clear();
+			window.slots.clear();
 		}
 	}
 
@@ -2446,26 +2206,19 @@ impl RealEngine {
 	/// the old footage's window is stale even though the program window is
 	/// untouched).
 	fn cancel_preview_window(&mut self, monitor: Monitor) {
-		// Same lock-order rule as `cancel_preview_windows`: run the cancel
-		// and releases outside the `preview_windows` guard.
-		let pending = {
-			let mut windows = self
-				.preview_windows
-				.lock()
-				.unwrap_or_else(|e| e.into_inner());
-			let Some(window) = windows.get_mut(&monitor) else {
-				return;
-			};
-			let slots: Vec<PreviewSlot> = std::mem::take(&mut window.slots).into_values().collect();
-			window.submitted.clear();
-			(window.sequence, slots)
+		let mut windows = self
+			.preview_windows
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let Some(window) = windows.get_mut(&monitor) else {
+			return;
 		};
-		if let Some(m) = RenderManager::global() {
-			m.cancel_preview_sequence(pending.0);
-			for slot in pending.1 {
-				slot.release();
-			}
+		for (_, task) in std::mem::take(&mut window.requests) {
+			task.cancel();
+			window.retired.push(task);
 		}
+		window.submitted.clear();
+		window.slots.clear();
 	}
 
 	/// Invalidates every cached/rendered preview frame: the CPU cache is
@@ -3245,8 +2998,6 @@ impl RealEngine {
 	/// cleared FIRST: its commands reference the marker/workarea
 	/// auxiliaries, so they must be gone before those handles release.
 	fn drop_project(&mut self) {
-		*self.renderer.lock().unwrap() = RendererSlot::Untried;
-		*self.source_renderer.lock().unwrap() = RendererSlot::Untried;
 		oak_engine_rust_sdk::node::undo_clear();
 		if let Some(m) = RenderManager::global() {
 			m.clear_graph_snapshot();
@@ -4095,11 +3846,7 @@ impl AudioMeterDataSource for RealEngine {
 // ---------------------------------------------------------------------------
 
 impl Drop for RealEngine {
-	/// The pre-render windows hold worker shm slots; a dropped engine must
-	/// hand them back. `ShmFrameRef` has no self-release on drop, so without
-	/// this every closed project (and every test engine) permanently shrank
-	/// the shared slot pool until later playback windows starved (the
-	/// full-suite `playback_window_supplies_playhead_frames` failure).
+	/// Cancel outstanding SDK previews before their project owner disappears.
 	fn drop(&mut self) {
 		self.cancel_preview_windows();
 	}
@@ -4135,16 +3882,9 @@ impl AppEngine for RealEngine {
 			self.display_color_gen.set(generation);
 			cache.clear();
 		}
-		// The full-resolution fill replaces the proxy when its frame matches
-		// the playhead; otherwise the proxy frame is displayed (cached
-		// misses fall back to the last proxy below, filled by the background
-		// worker once the playhead rests).
-		if let Some(image) = cache.entry(monitor).or_default().image_for(frame.0) {
-			return image.clone();
-		}
-		// M15 S2: try the pre-rendered playback window first — the frame's
-		// pixels are already in a worker shm slot (zero copy: build the
-		// display image from the slot bytes, then release the slot).
+		// Land the current proxy first, even when its full-res fill won the
+		// race: scopes are tied to this proxy pass and must not starve behind
+		// the full-resolution cache hit.
 		if let Some((image, scope)) = self.preview_slot_frame(monitor, frame) {
 			cache.entry(monitor).or_default().proxy = Some(ProxyEntry {
 				frame: frame.0,
@@ -4153,49 +3893,24 @@ impl AppEngine for RealEngine {
 			});
 			return image;
 		}
-		// A cache miss must NOT block the UI thread on a synchronous render
-		// while the cache has ever displayed a frame: during playback the
-		// wait starves the tick loop that feeds the pre-render window, and
-		// the seek-priority ticket steals worker capacity from it, so the
-		// window never catches up (every painted frame blocked in
-		// `TicketArena::wait` — the choppy playback regression); after a
-		// pause or a paused seek the same wait stalls the UI for as long as
-		// the worker takes to render the resting playhead (the "freeze on
-		// pause" report). Show the last displayed frame instead — the
-		// background full-res fill (schedule_full_res on the tick) replaces
-		// it within a few frames. Only a fully cold cache (nothing ever
-		// displayed) falls through to the synchronous render below.
+		// The full-resolution fill replaces the proxy when its frame matches
+		// the playhead; otherwise the proxy frame is displayed.
+		if let Some(image) = cache.entry(monitor).or_default().image_for(frame.0) {
+			return image.clone();
+		}
+		// A cache miss never blocks the UI thread. Show the last displayed
+		// frame while the SDK request and resting full-res fill are in flight.
 		if let Some(image) = cache
 			.get(&monitor)
 			.and_then(|e| e.proxy.as_ref().map(|p| p.image.clone()))
 		{
 			return image;
 		}
-		// Both monitors render through the oakrender ticket arena (falling
-		// back to the synthetic pattern when rendering is unavailable): the
-		// program monitor renders the current sequence, the source monitor
-		// renders the currently selected footage node at the source clock's
-		// playhead frame.
-		let rendered = match monitor {
-			Monitor::Program => self.render_program_frame(frame),
-			Monitor::Source => self.render_source_frame(frame),
-		};
-		let (image, scope) = match rendered {
-			Some((image, scope)) => (Arc::new(image), scope),
-			None => {
-				let (width, height, samples) = synthetic_frame_samples(frame);
-				let scope = analyze_f32_rgba(width, height, &samples);
-				let image = f32_rgba_to_bgra_image(width, height, &samples);
-				super::gpu::register_display_frame(image.id.0, width, height, &samples);
-				(Arc::new(image), scope)
-			}
-		};
-		cache.entry(monitor).or_default().proxy = Some(ProxyEntry {
-			frame: frame.0,
-			image: image.clone(),
-			scope,
-		});
-		image
+		// A completely cold cache returns its temporary pattern immediately.
+		let (width, height, samples) = synthetic_frame_samples(frame);
+		let image = f32_rgba_to_bgra_image(width, height, &samples);
+		super::gpu::register_display_frame(image.id.0, width, height, &samples);
+		Arc::new(image)
 	}
 
 	fn scope_data(&self, monitor: Monitor, cx: &App) -> ScopeData {
@@ -4293,7 +4008,6 @@ impl AppEngine for RealEngine {
 			// tracks the playhead frame), and any in-flight full-res job for
 			// the old selection is stale. The source pre-render window (M15
 			// S2) rebuilds against the new footage.
-			*self.source_renderer.lock().unwrap() = RendererSlot::Untried;
 			self.cpu_frame_cache
 				.lock()
 				.unwrap()
@@ -6735,6 +6449,7 @@ impl AppEngine for RealEngine {
 		let (Some(project), Some(seq)) = (self.project.clone(), self.sequence) else {
 			return Err("no sequence open".into());
 		};
+		let session = self.editor_session().ok_or("no sequence open")?;
 		let workarea = self.workarea().map(|(s, e)| (s.0, e.0));
 		let params = super::renderops::encoding_params_with_settings(
 			&project,
@@ -6744,7 +6459,12 @@ impl AppEngine for RealEngine {
 			workarea,
 			self.sequence_length().0,
 		)?;
-		Ok(super::renderops::spawn_export(&project, seq, params))
+		super::renderops::spawn_export(
+			&session,
+			oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity()),
+			&path.to_string_lossy(),
+			params,
+		)
 	}
 
 	fn sequence_entries(&self) -> Vec<(u64, SharedString)> {
@@ -6797,6 +6517,7 @@ impl AppEngine for RealEngine {
 		let Some(project) = self.project.clone() else {
 			return Err("no project open".into());
 		};
+		let session = self.editor_session().ok_or("no project open")?;
 		let Some(seq) = graphops::id_of(id) else {
 			return Err("the entry is not a sequence".into());
 		};
@@ -6827,7 +6548,12 @@ impl AppEngine for RealEngine {
 			workarea,
 			length_frames,
 		)?;
-		Ok(super::renderops::spawn_export(&project, seq, params))
+		super::renderops::spawn_export(
+			&session,
+			oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity()),
+			&path.to_string_lossy(),
+			params,
+		)
 	}
 
 	fn multicam_state(&self) -> Option<MulticamState> {
@@ -7373,40 +7099,35 @@ impl RealEngine {
 		Ok(())
 	}
 
-	/// Opens an `.otio` / `.fcpxml` project through the oaktask interchange
-	/// loader and adopts the loaded project.
+	/// Opens an `.otio` / `.fcpxml` project through the SDK task API and adopts
+	/// the exact loaded Arc through the migration handle.
 	fn open_interchange(&mut self, path: &PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
-		let title = format!("Loading '{}'", path.display());
-		let result: Arc<Mutex<Option<ProjectRef>>> = Arc::new(Mutex::new(None));
-		let mut driver = oak_task::task::Task::new(&title, None);
-		driver.set_behavior(Box::new(OtioLoadBehavior {
-			inner: oak_task::project::loadotio::LoadOTIOTask::new(
-				oak_task::project::load::ProjectLoadBaseTask::new(
-					oak_task::task::Task::new(&title, None),
-					path.to_string_lossy().into_owned(),
-				),
-			),
-			result: result.clone(),
-		}));
-		let run = driver.start();
-		let loaded = result.lock().unwrap_or_else(|e| e.into_inner()).take();
-		if run.is_err() {
-			let error = driver
-				.error()
-				.map(|s| s.to_string())
-				.unwrap_or_else(|| "the task failed".to_string());
+		let task = oak_engine_rust_sdk::task::load_otio(&path.to_string_lossy())
+			.ok_or_else(|| "failed to start the interchange load".to_string())?;
+		if !task.wait() {
+			let error = task.error();
+			let error = if error.is_empty() {
+				"the task failed".into()
+			} else {
+				error
+			};
 			return Err(format!("failed to load \"{}\": {error}", path.display()));
 		}
-		match loaded {
-			Some(project) => {
-				self.adopt_project(project, cx);
-				Ok(())
-			}
-			None => Err(format!(
+		let loaded = task.take_project().ok_or_else(|| {
+			format!(
 				"loaded \"{}\" but the loader returned no project",
 				path.display()
-			)),
-		}
+			)
+		})?;
+		let handle = loaded.into_storage_project_handle();
+		let project = graphops::project_from_storage(CHandle {
+			ctx: handle.ctx,
+			addref: handle.addref,
+			release: handle.release,
+			abi_version: handle.abi_version,
+		})?;
+		self.adopt_project(project, cx);
+		Ok(())
 	}
 
 	/// Exports the project to `path` through the OVE serializer (the .ove
@@ -7433,27 +7154,25 @@ impl RealEngine {
 		Ok(())
 	}
 
-	/// Exports as `.otio` / `.fcpxml` through the oaktask save task.
+	/// Exports as `.otio` / `.fcpxml` through the SDK's unified task API.
 	fn export_interchange(
 		&mut self,
 		path: &PathBuf,
 		_cx: &mut Context<Self>,
 	) -> Result<(), String> {
-		let Some(project) = self.project.clone() else {
+		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
 		let filename = path.to_string_lossy().into_owned();
-		let mut driver = oak_task::task::Task::new("Saving project...", None);
-		driver.set_behavior(Box::new(oak_task::project::saveotio::SaveOTIOTask {
-			base: oak_task::task::Task::new("Saving project...", None),
-			project,
-			filename,
-		}));
-		if driver.start().is_err() {
-			let error = driver
-				.error()
-				.map(|s| s.to_string())
-				.unwrap_or_else(|| "the task failed".to_string());
+		let task = oak_engine_rust_sdk::task::save_otio(&session.project(), &filename)
+			.ok_or_else(|| "failed to start the interchange export".to_string())?;
+		if !task.wait() {
+			let error = task.error();
+			let error = if error.is_empty() {
+				"the task failed".into()
+			} else {
+				error
+			};
 			return Err(format!("failed to export \"{}\": {error}", path.display()));
 		}
 		self.project_info.path = path.clone();
@@ -7478,41 +7197,17 @@ impl RealEngine {
 	}
 }
 
-/// The OTIO load driver behavior: runs the module load task and stashes
-/// the loaded project for the caller (the facade's `OtioLoadTaskBehavior`
-/// pattern).
-struct OtioLoadBehavior {
-	/// The module load task.
-	inner: oak_task::project::loadotio::LoadOTIOTask,
-	/// The result slot (the loaded project).
-	result: Arc<Mutex<Option<ProjectRef>>>,
-}
-
-impl oak_task::task::TaskBehavior for OtioLoadBehavior {
-	fn run(&mut self, task: &mut oak_task::task::Task) -> oak_task::error::Result<()> {
-		self.inner.run(task)?;
-		if let Ok(project) = self.inner.base.take_project() {
-			*self.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(project);
-		}
-		Ok(())
-	}
-}
-
 /// Builds the export-format list: (format id, display name, extension) from
-/// the oakcodec encoding enumeration.
+/// the SDK encoding enumeration.
 ///
 /// Pure helper so the export dialog can be unit tested.
 pub fn encoding_formats() -> Vec<(i32, String, String)> {
 	let mut out = Vec::new();
-	for i in 0..(oak_codec::exportformat::Format::Count as i32) {
-		let Some(format) = oak_codec::exportformat::Format::from_i32(i) else {
+	for i in 0..oak_engine_rust_sdk::codec::Format::count() {
+		let Some(format) = oak_engine_rust_sdk::codec::Format::from_i32(i) else {
 			continue;
 		};
-		out.push((
-			i,
-			oak_codec::exportformat::Format::get_name(format),
-			oak_codec::exportformat::Format::get_extension(format),
-		));
+		out.push((i, format.name(), format.extension()));
 	}
 	out
 }
@@ -8107,7 +7802,7 @@ mod tests {
 	}
 
 	/// End-to-end CPU render through the same path
-	/// [`RealEngine::render_program_frame`] uses: with the render manager
+	/// The sequence frame-render entry point uses: with the render manager
 	/// up (the default M15 S2 process backend), rendering an in-memory
 	/// sequence produces a real BGRA8 frame in a shared-memory slot at the
 	/// requested proxy geometry, the display image builds straight from
@@ -8199,60 +7894,50 @@ mod tests {
 		let _ = std::fs::remove_file(&media);
 	}
 
-	/// M15 S2 acceptance: the app's onscreen path reads the process
-	/// backend's shm slots without the counted main-process copy. The
-	/// preview path (`RenderedFrame::to_display`) wraps the slot bytes
-	/// into the display buffer — the GPU-upload staging copy — and must
-	/// leave `main_heap_frame_copies == 0`; the long-lived full-res path
-	/// (`rendered_to_owned_image`) is the one counted copy
-	/// (`slot_to_vec`), released right after.
+	/// P5 acceptance: the SDK copies a process-backend slot once, releases it
+	/// inside the engine, and gives the app an owned frame. Display and cache
+	/// conversion must not copy the worker slot again.
 	#[test]
-	fn process_backend_preview_path_is_zero_copy() {
+	fn process_backend_preview_frames_are_owned() {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
-		use oak_render::manager::{RenderBackendChoice, RenderManager};
-		use oak_render::procpool::{
-			main_heap_frame_copies, reset_main_heap_frame_copies, DispatcherConfig,
-		};
-		RenderManager::shutdown();
-		let worker_bin = crate::oakui::renderops::test_worker_bin().expect(
-			"a real oak-worker binary (build it with `cargo build -p oak-worker` or set OAK_WORKER_BIN)",
-		);
-		let config = DispatcherConfig {
-			worker_bin: Some(worker_bin),
-			workers: 1,
-			slots_per_worker: 2,
-			width: 64,
-			height: 64,
-			batch_size: 2,
-			..Default::default()
-		};
-		RenderManager::init_with_backend(RenderBackendChoice::Processes(config))
-			.expect("process backend init");
+		use oak_render::procpool::{main_heap_frame_copies, reset_main_heap_frame_copies};
+		oak_engine_rust_sdk::render::manager_shutdown();
+		assert!(oak_engine_rust_sdk::render::manager_init(
+			oak_engine_rust_sdk::render::RenderBackend::Processes
+		));
 
 		let project = graphops::create_project();
-		let seq = graphops::create_sequence(&project, "Zero Copy");
+		let seq = graphops::create_sequence(&project, "Owned Preview");
 		let tb = graphops::sequence_time_base(&graphops::lock(&project).graph, seq).unwrap();
 
 		reset_main_heap_frame_copies();
 		let frame =
 			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
 				.expect("render_frame must produce a frame");
-		let crate::oakui::renderops::RenderedFrame::Shm(slot) = &frame else {
-			panic!("the process backend must deliver a shm slot");
+		let crate::oakui::renderops::RenderedFrame::Sdk(slot) = &frame else {
+			panic!("the SDK task must deliver an owned frame");
 		};
-		assert_eq!(slot.meta.format, crate::oakui::renderops::SLOT_FORMAT_BGRA8);
+		let info = slot.info();
+		assert_eq!(
+			info.origin,
+			oak_engine_rust_sdk::preview_video::FrameOrigin::SharedMemory
+		);
+		assert_eq!(
+			info.pixel_format,
+			oak_engine_rust_sdk::preview_video::VideoPixelFormat::Bgra8
+		);
 		let (image, _scope, _samples) = frame.to_display().expect("display image from the slot");
 		assert_eq!(image.as_bytes(0).expect("one frame").len(), 64 * 64 * 4);
 		assert_eq!(
 			main_heap_frame_copies(),
 			0,
-			"the preview path must not copy through slot_to_vec"
+			"the app display path never reads or copies a worker slot"
 		);
 		release_rendered_frame(&frame);
 		assert_eq!(main_heap_frame_copies(), 0);
 
-		// The long-lived full-res path is the one counted copy.
+		// The long-lived display conversion does not touch another worker slot.
 		let frame =
 			crate::oakui::renderops::render_sequence_frame(&project, seq, 0, tb, 64, 64, None)
 				.expect("render_frame must produce a frame");
@@ -8260,12 +7945,12 @@ mod tests {
 		assert_eq!(image.as_bytes(0).expect("one frame").len(), 64 * 64 * 4);
 		assert_eq!(
 			main_heap_frame_copies(),
-			1,
-			"the long-lived cache path is the counted copy"
+			0,
+			"owned-cache conversion also stays away from worker slots"
 		);
 		release_rendered_frame(&frame);
 
-		RenderManager::shutdown();
+		oak_engine_rust_sdk::render::manager_shutdown();
 		oak_engine_rust_sdk::node::undo_clear();
 	}
 
@@ -10306,9 +9991,8 @@ mod tests {
 		let _ = std::fs::remove_file(&media);
 	}
 
-	/// Probe: a single interactive seek must render the seeked frame
-	/// without hanging the UI path (the ruler mouse-down path goes through
-	/// request_frame + a synchronous cpu_frame render).
+	/// Probe: an interactive seek returns immediately, then its SDK frame
+	/// lands without a synchronous UI render.
 	#[gpui_kit::test]
 	async fn interactive_seek_renders_without_hanging(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
@@ -10336,20 +10020,36 @@ mod tests {
 				engine.drop_footage(entry.id, TrackKind::Video, 0, Frame(0), cx)
 			})
 		});
-		// Interactive seek (not playing): a single synchronous render of the
-		// target frame. If this hangs, the seek render path deadlocks.
+		// Interactive seek (not playing): the first read may be a placeholder;
+		// bounded ticks must install the requested real frame.
 		cx.update(|app| {
 			engine.update(app, |engine, cx| {
 				engine.request_frame(Monitor::Program, Frame(24), cx)
 			})
 		});
+		let mut landed = false;
+		for _ in 0..1000 {
+			cx.update(|app| engine.update(app, |engine, cx| engine.tick(cx)));
+			let _ = cx.read(|app| engine.read(app).cpu_frame(Monitor::Program, app));
+			landed = cx.read(|app| {
+				let engine = engine.read(app);
+				let cache = engine.cpu_frame_cache.lock().unwrap();
+				cache
+					.get(&Monitor::Program)
+					.and_then(|entry| entry.proxy.as_ref())
+					.is_some_and(|entry| entry.frame == 24)
+			});
+			if landed {
+				break;
+			}
+			std::thread::sleep(Duration::from_millis(10));
+		}
+		assert!(landed, "the seeked SDK frame arrives");
 		let img = cx.read(|app| engine.read(app).cpu_frame(Monitor::Program, app));
 		let bytes = img.as_bytes(0).expect("frame bytes");
 		assert!(!bytes.is_empty(), "seeked frame has content");
 
-		// The reported freeze: play (the preview window fills and holds shm
-		// slots), THEN an interactive seek — the synchronous render must not
-		// deadlock against the window's held slots.
+		// Repeating the seek after playback uses the same non-blocking path.
 		cx.update(|app| engine.update(app, |engine, cx| engine.play(Monitor::Program, cx)));
 		for _ in 0..30 {
 			cx.update(|app| engine.update(app, |engine, cx| engine.tick(cx)));
@@ -10361,6 +10061,24 @@ mod tests {
 				engine.request_frame(Monitor::Program, Frame(48), cx)
 			})
 		});
+		landed = false;
+		for _ in 0..1000 {
+			cx.update(|app| engine.update(app, |engine, cx| engine.tick(cx)));
+			let _ = cx.read(|app| engine.read(app).cpu_frame(Monitor::Program, app));
+			landed = cx.read(|app| {
+				let engine = engine.read(app);
+				let cache = engine.cpu_frame_cache.lock().unwrap();
+				cache
+					.get(&Monitor::Program)
+					.and_then(|entry| entry.proxy.as_ref())
+					.is_some_and(|entry| entry.frame == 48)
+			});
+			if landed {
+				break;
+			}
+			std::thread::sleep(Duration::from_millis(10));
+		}
+		assert!(landed, "the post-playback seek frame arrives");
 		let img = cx.read(|app| engine.read(app).cpu_frame(Monitor::Program, app));
 		let bytes = img.as_bytes(0).expect("seek-after-play frame bytes");
 		assert!(!bytes.is_empty(), "seek after playback has content");
@@ -13809,9 +13527,8 @@ mod tests {
 		let _ = std::fs::remove_file(&media_b);
 	}
 
-	/// The source monitor renders the selected footage through the real
-	/// ticket path; a decode failure (media removed) falls back to the
-	/// synthetic pattern and latches the slot unavailable.
+	/// The source monitor renders selected footage through an SDK task; a
+	/// decode failure keeps the non-blocking synthetic fallback.
 	#[gpui_kit::test]
 	async fn engine_source_monitor_renders_selected_footage(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
@@ -13837,6 +13554,24 @@ mod tests {
 		let source_len = cx.read(|app| engine.read(app).source_length());
 		assert!(source_len.0 > 0, "the selected footage has a length");
 
+		let mut landed = false;
+		for _ in 0..1000 {
+			cx.update(|app| engine.update(app, |engine, cx| engine.tick(cx)));
+			let _ = cx.read(|app| engine.read(app).cpu_frame(Monitor::Source, app));
+			landed = cx.read(|app| {
+				let engine = engine.read(app);
+				let cache = engine.cpu_frame_cache.lock().unwrap();
+				cache
+					.get(&Monitor::Source)
+					.and_then(|entry| entry.proxy.as_ref())
+					.is_some_and(|entry| entry.frame == 0)
+			});
+			if landed {
+				break;
+			}
+			std::thread::sleep(Duration::from_millis(10));
+		}
+		assert!(landed, "the cold source frame arrives asynchronously");
 		let image = cx.read(|app| engine.read(app).cpu_frame(Monitor::Source, app));
 		let bytes = image.as_bytes(0).expect("source frame bytes");
 		assert!(!bytes.is_empty(), "the source monitor rendered");
@@ -13907,16 +13642,12 @@ mod tests {
 			fallback.as_bytes(0).is_some_and(|b| !b.is_empty()),
 			"the failure falls back to a frame"
 		);
-		assert!(cx.read(|app| {
-			let guard = engine.read(app).source_renderer.lock().unwrap();
-			matches!(*guard, RendererSlot::Unavailable)
-		}));
-		// The second read short-circuits on the latched slot.
+		// A second read remains non-blocking while the failed SDK request is
+		// reaped or retried by the playback tick.
 		let again = cx.read(|app| engine.read(app).cpu_frame(Monitor::Source, app));
 		assert!(again.as_bytes(0).is_some());
 
-		// The program monitor short-circuits on a latched-unavailable slot
-		// and falls back to a frame.
+		// The program monitor has the same non-blocking cold-cache fallback.
 		cx.update(|app| {
 			engine.update(app, |engine, _cx| {
 				engine
@@ -13924,15 +13655,10 @@ mod tests {
 					.lock()
 					.unwrap()
 					.remove(&Monitor::Program);
-				*engine.renderer.lock().unwrap() = RendererSlot::Unavailable;
 			})
 		});
 		let program = cx.read(|app| engine.read(app).cpu_frame(Monitor::Program, app));
 		assert!(program.as_bytes(0).is_some());
-		assert!(cx.read(|app| {
-			let guard = engine.read(app).renderer.lock().unwrap();
-			matches!(*guard, RendererSlot::Unavailable)
-		}));
 
 		let _ = std::fs::remove_file(&media);
 	}
@@ -14021,11 +13747,11 @@ mod tests {
 	#[gpui_kit::test]
 	async fn engine_export_session_finishes(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
-		let _worker = WorkerBinGuard::set();
-		assert!(
-			crate::oakui::renderops::ensure_render_manager(),
-			"the render manager starts"
-		);
+		if !oak_engine_rust_sdk::render::manager_init(
+			oak_engine_rust_sdk::render::RenderBackend::Threads,
+		) {
+			assert!(oak_engine_rust_sdk::render::manager_is_initialized());
+		}
 		let (engine, media, entry) = eng_import_media(cx, "export_e2e");
 		// A tiny sequence: 64x64 @ 25 fps with one 25-frame clip.
 		let seq = cx.update(|app| {
@@ -16219,11 +15945,10 @@ mod tests {
 		let _ = std::fs::remove_file(&media);
 	}
 
-	/// The playback-window slot reader's BGRA8 branch: a slot rendered in
-	/// the 8-bit wire format serves through the byte path (the F32 repack
-	/// rejects it).
+	/// The playback-window reader's BGRA8 branch serves an SDK-owned 8-bit
+	/// frame through the byte path (the F32 repack rejects it).
 	#[gpui_kit::test]
-	async fn preview_slot_frame_reads_bgra8_slots(cx: &mut gpui_kit::TestAppContext) {
+	async fn preview_slot_frame_reads_owned_bgra8(cx: &mut gpui_kit::TestAppContext) {
 		let _media = media_lock();
 		let _worker = WorkerBinGuard::set();
 		let (engine, media, entry) = eng_import_media(cx, "bgra_slot");
@@ -16247,21 +15972,15 @@ mod tests {
 			read_f32_frame(&rendered).is_none(),
 			"the F32 reader rejects a BGRA8 shm frame"
 		);
-		let crate::oakui::renderops::RenderedFrame::Shm(slot) = rendered else {
-			eprintln!(
-				"the backend delivered a non-shm frame (format {}); skipping the BGRA8 slot check",
-				rendered.format()
-			);
-			let _ = std::fs::remove_file(&media);
-			return;
+		let crate::oakui::renderops::RenderedFrame::Sdk(slot) = rendered else {
+			panic!("the SDK task must deliver an owned frame");
 		};
 		assert_eq!(
-			slot.meta.format,
-			crate::oakui::renderops::SLOT_FORMAT_BGRA8,
+			slot.info().pixel_format,
+			oak_engine_rust_sdk::preview_video::VideoPixelFormat::Bgra8,
 			"the default wire format is BGRA8"
 		);
-
-		// Park the slot in the program window at frame 0, then serve it
+		// Park the frame in the program window at frame 0, then serve it
 		// through the public slot reader.
 		cx.update(|app| {
 			engine.update(app, |engine, _cx| {
@@ -16269,7 +15988,7 @@ mod tests {
 				let window = windows.entry(Monitor::Program).or_default();
 				window.sequence = seq.identity();
 				window.generation = engine.preview_generation;
-				window.slots.insert(0, PreviewSlot::Shm(slot));
+				window.slots.insert(0, slot);
 			});
 		});
 		let out = cx.update(|app| {

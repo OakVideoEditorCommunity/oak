@@ -130,6 +130,10 @@ struct TaskEntry {
 	waveform_slot: Option<Arc<Mutex<Option<crate::audio_analysis::WaveformData>>>>,
 	/// Successful thumbnail render result, transferred once to the caller.
 	thumbnail_slot: Option<Arc<Mutex<Option<crate::thumbnail::ThumbnailData>>>>,
+	/// Successful audio mix result, transferred once to the caller.
+	audio_slot: Option<Arc<Mutex<Option<crate::preview_audio::AudioBufferData>>>>,
+	/// Successful video render result, transferred once to the caller.
+	video_slot: Option<Arc<Mutex<Option<crate::preview_video::VideoBufferData>>>>,
 }
 
 static TASKS: OnceLock<Mutex<HashMap<u64, Arc<TaskEntry>>>> = OnceLock::new();
@@ -154,6 +158,8 @@ fn spawn_task(
 	project_slot: Option<Arc<Mutex<Option<Arc<Mutex<oak_node::project::Project>>>>>>,
 	waveform_slot: Option<Arc<Mutex<Option<crate::audio_analysis::WaveformData>>>>,
 	thumbnail_slot: Option<Arc<Mutex<Option<crate::thumbnail::ThumbnailData>>>>,
+	audio_slot: Option<Arc<Mutex<Option<crate::preview_audio::AudioBufferData>>>>,
+	video_slot: Option<Arc<Mutex<Option<crate::preview_video::VideoBufferData>>>>,
 ) -> u64 {
 	let mut task = Task::new(&title, None);
 	let entry = Arc::new(TaskEntry {
@@ -166,6 +172,8 @@ fn spawn_task(
 		project_slot,
 		waveform_slot,
 		thumbnail_slot,
+		audio_slot,
+		video_slot,
 	});
 
 	let listener_entry = entry.clone();
@@ -246,7 +254,75 @@ pub(crate) fn spawn_proxy(
 		None,
 		None,
 		None,
+		None,
+		None,
 	)
+}
+
+struct VideoRenderBehavior {
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	track: Option<NodeId>,
+	playback: Option<(i64, i64, u64)>,
+	time: oak_core::Rational,
+	width: i32,
+	height: i32,
+	pixel_format: crate::preview_video::VideoPixelFormat,
+	slot: Arc<Mutex<Option<crate::preview_video::VideoBufferData>>>,
+}
+
+impl TaskBehavior for VideoRenderBehavior {
+	fn run(&mut self, task: &mut Task) -> oak_task::error::Result<()> {
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		let frame = crate::preview_video::render_video(
+			self.project.clone(),
+			self.viewer,
+			self.track,
+			self.playback,
+			self.time,
+			self.width,
+			self.height,
+			self.pixel_format,
+		)
+		.map_err(oak_task::error::Error::Failed)?;
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		*self.slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame);
+		Ok(())
+	}
+}
+
+struct AudioRenderBehavior {
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	range: oak_core::TimeRange,
+	sample_rate: i32,
+	channel_layout: u64,
+	slot: Arc<Mutex<Option<crate::preview_audio::AudioBufferData>>>,
+}
+
+impl TaskBehavior for AudioRenderBehavior {
+	fn run(&mut self, task: &mut Task) -> oak_task::error::Result<()> {
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		let audio = crate::preview_audio::render_audio(
+			self.project.clone(),
+			self.viewer,
+			self.range,
+			self.sample_rate,
+			self.channel_layout,
+		)
+		.map_err(oak_task::error::Error::Failed)?;
+		if task.is_cancelled() {
+			return Err(oak_task::error::Error::Cancelled);
+		}
+		*self.slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(audio);
+		Ok(())
+	}
 }
 
 struct ThumbnailRenderBehavior {
@@ -333,6 +409,8 @@ pub(crate) fn spawn_waveform_extract(
 		None,
 		Some(slot),
 		None,
+		None,
+		None,
 	)
 }
 
@@ -359,6 +437,76 @@ pub(crate) fn spawn_thumbnail_render(
 	spawn_task(
 		format!("Rendering Thumbnail {width}x{height}"),
 		Box::new(behavior),
+		None,
+		None,
+		Some(slot),
+		None,
+		None,
+	)
+}
+
+/// Starts an owned audio mix on an engine worker.
+pub(crate) fn spawn_audio_render(
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	range: oak_core::TimeRange,
+	sample_rate: i32,
+	channel_layout: u64,
+) -> u64 {
+	if range.out() <= range.in_() || sample_rate <= 0 || channel_layout == 0 {
+		return 0;
+	}
+	let slot = Arc::new(Mutex::new(None));
+	let behavior = AudioRenderBehavior {
+		project,
+		viewer,
+		range,
+		sample_rate,
+		channel_layout,
+		slot: slot.clone(),
+	};
+	spawn_task(
+		format!("Rendering Audio {viewer:?}"),
+		Box::new(behavior),
+		None,
+		None,
+		None,
+		Some(slot),
+		None,
+	)
+}
+
+/// Starts an owned video-frame render on an engine worker.
+pub(crate) fn spawn_video_render(
+	project: Arc<Mutex<oak_node::project::Project>>,
+	viewer: NodeId,
+	track: Option<NodeId>,
+	playback: Option<(i64, i64, u64)>,
+	time: oak_core::Rational,
+	width: i32,
+	height: i32,
+	pixel_format: crate::preview_video::VideoPixelFormat,
+) -> u64 {
+	if width <= 0 || height <= 0 {
+		return 0;
+	}
+	let slot = Arc::new(Mutex::new(None));
+	let behavior = VideoRenderBehavior {
+		project,
+		viewer,
+		track,
+		playback,
+		time,
+		width,
+		height,
+		pixel_format,
+		slot: slot.clone(),
+	};
+	spawn_task(
+		format!("Rendering Video {viewer:?}"),
+		Box::new(behavior),
+		None,
+		None,
 		None,
 		None,
 		Some(slot),
@@ -397,7 +545,15 @@ pub unsafe extern "C" fn oak_task_export(
 	let project_ref = unsafe { &*project }.project().clone();
 	let params = unsafe { &*params }.to_native(filename.to_string());
 	let export = ExportTask::new((project_ref, viewer), params);
-	spawn_task(format!("Exporting {filename}"), Box::new(export), None, None, None)
+	spawn_task(
+		format!("Exporting {filename}"),
+		Box::new(export),
+		None,
+		None,
+		None,
+		None,
+		None,
+	)
 }
 
 /// Starts a project save to an interchange format (`.otio` /
@@ -420,7 +576,15 @@ pub unsafe extern "C" fn oak_task_project_save_otio(
 		project: unsafe { &*project }.project().clone(),
 		filename: filename.to_string(),
 	};
-	spawn_task(format!("Saving {filename}"), Box::new(save), None, None, None)
+	spawn_task(
+		format!("Saving {filename}"),
+		Box::new(save),
+		None,
+		None,
+		None,
+		None,
+		None,
+	)
 }
 
 /// A load behavior that parks the produced project in a shared slot
@@ -468,6 +632,8 @@ pub unsafe extern "C" fn oak_task_project_load_otio(
 		Some(slot),
 		None,
 		None,
+		None,
+		None,
 	)
 }
 
@@ -510,6 +676,129 @@ pub unsafe extern "C" fn oak_task_thumbnail_render(
 		time.to_native(),
 		width,
 		height,
+	)
+}
+
+/// Starts an asynchronous sequence/footage audio mix into an owned buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_audio_render(
+	project: *const ProjectHandle,
+	viewer: u64,
+	range: crate::coretypes::OakTimeRange,
+	sample_rate: i32,
+	channel_layout: u64,
+) -> u64 {
+	let (Some(project), Some(viewer)) =
+		(unsafe { project.as_ref() }, NodeId::from_identity(viewer))
+	else {
+		return 0;
+	};
+	spawn_audio_render(
+		project.project().clone(),
+		viewer,
+		range.to_native(),
+		sample_rate,
+		channel_layout,
+	)
+}
+
+/// Starts an asynchronous sequence/footage video render into an owned buffer.
+/// `pixel_format`: 0 = F32 RGBA, 1 = packed BGRA8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_video_render(
+	project: *const ProjectHandle,
+	viewer: u64,
+	time: OakRational,
+	width: i32,
+	height: i32,
+	pixel_format: i32,
+) -> u64 {
+	let (Some(project), Some(viewer)) =
+		(unsafe { project.as_ref() }, NodeId::from_identity(viewer))
+	else {
+		return 0;
+	};
+	let pixel_format = match pixel_format {
+		1 => crate::preview_video::VideoPixelFormat::Bgra8,
+		_ => crate::preview_video::VideoPixelFormat::F32Rgba,
+	};
+	spawn_video_render(
+		project.project().clone(),
+		viewer,
+		None,
+		None,
+		time.to_native(),
+		width,
+		height,
+		pixel_format,
+	)
+}
+
+/// Starts an asynchronous Playback-priority preview frame render.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_video_render_playback(
+	project: *const ProjectHandle,
+	viewer: u64,
+	time: OakRational,
+	width: i32,
+	height: i32,
+	pixel_format: i32,
+	frame: i64,
+	distance: i64,
+	generation: u64,
+) -> u64 {
+	let (Some(project), Some(viewer)) =
+		(unsafe { project.as_ref() }, NodeId::from_identity(viewer))
+	else {
+		return 0;
+	};
+	let pixel_format = match pixel_format {
+		1 => crate::preview_video::VideoPixelFormat::Bgra8,
+		_ => crate::preview_video::VideoPixelFormat::F32Rgba,
+	};
+	spawn_video_render(
+		project.project().clone(),
+		viewer,
+		None,
+		Some((frame, distance, generation)),
+		time.to_native(),
+		width,
+		height,
+		pixel_format,
+	)
+}
+
+/// Starts an asynchronous single-track multicam-angle render.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_task_video_render_track(
+	project: *const ProjectHandle,
+	viewer: u64,
+	track: u64,
+	time: OakRational,
+	width: i32,
+	height: i32,
+	pixel_format: i32,
+) -> u64 {
+	let (Some(project), Some(viewer), Some(track)) = (
+		unsafe { project.as_ref() },
+		NodeId::from_identity(viewer),
+		NodeId::from_identity(track),
+	) else {
+		return 0;
+	};
+	let pixel_format = match pixel_format {
+		1 => crate::preview_video::VideoPixelFormat::Bgra8,
+		_ => crate::preview_video::VideoPixelFormat::F32Rgba,
+	};
+	spawn_video_render(
+		project.project().clone(),
+		viewer,
+		Some(track),
+		None,
+		time.to_native(),
+		width,
+		height,
+		pixel_format,
 	)
 }
 
@@ -654,6 +943,42 @@ pub extern "C" fn oak_task_take_thumbnail(id: u64) -> *const crate::thumbnail::T
 		.as_ref()
 		.and_then(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).take());
 	data.map(crate::thumbnail::ThumbnailHandle::from_data)
+		.unwrap_or(std::ptr::null())
+}
+
+/// Transfers a successful audio mix out of the task registry. The caller owns
+/// one reference and releases it with `oak_audio_buffer_release`.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_task_take_audio(id: u64) -> *const crate::preview_audio::AudioBufferHandle {
+	let Some(entry) = task(id) else {
+		return std::ptr::null();
+	};
+	if entry.state.load(Ordering::SeqCst) != OAK_TASK_SUCCEEDED {
+		return std::ptr::null();
+	}
+	let data = entry
+		.audio_slot
+		.as_ref()
+		.and_then(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).take());
+	data.map(crate::preview_audio::AudioBufferHandle::from_data)
+		.unwrap_or(std::ptr::null())
+}
+
+/// Transfers a successful video frame out of the task registry. The caller owns
+/// one reference and releases it with `oak_video_buffer_release`.
+#[unsafe(no_mangle)]
+pub extern "C" fn oak_task_take_video(id: u64) -> *const crate::preview_video::VideoBufferHandle {
+	let Some(entry) = task(id) else {
+		return std::ptr::null();
+	};
+	if entry.state.load(Ordering::SeqCst) != OAK_TASK_SUCCEEDED {
+		return std::ptr::null();
+	}
+	let data = entry
+		.video_slot
+		.as_ref()
+		.and_then(|slot| slot.lock().unwrap_or_else(|e| e.into_inner()).take());
+	data.map(crate::preview_video::VideoBufferHandle::from_data)
 		.unwrap_or(std::ptr::null())
 }
 

@@ -513,6 +513,26 @@ impl TicketArena {
 		)
 	}
 
+	/// [`TicketArena::submit_playback`] with a caller-reserved id and a
+	/// pollable result slot. Used by engine-owned asynchronous preview tasks.
+	pub fn submit_playback_with_id(
+		&self,
+		id: TicketId,
+		params: VideoTicketParams,
+		frame: i64,
+		distance: i64,
+		version: u64,
+		done: Completion,
+	) -> TicketId {
+		self.submit_video_impl(
+			id,
+			params,
+			done,
+			JobSchedule::playback(frame, distance, version),
+			true,
+		)
+	}
+
 	/// Submit a Background-priority frame (M15 S2 exports/precache): the
 	/// scheduler renders it whenever no Seek/Playback work is pending.
 	pub fn submit_video_background(&self, params: VideoTicketParams, done: Completion) -> TicketId {

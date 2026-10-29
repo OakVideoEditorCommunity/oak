@@ -34,6 +34,7 @@ unsafe extern "C" {
 	fn oak_editor_open(uri: *const u8, uri_len: usize, version_info: *mut i32) -> *mut c_void;
 	fn oak_editor_open_project_from_library(uuid: *const u8, uuid_len: usize, error: *mut i32) -> *mut c_void;
 	fn oak_editor_adopt_storage_project_handle(project: StorageProjectHandle) -> *mut c_void;
+	fn oak_editor_from_project_handle(project: *mut c_void) -> *mut c_void;
 	fn oak_editor_create_library(name: *const u8, name_len: usize, error: *mut i32) -> *mut c_void;
 	fn oak_editor_project(session: *const c_void) -> *mut c_void;
 	fn oak_editor_save(
@@ -81,6 +82,12 @@ unsafe impl Send for EditorSession {}
 unsafe impl Sync for EditorSession {}
 
 impl EditorSession {
+	/// Creates a fresh session around an existing project handle without
+	/// reopening or copying the document. The handle is consumed exactly once.
+	pub fn from_project(project: Project) -> Result<Self, StorageError> {
+		Self::from_raw(unsafe { oak_editor_from_project_handle(project.into_raw()) })
+	}
+
 	/// Adopts an owned storage handle into a session without reopening the project.
 	///
 	/// This is intended for migration from an existing shared project owner. The

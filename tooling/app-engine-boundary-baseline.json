@@ -102,28 +102,27 @@
       }
     },
     "crates/oak-app/src/oakui/real.rs": {
-      "total": 195,
+      "total": 180,
       "crates": {
         "oak-audio": 18,
-        "oak-codec": 20,
+        "oak-codec": 16,
         "oak-core": 68,
         "oak-node": 50,
         "oak-ofx-plugin": 1,
         "oak-render": 11,
         "oak-storage": 1,
-        "oak-task": 11,
         "oak-timeline": 11,
         "oak-undo": 4
       }
     },
     "crates/oak-app/src/oakui/renderops.rs": {
-      "total": 175,
+      "total": 159,
       "crates": {
-        "oak-codec": 27,
+        "oak-codec": 21,
         "oak-core": 59,
         "oak-node": 59,
         "oak-render": 18,
-        "oak-task": 11,
+        "oak-task": 1,
         "oak-timeline": 1
       }
     },

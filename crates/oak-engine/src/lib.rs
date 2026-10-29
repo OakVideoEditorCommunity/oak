@@ -16,6 +16,8 @@ pub mod node;
 pub mod ofx;
 pub mod otio;
 pub mod plugin;
+pub mod preview_audio;
+pub mod preview_video;
 pub mod render;
 pub mod thumbnail;
 pub mod storage;

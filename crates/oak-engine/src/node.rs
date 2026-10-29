@@ -47,6 +47,21 @@ pub struct ProjectHandle {
 	inner: Arc<Mutex<Project>>,
 }
 
+/// Converts an owned engine project handle into the storage migration handle
+/// used by legacy hosts. The input reference is consumed exactly once; the
+/// returned handle owns the same project Arc, not a reloaded copy.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn oak_project_into_storage_handle(
+	project: *mut ProjectHandle,
+) -> oak_core::handle::CHandle {
+	let Some(project) = (unsafe { project.as_ref() }) else {
+		return oak_core::handle::CHandle::null();
+	};
+	let inner = project.project().clone();
+	unsafe { oak_project_release(project) };
+	oak_storage::nodeutil::make_project_owned(inner)
+}
+
 impl ProjectHandle {
 	/// Wraps an existing shared project as a handle with ref count 1
 	/// (the storage backend boundary hands projects over as

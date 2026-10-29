@@ -20,6 +20,8 @@ unsafe extern "C" {
 	fn oak_project_new() -> *mut c_void;
 	fn oak_project_set_active(project: *const c_void);
 	fn oak_project_active() -> *mut c_void;
+	fn oak_project_into_storage_handle(project: *mut c_void)
+	-> crate::editor::StorageProjectHandle;
 	fn oak_project_name(project: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_project_filename(project: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
 	fn oak_project_pretty_filename(project: *const c_void, buf: *mut u8, buf_len: usize) -> i32;
@@ -346,6 +348,13 @@ unsafe impl Send for Project {}
 unsafe impl Sync for Project {}
 
 impl Project {
+	/// Converts this owned handle into the storage migration representation used
+	/// by legacy hosts. The same live Arc is retained; this handle is consumed.
+	pub fn into_storage_project_handle(self) -> crate::editor::StorageProjectHandle {
+		let handle = unsafe { oak_project_into_storage_handle(self.ptr) };
+		std::mem::forget(self);
+		handle
+	}
 	/// A new, initialized project (empty graph with a root folder).
 	pub fn new() -> Self {
 		Self {
@@ -363,6 +372,13 @@ impl Project {
 	/// calls take it as an argument).
 	pub(crate) fn as_raw(&self) -> *mut c_void {
 		self.ptr
+	}
+
+	/// Transfers the raw reference to another SDK handle without dropping it.
+	pub(crate) fn into_raw(self) -> *mut c_void {
+		let ptr = self.ptr;
+		std::mem::forget(self);
+		ptr
 	}
 
 	/// The project display name.

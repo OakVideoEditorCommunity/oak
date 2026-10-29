@@ -14,31 +14,26 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Montage resolution, ticket rendering and the export driver (M14 R3).
+//! SDK preview/export adapters and the app's pixel/display conversion.
 //!
-//! The facade's renderer box (`crates/oakengine/src/render.rs`: geometry
-//! validation, `build_video_montage` / `build_audio_montage`,
-//! `clip_media`) and its export path (`oakengine_task_create_export` +
-//! `oakengine_task_start_sync` + the task subscription) are app-side now:
-//! the montage builders read the oaknode graph directly and the renders
-//! go through the oakrender ticket arena, exactly like the CLI's
-//! `engine.rs` (M14 R2). The export drives `oak_task::export::ExportTask`
-//! synchronously on a background thread with the module task's event
-//! listener and cancel atom wired to the app's [`ExportSession`].
+//! Runtime montage construction, ticket scheduling, worker-frame ownership,
+//! audio mixing and export execution live in `oak-engine`. This module keeps
+//! the existing app event protocol and UI pixel conversion; synchronous wait
+//! helpers are called only by background workers and tests.
 
 use std::sync::mpsc;
 
 use gpui_kit::RenderImage;
+#[cfg(test)]
 use oak_core::texture::Texture;
-use oak_core::{Rational, TimeRange};
+use oak_core::{PixelFormat, Rational, TimeRange};
 use oak_engine_rust_sdk::state::Config;
 use oak_node::id::NodeId;
 use oak_node::track::TrackType;
+#[cfg(test)]
 use oak_render::manager::RenderManager;
 use oak_render::procpool::ShmFrameRef;
-use oak_render::ticket::{
-	AdjustmentSpan, AudioTicketParams, MontageClip, TicketPayload, VideoTicketParams,
-};
+use oak_render::ticket::{AdjustmentSpan, MontageClip, VideoTicketParams};
 
 use super::engine::{ExportEvent, ExportSession};
 use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image};
@@ -65,18 +60,16 @@ pub const SLOT_FORMAT_BGRA8: i32 = oak_render::ipc::SLOT_FORMAT_BGRA8;
 /// (without it the ticket arena rejects submissions). Returns false when
 /// the manager could not be started.
 pub fn ensure_render_manager() -> bool {
-	if RenderManager::global().is_some() {
+	if oak_engine_rust_sdk::render::manager_is_initialized() {
 		return true;
 	}
-	// Already-initialized is success (the module reports State for a
-	// second init). Log the real failure before degrading to the bool —
-	// "render manager failed to start" alone is undiagnosable in CI.
-	if let Err(e) = RenderManager::init() {
-		if RenderManager::global().is_none() {
-			log::error!("render manager init failed: {e:?}");
-		}
+	if !oak_engine_rust_sdk::render::manager_init(
+		oak_engine_rust_sdk::render::RenderBackend::Default,
+	) && !oak_engine_rust_sdk::render::manager_is_initialized()
+	{
+		log::error!("render manager init failed");
 	}
-	RenderManager::global().is_some()
+	oak_engine_rust_sdk::render::manager_is_initialized()
 }
 
 // ---------------------------------------------------------------------------
@@ -487,9 +480,18 @@ pub fn render_multicam_angle_frame(
 	width: i32,
 	height: i32,
 ) -> Result<RenderedFrame, String> {
-	render_video(multicam_angle_frame_params(
-		p, seq, track, frame_ts, tb, width, height,
-	)?)
+	validate_geometry(width, height, tb)?;
+	let session = super::real::editor_session_for_project(p)?;
+	let task = oak_engine_rust_sdk::task::render_track_video(
+		&session.project(),
+		oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity()),
+		oak_engine_rust_sdk::node::NodeId::from_raw(track.identity()),
+		rational_to_sdk(Rational::new(frame_ts * tb.0, tb.1)),
+		(width as u32, height as u32),
+		oak_engine_rust_sdk::preview_video::VideoPixelFormat::F32Rgba,
+	)
+	.ok_or_else(|| "failed to start the multicam render task".to_string())?;
+	wait_video_frame(task)
 }
 
 /// The audio montage over `range`: every audio clip overlapping the
@@ -554,6 +556,8 @@ pub fn audio_montage(p: &ProjectRef, seq: NodeId, range: TimeRange) -> Vec<Monta
 /// inline backend), or a GPU-resident engine texture (the thread
 /// pipeline — presented zero-copy when the UI's device is adopted).
 pub enum RenderedFrame {
+	/// SDK-owned CPU bytes, already copied out of the engine/worker backend.
+	Sdk(oak_engine_rust_sdk::preview_video::VideoFrame),
 	/// Process backend: a BGRA8 frame in a worker's shared-memory slot.
 	/// Read with `shm.slot_bytes(slot)` (no counted copy on the preview
 	/// path), build the display image, then release the slot through the
@@ -580,6 +584,7 @@ impl RenderedFrame {
 	/// Width in pixels.
 	pub fn width(&self) -> i32 {
 		match self {
+			RenderedFrame::Sdk(frame) => frame.info().width,
 			RenderedFrame::Shm(f) => f.meta.width,
 			RenderedFrame::CpuF32 { width, .. } => *width,
 			RenderedFrame::Gpu(texture) => texture.size().0,
@@ -589,6 +594,7 @@ impl RenderedFrame {
 	/// Height in pixels.
 	pub fn height(&self) -> i32 {
 		match self {
+			RenderedFrame::Sdk(frame) => frame.info().height,
 			RenderedFrame::Shm(f) => f.meta.height,
 			RenderedFrame::CpuF32 { height, .. } => *height,
 			RenderedFrame::Gpu(texture) => texture.size().1,
@@ -601,6 +607,10 @@ impl RenderedFrame {
 	/// `PIXEL_FORMAT_F32` for the in-process variant.
 	pub fn format(&self) -> i32 {
 		match self {
+			RenderedFrame::Sdk(frame) => match frame.info().pixel_format {
+				oak_engine_rust_sdk::preview_video::VideoPixelFormat::F32Rgba => PIXEL_FORMAT_F32,
+				oak_engine_rust_sdk::preview_video::VideoPixelFormat::Bgra8 => SLOT_FORMAT_BGRA8,
+			},
 			RenderedFrame::Shm(f) => f.meta.format,
 			RenderedFrame::CpuF32 { .. } => PIXEL_FORMAT_F32,
 			RenderedFrame::Gpu(_) => PIXEL_FORMAT_F32,
@@ -610,11 +620,13 @@ impl RenderedFrame {
 	/// True for the process-backend shm variant.
 	pub fn is_shm(&self) -> bool {
 		matches!(self, RenderedFrame::Shm(_))
+			|| matches!(self, RenderedFrame::Sdk(frame) if frame.info().origin == oak_engine_rust_sdk::preview_video::FrameOrigin::SharedMemory)
 	}
 
 	/// True for the thread-pipeline GPU texture variant.
 	pub fn is_gpu(&self) -> bool {
 		matches!(self, RenderedFrame::Gpu(_))
+			|| matches!(self, RenderedFrame::Sdk(frame) if frame.info().origin == oak_engine_rust_sdk::preview_video::FrameOrigin::Gpu)
 	}
 
 	/// Build the viewer display image plus the scope samples (M15 S2
@@ -631,6 +643,29 @@ impl RenderedFrame {
 	/// caller releases the slot afterwards.
 	pub fn to_display(&self) -> Option<(RenderImage, ScopeData, Option<Vec<f32>>)> {
 		match self {
+			RenderedFrame::Sdk(frame) => {
+				let info = frame.info();
+				let (w, h) = (info.width.max(0) as u32, info.height.max(0) as u32);
+				let data = frame.bytes();
+				match info.pixel_format {
+					oak_engine_rust_sdk::preview_video::VideoPixelFormat::F32Rgba => {
+						let mut samples =
+							repack_f32_rows(info.width, info.height, info.linesize, &data)?;
+						apply_output_node_f32(&mut samples);
+						let scope = analyze_f32_rgba(w, h, &samples);
+						super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
+						let image = f32_rgba_to_bgra_image(w, h, &samples);
+						Some((image, scope, Some(samples)))
+					}
+					oak_engine_rust_sdk::preview_video::VideoPixelFormat::Bgra8 => {
+						let scope = analyze_bgra8(w, h, &data);
+						let mut owned = data;
+						super::displaycolor::apply_bgra8(&mut owned, (w * h) as i64);
+						let image = bgra_bytes_to_render_image(w, h, &owned)?;
+						Some((image, scope, None))
+					}
+				}
+			}
 			RenderedFrame::Shm(f) => {
 				let meta = &f.meta;
 				let (w, h) = (meta.width.max(0) as u32, meta.height.max(0) as u32);
@@ -872,40 +907,6 @@ fn proxy_limits_at(p: &ProjectRef, seq: NodeId, time: Rational) -> Vec<(i32, i32
 	limits
 }
 
-/// Drive one video ticket synchronously (M15 S2: returns the payload
-/// variant without copying frame bytes — the shm slot is read zero-copy
-/// by the caller and released after building the display image).
-fn render_video(params: VideoTicketParams) -> Result<RenderedFrame, String> {
-	let m =
-		RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
-	let id = m.tickets.next_id();
-	if std::env::var_os("OAK_DEBUG_DISPATCH").is_some() {
-		eprintln!("renderops: sync render submit arena ticket {}", id.0);
-	}
-	m.tickets.submit_video_with_id(id, params, Box::new(|_| {}));
-	m.tickets.wait(id).map_err(|e| e.to_string())?;
-	if std::env::var_os("OAK_DEBUG_DISPATCH").is_some() {
-		eprintln!("renderops: sync render wait done arena ticket {}", id.0);
-	}
-	let result = m
-		.tickets
-		.result(id)
-		.ok_or_else(|| "render ticket produced no result".to_string())?;
-	match &result {
-		Ok(TicketPayload::Video(Texture::Cpu(frame))) => Ok(RenderedFrame::CpuF32 {
-			width: frame.width,
-			height: frame.height,
-			linesize: frame.linesize_bytes() as i32,
-			data: frame.data.clone(),
-		}),
-		Ok(TicketPayload::Video(texture @ Texture::Gpu { .. })) => {
-			Ok(RenderedFrame::Gpu(texture.clone()))
-		}
-		Ok(TicketPayload::ShmFrame(frame)) => Ok(RenderedFrame::Shm(frame.clone())),
-		_ => Err("render produced no video frame".to_string()),
-	}
-}
-
 /// Build the video ticket params for one sequence-montage frame (M15 S2:
 /// shared by the synchronous render and the playback pre-render window).
 /// `format` is the slot wire format the worker renders into: `None` keeps
@@ -918,7 +919,7 @@ pub fn sequence_frame_params(
 	tb: (i64, i64),
 	width: i32,
 	height: i32,
-	format: Option<oak_core::PixelFormat>,
+	format: Option<PixelFormat>,
 ) -> Result<VideoTicketParams, String> {
 	validate_geometry(width, height, tb)?;
 	let time = Rational::new(frame_ts * tb.0, tb.1);
@@ -947,6 +948,107 @@ pub fn sequence_frame_params(
 	})
 }
 
+/// Starts one sequence/footage frame render on an SDK engine worker.
+///
+/// The returned task is pollable; waiting and result transfer are explicit so
+/// playback code can keep the UI thread non-blocking.
+pub fn submit_video_frame(
+	p: &ProjectRef,
+	viewer: NodeId,
+	frame_ts: i64,
+	tb: (i64, i64),
+	width: i32,
+	height: i32,
+	format: Option<PixelFormat>,
+) -> Result<oak_engine_rust_sdk::task::Task, String> {
+	submit_video_frame_scheduled(
+		p, viewer, frame_ts, tb, width, height, format, None,
+	)
+}
+
+/// Starts a forward-window frame at Playback priority.
+pub fn submit_playback_video_frame(
+	p: &ProjectRef,
+	viewer: NodeId,
+	frame_ts: i64,
+	tb: (i64, i64),
+	width: i32,
+	height: i32,
+	format: Option<PixelFormat>,
+	playhead: i64,
+	generation: u64,
+) -> Result<oak_engine_rust_sdk::task::Task, String> {
+	submit_video_frame_scheduled(
+		p,
+		viewer,
+		frame_ts,
+		tb,
+		width,
+		height,
+		format,
+		Some((playhead, generation)),
+	)
+}
+
+fn submit_video_frame_scheduled(
+	p: &ProjectRef,
+	viewer: NodeId,
+	frame_ts: i64,
+	tb: (i64, i64),
+	width: i32,
+	height: i32,
+	format: Option<oak_core::PixelFormat>,
+	playback: Option<(i64, u64)>,
+) -> Result<oak_engine_rust_sdk::task::Task, String> {
+	validate_geometry(width, height, tb)?;
+	let session = super::real::editor_session_for_project(p)?;
+	let pixel_format = if format == Some(PixelFormat::F32) {
+		oak_engine_rust_sdk::preview_video::VideoPixelFormat::F32Rgba
+	} else {
+		oak_engine_rust_sdk::preview_video::VideoPixelFormat::Bgra8
+	};
+	let viewer = oak_engine_rust_sdk::node::NodeId::from_raw(viewer.identity());
+	let time = rational_to_sdk(Rational::new(frame_ts * tb.0, tb.1));
+	let size = (width as u32, height as u32);
+	if let Some((playhead, generation)) = playback {
+		oak_engine_rust_sdk::task::render_playback_video(
+			&session.project(),
+			viewer,
+			time,
+			size,
+			pixel_format,
+			frame_ts,
+			frame_ts.saturating_sub(playhead).abs(),
+			generation,
+		)
+	} else {
+		oak_engine_rust_sdk::task::render_video(
+			&session.project(),
+			viewer,
+			time,
+			size,
+			pixel_format,
+		)
+	}
+	.ok_or_else(|| "failed to start the video render task".to_string())
+}
+
+/// Waits for an SDK frame task on a background caller and transfers its owned
+/// result exactly once.
+fn wait_video_frame(task: oak_engine_rust_sdk::task::Task) -> Result<RenderedFrame, String> {
+	if !task.wait() {
+		let error = task.error();
+		return Err(if error.is_empty() {
+			"video render failed".to_string()
+		} else {
+			error
+		});
+	}
+	task.take_video()
+		.map(RenderedFrame::Sdk)
+		.ok_or_else(|| "video render produced no frame".to_string())
+}
+
 /// Render one frame of the sequence's montage at `frame_ts` (a timestamp
 /// in the `(tb.1 / tb.0)`-per-frame timebase) into a `(width, height)`
 /// frame. `format` is the slot wire format (see
@@ -960,7 +1062,7 @@ pub fn render_sequence_frame(
 	height: i32,
 	format: Option<oak_core::PixelFormat>,
 ) -> Result<RenderedFrame, String> {
-	render_video(sequence_frame_params(
+	wait_video_frame(submit_video_frame(
 		p, seq, frame_ts, tb, width, height, format,
 	)?)
 }
@@ -1028,7 +1130,7 @@ pub fn render_footage_frame(
 	height: i32,
 	format: Option<oak_core::PixelFormat>,
 ) -> Result<RenderedFrame, String> {
-	render_video(footage_frame_params(
+	wait_video_frame(submit_video_frame(
 		p, footage, frame_ts, tb, width, height, format,
 	)?)
 }
@@ -1054,90 +1156,73 @@ pub fn render_audio_range(
 	len_ts: i64,
 	tb: (i64, i64),
 ) -> Result<RenderedAudio, String> {
-	if tb.0 <= 0 || tb.1 <= 0 {
-		return Err("the sequence has no valid frame rate".to_string());
-	}
-	let range = TimeRange::new(
-		Rational::new(start_ts * tb.0, tb.1),
-		Rational::new((start_ts + len_ts) * tb.0, tb.1),
-	);
-	let montage = audio_montage(p, seq, range);
-	let m =
-		RenderManager::global().ok_or_else(|| "render manager is not initialized".to_string())?;
-	let id = m.tickets.next_id();
-	m.tickets.submit_audio_with_id(
-		id,
-		AudioTicketParams {
-			viewer: seq.identity(),
-			range,
-			sample_rate: 48000,
-			channel_layout: 0x3,
-			montage,
-		},
-		Box::new(|_| {}),
-	);
-	m.tickets.wait(id).map_err(|e| e.to_string())?;
-	let result = m
-		.tickets
-		.result(id)
-		.ok_or_else(|| "audio ticket produced no result".to_string())?;
-	match result {
-		Ok(TicketPayload::Audio(samples)) => Ok(RenderedAudio {
-			data: samples.samples,
-			sample_rate: samples.sample_rate,
-			channel_count: samples.channel_count,
-		}),
-		// M15 S3 process backend: the audio sits in a worker shm slot; copy
-		// the samples out and release the slot (the bytes must outlive it).
-		Ok(TicketPayload::ShmAudio(audio)) => {
-			let samples = audio.to_audio_samples();
-			if let Some(m) = RenderManager::global() {
-				m.release_audio_frame(&audio);
-			}
-			Ok(RenderedAudio {
-				data: samples.samples,
-				sample_rate: samples.sample_rate,
-				channel_count: samples.channel_count,
-			})
-		}
-		_ => Err("audio render produced no samples".to_string()),
-	}
+	let session = super::real::editor_session_for_project(p)?;
+	let (tx, rx) = mpsc::channel();
+	submit_audio_chunk(&session, seq, start_ts, len_ts, tb, tx)?;
+	rx.recv().map(|(_, audio)| audio).map_err(|e| e.to_string())
 }
 
-/// Submit one audio-chunk render for the playback prefetch (M15 S3; M16
-/// S3: the chunk is queued on the dedicated audio-render thread — see
-/// [`audio_thread`](super::audio_thread) — so the render never runs on the
-/// UI tick; a slow decode no longer freezes the UI or delays the next
-/// chunk (the old inline-dispatch path underran the audio device). The
-/// completion sends `(start_ts, samples)` on `tx`. Render errors send
+/// Submit one audio-chunk render for the playback prefetch. The SDK runs the
+/// mix on an engine worker and a completion adapter sends `(start_ts, samples)`
+/// on `tx`, so the render never runs on the UI tick. Render errors send
 /// silence of the expected length so the playback buffer stays aligned
 /// (the real-time path must never stall the UI thread on a worker).
 pub fn submit_audio_chunk(
-	p: &ProjectRef,
+	session: &oak_engine_rust_sdk::editor::EditorSession,
 	seq: NodeId,
 	start_ts: i64,
 	len_ts: i64,
 	tb: (i64, i64),
 	tx: mpsc::Sender<(i64, RenderedAudio)>,
 ) -> Result<(), String> {
-	let range = TimeRange::new(
-		Rational::new(start_ts * tb.0, tb.1),
-		Rational::new((start_ts + len_ts) * tb.0, tb.1),
+	if tb.0 <= 0 || tb.1 <= 0 {
+		return Err("the sequence has no valid frame rate".into());
+	}
+	let range = oak_engine_rust_sdk::types::TimeRange::new(
+		rational_to_sdk(Rational::new(start_ts * tb.0, tb.1)),
+		rational_to_sdk(Rational::new((start_ts + len_ts) * tb.0, tb.1)),
 	);
-	let montage = audio_montage(p, seq, range);
-	let sample_rate = 48000;
-	let channel_layout = 0x3u64;
-	super::audio_thread::submit(
-		AudioTicketParams {
-			viewer: seq.identity(),
-			range,
-			sample_rate,
-			channel_layout,
-			montage,
-		},
-		start_ts,
-		tx,
+	let expected_frames = ((range.out.to_f64() * 48_000.0).round()
+		- (range.in_.to_f64() * 48_000.0).round())
+	.max(0.0) as usize;
+	let task = oak_engine_rust_sdk::task::render_audio(
+		&session.project(),
+		oak_engine_rust_sdk::node::NodeId::from_raw(seq.identity()),
+		range,
+		48_000,
+		0x3,
 	)
+	.ok_or_else(|| "failed to start the audio render task".to_string())?;
+	std::thread::spawn(move || {
+		if task.wait() {
+			if let Some(block) = task.take_audio() {
+				let info = block.info();
+				let _ = tx.send((
+					start_ts,
+					RenderedAudio {
+						data: block.samples(),
+						sample_rate: info.sample_rate,
+						channel_count: info.channel_count,
+					},
+				));
+				return;
+			}
+		}
+		// A failed render must not stall or shift the real-time buffer.
+		let _ = tx.send((
+			start_ts,
+			RenderedAudio {
+				data: vec![0.0; expected_frames * 2],
+				sample_rate: 48_000,
+				channel_count: 2,
+			},
+		));
+	});
+	Ok(())
+}
+
+fn rational_to_sdk(value: Rational) -> oak_engine_rust_sdk::types::Rational {
+	oak_engine_rust_sdk::types::Rational::new(value.numerator(), value.denominator())
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,19 +1244,21 @@ pub fn encoding_params(
 	p: &ProjectRef,
 	seq: NodeId,
 	format: i32,
-	path: &std::path::Path,
+	_path: &std::path::Path,
 	workarea: Option<(i64, i64)>,
 	length_frames: i64,
-) -> Result<oak_task::export::EncodingParams, String> {
-	let container = oak_codec::exportformat::Format::from_i32(format)
+) -> Result<oak_engine_rust_sdk::task::EncodingParams, String> {
+	let container = oak_engine_rust_sdk::codec::Format::from_i32(format)
 		.ok_or_else(|| format!("unknown export format {format}"))?;
-	let video_codec = oak_codec::exportformat::Format::get_video_codecs(container)
-		.first()
-		.copied()
+	let video_codec = container
+		.video_codecs()
+		.iter()
+		.next()
 		.ok_or_else(|| format!("format {format} has no video codec"))?;
-	let audio_codec = oak_codec::exportformat::Format::get_audio_codecs(container)
-		.first()
-		.copied()
+	let audio_codec = container
+		.audio_codecs()
+		.iter()
+		.next()
 		.ok_or_else(|| format!("format {format} has no audio codec"))?;
 	let (width, height, rate) = {
 		let g = lock(p);
@@ -1201,18 +1288,17 @@ pub fn encoding_params(
 			),
 		),
 	};
-	Ok(oak_task::export::EncodingParams {
-		filename: path.to_string_lossy().into_owned(),
+	Ok(oak_engine_rust_sdk::task::EncodingParams {
 		format,
 		video_enabled: true,
-		video_codec: video_codec as i32,
+		video_codec,
 		video_width: width.max(1),
 		video_height: height.max(1),
 		video_time_base_num: rate_den,
 		video_time_base_den: rate_num,
 		video_pixel_format: 0,
 		audio_enabled: true,
-		audio_codec: audio_codec as i32,
+		audio_codec,
 		audio_sample_rate: EXPORT_SAMPLE_RATE,
 		audio_channel_layout: EXPORT_CHANNEL_LAYOUT,
 		subtitles_enabled: false,
@@ -1240,29 +1326,29 @@ pub fn encoding_params_with_settings(
 	p: &ProjectRef,
 	seq: NodeId,
 	settings: &crate::oakui::engine::ExportSettings,
-	path: &std::path::Path,
+	_path: &std::path::Path,
 	workarea: Option<(i64, i64)>,
 	length_frames: i64,
-) -> Result<oak_task::export::EncodingParams, String> {
-	let container = oak_codec::exportformat::Format::from_i32(settings.format)
+) -> Result<oak_engine_rust_sdk::task::EncodingParams, String> {
+	let container = oak_engine_rust_sdk::codec::Format::from_i32(settings.format)
 		.ok_or_else(|| format!("unknown export format {}", settings.format))?;
 	// ONLY the codecs the container supports are selectable upstream (the
 	// dialog rebuilds its lists from these tables); the chosen codec must
 	// be in the table — a mismatch is a hard error, not a silent default.
-	let video_codec = oak_codec::exportformat::Format::get_video_codecs(container)
+	let video_codec = container
+		.video_codecs()
 		.iter()
-		.find(|c| **c as i32 == settings.video_codec)
-		.copied()
+		.find(|c| *c == settings.video_codec)
 		.ok_or_else(|| {
 			format!(
 				"codec {} not supported by {container:?}",
 				settings.video_codec
 			)
 		})?;
-	let audio_codec = oak_codec::exportformat::Format::get_audio_codecs(container)
+	let audio_codec = container
+		.audio_codecs()
 		.iter()
-		.find(|c| **c as i32 == settings.audio_codec)
-		.copied()
+		.find(|c| *c == settings.audio_codec)
 		.ok_or_else(|| {
 			format!(
 				"audio codec {} not supported by {container:?}",
@@ -1330,18 +1416,17 @@ pub fn encoding_params_with_settings(
 		// stay at the 8-bit default and the dialog disables HDR).
 		_ => 0, // PixelFormat::U8
 	};
-	Ok(oak_task::export::EncodingParams {
-		filename: path.to_string_lossy().into_owned(),
+	Ok(oak_engine_rust_sdk::task::EncodingParams {
 		format: settings.format,
 		video_enabled: true,
-		video_codec: video_codec as i32,
+		video_codec,
 		video_width: width.max(1),
 		video_height: height.max(1),
 		video_time_base_num: rate_den.max(1),
 		video_time_base_den: rate_num.max(1),
 		video_pixel_format: pixel_format,
 		audio_enabled: true,
-		audio_codec: audio_codec as i32,
+		audio_codec,
 		audio_sample_rate: EXPORT_SAMPLE_RATE,
 		audio_channel_layout: EXPORT_CHANNEL_LAYOUT,
 		subtitles_enabled: false,
@@ -1361,50 +1446,51 @@ pub fn encoding_params_with_settings(
 	})
 }
 
-/// Start an export of `seq` with `params` on a background thread; the
-/// returned session carries the event channel and the cancel handle (the
-/// facade's export task wiring over the module task's event listener and
-/// cancel atom).
+/// Starts an export through the SDK task registry and adapts polling to the
+/// app's existing event protocol. Only the polling thread waits/sleeps; the UI
+/// receives progress and terminal state through the channel exactly as before.
 pub fn spawn_export(
-	p: &ProjectRef,
-	seq: NodeId,
-	params: oak_task::export::EncodingParams,
-) -> ExportSession {
+	session: &oak_engine_rust_sdk::editor::EditorSession,
+	seq: oak_engine_rust_sdk::node::NodeId,
+	filename: &str,
+	params: oak_engine_rust_sdk::task::EncodingParams,
+) -> Result<ExportSession, String> {
+	let task = oak_engine_rust_sdk::task::export(&session.project(), seq, filename, &params)
+		.ok_or_else(|| "failed to start the export task".to_string())?;
+	let cancellation = task.cancellation();
 	let (tx, rx) = mpsc::channel::<ExportEvent>();
-	let mut driver = oak_task::task::Task::new("Exporting...", None);
-	let cancel_atom = driver.get_cancel_atom();
-	{
-		let tx = tx.clone();
-		driver.set_event_listener(Box::new(move |event| {
-			let event = match event {
-				oak_task::task::TaskEvent::Started => ExportEvent::Started,
-				oak_task::task::TaskEvent::Progress(value) => ExportEvent::Progress(value),
-				// Finished is reported by the worker below (with the error).
-				oak_task::task::TaskEvent::Finished => return,
-			};
-			let _ = tx.send(event);
-		}));
-	}
-	driver.set_behavior(Box::new(oak_task::export::ExportTask::new(
-		(p.clone(), seq),
-		params,
-	)));
 	std::thread::spawn(move || {
-		let result = driver.start();
-		let error = if result.is_ok() {
-			String::new()
-		} else {
-			driver
-				.error()
-				.map(|s| s.to_string())
-				.unwrap_or_else(|| "export failed".to_string())
-		};
-		let _ = tx.send(ExportEvent::Finished(result.is_ok(), error));
+		let _ = tx.send(ExportEvent::Started);
+		loop {
+			let _ = tx.send(ExportEvent::Progress(task.progress().clamp(0.0, 1.0)));
+			match task.state() {
+				oak_engine_rust_sdk::task::TaskState::Running => {
+					std::thread::sleep(std::time::Duration::from_millis(10));
+				}
+				oak_engine_rust_sdk::task::TaskState::Succeeded => {
+					let _ = tx.send(ExportEvent::Finished(true, String::new()));
+					break;
+				}
+				oak_engine_rust_sdk::task::TaskState::Failed
+				| oak_engine_rust_sdk::task::TaskState::Cancelled => {
+					let error = {
+						let error = task.error();
+						if error.is_empty() {
+							"export failed".into()
+						} else {
+							error
+						}
+					};
+					let _ = tx.send(ExportEvent::Finished(false, error));
+					break;
+				}
+			}
+		}
 	});
-	ExportSession {
+	Ok(ExportSession {
 		events: rx,
-		cancel: Box::new(move || cancel_atom.cancel()),
-	}
+		cancel: Box::new(move || cancellation.cancel()),
+	})
 }
 
 /// The oak-worker binary for tests that drive the process backend:
@@ -3738,7 +3824,7 @@ mod tests {
 	#[test]
 	fn ensure_render_manager_logs_a_failed_start() {
 		let _media = media_lock();
-		if RenderManager::global().is_some() {
+		if oak_engine_rust_sdk::render::manager_is_initialized() {
 			println!("SKIP: the render manager is already initialized");
 			return;
 		}
@@ -3751,43 +3837,9 @@ mod tests {
 		}
 		assert!(!started, "a missing worker binary must not report success");
 		assert!(
-			RenderManager::global().is_none(),
+			!oak_engine_rust_sdk::render::manager_is_initialized(),
 			"the failed start leaves the manager down"
 		);
-	}
-
-	/// Points the render manager's worker resolution at a real oak-worker
-	/// binary (resolved via [`test_worker_bin`]: an existing
-	/// `$OAK_WORKER_BIN`, the test executable's sibling under
-	/// `target/<profile>/`, or the workspace `target/{debug,release}`),
-	/// restoring the previous environment on drop. When no worker file
-	/// exists the environment is left untouched and the pool cannot
-	/// deliver — the playback tests then take their strict/skip path.
-	/// Only used inside `media_lock` sections.
-	struct WorkerBinGuard {
-		prev: Option<String>,
-	}
-
-	impl WorkerBinGuard {
-		fn set() -> Self {
-			let prev = std::env::var("OAK_WORKER_BIN").ok();
-			match super::test_worker_bin() {
-				Some(path) => unsafe { std::env::set_var("OAK_WORKER_BIN", path) },
-				None => eprintln!(
-					"oak-worker binary not found (test-executable sibling, target/{{debug,release}} or OAK_WORKER_BIN); build it with `cargo build -p oak-worker` or set OAK_WORKER_BIN"
-				),
-			}
-			Self { prev }
-		}
-	}
-
-	impl Drop for WorkerBinGuard {
-		fn drop(&mut self) {
-			match &self.prev {
-				Some(p) => unsafe { std::env::set_var("OAK_WORKER_BIN", p) },
-				None => unsafe { std::env::remove_var("OAK_WORKER_BIN") },
-			}
-		}
 	}
 
 	/// The render-manager entry points: the single-footage frame, the
@@ -3796,11 +3848,8 @@ mod tests {
 	#[test]
 	fn render_entry_points_through_the_manager() {
 		let _media = media_lock();
-		let _worker = WorkerBinGuard::set();
-		assert!(
-			ensure_render_manager(),
-			"the render manager must start for this test; build oak-worker or set OAK_WORKER_BIN"
-		);
+		let _pipeline = EnvGuard::set("OAK_PIPELINE", "threads");
+		assert!(ensure_render_manager());
 		oak_engine_rust_sdk::node::undo_clear();
 
 		let media =

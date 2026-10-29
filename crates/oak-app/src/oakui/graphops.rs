@@ -1155,9 +1155,7 @@ pub fn library_open(uuid: &str) -> Result<ProjectRef, String> {
 			result.version_info
 		));
 	}
-	let handle = result.project;
-	let project =
-		unsafe { oak_storage::nodeutil::project_arc(&handle) }.map_err(|e| e.to_string())?;
+	let project = project_from_storage(result.project)?;
 	lock(&project).set_modified(false);
 	Ok(project)
 }
@@ -1178,6 +1176,25 @@ pub fn storage_bind(project: &ProjectRef) -> CHandle {
 	handle
 }
 
+/// Clones the Arc out of an SDK/storage migration handle and releases the
+/// handle. This preserves document identity while the app retires ProjectRef.
+pub fn project_from_storage(handle: CHandle) -> Result<ProjectRef, String> {
+	match unsafe { oak_storage::nodeutil::project_arc(&handle) } {
+		Ok(project) => {
+			release_storage_handle(handle);
+			Ok(project)
+		}
+		Err(error) => {
+			release_storage_handle(handle);
+			Err(error.to_string())
+		}
+	}
+}
+
+fn release_storage_handle(handle: CHandle) {
+	oak_storage::nodeutil::release_project(handle);
+}
+
 /// Whether the project behind `handle` is bound to the write-through
 /// session (the status bar's write state).
 pub fn storage_bound(handle: &CHandle) -> bool {
@@ -1194,7 +1211,7 @@ pub fn storage_last_error(handle: &CHandle) -> Option<String> {
 /// query handle (the engine's project-close path).
 pub fn storage_unbind(handle: CHandle) {
 	oak_storage::writethrough::unbind_project(handle);
-	oak_storage::nodeutil::release_project(handle);
+	release_storage_handle(handle);
 }
 
 /// Flush every bound project and stop the snapshot thread (app exit).
