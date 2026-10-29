@@ -16,6 +16,7 @@
 | [`p4-media-and-multicam.md`](p4-media-and-multicam.md) | **P4 素材、代理、波形、同步与多机位**：素材生命周期、代理、异步媒体任务、同步和多机位 | 已完成，P4A–P4E 验收通过 |
 | [`p5-render-preview-and-export.md`](p5-render-preview-and-export.md) | **P5 渲染、预览与导出**：统一导出任务、source/program 预览、音频与 worker 拓扑 | P5A–P5D 已完成；P6 接续 |
 | [`p6-ofx-and-advanced-interaction.md`](p6-ofx-and-advanced-interaction.md) | **P6 OFX 与高级交互**：插件生命周期、进度/取消、interact、overlay 与参数曲线 DTO | 已完成；P7 接续 |
+| [`p10-engine-consolidation.md`](p10-engine-consolidation.md) | **P10 私有 crate 合并进 engine（可行性计划）**：依赖/规模/测试/构建脚本盘点，目标结构、路径迁移规则、分阶段执行与风险控制 | 待评审，未执行 |
 | [`p9-worker-cli-and-sdk-docs.md`](p9-worker-cli-and-sdk-docs.md) | **P9 worker/CLI 收口与 SDK 文档**：worker 运行时迁入 engine、CLI 改 SDK、消费者守卫、missing_docs 清零与 docs.rs 发布 | 已完成 |
 | [`p8-sdk-editor-example.md`](p8-sdk-editor-example.md) | **P8 独立 SDK 消费者**：`examples/sdk_editor` headless 全流程 + 终端前端、C 头文件生成/校验、SDK 文档与发布元数据 | 已完成 |
 | [`p7-app-dependency-elimination.md`](p7-app-dependency-elimination.md) | **P7 app 依赖清零**：删除兼容实现和重复领域测试，收缩到 SDK DTO 与命令 | 已完成；边界 0 引用 / 0 内部依赖 |
