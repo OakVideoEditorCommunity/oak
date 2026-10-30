@@ -30,4 +30,4 @@ clap = { version = "4", features = ["derive"] }
 # The CLI is a pure SDK consumer: project/timeline queries, edits, frames,
 # audio, probe/transcode and export all cross the quercus-engine C ABI through
 # the safe Rust wrapper. It links no other Oak crate.
-quercus-engine-rs = { version = "=0.5.4" }
+quercus-engine-rs = { version = "=0.5.5" }

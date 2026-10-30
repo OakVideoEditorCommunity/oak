@@ -28,4 +28,4 @@ path = "src/main.rs"
 [dependencies]
 # The worker runtime (protocol, shm slots, eval) is an engine capability; the
 # binary is a thin launcher through the SDK like every other Oak consumer.
-quercus-engine-rs = { version = "=0.5.4" }
+quercus-engine-rs = { version = "=0.5.5" }
