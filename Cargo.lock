@@ -6501,9 +6501,9 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine-rs"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "138c7bd3274f41317ae8782d0d8c6f626dead9c16ceba8a4c6f97c8d5fcab4c4"
+checksum = "c3d2315d3a2b18d424429dedb595bd7014edaaa1bc9ef24d3f3e06c8f82c6782"
 dependencies = [
  "quercus-engine",
  "thiserror 2.0.20",
