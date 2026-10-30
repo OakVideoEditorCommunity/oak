@@ -43,6 +43,19 @@ pub fn ensure_render_manager() -> bool {
 	if quercus_engine_rs::render::manager_is_initialized() {
 		return true;
 	}
+	// The engine's process backend looks for `quercus-worker`; Oak ships the
+	// launcher as `oak-worker`, so point the engine at the sibling binary.
+	if std::env::var_os("QUERCUS_WORKER_BIN").is_none()
+		&& let Ok(exe) = std::env::current_exe()
+		&& let Some(dir) = exe.parent()
+	{
+		let worker = dir.join(format!("oak-worker{}", std::env::consts::EXE_SUFFIX));
+		if worker.is_file() {
+			// Safety: set once during render startup, before worker threads
+			// read the environment.
+			unsafe { std::env::set_var("QUERCUS_WORKER_BIN", &worker) };
+		}
+	}
 	if !quercus_engine_rs::render::manager_init(
 		quercus_engine_rs::render::RenderBackend::Default,
 	) && !quercus_engine_rs::render::manager_is_initialized()
