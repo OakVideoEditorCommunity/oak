@@ -17,9 +17,9 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use oak_engine_rust_sdk::editor::EditorSession;
-use oak_engine_rust_sdk::preview::PreviewSession;
-use oak_engine_rust_sdk::types::Rational;
+use quercus_engine_rs::editor::EditorSession;
+use quercus_engine_rs::preview::PreviewSession;
+use quercus_engine_rs::types::Rational;
 
 const COLS: u32 = 72;
 const ROWS: u32 = 22;

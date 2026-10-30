@@ -55,7 +55,7 @@ use crate::widgets::node_graph::{
 };
 use gpui_kit::{hsla, point, px, Hsla, Pixels, Point, SharedString};
 
-use oak_engine_rust_sdk::node::NodeId as DomainNodeId;
+use quercus_engine_rs::node::NodeId as DomainNodeId;
 
 use crate::oakui::graphops::{self, ProjectRef};
 
@@ -74,8 +74,8 @@ const TYPE_ID_TRANSITION_BLOCK: &str = "org.olivevideoeditor.Olive.transitionblo
 /// The real factory's Add-menu entries, converted to app-owned DTOs.
 pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 	use super::engine::{NodeCategory, NodeLibraryEntry, node_category_key};
-	fn category(value: oak_engine_rust_sdk::effect::NodeCategory) -> NodeCategory {
-		use oak_engine_rust_sdk::effect::NodeCategory as In;
+	fn category(value: quercus_engine_rs::effect::NodeCategory) -> NodeCategory {
+		use quercus_engine_rs::effect::NodeCategory as In;
 		match value {
 			In::Output => NodeCategory::Output,
 			In::Effect => NodeCategory::Effect,
@@ -93,8 +93,8 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 	}
 
 	let mut out = Vec::new();
-	for meta in oak_engine_rust_sdk::effect::factory_entries() {
-		if meta.flags & oak_engine_rust_sdk::effect::NODE_FLAG_DONT_SHOW_IN_CREATE_MENU != 0 {
+	for meta in quercus_engine_rs::effect::factory_entries() {
+		if meta.flags & quercus_engine_rs::effect::NODE_FLAG_DONT_SHOW_IN_CREATE_MENU != 0 {
 			continue;
 		}
 		let Some(category_key) = meta
@@ -114,8 +114,8 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 			category_key,
 		});
 	}
-	for meta in oak_engine_rust_sdk::effect::dynamic_factory_entries() {
-		let category_key = node_category_key(category(oak_engine_rust_sdk::effect::NodeCategory::OpenFx))
+	for meta in quercus_engine_rs::effect::dynamic_factory_entries() {
+		let category_key = node_category_key(category(quercus_engine_rs::effect::NodeCategory::OpenFx))
 			.expect("the OpenFX category is visible in the node library");
 		out.push(NodeLibraryEntry {
 			type_id: meta.type_id,
@@ -390,7 +390,7 @@ struct TypedNode {
 /// of a clip's context — the chain is self-contained, so the filtered view
 /// shows no output card and no synthesized clip→output wires.
 fn clip_context_nodes(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 ) -> Vec<TypedNode> {
 	snapshot_nodes(snapshot, seq)
@@ -399,14 +399,14 @@ fn clip_context_nodes(
 /// The displayable nodes of the sequence's graph, in identity order (the
 /// sequence node itself exactly once).
 fn graph_nodes(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 ) -> Vec<TypedNode> {
 	snapshot_nodes(snapshot, seq)
 }
 
 fn snapshot_nodes(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 ) -> Vec<TypedNode> {
 	let mut out: Vec<TypedNode> = snapshot
@@ -432,10 +432,10 @@ fn snapshot_nodes(
 /// Converts an owned SDK graph snapshot into the GPUI graph DTOs. Layout,
 /// colors and widget ID packing stay in the app; graph traversal stays in engine.
 fn present_graph_snapshot(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 ) -> (Vec<RealNode>, Vec<RealEdge>) {
-	use oak_engine_rust_sdk::editor::{GraphMediaType, GraphNodeRole};
+	use quercus_engine_rs::editor::{GraphMediaType, GraphNodeRole};
 	let seq_ident = seq.raw();
 	let mut nodes = Vec::new();
 	let mut edges = Vec::new();
@@ -542,8 +542,8 @@ fn build_graph_impl(
 	let Ok(session) = session_for_graph(project) else {
 		return (Vec::new(), Vec::new());
 	};
-	let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(seq.raw());
-	let clip = clip.map(|id| oak_engine_rust_sdk::node::NodeId::from_raw(id.raw()));
+	let sequence = quercus_engine_rs::node::NodeId::from_raw(seq.raw());
+	let clip = clip.map(|id| quercus_engine_rs::node::NodeId::from_raw(id.raw()));
 	let Some(snapshot) = session.graph_snapshot(sequence, clip) else {
 		return (Vec::new(), Vec::new());
 	};
@@ -553,8 +553,8 @@ fn build_graph_impl(
 /// Creates a session over the exact project Arc used by the current app.
 fn session_for_graph(
 	project: &ProjectRef,
-) -> Result<oak_engine_rust_sdk::editor::EditorSession, String> {
-	oak_engine_rust_sdk::editor::EditorSession::from_project(project.clone())
+) -> Result<quercus_engine_rs::editor::EditorSession, String> {
+	quercus_engine_rs::editor::EditorSession::from_project(project.clone())
 		.map_err(|error| format!("failed to adopt the current project: {error}"))
 }
 
@@ -599,7 +599,7 @@ fn role_of(type_id: &str, is_output: bool) -> u32 {
 /// `apply_edit` uses it so the first drag release writes
 /// `(displayed base + delta)` instead of `(origin + delta)`.
 fn fallback_base(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 	ident: u64,
 ) -> (f64, f64) {
@@ -617,7 +617,7 @@ fn fallback_base(
 /// the chain's row 0 can sit at row N of the full-sequence grid; taking
 /// the base from the wrong grid teleports the card on the first drag.
 fn fallback_base_in(
-	snapshot: &oak_engine_rust_sdk::editor::GraphSnapshot,
+	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
 	displayed: &[TypedNode],
 	ident: u64,
@@ -692,8 +692,8 @@ pub fn can_connect(project: &ProjectRef, from: PortId, to: PortId) -> bool {
 		return false;
 	}
 	session.can_connect(
-		oak_engine_rust_sdk::node::NodeId::from_raw(from_node),
-		oak_engine_rust_sdk::node::NodeId::from_raw(to_node),
+		quercus_engine_rs::node::NodeId::from_raw(from_node),
+		quercus_engine_rs::node::NodeId::from_raw(to_node),
 		&id_str,
 		-1,
 	)
@@ -736,7 +736,7 @@ pub fn apply_edit_in_view(
 			let snapshot = session
 				.graph_snapshot(
 					sequence,
-					clip.map(oak_engine_rust_sdk::node::NodeId::from_raw),
+					clip.map(quercus_engine_rs::node::NodeId::from_raw),
 				)
 				.ok_or_else(|| "node graph unavailable".to_string())?;
 			let id_str = snapshot
@@ -749,9 +749,9 @@ pub fn apply_edit_in_view(
 			let Some(id_str) = id_str else {
 				return Err("target input missing".into());
 			};
-			session.execute(oak_engine_rust_sdk::edit::EditCommand::Connect {
-				from: oak_engine_rust_sdk::node::NodeId::from_raw(from_node),
-				to: oak_engine_rust_sdk::node::NodeId::from_raw(to_node),
+			session.execute(quercus_engine_rs::edit::EditCommand::Connect {
+				from: quercus_engine_rs::node::NodeId::from_raw(from_node),
+				to: quercus_engine_rs::node::NodeId::from_raw(to_node),
 				input_id: id_str,
 			})
 			.map(|_| ())
@@ -770,7 +770,7 @@ pub fn apply_edit_in_view(
 			let snapshot = session
 				.graph_snapshot(
 					sequence,
-					clip.map(oak_engine_rust_sdk::node::NodeId::from_raw),
+					clip.map(quercus_engine_rs::node::NodeId::from_raw),
 				)
 				.ok_or_else(|| "node graph unavailable".to_string())?;
 			let (to, conn_id) = snapshot
@@ -782,8 +782,8 @@ pub fn apply_edit_in_view(
 				})
 				.map(|connection| (connection.to, connection.input_id.clone()))
 				.ok_or_else(|| format!("edge {} not found", edge.0))?;
-			session.execute(oak_engine_rust_sdk::edit::EditCommand::Disconnect {
-				to: oak_engine_rust_sdk::node::NodeId::from_raw(to.raw()),
+			session.execute(quercus_engine_rs::edit::EditCommand::Disconnect {
+				to: quercus_engine_rs::node::NodeId::from_raw(to.raw()),
 				input_id: conn_id,
 			})
 			.map(|_| ())
@@ -793,8 +793,8 @@ pub fn apply_edit_in_view(
 				let session = session_for_graph(project)?;
 				let snapshot = session
 					.graph_snapshot(
-						oak_engine_rust_sdk::node::NodeId::from_raw(seq.raw()),
-						clip.map(oak_engine_rust_sdk::node::NodeId::from_raw),
+						quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
+						clip.map(quercus_engine_rs::node::NodeId::from_raw),
 					)
 					.ok_or_else(|| "node graph unavailable".to_string())?;
 				let placed = snapshot
@@ -812,9 +812,9 @@ pub fn apply_edit_in_view(
 					}
 				});
 				session.execute(
-					oak_engine_rust_sdk::edit::EditCommand::SetContextPosition {
-						node: oak_engine_rust_sdk::node::NodeId::from_raw(node.0),
-						context: oak_engine_rust_sdk::node::NodeId::from_raw(seq.raw()),
+					quercus_engine_rs::edit::EditCommand::SetContextPosition {
+						node: quercus_engine_rs::node::NodeId::from_raw(node.0),
+						context: quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 						x: base.0 + f64::from(delta.x.as_f32()),
 						y: base.1 + f64::from(delta.y.as_f32()),
 					},
@@ -828,8 +828,8 @@ pub fn apply_edit_in_view(
 				if node.0 == seq.raw() {
 					continue;
 				}
-				session_for_graph(project)?.execute(oak_engine_rust_sdk::edit::EditCommand::RemoveNode {
-					node: oak_engine_rust_sdk::node::NodeId::from_raw(node.0),
+				session_for_graph(project)?.execute(quercus_engine_rs::edit::EditCommand::RemoveNode {
+					node: quercus_engine_rs::node::NodeId::from_raw(node.0),
 				})?;
 			}
 			Ok(())

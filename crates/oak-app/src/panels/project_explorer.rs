@@ -633,7 +633,7 @@ mod tests {
 	async fn context_menu_selection_follows_the_engine(cx: &mut TestAppContext) {
 		use crate::oakui::real::RealEngine;
 		let _lock = stack_lock();
-		oak_engine_rust_sdk::node::undo_clear();
+		quercus_engine_rs::node::undo_clear();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -839,7 +839,7 @@ mod tests {
 		});
 		cx.run_until_parked();
 
-		oak_engine_rust_sdk::node::undo_clear();
+		quercus_engine_rs::node::undo_clear();
 	}
 
 	/// Every local menu item path: the guard returns without a context

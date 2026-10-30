@@ -5332,7 +5332,7 @@ dependencies = [
  "half",
  "image",
  "log",
- "oak-engine-rust-sdk",
+ "quercus-engine-rs",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5343,84 +5343,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "oak-audio"
-version = "0.5.2"
-dependencies = [
- "cpal",
- "ffmpeg-next",
- "oak-codec",
- "oak-core",
- "oak-ffmpeg-link",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "oak-cli"
 version = "0.5.2"
 dependencies = [
  "clap",
- "oak-engine-rust-sdk",
-]
-
-[[package]]
-name = "oak-codec"
-version = "0.5.2"
-dependencies = [
- "ffmpeg-next",
- "oak-core",
- "oak-ffmpeg-link",
- "thiserror 2.0.20",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "oak-core"
-version = "0.5.2"
-dependencies = [
- "ash",
- "half",
- "image",
- "libc",
- "log",
- "objc2 0.6.4",
- "objc2-foundation 0.3.2",
- "objc2-io-surface",
- "objc2-metal 0.3.2",
- "ocio-rs",
- "quick-xml 0.41.0",
- "thiserror 2.0.20",
- "toml 0.8.23",
- "wgpu",
- "wgpu-types",
-]
-
-[[package]]
-name = "oak-engine"
-version = "0.5.2"
-dependencies = [
- "libc",
- "oak-audio",
- "oak-codec",
- "oak-core",
- "oak-ffmpeg-link",
- "oak-node",
- "oak-ofx-plugin",
- "oak-otio",
- "oak-render",
- "oak-storage",
- "oak-task",
- "oak-timeline",
- "oak-undo",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "oak-engine-rust-sdk"
-version = "0.5.2"
-dependencies = [
- "oak-engine",
- "thiserror 2.0.20",
+ "quercus-engine-rs",
 ]
 
 [[package]]
@@ -5428,111 +5355,10 @@ name = "oak-extensions"
 version = "0.5.2"
 
 [[package]]
-name = "oak-ffmpeg-link"
-version = "0.5.2"
-
-[[package]]
-name = "oak-node"
-version = "0.5.2"
-dependencies = [
- "oak-codec",
- "oak-core",
- "oak-undo",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-ofx-plugin"
-version = "0.5.2"
-dependencies = [
- "cc",
- "oak-core",
- "oak-node",
- "oak-render",
- "oak-undo",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-otio"
-version = "0.5.2"
-dependencies = [
- "oak-core",
- "quick-xml 0.41.0",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-render"
-version = "0.5.2"
-dependencies = [
- "cosmic-text",
- "libc",
- "naga",
- "oak-codec",
- "oak-core",
- "oak-node",
- "ocio-rs",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "uuid",
- "wgpu",
-]
-
-[[package]]
-name = "oak-storage"
-version = "0.5.2"
-dependencies = [
- "chrono",
- "oak-core",
- "oak-node",
- "oak-otio",
- "oak-undo",
- "sea-orm",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
-]
-
-[[package]]
-name = "oak-task"
-version = "0.5.2"
-dependencies = [
- "oak-codec",
- "oak-core",
- "oak-node",
- "oak-otio",
- "oak-render",
- "oak-undo",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-timeline"
-version = "0.5.2"
-dependencies = [
- "oak-core",
- "oak-node",
- "oak-undo",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "oak-undo"
-version = "0.5.2"
-dependencies = [
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "oak-worker"
 version = "0.5.2"
 dependencies = [
- "oak-engine-rust-sdk",
+ "quercus-engine-rs",
 ]
 
 [[package]]
@@ -6601,6 +6427,208 @@ dependencies = [
 ]
 
 [[package]]
+name = "quercus-audio"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bad0824b517c795c324a4b4fed77b72a25c366125b15a872c297384f9051c24"
+dependencies = [
+ "cpal",
+ "ffmpeg-next",
+ "quercus-codec",
+ "quercus-core",
+ "quercus-ffmpeg-link",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-codec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "656daa2565fc2551bac60d15f753a4b00ea0fcc12b001b97d41868b730dbaf6c"
+dependencies = [
+ "ffmpeg-next",
+ "quercus-core",
+ "quercus-ffmpeg-link",
+ "thiserror 2.0.20",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "quercus-core"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ddb4d8edb18480fb285b88050735853d0836868b8f4959b6ef0014a6593d914"
+dependencies = [
+ "ash",
+ "half",
+ "image",
+ "libc",
+ "log",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
+ "ocio-rs",
+ "quick-xml 0.41.0",
+ "thiserror 2.0.20",
+ "toml 0.8.23",
+ "wgpu",
+ "wgpu-types",
+]
+
+[[package]]
+name = "quercus-engine"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1abdafc701cb375bcaa1d8efdd4a33885b5351eb885128db10859fe7ae96aeeb"
+dependencies = [
+ "libc",
+ "quercus-audio",
+ "quercus-codec",
+ "quercus-core",
+ "quercus-ffmpeg-link",
+ "quercus-node",
+ "quercus-ofx-plugin",
+ "quercus-otio",
+ "quercus-render",
+ "quercus-storage",
+ "quercus-task",
+ "quercus-timeline",
+ "quercus-undo",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "quercus-engine-rs"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0e2a73dd8264fafe6abbfadf75c1488acc1465b90ebb90b9344e17c70a7069c"
+dependencies = [
+ "quercus-engine",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-ffmpeg-link"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "920f1d7d63ae4c95edf924e829c1dab3860013f06edf4a60b96a0a3449fd80e3"
+
+[[package]]
+name = "quercus-node"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce701f86d8d6128d5247bef2ab091d564a5abfb9c97c80572c19d78585b89c6e"
+dependencies = [
+ "quercus-codec",
+ "quercus-core",
+ "quercus-undo",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-ofx-plugin"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b65d829f6b3192986e9d4f5a9c9d4207fdaa79c632ed4f0cc08cb0f80fc01be7"
+dependencies = [
+ "cc",
+ "quercus-core",
+ "quercus-node",
+ "quercus-render",
+ "quercus-undo",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-otio"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1001993b2253fb2c65c241c291fd3fbdd2fd423fbd2c439de767706c30d8b68e"
+dependencies = [
+ "quercus-core",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-render"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83f1928d74f779272beced3a65fb35012d680f3eb38a96a9c9114910c845a5e2"
+dependencies = [
+ "cosmic-text",
+ "libc",
+ "naga",
+ "ocio-rs",
+ "quercus-codec",
+ "quercus-core",
+ "quercus-node",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
+ "wgpu",
+]
+
+[[package]]
+name = "quercus-storage"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28b9be52097faca9cdd3fecb9c857e72473e280cf444b9a7c4c97ac169a0d79b"
+dependencies = [
+ "chrono",
+ "quercus-core",
+ "quercus-node",
+ "quercus-otio",
+ "quercus-undo",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "quercus-task"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4d6a5bf92f700da4785900c03e816298d5b037e2a24160c33d3079f68e339ca"
+dependencies = [
+ "quercus-codec",
+ "quercus-core",
+ "quercus-node",
+ "quercus-otio",
+ "quercus-render",
+ "quercus-undo",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-timeline"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77af8c8799a36d7e6e2c640036a6a062fdf58e52163dfb8d47de5ed52fa75142"
+dependencies = [
+ "quercus-core",
+ "quercus-node",
+ "quercus-undo",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "quercus-undo"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3c79420a1c7f517a148232c6950bfa59bd3e5ec0cabbf665ef61d3845163345"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7473,7 +7501,7 @@ dependencies = [
 name = "sdk_editor"
 version = "0.1.0"
 dependencies = [
- "oak-engine-rust-sdk",
+ "quercus-engine-rs",
 ]
 
 [[package]]

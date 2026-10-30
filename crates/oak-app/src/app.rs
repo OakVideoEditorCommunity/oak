@@ -4102,9 +4102,9 @@ fn run_with<E: AppEngine>(args: AppArgs) {
 		// choice through the process environment. Read by gpui_wgpu as
 		// OAK_DISPLAY_BIT_DEPTH ("8" opts into the 8-bit pair; anything
 		// else requests 10-bit).
-		let bit_depth = oak_engine_rust_sdk::core::DisplayBitDepth::from_config_string(
+		let bit_depth = quercus_engine_rs::core::DisplayBitDepth::from_config_string(
 			&crate::oakui::real::config_get_string(
-                oak_engine_rust_sdk::core::CONFIG_KEY_DISPLAY_BIT_DEPTH,
+                quercus_engine_rs::core::CONFIG_KEY_DISPLAY_BIT_DEPTH,
 			),
 		);
 		// SAFETY: single-threaded startup, before any window exists.

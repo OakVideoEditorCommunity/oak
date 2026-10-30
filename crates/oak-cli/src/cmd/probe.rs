@@ -23,8 +23,8 @@
 //! each stream's duration in rational seconds. A missing file prints
 //! `error: probe: file does not exist: <path>` on stderr and exits 1.
 
-use oak_engine_rust_sdk::codec;
-use oak_engine_rust_sdk::types::Rational;
+use quercus_engine_rs::codec;
+use quercus_engine_rs::types::Rational;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::fmt;

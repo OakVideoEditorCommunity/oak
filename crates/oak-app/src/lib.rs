@@ -22,7 +22,7 @@
 //! the main layout from the design (`design/`), dockable panels built from
 //! the `oak_widgets` library, and an engine seam (`oakui`) with two
 //! backends: the mock ([`oakui::MockEngine`]) feeding demo data, and the
-//! real engine ([`oakui::RealEngine`]), a pure `oak-engine-rust-sdk`
+//! real engine ([`oakui::RealEngine`]), a pure `quercus-engine-rs`
 //! consumer. P7 removed every other Oak dependency: project sessions,
 //! semantic edits, preview/export tasks, configuration, storage and OFX all
 //! cross the SDK facade, and the app links no internal module crate.

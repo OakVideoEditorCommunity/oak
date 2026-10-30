@@ -5,8 +5,8 @@ Oak engine.
 
 Since the SDK收口 the binary is a **thin launcher**: the NDJSON control
 loop, shared-memory frame-slot transport, graph loading and per-process
-rendering live in `oak-engine`; the worker links `oak-engine-rust-sdk` and
-calls `oak_engine_rust_sdk::worker::main()`.
+rendering live in the external `quercus-engine` crate; the worker links `quercus-engine-rs` and
+calls `quercus_engine_rs::worker::main()`.
 
 ## Build and run
 
@@ -22,27 +22,28 @@ skips the renderer and exits 1 like the C++ main.
 
 ## Where the runtime lives
 
-- `oak-engine/src/worker/mod.rs` — backend selection, startup handshake,
+- `quercus-engine/src/worker/mod.rs` (Quercus repo) — backend selection, startup handshake,
   NDJSON control loop, `load_graph`, `render_frame`/`render_batch`,
   `render_audio_batch`, shutdown.
-- `oak-engine/src/worker/ipc.rs` — re-export of `oak_render::ipc` (the
+- `quercus-engine/src/worker/ipc.rs` — re-export of `quercus-render::ipc` (the
   shared-memory slots and NDJSON message types).
-- `oak-engine/src/worker/ofx_host.rs` — the single OpenFX host loop.
-- `oak-engine/src/worker/framecache.rs` — worker-side frame cache.
+- `quercus-engine/src/worker/ofx_host.rs` — the single OpenFX host loop.
+- `quercus-engine/src/worker/framecache.rs` — worker-side frame cache.
 
 The worker tests (protocol, process-pool integration, crash isolation,
 OFX host) live in the engine test modules; the binary-level contract
-tests are in `oak-engine/src/worker/process_tests.rs`. Build the worker
+tests are in the Quercus engine repository (`quercus-engine/src/worker/process_tests.rs`). Build the worker
 before running them, or set `OAK_WORKER_BIN`:
 
 ```sh
 cargo build -p oak-worker
-cargo test -p oak-engine
+# from the Quercus repository:
+cargo test -p quercus-engine
 ```
 
 ## Dependency boundary
 
-`crates/oak-worker/Cargo.toml` depends only on `oak-engine-rust-sdk`
+`crates/oak-worker/Cargo.toml` depends only on `quercus-engine-rs`
 (besides std). `python3 tooling/check_sdk_consumers.py` enforces this.
 
 ## License

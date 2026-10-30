@@ -37,7 +37,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui_kit::{Keystroke, Point, RenderImage, Size};
-use oak_engine_rust_sdk::ofx::{status, Interact};
+use quercus_engine_rs::ofx::{status, Interact};
 
 /// One progress event a plugin reporter pushed to the app channel (drained
 /// by the app tick, which drives a progress dialog).
@@ -81,13 +81,13 @@ fn progress_tx() -> Option<std::sync::mpsc::Sender<PluginProgressEvent>> {
 /// Updates the active-viewer time snapshot the timeline suite falls back
 /// to when no render context is live (engine seek / tick path).
 pub fn update_viewer_time(time: f64, range_min: f64, range_max: f64) {
-	oak_engine_rust_sdk::ofx::set_viewer_time(time, range_min, range_max);
+	quercus_engine_rs::ofx::set_viewer_time(time, range_min, range_max);
 }
 
 /// Updates the project extent (width/height) the OFX normalised-coordinate
 /// default conversion uses, and pushes it into oakplugin.
 pub fn update_project_extent(width: f64, height: f64) {
-	oak_engine_rust_sdk::ofx::set_project_extent(width, height);
+	quercus_engine_rs::ofx::set_project_extent(width, height);
 }
 
 /// Requests cancellation of the running plugin render (the progress
@@ -95,7 +95,7 @@ pub fn update_project_extent(width: f64, height: f64) {
 /// forwards the cancel to the render workers (their progress reporters
 /// answer false from the next batch boundary on).
 pub fn cancel_plugin_render() {
-	oak_engine_rust_sdk::ofx::cancel_render();
+	quercus_engine_rs::ofx::cancel_render();
 }
 
 // ---------------------------------------------------------------------------
@@ -108,12 +108,12 @@ pub fn cancel_plugin_render() {
 /// the active-viewer provider. Returns the number of plugin node types
 /// registered (0 when no plugins were discovered or the scan failed).
 pub fn init() -> usize {
-	if oak_engine_rust_sdk::ofx::scan().is_none() {
+	if quercus_engine_rs::ofx::scan().is_none() {
 		eprintln!("[ofx] plugin scan failed");
 	}
-	let registered = oak_engine_rust_sdk::ofx::register_plugin_nodes();
-	oak_engine_rust_sdk::ofx::install_render_executor();
-	oak_engine_rust_sdk::ofx::set_progress_handler(
+	let registered = quercus_engine_rs::ofx::register_plugin_nodes();
+	quercus_engine_rs::ofx::install_render_executor();
+	quercus_engine_rs::ofx::set_progress_handler(
 		|label, message, fraction| {
 			if let Some(tx) = progress_tx() {
 				let _ = tx.send(PluginProgressEvent {
@@ -126,15 +126,15 @@ pub fn init() -> usize {
 		},
 		|| {},
 	);
-	oak_engine_rust_sdk::ofx::set_project_extent(1920.0, 1080.0);
+	quercus_engine_rs::ofx::set_project_extent(1920.0, 1080.0);
 	registered
 }
 
 /// Unregisters progress callbacks, destroys interacts, then closes the host.
 pub fn shutdown() {
 	sync_active_interact(None);
-	oak_engine_rust_sdk::ofx::clear_progress_handler();
-	oak_engine_rust_sdk::ofx::shutdown();
+	quercus_engine_rs::ofx::clear_progress_handler();
+	quercus_engine_rs::ofx::shutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +222,7 @@ pub fn sync_active_interact(instance: Option<u64>) {
 	let Some(id) = instance else {
 		return;
 	};
-	let Some(interact) = oak_engine_rust_sdk::ofx::create_interact(id) else {
+	let Some(interact) = quercus_engine_rs::ofx::create_interact(id) else {
 		// The plugin has no interact: normal no-op.
 		return;
 	};
@@ -362,7 +362,7 @@ pub fn draw_interact_composite(
 	if bw != w as u32 || bh != h as u32 {
 		return None;
 	}
-	use oak_engine_rust_sdk::ofx::gl;
+	use quercus_engine_rs::ofx::gl;
 	let _guard = gl::acquire()?;
 	let tex = gl::create_output_texture(w, h)?;
 	let fbo = match gl::create_fbo(tex, w, h) {
@@ -437,7 +437,7 @@ pub fn viewport_pixel_to_pen(
 /// backspace/delete, tab, home/end, page up/down and the function keys;
 /// anything else maps to the SDK's unknown key with an empty string.
 pub fn key_symbol(keystroke: &Keystroke) -> (i32, String) {
-	use oak_engine_rust_sdk::ofx::key as ofx_key;
+	use quercus_engine_rs::ofx::key as ofx_key;
 	let key = keystroke.key.as_str();
 	let named = match key {
 		"space" => Some(ofx_key::SPACE),
@@ -504,7 +504,7 @@ mod tests {
 	use super::*;
 
 	mod ofx_key {
-		pub use oak_engine_rust_sdk::ofx::key::{
+		pub use quercus_engine_rs::ofx::key::{
 			A as KEY_A, BACKSPACE as KEY_BACKSPACE, DELETE as KEY_DELETE, DOWN as KEY_DOWN,
 			END as KEY_END, ESCAPE as KEY_ESCAPE, F1 as KEY_F1, HOME as KEY_HOME,
 			LEFT as KEY_LEFT, PAGE_DOWN as KEY_PAGE_DOWN, PAGE_UP as KEY_PAGE_UP,
@@ -762,11 +762,11 @@ mod tests {
 			println!("SKIP: minimal test plugin not built");
 			return false;
 		};
-		if !oak_engine_rust_sdk::ofx::scan_path(&dir.to_string_lossy()) {
+		if !quercus_engine_rs::ofx::scan_path(&dir.to_string_lossy()) {
 			println!("SKIP: test plugin scan failed");
 			return false;
 		}
-		oak_engine_rust_sdk::ofx::register_plugin_nodes();
+		quercus_engine_rs::ofx::register_plugin_nodes();
 		true
 	}
 
@@ -802,7 +802,7 @@ mod tests {
 		// (1) app-layer creation: `sync_active_interact` on the plugin
 		// instance handle creates the interact (new_interact → describe →
 		// create_instance).
-		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
+		let inst = quercus_engine_rs::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
 		let handle = inst.id();
 		sync_active_interact(Some(handle));
@@ -825,11 +825,11 @@ mod tests {
 
 		// (3) keys and idle.
 		assert_eq!(
-			interact.key_down(oak_engine_rust_sdk::ofx::key::A, "a", 5.0),
+			interact.key_down(quercus_engine_rs::ofx::key::A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(
-			interact.key_up(oak_engine_rust_sdk::ofx::key::A, "a", 5.0),
+			interact.key_up(quercus_engine_rs::ofx::key::A, "a", 5.0),
 			status::OK
 		);
 		assert_eq!(interact.idle(), status::OK);
@@ -900,7 +900,7 @@ mod tests {
 			"idle not recorded: {lines:?}"
 		);
 
-		oak_engine_rust_sdk::ofx::shutdown();
+		quercus_engine_rs::ofx::shutdown();
 	}
 
 	/// End-to-end overlay: the plugin's draw action really renders into the
@@ -920,7 +920,7 @@ mod tests {
 		let _ = std::fs::remove_file(&marker);
 		let _marker_env = MarkerEnvGuard::set(&marker);
 
-		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
+		let inst = quercus_engine_rs::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
 		let handle = inst.id();
 		sync_active_interact(Some(handle));
@@ -978,7 +978,7 @@ mod tests {
 		);
 
 		sync_active_interact(None);
-		oak_engine_rust_sdk::ofx::shutdown();
+		quercus_engine_rs::ofx::shutdown();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -1055,7 +1055,7 @@ mod tests {
 	fn sync_active_interact_missing_instance_is_a_noop() {
 		let _lock = HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 		assert!(
-			oak_engine_rust_sdk::ofx::create_interact(u64::MAX - 7).is_none(),
+			quercus_engine_rs::ofx::create_interact(u64::MAX - 7).is_none(),
 			"the probe handle is not registered"
 		);
 		// The node/instance is gone: nothing to attach.
@@ -1076,7 +1076,7 @@ mod tests {
 			"a second init must not register duplicates (the first registered {first} plugin type(s))"
 		);
 		assert!(
-			oak_engine_rust_sdk::ofx::has_progress_handler(),
+			quercus_engine_rs::ofx::has_progress_handler(),
 			"init installs the progress reporter factory"
 		);
 	}
@@ -1096,7 +1096,7 @@ mod tests {
 		if !scan_interact_plugin() {
 			return;
 		}
-		let inst = oak_engine_rust_sdk::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
+		let inst = quercus_engine_rs::ofx::Instance::create(INTERACT_PLUGIN_ID, None)
 			.expect("interact variant instance");
 		let handle = inst.id();
 		sync_active_interact(Some(handle));
@@ -1148,7 +1148,7 @@ mod tests {
 
 		// A plugin that does not declare an overlay interact reports
 		// `new_interact() == None` and stays inert.
-		let plain = oak_engine_rust_sdk::ofx::Instance::create("org.oak.test-plugin", None)
+		let plain = quercus_engine_rs::ofx::Instance::create("org.oak.test-plugin", None)
 			.expect("plain effect variant instance");
 		let plain_handle = plain.id();
 		sync_active_interact(Some(plain_handle));
@@ -1157,6 +1157,6 @@ mod tests {
 			"a plugin without an interact installs nothing"
 		);
 
-		oak_engine_rust_sdk::ofx::shutdown();
+		quercus_engine_rs::ofx::shutdown();
 	}
 }

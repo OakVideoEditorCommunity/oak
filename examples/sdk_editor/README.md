@@ -1,7 +1,7 @@
 # sdk_editor — an independent Oak SDK consumer
 
 This example is the P8 acceptance proof: a new editor that depends on exactly
-one Oak crate, `oak-engine-rust-sdk`, and completes the full workflow through
+one engine crate, `quercus-engine-rs`, and completes the full workflow through
 the public SDK only.
 
 ```bash
@@ -30,5 +30,5 @@ Dependency proof:
 
 ```bash
 cargo tree -p sdk_editor --depth 1
-# oak-engine-rust-sdk is the only Oak entry
+# quercus-engine-rs is the only engine entry
 ```

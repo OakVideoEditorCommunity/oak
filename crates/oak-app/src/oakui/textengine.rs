@@ -17,7 +17,7 @@
 //! SDK entry points for the shared text backend. Workers install the
 //! same implementation in their own processes.
 
-use oak_engine_rust_sdk::render::{
+use quercus_engine_rs::render::{
 	font_families as sdk_font_families, textengine_install as sdk_textengine_install,
 };
 

@@ -59,7 +59,7 @@ use crate::oakui::real::{
 // The `DisplayBitDepth` config key lives with the format mapping it
 // drives (oak-render's backend); the preferences dropdown and the
 // window-layer consumer share the same key.
-use oak_engine_rust_sdk::core::CONFIG_KEY_DISPLAY_BIT_DEPTH;
+use quercus_engine_rs::core::CONFIG_KEY_DISPLAY_BIT_DEPTH;
 
 // ---------------------------------------------------------------------------
 // Preferences
@@ -1084,8 +1084,8 @@ impl ExportDialogContent {
 				.map(|(i, code)| {
 					ComboBoxOption::new(
 						i,
-						oak_engine_rust_sdk::codec::Codec::from_i32(*code)
-							.unwrap_or(oak_engine_rust_sdk::codec::Codec::H264)
+						quercus_engine_rs::codec::Codec::from_i32(*code)
+							.unwrap_or(quercus_engine_rs::codec::Codec::H264)
 							.name(),
 					)
 				})
@@ -1252,8 +1252,8 @@ impl ExportDialogContent {
 			.map(|(i, code)| {
 				ComboBoxOption::new(
 					i,
-					oak_engine_rust_sdk::codec::Codec::from_i32(*code)
-						.unwrap_or(oak_engine_rust_sdk::codec::Codec::H264)
+					quercus_engine_rs::codec::Codec::from_i32(*code)
+						.unwrap_or(quercus_engine_rs::codec::Codec::H264)
 						.name(),
 				)
 			})
@@ -1264,8 +1264,8 @@ impl ExportDialogContent {
 			.map(|(i, code)| {
 				ComboBoxOption::new(
 					i,
-					oak_engine_rust_sdk::codec::Codec::from_i32(*code)
-						.unwrap_or(oak_engine_rust_sdk::codec::Codec::AAC)
+					quercus_engine_rs::codec::Codec::from_i32(*code)
+						.unwrap_or(quercus_engine_rs::codec::Codec::AAC)
 						.name(),
 				)
 			})
@@ -1361,7 +1361,7 @@ impl ExportDialogContent {
 /// The video codecs the container `format` accepts (the compatibility
 /// table; the dialog only offers these).
 pub fn compatible_video_codecs(format: i32) -> Vec<i32> {
-	let Some(container) = oak_engine_rust_sdk::codec::Format::from_i32(format) else {
+	let Some(container) = quercus_engine_rs::codec::Format::from_i32(format) else {
 		return vec![1]; // H.264 fallback
 	};
 	container
@@ -1373,7 +1373,7 @@ pub fn compatible_video_codecs(format: i32) -> Vec<i32> {
 
 /// The audio codecs the container `format` accepts.
 pub fn compatible_audio_codecs(format: i32) -> Vec<i32> {
-	let Some(container) = oak_engine_rust_sdk::codec::Format::from_i32(format) else {
+	let Some(container) = quercus_engine_rs::codec::Format::from_i32(format) else {
 		return vec![12]; // AAC fallback
 	};
 	container
@@ -4511,15 +4511,15 @@ mod tests {
 		}
 	}
 
-	/// Restores `OAK_CONFIG_DIR` when dropped (the shortcut-capture commits
+	/// Restores `QUERCUS_CONFIG_DIR` when dropped (the shortcut-capture commits
 	/// write `<config>/shortcuts`, so those tests point it at a temp dir).
 	struct ConfigDirRestore(Option<std::ffi::OsString>);
 
 	impl Drop for ConfigDirRestore {
 		fn drop(&mut self) {
 			match &self.0 {
-				Some(value) => unsafe { std::env::set_var("OAK_CONFIG_DIR", value) },
-				None => unsafe { std::env::remove_var("OAK_CONFIG_DIR") },
+				Some(value) => unsafe { std::env::set_var("QUERCUS_CONFIG_DIR", value) },
+				None => unsafe { std::env::remove_var("QUERCUS_CONFIG_DIR") },
 			}
 		}
 	}
@@ -6780,8 +6780,8 @@ mod tests {
 			std::process::id()
 		));
 		std::fs::create_dir_all(&config_dir).expect("temp config dir");
-		let _env = ConfigDirRestore(std::env::var_os("OAK_CONFIG_DIR"));
-		unsafe { std::env::set_var("OAK_CONFIG_DIR", &config_dir) };
+		let _env = ConfigDirRestore(std::env::var_os("QUERCUS_CONFIG_DIR"));
+		unsafe { std::env::set_var("QUERCUS_CONFIG_DIR", &config_dir) };
 
 		cx.update(|cx| {
 			gpui_kit::init(cx);

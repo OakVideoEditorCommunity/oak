@@ -17,10 +17,10 @@
 //! oak-worker: a thin launcher for the engine's render-worker runtime.
 //!
 //! The NDJSON control loop, shared-memory frame-slot transport, graph
-//! loading and per-process rendering live in `oak-engine`; this binary only
-//! depends on `oak-engine-rust-sdk` and calls
-//! [`oak_engine_rust_sdk::worker::main`].
+//! loading and per-process rendering live in the external `quercus-engine` crate; this binary only
+//! depends on `quercus-engine-rs` and calls
+//! [`quercus_engine_rs::worker::main`].
 
 fn main() {
-	std::process::exit(oak_engine_rust_sdk::worker::main());
+	std::process::exit(quercus_engine_rs::worker::main());
 }

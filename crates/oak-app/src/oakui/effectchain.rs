@@ -16,8 +16,8 @@
 
 //! Effect-library presentation and SDK effect/parameter adapters.
 
-use oak_engine_rust_sdk::edit::EditCommand;
-use oak_engine_rust_sdk::node::NodeId;
+use quercus_engine_rs::edit::EditCommand;
+use quercus_engine_rs::node::NodeId;
 
 use super::graphops::ProjectRef;
 
@@ -26,7 +26,7 @@ pub fn effect_input_of(project: &ProjectRef, node: NodeId) -> Option<String> {
 	let session = super::real::editor_session_for_project(project).ok()?;
 	session
 		.project()
-		.effect_input_id(oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()))
+		.effect_input_id(quercus_engine_rs::node::NodeId::from_raw(node.raw()))
 }
 
 /// Returns a host's effect chain, closest to source first.
@@ -36,7 +36,7 @@ pub fn chain(project: &ProjectRef, host: NodeId) -> Vec<NodeId> {
 	};
 	session
 		.project()
-		.effect_chain(oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()))
+		.effect_chain(quercus_engine_rs::node::NodeId::from_raw(host.raw()))
 		.into_iter()
 		.filter_map(|node| super::graphops::id_of(node.raw()))
 		.collect()
@@ -49,7 +49,7 @@ pub fn is_enabled(project: &ProjectRef, node: NodeId) -> bool {
 		.is_some_and(|session| {
 			session
 				.project()
-				.effect_is_enabled(oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()))
+				.effect_is_enabled(quercus_engine_rs::node::NodeId::from_raw(node.raw()))
 		})
 }
 
@@ -58,7 +58,7 @@ pub fn plugin_instance_handle(project: &ProjectRef, node: NodeId) -> Option<u64>
 	let session = super::real::editor_session_for_project(project).ok()?;
 	session
 		.project()
-		.plugin_instance_handle(oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()))
+		.plugin_instance_handle(quercus_engine_rs::node::NodeId::from_raw(node.raw()))
 }
 
 /// Built-in effect-group keys in presentation order.
@@ -76,8 +76,8 @@ pub const GROUP_KEYS: &[&str] = &[
 ];
 
 /// Maps an SDK node category to its presentation group.
-pub fn category_group_key(category: oak_engine_rust_sdk::effect::NodeCategory) -> &'static str {
-	use oak_engine_rust_sdk::effect::NodeCategory as Category;
+pub fn category_group_key(category: quercus_engine_rs::effect::NodeCategory) -> &'static str {
+	use quercus_engine_rs::effect::NodeCategory as Category;
 	match category {
 		Category::Color => "color",
 		Category::Filter => "filter",
@@ -122,9 +122,9 @@ fn type_suffix(type_id: &str) -> &str {
 /// Enumerates effects that can be added to a clip's chain.
 pub fn addable_effects() -> Vec<super::engine::EffectEntry> {
 	use super::engine::EffectEntry;
-	use oak_engine_rust_sdk::effect::{NODE_FLAG_DONT_SHOW_IN_CREATE_MENU, NODE_FLAG_VIDEO_EFFECT};
+	use quercus_engine_rs::effect::{NODE_FLAG_DONT_SHOW_IN_CREATE_MENU, NODE_FLAG_VIDEO_EFFECT};
 	let mut out = Vec::new();
-	for meta in oak_engine_rust_sdk::effect::factory_entries() {
+	for meta in quercus_engine_rs::effect::factory_entries() {
 		if meta.flags & NODE_FLAG_VIDEO_EFFECT != 0
 			&& meta.flags & NODE_FLAG_DONT_SHOW_IN_CREATE_MENU == 0
 		{
@@ -142,7 +142,7 @@ pub fn addable_effects() -> Vec<super::engine::EffectEntry> {
 			});
 		}
 	}
-	for meta in oak_engine_rust_sdk::effect::dynamic_factory_entries() {
+	for meta in quercus_engine_rs::effect::dynamic_factory_entries() {
 		let name = if meta.name.is_empty() {
 			meta.type_id.clone()
 		} else {
@@ -174,11 +174,11 @@ fn group_rank(group: &str) -> Option<usize> {
 
 /// Converts an SDK parameter snapshot into inspector-owned DTOs.
 pub fn params_from_sdk(
-	snapshot: &oak_engine_rust_sdk::editor::ParameterSnapshot,
+	snapshot: &quercus_engine_rs::editor::ParameterSnapshot,
 	type_id: &str,
 ) -> Vec<super::engine::EffectParam> {
 	use super::engine::{EffectValue, EffectValueType};
-	use oak_engine_rust_sdk::editor::{ParameterValue, ParameterValueType};
+	use quercus_engine_rs::editor::{ParameterValue, ParameterValueType};
 
 	fn value_type(value: ParameterValueType) -> EffectValueType {
 		use EffectValueType as Out;
@@ -208,7 +208,7 @@ pub fn params_from_sdk(
 		}
 	}
 
-	fn pod_value(value: oak_engine_rust_sdk::node::NodeValue) -> EffectValue {
+	fn pod_value(value: quercus_engine_rs::node::NodeValue) -> EffectValue {
 		match value.kind {
 			1 => EffectValue::Int(value.num),
 			2 => EffectValue::Float(value.f[0]),
@@ -243,7 +243,7 @@ pub fn params_from_sdk(
 		value.pod.map(pod_value).unwrap_or(EffectValue::None)
 	}
 
-	let builtin = oak_engine_rust_sdk::effect::factory_entries()
+	let builtin = quercus_engine_rs::effect::factory_entries()
 		.iter()
 		.any(|entry| entry.type_id == type_id);
 	snapshot
@@ -292,13 +292,13 @@ pub fn params_from_sdk(
 
 /// Writes one app parameter value through the session's native command ABI.
 pub fn set_sdk_input_value(
-	session: &oak_engine_rust_sdk::editor::EditorSession,
-	node: oak_engine_rust_sdk::node::NodeId,
+	session: &quercus_engine_rs::editor::EditorSession,
+	node: quercus_engine_rs::node::NodeId,
 	input_id: &str,
 	value: super::engine::EffectValue,
 ) -> Result<(), String> {
 	use super::engine::EffectValue as In;
-	use oak_engine_rust_sdk::node::NodeValue;
+	use quercus_engine_rs::node::NodeValue;
 	fn pod(kind: i32, num: i64, values: &[f64]) -> NodeValue {
 		let mut value = NodeValue {
 			kind,

@@ -16,7 +16,7 @@
 
 //! Subcommand implementations.
 //!
-//! Every subcommand is a real implementation over `oak-engine-rust-sdk`:
+//! Every subcommand is a real implementation over `quercus-engine-rs`:
 //! the CLI links no other Oak crate.
 //!
 //!   - `probe`     → the SDK codec probe (`codec::decoder_probe`)

@@ -6,7 +6,7 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-//! P8 acceptance: a consumer with only `oak-engine-rust-sdk` completes the
+//! P8 acceptance: a consumer with only `quercus-engine-rs` completes the
 //! whole editing workflow (import → edit → effect/keyframe → preview/audio →
 //! undo/redo → save/reopen → export).
 

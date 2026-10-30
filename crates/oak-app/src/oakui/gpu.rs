@@ -53,24 +53,24 @@ fn display_lut_key() -> String {
 	format!(
 		"{}|{}|{}|{}",
 		crate::oakui::displaycolor::generation(),
-		oak_engine_rust_sdk::state::color_working_space(),
-		oak_engine_rust_sdk::state::color_output_gamut(),
-		oak_engine_rust_sdk::state::color_output_transfer()
+		quercus_engine_rs::state::color_working_space(),
+		quercus_engine_rs::state::color_output_gamut(),
+		quercus_engine_rs::state::color_output_transfer()
 	)
 }
 
 /// Build the working-space → display-device 3D LUT with the exact CPU
 /// reference implementation: the output node
-/// ([`oak_engine_rust_sdk::utils::working_to_display_target`]) followed by the
+/// ([`quercus_engine_rs::utils::working_to_display_target`]) followed by the
 /// display ICC chain ([`super::displaycolor::apply_f32_rgba`]). This is
 /// what makes the GPU present path color-managed: every per-pixel step the
 /// CPU path performs runs here once per settings change, on the GPU's
 /// behalf, at full precision.
 #[cfg(test)]
 fn build_display_lut() -> Lut3d {
-	let edge = oak_engine_rust_sdk::core::DISPLAY_EDGE;
-	let lo = oak_engine_rust_sdk::core::DISPLAY_LO;
-	let hi = oak_engine_rust_sdk::core::DISPLAY_HI;
+	let edge = quercus_engine_rs::core::DISPLAY_EDGE;
+	let lo = quercus_engine_rs::core::DISPLAY_LO;
+	let hi = quercus_engine_rs::core::DISPLAY_HI;
 	let n = (edge as usize).pow(3);
 	let mut samples = vec![0.0f32; n * 4];
 	let step = |i: usize, axis: usize| -> f32 {
@@ -88,11 +88,11 @@ fn build_display_lut() -> Lut3d {
 			}
 		}
 	}
-	oak_engine_rust_sdk::utils::working_to_display_target(
+	quercus_engine_rs::utils::working_to_display_target(
 		&mut samples,
-		&oak_engine_rust_sdk::state::color_working_space(),
-		&oak_engine_rust_sdk::state::color_output_gamut(),
-		&oak_engine_rust_sdk::state::color_output_transfer(),
+		&quercus_engine_rs::state::color_working_space(),
+		&quercus_engine_rs::state::color_output_gamut(),
+		&quercus_engine_rs::state::color_output_transfer(),
 	);
 	super::displaycolor::apply_f32_rgba(&mut samples, n as i64);
 	let mut data = Vec::with_capacity(n * 3);
@@ -258,7 +258,7 @@ mod tests {
 		let _lock = crate::oakui::graphops::test_lock();
 		let key = display_lut_key();
 		let lut = build_display_lut();
-		assert_eq!(lut.edge, oak_engine_rust_sdk::core::DISPLAY_EDGE);
+		assert_eq!(lut.edge, quercus_engine_rs::core::DISPLAY_EDGE);
 		let n = (lut.edge as usize).pow(3);
 		assert_eq!(lut.data.len(), n * 3, "three channels per grid point");
 		assert!(
@@ -285,8 +285,8 @@ mod tests {
 			key.starts_with(&crate::oakui::displaycolor::generation().to_string()),
 			"the generation is the first key component: {key}"
 		);
-		assert!(key.contains(&oak_engine_rust_sdk::state::color_working_space()));
-		assert!(key.contains(&oak_engine_rust_sdk::state::color_output_gamut()));
-		assert!(key.contains(&oak_engine_rust_sdk::state::color_output_transfer()));
+		assert!(key.contains(&quercus_engine_rs::state::color_working_space()));
+		assert!(key.contains(&quercus_engine_rs::state::color_output_gamut()));
+		assert!(key.contains(&quercus_engine_rs::state::color_output_transfer()));
 	}
 }

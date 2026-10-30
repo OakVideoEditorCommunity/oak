@@ -25,11 +25,11 @@
 //! `--format ppm` renders the frame range into P6 PPM frames plus a PCM s16
 //! WAV when the source has audio streams.
 
-use oak_engine_rust_sdk::codec;
-use oak_engine_rust_sdk::editor::{EditorSession, TrackKind};
-use oak_engine_rust_sdk::edit::EditCommand;
-use oak_engine_rust_sdk::node::{NodeId, Project};
-use oak_engine_rust_sdk::types::{Rational, TimeRange};
+use quercus_engine_rs::codec;
+use quercus_engine_rs::editor::{EditorSession, TrackKind};
+use quercus_engine_rs::edit::EditCommand;
+use quercus_engine_rs::node::{NodeId, Project};
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_USAGE};
 use crate::engine;

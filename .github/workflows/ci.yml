@@ -316,19 +316,8 @@ jobs:
       # ------------------------------------------------------------------
       # Build & test
       # ------------------------------------------------------------------
-      - name: App engine boundary guard
-        run: python3 tooling/check_app_engine_boundary.py
-
       - name: SDK consumer guard (app/cli/worker/example)
         run: python3 tooling/check_sdk_consumers.py
-
-      - name: Engine C header is current
-        run: python3 tooling/gen_c_header.py --check
-
-      - name: Engine C header compiles (C11)
-        run: |
-          printf '#include "oak_engine.h"\nint main(void) { return 0; }\n' > "$RUNNER_TEMP/oak_header_test.c"
-          cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -I crates/oak-engine/include "$RUNNER_TEMP/oak_header_test.c"
 
       # `cargo check` (not build): the Test step links the test binaries
       # anyway, and a full build would codegen every workspace crate twice
@@ -494,27 +483,3 @@ jobs:
             head -c 6000 "$f"
             echo
           done
-
-      # ------------------------------------------------------------------
-      # OFX plugin discovery end-to-end (x64 Linux reference)
-      # ------------------------------------------------------------------
-      # Build a minimal but real OFX plugin into a .ofx.bundle, point
-      # OFX_PLUGIN_PATH at it and let the scan_probe example run the full
-      # host path (directory scan -> dlopen -> setHost -> load -> describe
-      # -> register). The assertion is the plugin's registration line; CI
-      # machines have no system-wide OFX plugins, so the fixture is the
-      # only discovery.
-      - name: Build OFX fixture plugin
-        if: matrix.distro == 'debian'
-        run: crates/oak-ofx-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
-
-      - name: Probe OFX plugin discovery
-        if: matrix.distro == 'debian'
-        run: |
-          OFX_PLUGIN_PATH="$PWD/.cache/ofx-fixture" \
-            cargo run --locked -p oak-ofx-plugin --example scan_probe > probe.log 2>&1
-          grep -q 'type_id=rs.oak.CiTestPlugin' probe.log
-          # A project carrying a plugin node must survive save/load (the
-          # serializer resolves plugin types via the dynamic factory).
-          OAK_OFX_FIXTURE_DIR="$PWD/.cache/ofx-fixture" \
-            cargo test --locked -p oak-ofx-plugin --test ofx_roundtrip

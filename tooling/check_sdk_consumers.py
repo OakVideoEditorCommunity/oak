@@ -3,7 +3,8 @@
 
 Consumer crates (`oak-app`, `oak-cli`, `oak-worker`, `examples/sdk_editor`)
 must not depend on an internal Oak crate nor mention one in their sources.
-The only allowed Oak entry is `oak-engine-rust-sdk` (the Rust SDK).
+The only allowed engine entry is the published `quercus-engine-rs` crate
+(Quercus Nonlinear Video Editing Engine Rust SDK) from crates.io.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ INTERNAL = (
     "oak-timeline",
     "oak-undo",
 )
-ALLOWED_DEPENDENCY = "oak-engine-rust-sdk"
+ALLOWED_DEPENDENCY = "quercus-engine-rs"
 REFERENCE = re.compile(
     r"\boak_(?:audio|codec|core|engine|node|ofx_plugin|otio|render|storage|task|timeline|undo)::"
 )

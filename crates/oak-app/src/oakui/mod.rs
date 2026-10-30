@@ -28,7 +28,7 @@
 //!   widget's data-source trait.
 //! * [`real`] — [`RealEngine`](real::RealEngine) and
 //!   [`RealClock`](real::RealClock), the real engine. It is a pure
-//!   `oak-engine-rust-sdk` consumer: a live `EditorSession` owns the
+//!   `quercus-engine-rs` consumer: a live `EditorSession` owns the
 //!   project and its semantic edits, and the app links no internal module
 //!   crate. It implements the same
 //!   [`EngineGateway`](engine::EngineGateway) seam as the mock.

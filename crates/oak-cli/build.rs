@@ -24,5 +24,7 @@ fn main() {
 		// the binary dies at launch ("Library not loaded"). Map the rpath
 		// at the real system library.
 		println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib");
+		println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
+		println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../deps");
 	}
 }

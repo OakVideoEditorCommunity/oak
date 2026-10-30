@@ -28,16 +28,16 @@ use crate::widgets::project_explorer::ProjectEntry;
 use crate::oakui::graphops::ProjectRef;
 
 /// One child entry of a folder with its identity.
-fn child_entry(snapshot: &oak_engine_rust_sdk::editor::EntrySnapshot) -> ProjectEntry {
+fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEntry {
 	ProjectEntry::new(
 		snapshot.id.raw(),
 		snapshot.name.clone(),
-		snapshot.kind == Some(oak_engine_rust_sdk::node::NodeKind::Folder),
+		snapshot.kind == Some(quercus_engine_rs::node::NodeKind::Folder),
 	)
 }
 
 /// The children of a folder node.
-fn folder_children(snapshot: &oak_engine_rust_sdk::editor::EntrySnapshot) -> Vec<ProjectEntry> {
+fn folder_children(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> Vec<ProjectEntry> {
 	snapshot
 		.children
 		.iter()
@@ -46,9 +46,9 @@ fn folder_children(snapshot: &oak_engine_rust_sdk::editor::EntrySnapshot) -> Vec
 }
 
 fn find_snapshot<'a>(
-	entry: &'a oak_engine_rust_sdk::editor::EntrySnapshot,
+	entry: &'a quercus_engine_rs::editor::EntrySnapshot,
 	identity: u64,
-) -> Option<&'a oak_engine_rust_sdk::editor::EntrySnapshot> {
+) -> Option<&'a quercus_engine_rs::editor::EntrySnapshot> {
 	if entry.id.raw() == identity {
 		return Some(entry);
 	}
@@ -74,7 +74,7 @@ pub fn children(project: &ProjectRef, parent_id: u64) -> Vec<ProjectEntry> {
 	};
 	let snapshot = session.snapshot();
 	find_snapshot(&snapshot.root, parent_id)
-		.filter(|entry| entry.kind == Some(oak_engine_rust_sdk::node::NodeKind::Folder))
+		.filter(|entry| entry.kind == Some(quercus_engine_rs::node::NodeKind::Folder))
 		.map(folder_children)
 		.unwrap_or_default()
 }
@@ -84,7 +84,7 @@ pub fn children(project: &ProjectRef, parent_id: u64) -> Vec<ProjectEntry> {
 pub fn find_by_identity(
 	project: &ProjectRef,
 	identity: u64,
-) -> Option<oak_engine_rust_sdk::node::NodeId> {
+) -> Option<quercus_engine_rs::node::NodeId> {
 	let session = super::real::editor_session_for_project(project).ok()?;
 	find_snapshot(&session.snapshot().root, identity).map(|entry| entry.id)
 }

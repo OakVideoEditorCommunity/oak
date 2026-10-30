@@ -111,7 +111,7 @@ fn run_info(project: &str) -> i32 {
 
 /// Print one sequence block (`print_sequence` in cli/main.cpp) through the
 /// SDK project queries.
-fn print_sequence(project: &engine::ProjectRef, seq_id: oak_engine_rust_sdk::node::NodeId, index: i64) {
+fn print_sequence(project: &engine::ProjectRef, seq_id: quercus_engine_rs::node::NodeId, index: i64) {
 	let name = engine::node_label(project, seq_id);
 	let length = engine::sequence_length(project, seq_id);
 	let frame_rate = engine::sequence_frame_rate(project, seq_id);

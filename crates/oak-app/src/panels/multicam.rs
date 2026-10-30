@@ -51,7 +51,7 @@ use gpui_kit::{
 };
 use crate::widgets::viewer::PlaybackClock;
 
-use oak_engine_rust_sdk::editor::multicam::{rows_and_columns, rows_cols_to_index};
+use quercus_engine_rs::editor::multicam::{rows_and_columns, rows_cols_to_index};
 
 use crate::oakui::timecode::format_timecode;
 use crate::oakui::{AppEngine, MulticamState};

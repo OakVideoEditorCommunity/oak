@@ -28,6 +28,6 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 # The CLI is a pure SDK consumer: project/timeline queries, edits, frames,
-# audio, probe/transcode and export all cross the oak-engine C ABI through
+# audio, probe/transcode and export all cross the quercus-engine C ABI through
 # the safe Rust wrapper. It links no other Oak crate.
-oak-engine-rust-sdk = { path = "../oak-engine-rust-sdk" }
+quercus-engine-rs = { version = "=0.5.4" }

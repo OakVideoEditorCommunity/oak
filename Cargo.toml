@@ -14,24 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Root manifest: the Cargo workspace only — every package lives under
-# crates/ (the GUI app in oak-app, the CLI in oak-cli, the render worker
-# in oak-worker, the module rlibs in oak-*) or examples/ (standalone
-# integration crates, each with its own Cargo.toml).
+# Root manifest: the Cargo workspace only. The editor app lives in
+# crates/oak-app, the CLI in oak-cli, the render worker in oak-worker and
+# the extension host in oak-extensions. The engine and the Rust SDK are
+# external: consumers depend on the published `quercus-engine-rs` crate
+# (Quercus Nonlinear Video Editing Engine Rust SDK) from crates.io.
 #
 # crates/oakengine.bk is the legacy C++-era backup; not a package.
 [workspace]
 members = ["crates/*", "examples/*"]
 exclude = ["crates/oakengine.bk"]
-# NOTE: oak-storage is a workspace member but NOT a default member (it
-# stays out of the default-members test matrix to keep `cargo test` at
-# the root fast; the app links it as a normal path dependency, so it
-# builds with the app). Build/test it explicitly with `cargo test -p oak-storage`.
-# NOTE: `crates/oakengine` (the frozen C-ABI facade cdylib) is retired:
-# every consumer (app/cli/worker/plugins) links the module rlibs
-# directly, so nothing in the workspace referenced it. The sources are
-# kept at crates/oakengine.bk (excluded from the workspace) as a
-# reference snapshot; git history is the authoritative backup.
 default-members = ["crates/oak-app", "crates/oak-cli", "crates/oak-worker"]
 resolver = "2"
 

@@ -524,11 +524,11 @@ impl<E: AppEngine> TimelinePanel<E> {
 			cx.notify();
 			return;
 		}
-		let is_generator = oak_engine_rust_sdk::effect::factory_entries()
+		let is_generator = quercus_engine_rs::effect::factory_entries()
 			.into_iter()
 			.find(|entry| entry.type_id == type_id)
 			.map(|entry| {
-				entry.category == Some(oak_engine_rust_sdk::effect::NodeCategory::Generator)
+				entry.category == Some(quercus_engine_rs::effect::NodeCategory::Generator)
 			})
 			.unwrap_or(false);
 		if !is_generator {

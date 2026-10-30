@@ -11,8 +11,8 @@
 //! `AppEngine` contract contains no engine-internal types or calls; P1
 //! moves these operations behind the engine SDK.
 
-use oak_engine_rust_sdk::codec::ProxyParams as SdkProxyParams;
-use oak_engine_rust_sdk::state::Config;
+use quercus_engine_rs::codec::ProxyParams as SdkProxyParams;
+use quercus_engine_rs::state::Config;
 
 use super::engine::ProxyParamsUi;
 use super::real::{config_set_bool, config_set_int};

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! An independent Oak editor built only on `oak-engine-rust-sdk`.
+//! An independent Oak editor built only on `quercus-engine-rs`.
 //!
 //! This crate is the P8 proof: its Cargo manifest has exactly one Oak
 //! dependency (the Rust SDK), and the whole workflow below uses only public
@@ -25,16 +25,16 @@ pub mod shell;
 
 use std::path::{Path, PathBuf};
 
-use oak_engine_rust_sdk::audio;
-use oak_engine_rust_sdk::edit::{EditCommand, EditResult};
-use oak_engine_rust_sdk::editor::{EditorSession, KeyframeInterpolation, TrackKind};
-use oak_engine_rust_sdk::node::{self, NodeId, NodeKind, NodeValue};
-use oak_engine_rust_sdk::ofx;
-use oak_engine_rust_sdk::preview::PreviewSession;
-use oak_engine_rust_sdk::render::{self, RenderBackend};
-use oak_engine_rust_sdk::state;
-use oak_engine_rust_sdk::task::{self, EncodingParams, TaskState};
-use oak_engine_rust_sdk::types::Rational;
+use quercus_engine_rs::audio;
+use quercus_engine_rs::edit::{EditCommand, EditResult};
+use quercus_engine_rs::editor::{EditorSession, KeyframeInterpolation, TrackKind};
+use quercus_engine_rs::node::{self, NodeId, NodeKind, NodeValue};
+use quercus_engine_rs::ofx;
+use quercus_engine_rs::preview::PreviewSession;
+use quercus_engine_rs::render::{self, RenderBackend};
+use quercus_engine_rs::state;
+use quercus_engine_rs::task::{self, EncodingParams, TaskState};
+use quercus_engine_rs::types::Rational;
 
 /// One run's observable results (used by the CLI summary and the tests).
 #[derive(Debug, Clone)]
@@ -378,9 +378,9 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	let length = content_length(&project, sequence);
 	let export_path = work_dir.join("sdk_editor_demo.mp4");
 	let params = EncodingParams {
-		format: oak_engine_rust_sdk::codec::Format::MPEG4Video as i32,
+		format: quercus_engine_rs::codec::Format::MPEG4Video as i32,
 		video_enabled: true,
-		video_codec: oak_engine_rust_sdk::codec::Codec::H264 as i32,
+		video_codec: quercus_engine_rs::codec::Codec::H264 as i32,
 		video_width: geometry.0.max(2),
 		video_height: geometry.1.max(2),
 		video_time_base_num: rate.den.clamp(1, i32::MAX as i64) as i32,
@@ -430,7 +430,7 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	})
 }
 
-fn content_length(project: &oak_engine_rust_sdk::node::Project, sequence: NodeId) -> Rational {
+fn content_length(project: &quercus_engine_rs::node::Project, sequence: NodeId) -> Rational {
 	let mut end = Rational::new(0, 1);
 	for list_index in 0..project.sequence_track_list_count(sequence) {
 		let list = project.sequence_track_list_at(sequence, list_index);
@@ -448,7 +448,7 @@ fn content_length(project: &oak_engine_rust_sdk::node::Project, sequence: NodeId
 	end
 }
 
-fn video_track(project: &oak_engine_rust_sdk::node::Project, sequence: NodeId) -> Option<NodeId> {
+fn video_track(project: &quercus_engine_rs::node::Project, sequence: NodeId) -> Option<NodeId> {
 	for list_index in 0..project.sequence_track_list_count(sequence) {
 		let list = project.sequence_track_list_at(sequence, list_index);
 		if project.tracklist_kind(list) == 0 && project.tracklist_track_count(list) > 0 {
@@ -458,8 +458,8 @@ fn video_track(project: &oak_engine_rust_sdk::node::Project, sequence: NodeId) -
 	None
 }
 
-fn count_entries(snapshot: &oak_engine_rust_sdk::editor::ProjectSnapshot) -> usize {
-	fn walk(entry: &oak_engine_rust_sdk::editor::EntrySnapshot) -> usize {
+fn count_entries(snapshot: &quercus_engine_rs::editor::ProjectSnapshot) -> usize {
+	fn walk(entry: &quercus_engine_rs::editor::EntrySnapshot) -> usize {
 		1 + entry.children.iter().map(walk).sum::<usize>()
 	}
 	walk(&snapshot.root)

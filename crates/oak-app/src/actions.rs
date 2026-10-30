@@ -42,7 +42,7 @@ use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 use gpui_kit::{Action, KeyBinding, KeyBindingContextPredicate};
-use oak_engine_rust_sdk::utils::configuration_location;
+use quercus_engine_rs::utils::configuration_location;
 
 // One macro call generates all three views of the registry, so they can
 // never drift apart: the gpui action structs, the `ActionId` enum and the

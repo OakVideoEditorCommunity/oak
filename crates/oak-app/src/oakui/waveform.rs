@@ -33,7 +33,7 @@ use crate::widgets::timeline::ClipId;
 use crate::widgets::timeline::FrameRange;
 use gpui_kit::{Bounds, Hsla, Pixels, Window};
 
-pub use oak_engine_rust_sdk::audio_analysis::MinMax;
+pub use quercus_engine_rs::audio_analysis::MinMax;
 
 /// The cached waveform of one clip.
 #[derive(Debug, Clone)]
@@ -111,7 +111,7 @@ impl WaveformCache {
 /// already on a media worker, so the blocking handle API does not stall GPUI.
 fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
 	const SAMPLES_PER_POINT: i32 = 256;
-	let waveform = oak_engine_rust_sdk::audio_analysis::Waveform::extract(
+	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
 		filename,
 		0,
 		SAMPLES_PER_POINT,
@@ -141,7 +141,7 @@ fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWavefo
 /// falls back to timecode alignment).
 pub fn extract_audio_envelope(filename: &str, stream_index: i32) -> Option<Vec<f64>> {
 	const SAMPLES_PER_POINT: i32 = 256;
-	let waveform = oak_engine_rust_sdk::audio_analysis::Waveform::extract(
+	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
 		filename,
 		stream_index,
 		SAMPLES_PER_POINT,

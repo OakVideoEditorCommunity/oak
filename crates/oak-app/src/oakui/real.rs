@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! The real engine: [`RealEngine`] is a pure `oak-engine-rust-sdk`
+//! The real engine: [`RealEngine`] is a pure `quercus-engine-rs`
 //! consumer behind the same [`EngineGateway`](super::engine::EngineGateway) /
 //! [`AppEngine`](super::engine::AppEngine) seam the mock implements. The app
 //! links no other Oak crate.
@@ -69,12 +69,12 @@ use crate::widgets::audio_meter::AudioMeterDataSource;
 use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::viewer::PlaybackClock;
 
-use oak_engine_rust_sdk::editor::TrackKind as DomainTrackKind;
-use oak_engine_rust_sdk::node::{NodeId, NodeKind};
-use oak_engine_rust_sdk::edit::EditCommand;
-use oak_engine_rust_sdk::editor::EditorSession;
-use oak_engine_rust_sdk::state::Config;
-use oak_engine_rust_sdk::types::{Rational, TimeRange};
+use quercus_engine_rs::editor::TrackKind as DomainTrackKind;
+use quercus_engine_rs::node::{NodeId, NodeKind};
+use quercus_engine_rs::edit::EditCommand;
+use quercus_engine_rs::editor::EditorSession;
+use quercus_engine_rs::state::Config;
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 use super::engine::{
 	AppEngine, EngineGateway, ExportSession, LibraryProject, Monitor, MulticamState, Project,
@@ -86,7 +86,7 @@ use super::settings::proxy_params_from_config;
 use super::transport::TransportState;
 
 /// Converts the SDK proxy DTO into the proxy dialog's app-owned parameters.
-fn proxy_ui_from_sdk(params: &oak_engine_rust_sdk::codec::ProxyParams) -> super::engine::ProxyParamsUi {
+fn proxy_ui_from_sdk(params: &quercus_engine_rs::codec::ProxyParams) -> super::engine::ProxyParamsUi {
 	super::engine::ProxyParamsUi {
 		width: params.width,
 		height: params.height,
@@ -124,19 +124,19 @@ pub(crate) fn editor_session_for_project(project: &ProjectRef) -> Result<EditorS
 	Ok(session)
 }
 /// Converts the SDK's codec-neutral proxy state into the app facade's UI state.
-fn proxy_media_state(state: oak_engine_rust_sdk::codec::ProxyState) -> super::engine::ProxyMediaState {
+fn proxy_media_state(state: quercus_engine_rs::codec::ProxyState) -> super::engine::ProxyMediaState {
 	match state {
-		oak_engine_rust_sdk::codec::ProxyState::Missing => super::engine::ProxyMediaState::Missing,
-		oak_engine_rust_sdk::codec::ProxyState::Generating => {
+		quercus_engine_rs::codec::ProxyState::Missing => super::engine::ProxyMediaState::Missing,
+		quercus_engine_rs::codec::ProxyState::Generating => {
 			super::engine::ProxyMediaState::Generating
 		}
-		oak_engine_rust_sdk::codec::ProxyState::Ready => super::engine::ProxyMediaState::Ready,
-		oak_engine_rust_sdk::codec::ProxyState::Failed => super::engine::ProxyMediaState::Failed,
+		quercus_engine_rs::codec::ProxyState::Ready => super::engine::ProxyMediaState::Ready,
+		quercus_engine_rs::codec::ProxyState::Failed => super::engine::ProxyMediaState::Failed,
 	}
 }
 /// Converts the SDK multicam DTO into the app facade's stable-identity state.
 fn multicam_state_from_sdk(
-	state: oak_engine_rust_sdk::editor::multicam::MulticamState,
+	state: quercus_engine_rs::editor::multicam::MulticamState,
 ) -> super::engine::MulticamState {
 	super::engine::MulticamState {
 		sequence_id: state.sequence.raw(),
@@ -147,11 +147,11 @@ fn multicam_state_from_sdk(
 	}
 }
 
-fn rational_to_sdk(value: Rational) -> oak_engine_rust_sdk::types::Rational {
-	oak_engine_rust_sdk::types::Rational::new(value.num, value.den)
+fn rational_to_sdk(value: Rational) -> quercus_engine_rs::types::Rational {
+	quercus_engine_rs::types::Rational::new(value.num, value.den)
 }
 
-fn rational_from_sdk(value: oak_engine_rust_sdk::types::Rational) -> Rational {
+fn rational_from_sdk(value: quercus_engine_rs::types::Rational) -> Rational {
 	Rational::new(value.num, value.den)
 }
 
@@ -298,17 +298,17 @@ struct PreviewWindow {
 	/// Frames already submitted to the scheduler (pending or in flight).
 	submitted: BTreeSet<i64>,
 	/// Pollable SDK renders. Terminal tasks are drained without waiting.
-	requests: BTreeMap<i64, oak_engine_rust_sdk::task::Task>,
+	requests: BTreeMap<i64, quercus_engine_rs::task::Task>,
 	/// Cancelled renders retained until terminal, so dropping them never joins
 	/// a running worker on the UI thread.
-	retired: Vec<oak_engine_rust_sdk::task::Task>,
+	retired: Vec<quercus_engine_rs::task::Task>,
 	/// Owned rendered frames, keyed by frame number. A frame is consumed by
 	/// `cpu_frame` or dropped when it falls out of the window.
 	slots: BTreeMap<i64, PreviewSlot>,
 }
 
 /// A finished, backend-independent frame in the playback pre-render window.
-type PreviewSlot = oak_engine_rust_sdk::preview_video::VideoFrame;
+type PreviewSlot = quercus_engine_rs::preview_video::VideoFrame;
 
 // ---------------------------------------------------------------------------
 // Playback audio prefetch (M15 S3; M16 S3: rendered on the audio thread)
@@ -858,7 +858,7 @@ struct ProxyRun {
 	/// engine can validate the footage/task pair and clear its active-task entry.
 	session: EditorSession,
 	/// Pollable engine task. Dropping it cancels and joins an unfinished worker.
-	task: oak_engine_rust_sdk::task::Task,
+	task: quercus_engine_rs::task::Task,
 }
 
 /// One card of the real effect stack: the chain node's identity, its
@@ -1261,13 +1261,13 @@ impl RealEngine {
 				.last_audio_resync
 				.map(|t| t.elapsed() > std::time::Duration::from_secs(1))
 				.unwrap_or(true);
-			let underrun = oak_engine_rust_sdk::audio::take_output_underrun_frames().unwrap_or(0);
+			let underrun = quercus_engine_rs::audio::take_output_underrun_frames().unwrap_or(0);
 			if underrun > 0 {
-				let q = oak_engine_rust_sdk::audio::output_queued_frames().unwrap_or(-1);
+				let q = quercus_engine_rs::audio::output_queued_frames().unwrap_or(-1);
 				audio_dbg(&format!("underrun +{underrun} frames (device queue {q})"));
 			}
 			if cooldown_ok && underrun > 480 {
-				let dropped = oak_engine_rust_sdk::audio::drop_output_frames(underrun).unwrap_or(0);
+				let dropped = quercus_engine_rs::audio::drop_output_frames(underrun).unwrap_or(0);
 				audio_dbg(&format!(
 					"underrun heal: trimmed {dropped} stale frames (underrun {underrun}) at frame {frame}"
 				));
@@ -1285,11 +1285,11 @@ impl RealEngine {
 			// Packed F32; layout: 1ch → mono mask, else stereo.
 			let layout: u64 = if buf.channel_count == 1 { 0x4 } else { 0x3 };
 			let bytes: Vec<u8> = buf.data.iter().flat_map(|v| v.to_ne_bytes()).collect();
-			let _ = oak_engine_rust_sdk::audio::push_to_output(
-				oak_engine_rust_sdk::audio::AudioParams::new(
+			let _ = quercus_engine_rs::audio::push_to_output(
+				quercus_engine_rs::audio::AudioParams::new(
 					buf.sample_rate,
 					layout,
-					oak_engine_rust_sdk::audio::SampleFormat::F32,
+					quercus_engine_rs::audio::SampleFormat::F32,
 				),
 				&bytes,
 			);
@@ -1301,21 +1301,21 @@ impl RealEngine {
 			// correction starts from the frame actually audible right now
 			// instead of teleporting the playhead back to the push position.
 			if self.audio_playback.is_none() {
-				if let Some(secs) = oak_engine_rust_sdk::audio::seconds() {
+				if let Some(secs) = quercus_engine_rs::audio::seconds() {
 					if secs >= 0.0 {
 						self.audio_playback = Some((frame, secs));
 						// Zeros padded before this first push (stream
 						// startup, or the whole paused interval) are
 						// not a playback underrun — reset the counter
 						// so the self-heal doesn't fire spuriously.
-						let _ = oak_engine_rust_sdk::audio::take_output_underrun_frames();
+						let _ = quercus_engine_rs::audio::take_output_underrun_frames();
 					}
 				}
 			}
 		}
 		if audio_dbg_enabled() {
-			let secs = oak_engine_rust_sdk::audio::seconds().unwrap_or(-1.0);
-			let q = oak_engine_rust_sdk::audio::output_queued_frames().unwrap_or(-1);
+			let secs = quercus_engine_rs::audio::seconds().unwrap_or(-1.0);
+			let q = quercus_engine_rs::audio::output_queued_frames().unwrap_or(-1);
 			audio_dbg(&format!(
 				"tick f={frame} secs={secs:.3} buf={} sub={submitted} push={pushed} q={q}",
 				st.buffered.len()
@@ -1332,8 +1332,8 @@ impl RealEngine {
 	fn stop_program_playback(&mut self, cx: &mut Context<Self>) {
 		self.program_playing = false;
 		self.audio_playback = None;
-		let _ = oak_engine_rust_sdk::audio::stop_output();
-		let _ = oak_engine_rust_sdk::audio::reset_output_clock();
+		let _ = quercus_engine_rs::audio::stop_output();
+		let _ = quercus_engine_rs::audio::reset_output_clock();
 		// Reset the prefetch at the resting playhead so a later play()
 		// re-renders it: `last_consumed` would otherwise suppress the
 		// re-push of the very frame still on screen.
@@ -1550,7 +1550,7 @@ impl RealEngine {
 					tb,
 					width,
 					height,
-					Some(oak_engine_rust_sdk::types::PixelFormat::F32),
+					Some(quercus_engine_rs::types::PixelFormat::F32),
 				),
 				FullResTarget::Footage(node) => super::renderops::render_footage_frame(
 					&project,
@@ -1559,7 +1559,7 @@ impl RealEngine {
 					tb,
 					width,
 					height,
-					Some(oak_engine_rust_sdk::types::PixelFormat::F32),
+					Some(quercus_engine_rs::types::PixelFormat::F32),
 				),
 			};
 			if let Ok(rendered) = rendered {
@@ -1655,9 +1655,9 @@ impl RealEngine {
 	/// node editor has no multicam selection).
 	fn multicam_state_internal(&self) -> Option<MulticamState> {
 		let session = self.editor_session()?;
-		let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(self.sequence?.raw());
+		let sequence = quercus_engine_rs::node::NodeId::from_raw(self.sequence?.raw());
 		if let Some(clip) = self.selected_clip_node() {
-			if let Some(state) = session.multicam_state(oak_engine_rust_sdk::node::NodeId::from_raw(clip.raw())) {
+			if let Some(state) = session.multicam_state(quercus_engine_rs::node::NodeId::from_raw(clip.raw())) {
 				return Some(multicam_state_from_sdk(state));
 			}
 		}
@@ -1733,7 +1733,7 @@ impl RealEngine {
 		};
 		let Some(track) = session
 			.multicam_source_track(
-				oak_engine_rust_sdk::node::NodeId::from_raw(state.node_id),
+				quercus_engine_rs::node::NodeId::from_raw(state.node_id),
 				source,
 			)
 			.and_then(|track| graphops::id_of(track.raw()))
@@ -1895,18 +1895,18 @@ impl RealEngine {
 		// so cancelled requests stay in `retired` until a later tick.
 		window
 			.retired
-			.retain(|task| task.state() == oak_engine_rust_sdk::task::TaskState::Running);
+			.retain(|task| task.state() == quercus_engine_rs::task::TaskState::Running);
 		let finished: Vec<i64> = window
 			.requests
 			.iter()
-			.filter(|(_, task)| task.state() != oak_engine_rust_sdk::task::TaskState::Running)
+			.filter(|(_, task)| task.state() != quercus_engine_rs::task::TaskState::Running)
 			.map(|(frame, _)| *frame)
 			.collect();
 		for frame in finished {
 			let Some(task) = window.requests.remove(&frame) else {
 				continue;
 			};
-			if task.state() == oak_engine_rust_sdk::task::TaskState::Succeeded {
+			if task.state() == quercus_engine_rs::task::TaskState::Succeeded {
 				if let Some(frame_data) = task.take_video() {
 					window.slots.insert(frame, frame_data);
 				} else {
@@ -1931,7 +1931,7 @@ impl RealEngine {
 				tb,
 				width,
 				height,
-				Some(oak_engine_rust_sdk::types::PixelFormat::F32),
+				Some(quercus_engine_rs::types::PixelFormat::F32),
 				playhead,
 				self.preview_generation,
 			) else {
@@ -2082,7 +2082,7 @@ impl RealEngine {
 	/// so the render stays valid when the engine drops the project mid-flight
 	/// (the drain discards the stale completion).
 	fn thumbnail_worker(
-		project: oak_engine_rust_sdk::node::Project,
+		project: quercus_engine_rs::node::Project,
 		identity: u64,
 		generation: u64,
 		tx: mpsc::Sender<ThumbEvent>,
@@ -2103,11 +2103,11 @@ impl RealEngine {
 	/// project's disk-cache location when it overrides the default (the
 	/// 项目属性 disk-cache setting's live consumer).
 	fn render_thumbnail(
-		project: &oak_engine_rust_sdk::node::Project,
+		project: &quercus_engine_rs::node::Project,
 		identity: u64,
 	) -> Option<PathBuf> {
-		let node = oak_engine_rust_sdk::node::NodeId::from_raw(identity);
-		if project.node_kind(node) != Some(oak_engine_rust_sdk::node::NodeKind::Footage) {
+		let node = quercus_engine_rs::node::NodeId::from_raw(identity);
+		if project.node_kind(node) != Some(quercus_engine_rs::node::NodeKind::Footage) {
 			return None;
 		}
 		let filename = project.footage_filename(node).filter(|filename| !filename.is_empty())?;
@@ -2119,10 +2119,10 @@ impl RealEngine {
 		}
 		// The SDK returns owned F32 RGBA pixels, so the PNG has no shared-memory
 		// slot or GPU texture lifetime dependency.
-		let task = oak_engine_rust_sdk::task::render_thumbnail(
+		let task = quercus_engine_rs::task::render_thumbnail(
 			project,
 			node,
-			oak_engine_rust_sdk::types::Rational::new(0, 1),
+			quercus_engine_rs::types::Rational::new(0, 1),
 			(THUMBNAIL_WIDTH as u32, THUMBNAIL_HEIGHT as u32),
 		)?;
 		if !task.wait() {
@@ -2180,7 +2180,7 @@ impl RealEngine {
 	fn proxy_cache_path() -> String {
 		let configured = config_get_string(CONFIG_KEY_DISK_CACHE_PATH);
 		if configured.trim().is_empty() {
-			oak_engine_rust_sdk::utils::default_disk_cache_path().unwrap_or_default()
+			quercus_engine_rs::utils::default_disk_cache_path().unwrap_or_default()
 		} else {
 			configured
 		}
@@ -2207,15 +2207,15 @@ impl RealEngine {
 			.proxy_runs
 			.iter()
 			.filter_map(|run| match run.task.state() {
-				oak_engine_rust_sdk::task::TaskState::Running => None,
-				oak_engine_rust_sdk::task::TaskState::Succeeded => Some((run.footage, true)),
-				oak_engine_rust_sdk::task::TaskState::Failed
-				| oak_engine_rust_sdk::task::TaskState::Cancelled => Some((run.footage, false)),
+				quercus_engine_rs::task::TaskState::Running => None,
+				quercus_engine_rs::task::TaskState::Succeeded => Some((run.footage, true)),
+				quercus_engine_rs::task::TaskState::Failed
+				| quercus_engine_rs::task::TaskState::Cancelled => Some((run.footage, false)),
 			})
 			.collect();
 		for run in &self.proxy_runs {
 			if let Some((_, succeeded)) = finished.iter().find(|(id, _)| *id == run.footage) {
-				let id = oak_engine_rust_sdk::node::NodeId::from_raw(run.footage);
+				let id = quercus_engine_rs::node::NodeId::from_raw(run.footage);
 				let _ = run.session.complete_proxy(id, &run.task, *succeeded);
 			}
 		}
@@ -2232,7 +2232,7 @@ impl RealEngine {
 	/// Maximum concurrent proxy workers (configurable in Proxy Settings).
 	/// The SDK value preserves the engine's per-worker CPU/thread budget.
 	fn proxy_max_concurrent() -> usize {
-		oak_engine_rust_sdk::task::proxy_max_concurrent()
+		quercus_engine_rs::task::proxy_max_concurrent()
 	}
 
 	/// 按并发上限从队列递补启动代理生成（队列去重由入队侧保证）。
@@ -2272,8 +2272,8 @@ impl RealEngine {
 					return false;
 				};
 				status.can_generate
-					&& status.state != oak_engine_rust_sdk::codec::ProxyState::Ready
-					&& status.state != oak_engine_rust_sdk::codec::ProxyState::Failed
+					&& status.state != quercus_engine_rs::codec::ProxyState::Ready
+					&& status.state != quercus_engine_rs::codec::ProxyState::Failed
 					&& (!status.has_proxy || status.enabled)
 					&& self.proxy_runs.iter().all(|run| run.footage != footage.id.raw())
 			})
@@ -2296,7 +2296,7 @@ impl RealEngine {
 	/// every clip is re-placed so its source head lines up with the
 	/// reference's at the anchor (one multi-undo).
 	fn sync_clips_by_source_time_internal(&mut self, clips: &[ClipId]) {
-		use oak_engine_rust_sdk::audio_analysis::{SourceClip, place_by_source_time};
+		use quercus_engine_rs::audio_analysis::{SourceClip, place_by_source_time};
 
 		let Some(project) = self.project.clone() else {
 			return;
@@ -2392,14 +2392,14 @@ impl RealEngine {
 		let Some(session) = session else {
 			return;
 		};
-		let _ = oak_engine_rust_sdk::node::undo_group_begin("Synchronize Clips by Source Time");
+		let _ = quercus_engine_rs::node::undo_group_begin("Synchronize Clips by Source Time");
 		for (node, _track, _list, _track_index, timeline_in) in &placements {
 			let _ = session.execute(EditCommand::MoveClip {
 				clip: *node,
 				new_in_ts: graphops::rational_to_ts(*timeline_in, tb),
 			});
 		}
-		let _ = oak_engine_rust_sdk::node::undo_group_end();
+		let _ = quercus_engine_rs::node::undo_group_end();
 	}
 
 	/// Synchronize the selected clips by waveform correlation (the C++
@@ -2409,8 +2409,8 @@ impl RealEngine {
 	/// offset triggers a rate search whose winner also rescales the clip
 	/// speed (one multi-undo).
 	fn sync_clips_by_waveform_internal(&mut self, clips: &[ClipId], allow_speed: bool) {
-		use oak_engine_rust_sdk::audio_analysis::place_by_waveform_offset;
-		use oak_engine_rust_sdk::audio_analysis::{
+		use quercus_engine_rs::audio_analysis::place_by_waveform_offset;
+		use quercus_engine_rs::audio_analysis::{
 			estimate_envelope_offset, estimate_stretch_offset,
 		};
 
@@ -2581,7 +2581,7 @@ impl RealEngine {
 		let Some(session) = self.editor_session() else {
 			return;
 		};
-		let _ = oak_engine_rust_sdk::node::undo_group_begin("Synchronize Clips by Waveform");
+		let _ = quercus_engine_rs::node::undo_group_begin("Synchronize Clips by Waveform");
 		for (node, _track, _list, _track_index, timeline_in, speed, old_speed) in &placements {
 			if (*speed - 1.0).abs() > f64::EPSILON {
 				// The C++ multiplies the clip's current speed by the
@@ -2596,7 +2596,7 @@ impl RealEngine {
 				new_in_ts: graphops::rational_to_ts(*timeline_in, tb),
 			});
 		}
-		let _ = oak_engine_rust_sdk::node::undo_group_end();
+		let _ = quercus_engine_rs::node::undo_group_end();
 	}
 
 	/// M16 S1 graph mode: pushes the current project state to the worker
@@ -2607,7 +2607,7 @@ impl RealEngine {
 		// after the debounce window (or immediately when no edit raced
 		// recently). Rapid edits coalesce instead of serializing +
 		// uploading the whole project snapshot on every keystroke.
-		let revision = oak_engine_rust_sdk::node::undo_index().max(0) as u64;
+		let revision = quercus_engine_rs::node::undo_index().max(0) as u64;
 		self.pending_snapshot = Some(revision);
 	}
 
@@ -2628,7 +2628,7 @@ impl RealEngine {
 		let Some(project) = self.project.clone() else {
 			return;
 		};
-		if oak_engine_rust_sdk::render::manager_set_graph_snapshot(&project, revision) {
+		if quercus_engine_rs::render::manager_set_graph_snapshot(&project, revision) {
 			{
 				// Every frame rendered since the edit went through workers
 				// holding the STALE snapshot (the debounce window — the
@@ -2651,7 +2651,7 @@ impl RealEngine {
 	/// library. Projects without a sequence get a blank default.
 	fn adopt_project(&mut self, project: ProjectRef, cx: &mut Context<Self>) {
 		self.drop_project();
-		oak_engine_rust_sdk::node::undo_clear();
+		quercus_engine_rs::node::undo_clear();
 
 		// Cached display info.
 		let (name, path, first_sequence) = {
@@ -2688,14 +2688,14 @@ impl RealEngine {
 			let transfer = project
 				.setting("outputtransfer")
 				.unwrap_or_else(|| "srgb".to_string());
-			let _ = oak_engine_rust_sdk::state::color_set_pipeline_settings(
+			let _ = quercus_engine_rs::state::color_set_pipeline_settings(
 				&working, &gamut, &transfer,
 			);
 		}
 		// The inline (test) render backend's node-graph source: the live
 		// project, so preview frames evaluate through the traverser just
 		// like the worker pool's process snapshot does.
-		let _ = oak_engine_rust_sdk::render::manager_set_inline_project(&project);
+		let _ = quercus_engine_rs::render::manager_set_inline_project(&project);
 
 		// Footage loaded from a file may lack stream metadata (C++ projects
 		// have no `<streams>` segment; older Rust saves predate the probe
@@ -2734,8 +2734,8 @@ impl RealEngine {
 	/// cleared FIRST: its commands reference the marker/workarea
 	/// auxiliaries, so they must be gone before those handles release.
 	fn drop_project(&mut self) {
-		oak_engine_rust_sdk::node::undo_clear();
-		oak_engine_rust_sdk::render::manager_clear_graph_snapshot();
+		quercus_engine_rs::node::undo_clear();
+		quercus_engine_rs::render::manager_clear_graph_snapshot();
 		set_live_session(None);
 		if let Some(session) = self.session.take() {
 			session.close();
@@ -2775,10 +2775,10 @@ impl RealEngine {
 	fn apply_project_color_config(project: Option<&ProjectRef>) {
 		let stored = project.and_then(|p| p.setting(PROJECT_SETTING_OCIO_CONFIG));
 		let applied =
-			oak_engine_rust_sdk::state::color_set_up_default_config(stored.as_deref());
+			quercus_engine_rs::state::color_set_up_default_config(stored.as_deref());
 		if let Err(e) = applied {
 			println!("[real engine] project OCIO config apply failed: {e}");
-			let _ = oak_engine_rust_sdk::state::color_set_up_default_config(None);
+			let _ = quercus_engine_rs::state::color_set_up_default_config(None);
 		}
 		super::displaycolor::invalidate();
 	}
@@ -2831,7 +2831,7 @@ impl RealEngine {
 		// pool to what fits now; the size change on the OTHER sequence's
 		// update re-expands it.
 		let fps = (rate.num as f64 / rate.den.max(1) as f64).round().max(1.0) as u32;
-		oak_engine_rust_sdk::render::manager_set_workspace_size(
+		quercus_engine_rs::render::manager_set_workspace_size(
 			width as i32,
 			height as i32,
 			fps,
@@ -3141,7 +3141,7 @@ impl RealEngine {
 		};
 		let chain = session
 			.project()
-			.effect_chain(oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()));
+			.effect_chain(quercus_engine_rs::node::NodeId::from_raw(host.raw()));
 		let project = self.project_ref().expect("session requires a project");
 		let mut out: Vec<Arc<dyn EffectData>> = Vec::new();
 		for node in chain {
@@ -3150,14 +3150,14 @@ impl RealEngine {
 			let type_id = graphops::node_type_id(project, node);
 			// `name_of` covers both static (built-in) and dynamic (OpenFX
 			// plugin) factory entries.
-			let title = oak_engine_rust_sdk::effect::factory_name(&type_id)
+			let title = quercus_engine_rs::effect::factory_name(&type_id)
 				.filter(|n| !n.is_empty())
 				.unwrap_or(type_id);
 			let plugin_handle = super::effectchain::plugin_instance_handle(project, node);
 			// The OpenFX plugin badge: the persistent-message count (the
 			// simplified 徽标/计数 of stage 6b). Built-in effects show none.
 			let badge = plugin_handle.and_then(|handle| {
-				oak_engine_rust_sdk::ofx::persistent_message_count(handle).filter(|count| *count > 0)
+				quercus_engine_rs::ofx::persistent_message_count(handle).filter(|count| *count > 0)
 			});
 			let subtitle = plugin_handle.map(|_| {
 				// A muted secondary line identifying the plugin effect as an
@@ -3230,8 +3230,8 @@ impl EngineGateway for RealEngine {
 			// The audio master anchor is dropped too — the next play run
 			// re-anchors at its own first push.
 			self.audio_playback = None;
-			let _ = oak_engine_rust_sdk::audio::clear_buffered_output();
-			let _ = oak_engine_rust_sdk::audio::reset_output_clock();
+			let _ = quercus_engine_rs::audio::clear_buffered_output();
+			let _ = quercus_engine_rs::audio::reset_output_clock();
 			let mut st = self
 				.audio_prefetch
 				.lock()
@@ -3336,7 +3336,7 @@ impl EngineGateway for RealEngine {
 		// clock untouched.
 		if self.program_playing && self.program_clock.read(cx).is_playing() {
 			if let Some((start_frame, start_secs)) = self.audio_playback {
-				if let Some(secs) = oak_engine_rust_sdk::audio::seconds() {
+				if let Some(secs) = quercus_engine_rs::audio::seconds() {
 					if secs > start_secs {
 						let rate = self.program_clock.read(cx).frame_rate();
 						let mut target = audio_target_frame(start_frame, start_secs, secs, rate);
@@ -3384,7 +3384,7 @@ impl EngineGateway for RealEngine {
 		// delivered from its poll loop, which must run on the UI tick.
 		// Then feed the playback pre-render windows before draining the
 		// completion channels.
-		oak_engine_rust_sdk::render::manager_poll();
+		quercus_engine_rs::render::manager_poll();
 		self.update_preview_window(Monitor::Source, cx);
 		self.update_preview_window(Monitor::Program, cx);
 		// M12 P1: while the program plays, pull the audio for the
@@ -3537,7 +3537,7 @@ impl AudioMeterDataSource for RealEngine {
 		// (clamped to the meter's 0..1 range). Silent when nothing has been
 		// pushed to the output or without an AudioManager instance.
 		let mut peaks = [0.0f32; 8];
-		let Some(n) = oak_engine_rust_sdk::audio::output_levels(&mut peaks) else {
+		let Some(n) = quercus_engine_rs::audio::output_levels(&mut peaks) else {
 			return vec![0.0, 0.0];
 		};
 		if n <= 0 {
@@ -3691,7 +3691,7 @@ impl AppEngine for RealEngine {
 		let (Some(project), Some(seq)) = (self.project.clone(), self.sequence) else {
 			return;
 		};
-		let internal = oak_engine_rust_sdk::node::internal_height_from_pixels(f32::from(height) as i32);
+		let internal = quercus_engine_rs::node::internal_height_from_pixels(f32::from(height) as i32);
 		let ids: Vec<NodeId> = [
 			DomainTrackKind::Video,
 			DomainTrackKind::Audio,
@@ -3775,7 +3775,7 @@ impl AppEngine for RealEngine {
 		};
 		let result = session
 			.execute(EditCommand::EffectInsert {
-				host: oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()),
+				host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
 				index,
 				type_id: type_id.to_string(),
 			})
@@ -3803,7 +3803,7 @@ impl AppEngine for RealEngine {
 		}
 		let result = session
 			.execute(EditCommand::EffectInsert {
-				host: oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()),
+				host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
 				index: usize::MAX,
 				type_id: type_id.to_string(),
 			})
@@ -3815,7 +3815,7 @@ impl AppEngine for RealEngine {
 	fn effect_params(&self, effect: EffectId) -> Option<Vec<crate::oakui::engine::EffectParam>> {
 		let session = self.editor_session()?;
 		let node = graphops::id_of(effect.0)?;
-		let node = oak_engine_rust_sdk::node::NodeId::from_raw(node.raw());
+		let node = quercus_engine_rs::node::NodeId::from_raw(node.raw());
 		let snapshot = session.parameters(node)?;
 		let type_id = session.project().node_type_id(node).unwrap_or_default();
 		Some(super::effectchain::params_from_sdk(&snapshot, &type_id))
@@ -3834,7 +3834,7 @@ impl AppEngine for RealEngine {
 		let Some(node) = graphops::id_of(effect.0) else {
 			return Err("effect node not found".into());
 		};
-		let node = oak_engine_rust_sdk::node::NodeId::from_raw(node.raw());
+		let node = quercus_engine_rs::node::NodeId::from_raw(node.raw());
 		let result = super::effectchain::set_sdk_input_value(&session, node, input_id, value);
 		self.apply_edit(result.clone(), "set parameter", cx);
 		result
@@ -3854,7 +3854,7 @@ impl AppEngine for RealEngine {
 		};
 		session
 			.execute(EditCommand::PushNodeButton {
-				node: oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+				node: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 				input_id: input_id.to_string(),
 			})
 			.map_err(|error| format!("push button \"{input_id}\" failed: {error}"))?;
@@ -3873,7 +3873,7 @@ impl AppEngine for RealEngine {
 		};
 		let chain = session
 			.project()
-			.effect_chain(oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()));
+			.effect_chain(quercus_engine_rs::node::NodeId::from_raw(host.raw()));
 		let project = self.project_ref()?;
 		for node in chain {
 			let node = graphops::id_of(node.raw())?;
@@ -3902,7 +3902,7 @@ impl AppEngine for RealEngine {
 					return;
 				};
 				let result = session.execute(EditCommand::EffectSetEnabled {
-					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 					enabled: *enabled,
 				})
 				.map(|_| ());
@@ -3929,8 +3929,8 @@ impl AppEngine for RealEngine {
 					return;
 				};
 				let result = session.execute(EditCommand::EffectRemove {
-					host: oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()),
-					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+					host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
+					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 				})
 				.map(|_| ());
 				self.apply_edit(result, "remove effect", cx);
@@ -3946,8 +3946,8 @@ impl AppEngine for RealEngine {
 					return;
 				};
 				let result = session.execute(EditCommand::EffectMove {
-					host: oak_engine_rust_sdk::node::NodeId::from_raw(host.raw()),
-					effect: oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+					host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
+					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 					new_index: *new_index,
 				})
 				.map(|_| ());
@@ -4263,7 +4263,7 @@ impl AppEngine for RealEngine {
 			}
 			TimelineEvent::TrackHeightChanged { track, height } => {
 				if let (Some(t), Some(project)) = (self.tracks.get(*track), self.project.clone()) {
-					let internal = oak_engine_rust_sdk::node::internal_height_from_pixels(
+					let internal = quercus_engine_rs::node::internal_height_from_pixels(
 						f32::from(*height) as i32,
 					);
 					graphops::set_track_height(&project, t.track, internal);
@@ -4768,7 +4768,7 @@ impl AppEngine for RealEngine {
 	/// Open an undo group for a multi-write parameter gesture (a
 	/// color-wheel drag's per-move writes join it, closing as one entry).
 	fn begin_param_drag(&mut self, name: &str, cx: &mut Context<Self>) {
-		if !oak_engine_rust_sdk::node::undo_group_begin(name) {
+		if !quercus_engine_rs::node::undo_group_begin(name) {
 			println!("[real engine] begin param drag: failed");
 		}
 		cx.notify();
@@ -4776,7 +4776,7 @@ impl AppEngine for RealEngine {
 
 	/// Close the gesture's undo group.
 	fn end_param_drag(&mut self, cx: &mut Context<Self>) {
-		if !oak_engine_rust_sdk::node::undo_group_end() {
+		if !quercus_engine_rs::node::undo_group_end() {
 			println!("[real engine] end param drag: failed");
 		}
 		cx.notify();
@@ -4812,23 +4812,23 @@ impl AppEngine for RealEngine {
 	}
 
 	fn can_undo(&self) -> bool {
-		self.project.is_some() && oak_engine_rust_sdk::node::undo_can_undo()
+		self.project.is_some() && quercus_engine_rs::node::undo_can_undo()
 	}
 
 	fn can_redo(&self) -> bool {
-		self.project.is_some() && oak_engine_rust_sdk::node::undo_can_redo()
+		self.project.is_some() && quercus_engine_rs::node::undo_can_redo()
 	}
 
 	fn undo(&mut self, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_engine_rust_sdk::node::undo();
+			quercus_engine_rs::node::undo();
 			self.apply_stack_change(cx);
 		}
 	}
 
 	fn redo(&mut self, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_engine_rust_sdk::node::redo();
+			quercus_engine_rs::node::redo();
 			self.apply_stack_change(cx);
 		}
 	}
@@ -4840,18 +4840,18 @@ impl AppEngine for RealEngine {
 		// The C++ `HistoryModel` lists every row of the engine stack (done
 		// first, then the redoable tail); labels are read through the same
 		// two-stage contract the C++ `oakengine_undo_command_text` uses.
-		let count = oak_engine_rust_sdk::node::undo_count();
+		let count = quercus_engine_rs::node::undo_count();
 		(0..count)
 			.map(|row| super::HistoryEntry {
-				name: oak_engine_rust_sdk::node::undo_command_name(row).unwrap_or_default(),
-				done: oak_engine_rust_sdk::node::undo_command_done(row).unwrap_or(false),
+				name: quercus_engine_rs::node::undo_command_name(row).unwrap_or_default(),
+				done: quercus_engine_rs::node::undo_command_done(row).unwrap_or(false),
 			})
 			.collect()
 	}
 
 	fn history_index(&self) -> i64 {
 		if self.project.is_some() {
-			oak_engine_rust_sdk::node::undo_index()
+			quercus_engine_rs::node::undo_index()
 		} else {
 			0
 		}
@@ -4859,7 +4859,7 @@ impl AppEngine for RealEngine {
 
 	fn jump_history(&mut self, index: i64, cx: &mut Context<Self>) {
 		if self.project.is_some() {
-			oak_engine_rust_sdk::node::undo_jump(index);
+			quercus_engine_rs::node::undo_jump(index);
 			self.apply_stack_change(cx);
 		}
 	}
@@ -4947,7 +4947,7 @@ impl AppEngine for RealEngine {
 			return Err("unknown project entry".into());
 		};
 		session.execute(EditCommand::ReplaceFootage {
-			footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.raw()),
+			footage: quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
 			path: path.to_string_lossy().into_owned(),
 		})?;
 		cx.notify();
@@ -4963,7 +4963,7 @@ impl AppEngine for RealEngine {
 		};
 		let result = session
 			.execute(EditCommand::RenameBlocks {
-				clips: vec![oak_engine_rust_sdk::node::NodeId::from_raw(node.raw())],
+				clips: vec![quercus_engine_rs::node::NodeId::from_raw(node.raw())],
 				name: new_name,
 			})
 			.map(|_| ());
@@ -4984,7 +4984,7 @@ impl AppEngine for RealEngine {
 		// matching the C++ path, which is undoable).
 		let result = session
 			.execute(EditCommand::DeleteEntry {
-				node: oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+				node: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 			})
 			.map(|_| ());
 		self.apply_edit(result, "delete entry", cx);
@@ -5334,7 +5334,7 @@ impl AppEngine for RealEngine {
 		// refuses an invalid config the same way). Applying is the
 		// process-wide color config reload plus a full frame invalidation.
 		let path = (!trimmed.is_empty()).then_some(trimmed.as_str());
-		oak_engine_rust_sdk::state::color_set_up_default_config(path)
+		quercus_engine_rs::state::color_set_up_default_config(path)
 			.map_err(|e| e.to_string())?;
 		if trimmed.is_empty() {
 			project.unset_setting(PROJECT_SETTING_OCIO_CONFIG);
@@ -5410,7 +5410,7 @@ impl AppEngine for RealEngine {
 		project.set_setting("outputtransfer", &transfer);
 		// The app-side transforms read the process global; the workers pick
 		// the new settings up with the next graph upload.
-		let _ = oak_engine_rust_sdk::state::color_set_pipeline_settings(
+		let _ = quercus_engine_rs::state::color_set_pipeline_settings(
 			&working, &gamut, &transfer,
 		);
 		// The workers derive their pipeline colors from the uploaded project
@@ -5418,8 +5418,8 @@ impl AppEngine for RealEngine {
 		// revision (the manager dedups re-uploads on it), so push an explicit
 		// resync — the workers re-deserialize the rewritten snapshot, adopt
 		// the new working space/output spec and drop their cached frames.
-		let revision = oak_engine_rust_sdk::node::undo_index().max(0) as u64;
-		let _ = oak_engine_rust_sdk::render::manager_resync_graph_snapshot(&project, revision);
+		let revision = quercus_engine_rs::node::undo_index().max(0) as u64;
+		let _ = quercus_engine_rs::render::manager_resync_graph_snapshot(&project, revision);
 		// The pipeline colorspace changed: every cached frame (CPU image,
 		// GPU texture, preview slot) was rendered under the old space.
 		super::displaycolor::invalidate();
@@ -5553,7 +5553,7 @@ impl AppEngine for RealEngine {
 		};
 		// The effect-library generator becomes a node in the project, then
 		// a generator clip feeds from it (the text-clip drop's shape).
-		let generator = oak_engine_rust_sdk::node::create_generator(&project, type_id)
+		let generator = quercus_engine_rs::node::create_generator(&project, type_id)
 			.ok_or_else(|| format!("effect \"{type_id}\" is not a generator"))?;
 		let video_target = if self
 			.tracks
@@ -5771,7 +5771,7 @@ impl AppEngine for RealEngine {
 			return Some(super::engine::ProxyMediaState::Generating);
 		}
 		self.editor_session()?
-			.proxy_status(oak_engine_rust_sdk::node::NodeId::from_raw(id))
+			.proxy_status(quercus_engine_rs::node::NodeId::from_raw(id))
 			.map(|status| proxy_media_state(status.state))
 	}
 
@@ -5784,7 +5784,7 @@ impl AppEngine for RealEngine {
 			return Err("a proxy is already generating for this footage".into());
 		}
 		let session = self.editor_session().ok_or("no project open")?;
-		let footage = oak_engine_rust_sdk::node::NodeId::from_raw(id);
+		let footage = quercus_engine_rs::node::NodeId::from_raw(id);
 		let task = session.generate_proxy(footage, &Self::proxy_cache_path())?;
 		self.proxy_runs.push(ProxyRun { footage: id, session, task });
 		cx.notify();
@@ -5808,7 +5808,7 @@ impl AppEngine for RealEngine {
 			return;
 		};
 		if session
-			.delete_proxy(oak_engine_rust_sdk::node::NodeId::from_raw(id))
+			.delete_proxy(quercus_engine_rs::node::NodeId::from_raw(id))
 			.is_ok()
 		{
 			self.invalidate_preview_frames(cx);
@@ -5820,7 +5820,7 @@ impl AppEngine for RealEngine {
 			return;
 		};
 		if session
-			.set_proxy_enabled(oak_engine_rust_sdk::node::NodeId::from_raw(id), enabled)
+			.set_proxy_enabled(quercus_engine_rs::node::NodeId::from_raw(id), enabled)
 			.is_err()
 		{
 			return;
@@ -5836,7 +5836,7 @@ impl AppEngine for RealEngine {
 	fn proxy_reveal(&self, id: u64) {
 		let Some(proxy_path) = self
 			.editor_session()
-			.and_then(|session| session.proxy_path(oak_engine_rust_sdk::node::NodeId::from_raw(id)))
+			.and_then(|session| session.proxy_path(quercus_engine_rs::node::NodeId::from_raw(id)))
 			.filter(|path| !path.is_empty())
 		else {
 			return;
@@ -5860,7 +5860,7 @@ impl AppEngine for RealEngine {
 			return;
 		};
 		if let Some(session) = self.editor_session() {
-			let mut sdk = oak_engine_rust_sdk::codec::ProxyParams::default();
+			let mut sdk = quercus_engine_rs::codec::ProxyParams::default();
 			sdk.width = params.width;
 			sdk.height = params.height;
 			sdk.divider = params.divider;
@@ -5870,7 +5870,7 @@ impl AppEngine for RealEngine {
 				return;
 			}
 			let _ = session.execute(EditCommand::SetFootageProxyParams {
-				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.raw()),
+				footage: quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
 				params: sdk,
 			});
 		}
@@ -5883,7 +5883,7 @@ impl AppEngine for RealEngine {
 		};
 		if let Some(session) = self.editor_session() {
 			let _ = session.execute(EditCommand::ClearFootageProxyParams {
-				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.raw()),
+				footage: quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
 			});
 		}
 		cx.notify();
@@ -5893,7 +5893,7 @@ impl AppEngine for RealEngine {
 		let session = self.editor_session()?;
 		let node = graphops::id_of(id)?;
 		let params = session.project().footage_custom_proxy_params(
-			oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()),
+			quercus_engine_rs::node::NodeId::from_raw(node.raw()),
 		)?;
 		Some(proxy_ui_from_sdk(&params))
 	}
@@ -5907,7 +5907,7 @@ impl AppEngine for RealEngine {
 		};
 		session
 			.project()
-			.footage_effective_proxy_params(oak_engine_rust_sdk::node::NodeId::from_raw(node.raw()))
+			.footage_effective_proxy_params(quercus_engine_rs::node::NodeId::from_raw(node.raw()))
 			.map(|params| proxy_ui_from_sdk(&params))
 			.unwrap_or_else(proxy_params_from_config)
 	}
@@ -5943,7 +5943,7 @@ impl AppEngine for RealEngine {
 			return eligibility;
 		};
 		for clip in clips {
-			let Some(info) = session.clip_sync_info(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0)) else {
+			let Some(info) = session.clip_sync_info(quercus_engine_rs::node::NodeId::from_raw(clip.0)) else {
 				continue;
 			};
 			if info.has_source_start_time {
@@ -6036,7 +6036,7 @@ impl AppEngine for RealEngine {
 		)?;
 		super::renderops::spawn_export(
 			&session,
-			oak_engine_rust_sdk::node::NodeId::from_raw(seq.raw()),
+			quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 			&path.to_string_lossy(),
 			params,
 		)
@@ -6119,7 +6119,7 @@ impl AppEngine for RealEngine {
 		)?;
 		super::renderops::spawn_export(
 			&session,
-			oak_engine_rust_sdk::node::NodeId::from_raw(seq.raw()),
+			quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 			&path.to_string_lossy(),
 			params,
 		)
@@ -6143,7 +6143,7 @@ impl AppEngine for RealEngine {
 		};
 		clips.iter().any(|clip| {
 			session
-				.multicam_connected_sequence(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+				.multicam_connected_sequence(quercus_engine_rs::node::NodeId::from_raw(clip.0))
 				.is_some()
 		})
 	}
@@ -6154,7 +6154,7 @@ impl AppEngine for RealEngine {
 		};
 		clips.iter().any(|clip| {
 			session
-				.multicam_state(oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+				.multicam_state(quercus_engine_rs::node::NodeId::from_raw(clip.0))
 				.is_some()
 		})
 	}
@@ -6170,7 +6170,7 @@ impl AppEngine for RealEngine {
 		};
 		let clips = clips
 			.into_iter()
-			.map(|clip| oak_engine_rust_sdk::node::NodeId::from_raw(clip.0))
+			.map(|clip| quercus_engine_rs::node::NodeId::from_raw(clip.0))
 			.collect();
 		let result = session
 			.execute(EditCommand::SetMulticamEnabled { clips, enabled })
@@ -6240,10 +6240,10 @@ impl AppEngine for RealEngine {
 		if state.current_source == source {
 			return;
 		}
-		let sequence = oak_engine_rust_sdk::node::NodeId::from_raw(sequence.raw());
+		let sequence = quercus_engine_rs::node::NodeId::from_raw(sequence.raw());
 		let result = session
 			.execute(EditCommand::SwitchMulticam {
-				clip: oak_engine_rust_sdk::node::NodeId::from_raw(state.clip_id),
+				clip: quercus_engine_rs::node::NodeId::from_raw(state.clip_id),
 				source,
 				split_clip,
 				playhead: session.project().sequence_playhead(sequence),
@@ -6263,7 +6263,7 @@ impl AppEngine for RealEngine {
 				.root
 				.children
 				.into_iter()
-				.filter(|entry| entry.kind == Some(oak_engine_rust_sdk::node::NodeKind::Footage))
+				.filter(|entry| entry.kind == Some(quercus_engine_rs::node::NodeKind::Footage))
 				.filter_map(|entry| {
 					let filename = project.footage_filename(entry.id)?;
 					if filename.is_empty() {
@@ -6324,10 +6324,10 @@ impl AppEngine for RealEngine {
 			envelopes.push(envelope);
 		}
 		let reference_envelope = envelopes[0].clone();
-		let offsets: Vec<oak_engine_rust_sdk::audio_analysis::OffsetEstimate> = envelopes[1..]
+		let offsets: Vec<quercus_engine_rs::audio_analysis::OffsetEstimate> = envelopes[1..]
 			.iter()
 			.map(|candidate| {
-				oak_engine_rust_sdk::audio_analysis::estimate_envelope_offset(
+				quercus_engine_rs::audio_analysis::estimate_envelope_offset(
 					&reference_envelope,
 					candidate,
 					&[],
@@ -6370,10 +6370,10 @@ impl AppEngine for RealEngine {
 		};
 		let angles = selected
 			.iter()
-			.map(|angle| oak_engine_rust_sdk::node::NodeId::from_raw(angle.id))
+			.map(|angle| quercus_engine_rs::node::NodeId::from_raw(angle.id))
 			.collect();
 		let result = session.execute(EditCommand::CreateMulticamSequence {
-			host_sequence: oak_engine_rust_sdk::node::NodeId::from_raw(host_sequence.raw()),
+			host_sequence: quercus_engine_rs::node::NodeId::from_raw(host_sequence.raw()),
 			angles,
 			offsets,
 			name,
@@ -6527,7 +6527,7 @@ impl RealEngine {
 		let mc_for_source = candidates.iter().copied().find(|&mc| {
 			session.as_ref().is_some_and(|session| {
 				session
-					.multicam_sequence(oak_engine_rust_sdk::node::NodeId::from_raw(mc.raw()))
+					.multicam_sequence(quercus_engine_rs::node::NodeId::from_raw(mc.raw()))
 					.map(|sequence| sequence.raw())
 					== Some(source_seq.raw())
 			})
@@ -6614,12 +6614,12 @@ impl RealEngine {
 			return None;
 		};
 		let params = session.project().footage_video_params(
-			oak_engine_rust_sdk::node::NodeId::from_raw(footage.raw()),
+			quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
 			0,
 		);
 		match params {
 			Some(_) => match session.execute(EditCommand::CreateSequenceFromFootage {
-				footage: oak_engine_rust_sdk::node::NodeId::from_raw(footage.raw()),
+				footage: quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
 				name: "Sequence 1".into(),
 			}) {
 				Ok(result) => {
@@ -6668,7 +6668,7 @@ impl RealEngine {
 	/// Opens an `.otio` / `.fcpxml` project through the SDK task API and adopts
 	/// the exact loaded Arc through the migration handle.
 	fn open_interchange(&mut self, path: &PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
-		let task = oak_engine_rust_sdk::task::load_otio(&path.to_string_lossy())
+		let task = quercus_engine_rs::task::load_otio(&path.to_string_lossy())
 			.ok_or_else(|| "failed to start the interchange load".to_string())?;
 		if !task.wait() {
 			let error = task.error();
@@ -6720,7 +6720,7 @@ impl RealEngine {
 			return Err("no project open".into());
 		};
 		let filename = path.to_string_lossy().into_owned();
-		let task = oak_engine_rust_sdk::task::save_otio(&session.project(), &filename)
+		let task = quercus_engine_rs::task::save_otio(&session.project(), &filename)
 			.ok_or_else(|| "failed to start the interchange export".to_string())?;
 		if !task.wait() {
 			let error = task.error();
@@ -6759,8 +6759,8 @@ impl RealEngine {
 /// Pure helper so the export dialog can be unit tested.
 pub fn encoding_formats() -> Vec<(i32, String, String)> {
 	let mut out = Vec::new();
-	for i in 0..oak_engine_rust_sdk::codec::Format::count() {
-		let Some(format) = oak_engine_rust_sdk::codec::Format::from_i32(i) else {
+	for i in 0..quercus_engine_rs::codec::Format::count() {
+		let Some(format) = quercus_engine_rs::codec::Format::from_i32(i) else {
 			continue;
 		};
 		out.push((i, format.name(), format.extension()));
@@ -6892,12 +6892,12 @@ pub fn set_theme_dark(dark: bool) {
 /// The host's audio output device names in enumeration order (the index is
 /// what the engine's `set_output_device` takes).
 pub fn audio_output_devices() -> Vec<String> {
-	oak_engine_rust_sdk::audio::output_device_names().to_vec()
+	quercus_engine_rs::audio::output_device_names().to_vec()
 }
 
 /// The host's audio input device names (see [`audio_output_devices`]).
 pub fn audio_input_devices() -> Vec<String> {
-	oak_engine_rust_sdk::audio::input_device_names().to_vec()
+	quercus_engine_rs::audio::input_device_names().to_vec()
 }
 
 /// Selects the output device by NAME (empty = system default), persists the
@@ -6908,9 +6908,9 @@ pub fn set_audio_output_device(name: &str) {
 	let index = if name.is_empty() {
 		-1
 	} else {
-		oak_engine_rust_sdk::audio::device_index_by_name(name, true).unwrap_or(-1)
+		quercus_engine_rs::audio::device_index_by_name(name, true).unwrap_or(-1)
 	};
-	let _ = oak_engine_rust_sdk::audio::set_output_device(index);
+	let _ = quercus_engine_rs::audio::set_output_device(index);
 }
 
 /// Selects the input device by NAME (empty = system default) and persists
@@ -6920,9 +6920,9 @@ pub fn set_audio_input_device(name: &str) {
 	let index = if name.is_empty() {
 		-1
 	} else {
-		oak_engine_rust_sdk::audio::device_index_by_name(name, false).unwrap_or(-1)
+		quercus_engine_rs::audio::device_index_by_name(name, false).unwrap_or(-1)
 	};
-	let _ = oak_engine_rust_sdk::audio::set_input_device(index);
+	let _ = quercus_engine_rs::audio::set_input_device(index);
 }
 
 /// The configured output device name, validated against the live
@@ -6950,7 +6950,7 @@ pub fn audio_input_device() -> String {
 /// choices. Called once at startup; without an instance `push_to_output`
 /// fails silently and playback stays video-only.
 pub fn audio_init_from_config() {
-	let _ = oak_engine_rust_sdk::audio::create_instance();
+	let _ = quercus_engine_rs::audio::create_instance();
 	let output = config_get_string(CONFIG_KEY_AUDIO_OUTPUT);
 	if !output.is_empty() {
 		set_audio_output_device(&output);
@@ -6986,7 +6986,7 @@ pub fn configure_storage() {
 /// Flushes every bound project (write-through + snapshot) and stops the
 /// snapshot thread. The app calls this on exit.
 pub fn storage_flush() {
-	oak_engine_rust_sdk::storage::flush();
+	quercus_engine_rs::storage::flush();
 }
 
 /// The library rows, most recently modified first (the project manager's

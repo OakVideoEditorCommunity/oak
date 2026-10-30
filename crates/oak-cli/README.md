@@ -1,6 +1,6 @@
 # oak-cli (Rust)
 
-Headless command-line consumer of `oak-engine-rust-sdk` — the Rust rewrite
+Headless command-line consumer of `quercus-engine-rs` — the Rust rewrite
 of `cli/main.cpp` (which stays in the tree until cutover). Same
 subcommands, same output format, same exit codes:
 
@@ -19,7 +19,7 @@ cargo test                 # unit + integration tests
 ```
 
 The crate is a pure **SDK consumer**: `Cargo.toml` depends only on
-`oak-engine-rust-sdk` (plus `clap`), and every project query, edit, frame,
+`quercus-engine-rs` (plus `clap`), and every project query, edit, frame,
 audio block, probe and export crosses the engine ABI through the SDK.
 `cargo test -p oak-cli` stands alone; `python3 tooling/check_sdk_consumers.py`
 enforces the boundary.

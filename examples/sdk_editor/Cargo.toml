@@ -1,4 +1,5 @@
 [package]
+
 name = "sdk_editor"
 version = "0.1.0"
 edition = "2024"
@@ -10,7 +11,7 @@ repository = "https://github.com/oakvideoeditor/oak"
 [dependencies]
 # The ONLY Oak dependency: the example proves a new editor can be built on
 # the public Rust SDK without any other Oak crate.
-oak-engine-rust-sdk = { path = "../../crates/oak-engine-rust-sdk" }
+quercus-engine-rs = { version = "=0.5.4" }
 [features]
 default = []
 

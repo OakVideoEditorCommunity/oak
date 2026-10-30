@@ -6,7 +6,7 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-//! The CLI's engine adapter: a pure `oak-engine-rust-sdk` consumer.
+//! The CLI's engine adapter: a pure `quercus-engine-rs` consumer.
 //!
 //! Projects are opened as an [`EditorSession`]; queries use the SDK's
 //! owned `Project` DTO methods, edits are SDK `EditCommand`s, frames and
@@ -15,13 +15,13 @@
 
 use std::path::Path;
 
-use oak_engine_rust_sdk::editor::{EditorSession, TrackKind};
-use oak_engine_rust_sdk::node::{NodeId, NodeKind, Project};
-use oak_engine_rust_sdk::render::{self, RenderBackend};
-use oak_engine_rust_sdk::task::{
+use quercus_engine_rs::editor::{EditorSession, TrackKind};
+use quercus_engine_rs::node::{NodeId, NodeKind, Project};
+use quercus_engine_rs::render::{self, RenderBackend};
+use quercus_engine_rs::task::{
 	self, EncodingParams, TaskState,
 };
-use oak_engine_rust_sdk::types::{Rational, TimeRange};
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 /// The CLI's shared project handle (SDK, not an internal graph).
 pub type ProjectRef = Project;
@@ -136,13 +136,13 @@ pub struct RenderedFrame {
 
 /// Initializes the render manager and the engine backends the CLI uses.
 pub fn render_manager_init() -> Result<(), String> {
-	let _ = oak_engine_rust_sdk::state::color_set_up_default_config(None);
+	let _ = quercus_engine_rs::state::color_set_up_default_config(None);
 	render::textengine_install();
-	let _ = oak_engine_rust_sdk::audio::create_instance();
-	let _ = oak_engine_rust_sdk::ofx::scan();
-	oak_engine_rust_sdk::ofx::register_plugin_nodes();
-	oak_engine_rust_sdk::ofx::install_render_executor();
-	if !render::manager_init(RenderBackend::Default) && !render::manager_is_initialized() {
+	let _ = quercus_engine_rs::audio::create_instance();
+	let _ = quercus_engine_rs::ofx::scan();
+	quercus_engine_rs::ofx::register_plugin_nodes();
+	quercus_engine_rs::ofx::install_render_executor();
+	if !render::manager_init(RenderBackend::Threads) && !render::manager_is_initialized() {
 		return Err("cannot initialize the render manager".to_string());
 	}
 	Ok(())
@@ -225,16 +225,16 @@ pub fn export_sequence(
 		return Err("the sequence has no video parameters".to_string());
 	}
 	let params = EncodingParams {
-		format: oak_engine_rust_sdk::codec::Format::MPEG4Video as i32,
+		format: quercus_engine_rs::codec::Format::MPEG4Video as i32,
 		video_enabled: true,
-		video_codec: oak_engine_rust_sdk::codec::Codec::H264 as i32,
+		video_codec: quercus_engine_rs::codec::Codec::H264 as i32,
 		video_width: width,
 		video_height: height,
 		video_time_base_num: fr_den.max(1),
 		video_time_base_den: fr_num.max(1),
 		video_pixel_format: 0,
 		audio_enabled: true,
-		audio_codec: oak_engine_rust_sdk::codec::Codec::AAC as i32,
+		audio_codec: quercus_engine_rs::codec::Codec::AAC as i32,
 		audio_sample_rate: 48_000,
 		audio_channel_layout: 0x3,
 		export_length_num: frames.max(0) as i32 * fr_den.max(1),

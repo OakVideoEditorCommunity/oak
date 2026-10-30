@@ -38,7 +38,7 @@
 //! project/sequence/argument failures exit 1; bad seconds exit 64
 //! (usage). Frame progress goes to stderr (`frame N: T s`).
 
-use oak_engine_rust_sdk::types::{Rational, TimeRange};
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_RENDER_UNAVAILABLE, EXIT_USAGE};
 use crate::engine;

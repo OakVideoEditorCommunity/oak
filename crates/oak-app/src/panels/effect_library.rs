@@ -34,7 +34,7 @@ use gpui_kit::{
 };
 use gpui_kit::base::input::InputState;
 use gpui_kit::component::input::InputEvent;
-use oak_engine_rust_sdk::state::Config;
+use quercus_engine_rs::state::Config;
 
 use crate::i18n;
 use crate::oakui::effectchain::group_label;
