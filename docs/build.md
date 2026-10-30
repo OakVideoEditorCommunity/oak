@@ -27,7 +27,11 @@ macOS, Linux, and Windows. For the Chinese version see
   system libraries (PipeWire/JACK/ALSA/PulseAudio/sndfile for cpal,
   GL/Vulkan/XKB for the wgpu windowing stack), the headless-test stack
   (xvfb, Mesa software Vulkan, fonts) and the packaging tools.
-- **FFmpeg 8.1, built by the project script.** Distro packages are too
+- **FFmpeg 8.1, built by the project script (mandatory).** The editor builds
+  the external `quercus-engine` crate, which is pinned to this exact static
+  FFmpeg build. Do not use a system/Homebrew/distro FFmpeg and do not point
+  `FFMPEG_DIR` at one: the link fails or the result loads the wrong libraries.
+  Distro packages are too
   old for `ffmpeg-next` 9 and are deliberately not used:
   ```sh
   tooling/install-deps.sh        # every package-manager dependency

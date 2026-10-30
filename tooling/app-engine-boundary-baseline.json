@@ -1,9 +1,0 @@
-{
-  "schema": 1,
-  "dependencies": {
-    "dependencies": [],
-    "dev-dependencies": [],
-    "build-dependencies": []
-  },
-  "references": {}
-}

@@ -32,7 +32,14 @@ which maintained by TUST OpenAtom Open Source Club.
 
 ## Build Instructions
 
-See the [Build Guide](docs/build.md).
+The editor now consumes the external Quercus engine from crates.io
+(`quercus-engine-rs`). **The project FFmpeg build is mandatory**: run
+`tooling/install-deps.sh` and `tooling/ffmpeg/build-ffmpeg.sh` before the first
+`cargo build`, and do not point `FFMPEG_DIR` at a system/Homebrew/distro
+FFmpeg — that produces link errors or loads the wrong libraries.
+
+See the [Build Guide](docs/build.md) and the
+[Quercus engine repository](https://github.com/OakVideoEditorCommunity/quercus-engine).
 
 ## Roadmap
 
