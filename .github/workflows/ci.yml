@@ -350,13 +350,12 @@ jobs:
             (
               sleep 1800
               echo "::warning::test suite exceeded 1800s; dumping hung-process stacks"
-              for p in $(pgrep -f 'target/debug/deps/|target/debug/oak-worker'); do
+              for p in $(pgrep -f 'target/debug/deps/'); do
                 echo "===== thread stacks of pid $p ($(readlink /proc/$p/exe 2>/dev/null)) ====="
                 gdb -batch -ex 'thread apply all bt' -p "$p" || true
               done
               pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) >/dev/null 2>&1 &
+                          ) >/dev/null 2>&1 &
             WATCHDOG_PID=$!
             wait $TEST_PID
             rc=$?
@@ -396,8 +395,7 @@ jobs:
                 sample "$p" 2 10 2>&1 | head -120 || true
               done
               pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) &
+                          ) &
             WATCHDOG_PID=$!
             wait $TEST_PID
             rc=$?

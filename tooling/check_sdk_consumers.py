@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Zero-tolerance guard: every first-party Oak consumer links only the SDK.
 
-Consumer crates (`oak-app`, `oak-cli`, `oak-worker`, `examples/sdk_editor`)
+Consumer crates (`oak-app`, `oak-cli`, `examples/sdk_editor`)
 must not depend on an internal Oak crate nor mention one in their sources.
 The only allowed engine entry is the published `quercus-engine-rs` crate
 (Quercus Nonlinear Video Editing Engine Rust SDK) from crates.io.
@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 CONSUMERS = (
     ROOT / "crates" / "oak-app",
     ROOT / "crates" / "oak-cli",
-    ROOT / "crates" / "oak-worker",
     ROOT / "examples" / "sdk_editor",
 )
 INTERNAL = (

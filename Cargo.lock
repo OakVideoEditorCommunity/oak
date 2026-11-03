@@ -5498,13 +5498,6 @@ name = "oak-extensions"
 version = "0.5.2"
 
 [[package]]
-name = "oak-worker"
-version = "0.5.2"
-dependencies = [
- "quercus-engine-rs",
-]
-
-[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

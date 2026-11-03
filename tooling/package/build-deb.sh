@@ -42,7 +42,7 @@ mkdir -p "$STAGING/usr/bin" "$STAGING/usr/share/applications" \
 	"$STAGING/usr/share/oak/icons" \
 	"$STAGING/usr/share/icons/hicolor/scalable/apps" "$STAGING/DEBIAN"
 
-install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
+install -m755 target/release/oak-editor target/release/oak-cli \
 	"$STAGING/usr/bin/"
 install -m644 packaging/oak.desktop "$STAGING/usr/share/applications/oak.desktop"
 if [ -f icons/icon.png ]; then

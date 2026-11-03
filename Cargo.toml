@@ -15,8 +15,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Root manifest: the Cargo workspace only. The editor app lives in
-# crates/oak-app, the CLI in oak-cli, the render worker in oak-worker and
-# the extension host in oak-extensions. The engine and the Rust SDK are
+# crates/oak-app, the CLI in oak-cli and the extension host in
+# oak-extensions. Rendering runs in-process (no worker binary). The engine and the Rust SDK are
 # external: consumers depend on `quercus-engine-rs` with BOTH a pinned
 # version and a path into the `quercus-engine` git submodule (the Cargo
 # "version + path" form: the path wins locally, the version is what a
@@ -26,7 +26,7 @@
 [workspace]
 members = ["crates/*", "examples/*"]
 exclude = ["crates/oakengine.bk", "quercus-engine"]
-default-members = ["crates/oak-app", "crates/oak-cli", "crates/oak-worker"]
+default-members = ["crates/oak-app", "crates/oak-cli"]
 resolver = "2"
 
 [workspace.package]

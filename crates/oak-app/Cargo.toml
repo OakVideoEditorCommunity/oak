@@ -98,7 +98,7 @@ image = "0.25"
 # https://docs.crabnebula.dev/packager/configuration/).
 #
 # Binaries are resolved relative to `target/<profile>` (oak-editor is the
-# main binary; oak-cli / oak-worker are bundled alongside). They must exist
+# main binary; oak-cli is bundled alongside). They must exist
 # before packaging runs — `cargo packager` does NOT build the app itself, so
 # CD builds with `cargo build --release` first.
 #
@@ -138,5 +138,4 @@ resources = [
 binaries = [
     { path = "oak-editor", main = true },
     { path = "oak-cli", main = false },
-    { path = "oak-worker", main = false },
 ]

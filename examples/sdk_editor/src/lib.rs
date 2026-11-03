@@ -73,7 +73,7 @@ pub fn init_engine() {
 	ofx::register_plugin_nodes();
 	ofx::install_render_executor();
 	// Threads backend: renders inline on the calling worker, so the example
-	// also runs in CI/containers without the oak-worker binary.
+	// also runs in CI/containers without a separate worker binary.
 	let _ = render::manager_init(RenderBackend::Threads);
 }
 

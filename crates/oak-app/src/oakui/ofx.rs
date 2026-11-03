@@ -23,8 +23,8 @@
 //!
 //! ## Rendering topology and progress
 //!
-//! Preview/export rendering runs through the process-isolated oak-worker
-//! pool (M15 S2), so plugin rendering happens in the worker process where
+//! Preview/export rendering now runs in-process (no worker process), so
+//! plugin execution happens in the main process where
 //! this main-process reporter factory is not in effect. The wiring still
 //! serves the in-process render paths (e.g. the test-only inline backend).
 //! Worker-side progress is forwarded over the control plane: the worker
