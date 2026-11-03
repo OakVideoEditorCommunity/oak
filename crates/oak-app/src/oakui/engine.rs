@@ -915,6 +915,16 @@ pub trait AppEngine:
 		Err("subtitle export not supported".into())
 	}
 
+	/// Reads the subtitle style currently applied to a Text clip.
+	fn subtitle_style(&self, _clip: u64) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
+		None
+	}
+
+	/// Reads a clip's audio mix and effect chain.
+	fn clip_audio(&self, _clip: u64) -> Option<quercus_engine_rs::editor::ClipAudioState> {
+		None
+	}
+
 	/// Apply a subtitle style to one Text clip.
 	fn set_subtitle_style(
 		&mut self,
@@ -963,6 +973,27 @@ pub trait AppEngine:
 		_clips: &[u64],
 		_fade_in: (i64, i64),
 		_fade_out: (i64, i64),
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Enable/disable one audio effect-chain entry.
+	fn set_clip_audio_effect_enabled(
+		&mut self,
+		_clip: u64,
+		_index: usize,
+		_enabled: bool,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Remove one audio effect-chain entry.
+	fn remove_clip_audio_effect(
+		&mut self,
+		_clip: u64,
+		_index: usize,
 		_cx: &mut Context<Self>,
 	) -> Result<(), String> {
 		Err("clip audio is not supported".into())

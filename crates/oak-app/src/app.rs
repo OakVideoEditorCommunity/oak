@@ -3076,11 +3076,25 @@ impl<E: AppEngine> OakApp<E> {
 		if !matches!(self.modal, ModalState::None) {
 			return;
 		}
-		if self.timeline.read(cx).selection().is_empty() {
+		let clip = self
+			.timeline
+			.read(cx)
+			.selection()
+			.iter()
+			.next()
+			.map(|clip| clip.0);
+		let Some(clip) = clip else {
 			return;
-		}
+		};
+		let style = self
+			.engine
+			.read(cx)
+			.subtitle_style(clip)
+			.unwrap_or_default();
 		self.spawn_modal(cx, move |window, app| {
-			let content = app.new(|cx| crate::dialogs::SubtitleStyleContent::new(window, cx));
+			let content = app.new(|cx| {
+				crate::dialogs::SubtitleStyleContent::new(&style, window, cx)
+			});
 			let modal = app.new(|cx| {
 				Modal::new(
 					modal_ids::SUBTITLE_PROPERTIES,
@@ -3104,11 +3118,21 @@ impl<E: AppEngine> OakApp<E> {
 		if !matches!(self.modal, ModalState::None) {
 			return;
 		}
-		if self.timeline.read(cx).selection().is_empty() {
+		let clip = self
+			.timeline
+			.read(cx)
+			.selection()
+			.iter()
+			.next()
+			.map(|clip| clip.0);
+		let Some(clip) = clip else {
 			return;
-		}
+		};
+		let audio = self.engine.read(cx).clip_audio(clip).unwrap_or_default();
 		self.spawn_modal(cx, move |window, app| {
-			let content = app.new(|cx| crate::dialogs::AudioPropertiesContent::new(window, cx));
+			let content = app.new(|cx| {
+				crate::dialogs::AudioPropertiesContent::new(&audio, window, cx)
+			});
 			let modal = app.new(|cx| {
 				Modal::new(
 					modal_ids::AUDIO_PROPERTIES,
@@ -3564,7 +3588,45 @@ impl<E: AppEngine> OakApp<E> {
 							};
 							let (gain, pan, fade_in, fade_out) =
 								content.read(cx).mix(cx);
-							let effects = content.read(cx).effects(cx).to_vec();
+							let initial = content.read(cx).initial_effects().to_vec();
+							let desired = content.read(cx).effects(cx);
+							let mut used = vec![false; initial.len()];
+							let mut updates: Vec<(usize, String, f64)> = Vec::new();
+							let mut additions: Vec<(String, String, f64)> = Vec::new();
+							for (type_id, input, value) in &desired {
+								if let Some((index, effect)) = initial
+									.iter()
+									.enumerate()
+									.find(|(_, effect)| {
+										!used
+											.iter()
+											.enumerate()
+											.any(|(i, used)| {
+												*used && initial[i].type_id == effect.type_id
+											})
+											&& effect.type_id == *type_id
+									})
+								{
+									let position = initial
+										.iter()
+										.position(|candidate| {
+											std::ptr::eq(candidate, effect)
+										})
+										.unwrap_or(index);
+									// Mark the matched entry used; the find
+									// above only excludes already-used ones.
+									used[position] = true;
+									updates.push((position, input.clone(), *value));
+								} else {
+									additions.push((type_id.clone(), input.clone(), *value));
+								}
+							}
+							let removals: Vec<usize> = initial
+								.iter()
+								.enumerate()
+								.filter_map(|(index, _)| (!used[index]).then_some(index))
+								.collect();
+							let final_len = initial.len() - removals.len();
 							let result = self.engine.update(cx, |engine, cx| {
 								engine.set_clip_audio_gain(&[clip], gain, cx)?;
 								engine.set_clip_audio_pan(&[clip], pan, cx)?;
@@ -3574,13 +3636,26 @@ impl<E: AppEngine> OakApp<E> {
 									((fade_out * 1000.0) as i64, 1000),
 									cx,
 								)?;
-								for (index, (type_id, input, value)) in
-									effects.iter().enumerate()
+								for (index, input, value) in &updates {
+									engine.set_clip_audio_effect_param(
+										clip, *index, input, *value, cx,
+									)?;
+									if !initial[*index].enabled {
+										engine.set_clip_audio_effect_enabled(
+											clip, *index, true, cx,
+										)?;
+									}
+								}
+								for index in removals.iter().rev() {
+									engine.remove_clip_audio_effect(clip, *index, cx)?;
+								}
+								for (offset, (type_id, input, value)) in
+									additions.iter().enumerate()
 								{
 									engine.add_clip_audio_effect(&[clip], type_id, cx)?;
 									engine.set_clip_audio_effect_param(
 										clip,
-										index,
+										final_len + offset,
 										input,
 										*value,
 										cx,

@@ -30,6 +30,7 @@ use crate::oakui::component::controls::SliderValue;
 use crate::oakui::component::controls::ValueKind;
 use crate::oakui::component::controls::{CheckBox, CheckBoxEvent, CheckState};
 use crate::oakui::component::controls::{ComboBox, ComboBoxEvent, ComboBoxOption};
+use crate::oakui::component::OfxColorPicker;
 use crate::oakui::component::controls::{SpinBox, SpinBoxEvent};
 use crate::oakui::component::text_input;
 use gpui_kit::colors::DefaultColors;
@@ -7176,40 +7177,63 @@ mod tests {
 pub struct SubtitleStyleContent {
 	font_family: Entity<TextValue>,
 	font_size: Entity<SpinBox>,
-	color: Entity<TextValue>,
+	color: Entity<OfxColorPicker>,
 	outline_enabled: Entity<CheckBox>,
 	outline_width: Entity<SpinBox>,
-	outline_color: Entity<TextValue>,
+	outline_color: Entity<OfxColorPicker>,
 	error: Option<String>,
 }
 
 impl SubtitleStyleContent {
-	/// Builds the editor seeded with the SDK default subtitle style.
-	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-		let font_family = text_field(String::new(), window, cx);
+	/// Builds the editor seeded with `style`.
+	pub fn new(
+		style: &quercus_engine_rs::editor::SubtitleStyle,
+		window: &mut Window,
+		cx: &mut Context<Self>,
+	) -> Self {
+		let font_family = text_field(style.font_family.clone(), window, cx);
 		let font_size = cx.new(|cx| {
 			SpinBox::new(
 				81,
-				SliderModel::new(ValueKind::Float, 1.0, 400.0, 1.0, 72.0),
+				SliderModel::new(ValueKind::Float, 1.0, 400.0, 1.0, f64::from(style.font_size)),
 				window,
 				cx,
 			)
 		});
-		let color = text_field("FFFFFF".to_string(), window, cx);
+		let color = cx.new(|cx| {
+			OfxColorPicker::new(83, rgba_from_array(style.color), window, cx)
+		});
 		let outline_enabled = cx.new(|cx| {
-			CheckBox::new(82, CheckState::Checked, window, cx)
-				.with_label(i18n::tr("subtitle.style.outline"))
+			CheckBox::new(
+				82,
+				if style.outline_enabled {
+					CheckState::Checked
+				} else {
+					CheckState::Unchecked
+				},
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("subtitle.style.outline"))
 		});
 		subscribe_checkbox(&outline_enabled, cx);
 		let outline_width = cx.new(|cx| {
 			SpinBox::new(
-				83,
-				SliderModel::new(ValueKind::Float, 0.0, 40.0, 0.5, 2.0),
+				84,
+				SliderModel::new(
+					ValueKind::Float,
+					0.0,
+					40.0,
+					0.5,
+					f64::from(style.outline_width),
+				),
 				window,
 				cx,
 			)
 		});
-		let outline_color = text_field("000000".to_string(), window, cx);
+		let outline_color = cx.new(|cx| {
+			OfxColorPicker::new(85, rgba_from_array(style.outline_color), window, cx)
+		});
 		Self {
 			font_family,
 			font_size,
@@ -7223,10 +7247,8 @@ impl SubtitleStyleContent {
 
 	/// The style currently entered.
 	pub fn style(&self, cx: &App) -> Result<quercus_engine_rs::editor::SubtitleStyle, String> {
-		let color = parse_hex_color(self.color.read(cx).value(cx))
-			.ok_or_else(|| i18n::tr("subtitle.style.invalid_color").to_string())?;
-		let outline_color = parse_hex_color(self.outline_color.read(cx).value(cx))
-			.ok_or_else(|| i18n::tr("subtitle.style.invalid_color").to_string())?;
+		let color = color_from_rgba(self.color.read(cx).committed());
+		let outline_color = color_from_rgba(self.outline_color.read(cx).committed());
 		Ok(quercus_engine_rs::editor::SubtitleStyle {
 			font_family: self.font_family.read(cx).value(cx).to_string(),
 			font_size: self.font_size.read(cx).value().to_f64() as f32,
@@ -7305,39 +7327,122 @@ pub struct AudioPropertiesContent {
 	volume: Entity<SpinBox>,
 	pan_effect_enabled: Entity<CheckBox>,
 	pan_effect: Entity<SpinBox>,
+	initial_effects: Vec<quercus_engine_rs::editor::ClipAudioEffect>,
 	error: Option<String>,
 }
 
 impl AudioPropertiesContent {
-	/// Builds the editor seeded with unity gain, centre pan and no fades.
-	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+	/// Builds the editor seeded with `audio`.
+	pub fn new(
+		audio: &quercus_engine_rs::editor::ClipAudioState,
+		window: &mut Window,
+		cx: &mut Context<Self>,
+	) -> Self {
+		let volume_effect = audio.effects.iter().find(|effect| {
+			effect.type_id == "org.olivevideoeditor.Olive.volume"
+		});
+		let pan_effect_entry = audio.effects.iter().find(|effect| {
+			effect.type_id == "org.olivevideoeditor.Olive.pan"
+		});
 		let gain = cx.new(|cx| {
-			SpinBox::new(91, SliderModel::new(ValueKind::Float, 0.0, 4.0, 0.05, 1.0), window, cx)
+			SpinBox::new(
+				91,
+				SliderModel::new(ValueKind::Float, 0.0, 4.0, 0.05, audio.gain),
+				window,
+				cx,
+			)
 		});
 		let pan = cx.new(|cx| {
-			SpinBox::new(92, SliderModel::new(ValueKind::Float, -1.0, 1.0, 0.05, 0.0), window, cx)
+			SpinBox::new(
+				92,
+				SliderModel::new(ValueKind::Float, -1.0, 1.0, 0.05, audio.pan),
+				window,
+				cx,
+			)
 		});
 		let fade_in = cx.new(|cx| {
-			SpinBox::new(93, SliderModel::new(ValueKind::Float, 0.0, 10.0, 0.1, 0.0), window, cx)
+			SpinBox::new(
+				93,
+				SliderModel::new(
+					ValueKind::Float,
+					0.0,
+					10.0,
+					0.1,
+					audio.fade_in.to_f64(),
+				),
+				window,
+				cx,
+			)
 		});
 		let fade_out = cx.new(|cx| {
-			SpinBox::new(94, SliderModel::new(ValueKind::Float, 0.0, 10.0, 0.1, 0.0), window, cx)
+			SpinBox::new(
+				94,
+				SliderModel::new(
+					ValueKind::Float,
+					0.0,
+					10.0,
+					0.1,
+					audio.fade_out.to_f64(),
+				),
+				window,
+				cx,
+			)
 		});
 		let volume_enabled = cx.new(|cx| {
-			CheckBox::new(95, CheckState::Unchecked, window, cx)
-				.with_label(i18n::tr("audio.props.volume_effect"))
+			CheckBox::new(
+				95,
+				if volume_effect.is_some() {
+					CheckState::Checked
+				} else {
+					CheckState::Unchecked
+				},
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("audio.props.volume_effect"))
 		});
 		subscribe_checkbox(&volume_enabled, cx);
 		let volume = cx.new(|cx| {
-			SpinBox::new(96, SliderModel::new(ValueKind::Float, 0.0, 4.0, 0.05, 1.0), window, cx)
+			SpinBox::new(
+				96,
+				SliderModel::new(
+					ValueKind::Float,
+					0.0,
+					4.0,
+					0.05,
+					volume_effect.and_then(|effect| effect.volume).unwrap_or(1.0),
+				),
+				window,
+				cx,
+			)
 		});
 		let pan_effect_enabled = cx.new(|cx| {
-			CheckBox::new(97, CheckState::Unchecked, window, cx)
-				.with_label(i18n::tr("audio.props.pan_effect"))
+			CheckBox::new(
+				97,
+				if pan_effect_entry.is_some() {
+					CheckState::Checked
+				} else {
+					CheckState::Unchecked
+				},
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("audio.props.pan_effect"))
 		});
 		subscribe_checkbox(&pan_effect_enabled, cx);
 		let pan_effect = cx.new(|cx| {
-			SpinBox::new(98, SliderModel::new(ValueKind::Float, -1.0, 1.0, 0.05, 0.0), window, cx)
+			SpinBox::new(
+				98,
+				SliderModel::new(
+					ValueKind::Float,
+					-1.0,
+					1.0,
+					0.05,
+					pan_effect_entry.and_then(|effect| effect.pan).unwrap_or(0.0),
+				),
+				window,
+				cx,
+			)
 		});
 		Self {
 			gain,
@@ -7348,6 +7453,7 @@ impl AudioPropertiesContent {
 			volume,
 			pan_effect_enabled,
 			pan_effect,
+			initial_effects: audio.effects.clone(),
 			error: None,
 		}
 	}
@@ -7363,23 +7469,28 @@ impl AudioPropertiesContent {
 	}
 
 	/// `Some(value)` for each enabled effect, in chain order (Volume first).
-	pub fn effects(&self, cx: &App) -> Vec<(&'static str, &'static str, f64)> {
+	pub fn effects(&self, cx: &App) -> Vec<(String, String, f64)> {
 		let mut effects = Vec::new();
 		if self.volume_enabled.read(cx).state() == CheckState::Checked {
 			effects.push((
-				"org.olivevideoeditor.Olive.volume",
-				"volume_in",
+				"org.olivevideoeditor.Olive.volume".to_string(),
+				"volume_in".to_string(),
 				self.volume.read(cx).value().to_f64(),
 			));
 		}
 		if self.pan_effect_enabled.read(cx).state() == CheckState::Checked {
 			effects.push((
-				"org.olivevideoeditor.Olive.pan",
-				"panning_in",
+				"org.olivevideoeditor.Olive.pan".to_string(),
+				"panning_in".to_string(),
 				self.pan_effect.read(cx).value().to_f64(),
 			));
 		}
 		effects
+	}
+
+	/// The effect chain as it was when the dialog opened.
+	pub fn initial_effects(&self) -> &[quercus_engine_rs::editor::ClipAudioEffect] {
+		&self.initial_effects
 	}
 
 	/// The validation error shown under the form.
@@ -7442,6 +7553,25 @@ fn subscribe_checkbox<T: 'static>(check: &Entity<CheckBox>, cx: &mut Context<T>)
 	.detach();
 }
 
+fn rgba_from_array(color: [f64; 4]) -> gpui_kit::Rgba {
+	gpui_kit::Rgba {
+		r: color[0] as f32,
+		g: color[1] as f32,
+		b: color[2] as f32,
+		a: color[3] as f32,
+	}
+}
+
+fn color_from_rgba(color: gpui_kit::Rgba) -> [f64; 4] {
+	[
+		color.r as f64,
+		color.g as f64,
+		color.b as f64,
+		color.a as f64,
+	]
+}
+
+#[allow(dead_code)]
 fn parse_hex_color(text: SharedString) -> Option<[f64; 4]> {
 	let text = text.trim().trim_start_matches('#');
 	if text.len() != 6 {

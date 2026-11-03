@@ -1931,6 +1931,10 @@ impl OfxColorPicker {
 	/// Apply a committed colour from the engine (called every frame from
 	/// the params view's value sync). While the popup is open the draft is
 	/// left alone so an in-progress edit is not clobbered by re-syncs.
+	pub(crate) fn committed(&self) -> Rgba {
+		self.committed
+	}
+
 	pub(crate) fn set_committed(&mut self, color: Rgba, cx: &mut Context<Self>) {
 		if self.committed == color {
 			return;

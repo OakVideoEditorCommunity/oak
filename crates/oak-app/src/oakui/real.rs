@@ -5013,6 +5013,19 @@ impl AppEngine for RealEngine {
 		Ok(())
 	}
 
+	fn subtitle_style(
+		&self,
+		clip: u64,
+	) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
+		let session = self.editor_session()?;
+		session.subtitle_style(quercus_engine_rs::node::NodeId::from_raw(clip))
+	}
+
+	fn clip_audio(&self, clip: u64) -> Option<quercus_engine_rs::editor::ClipAudioState> {
+		let session = self.editor_session()?;
+		session.clip_audio(quercus_engine_rs::node::NodeId::from_raw(clip))
+	}
+
 	fn set_subtitle_style(
 		&mut self,
 		clip: u64,
@@ -5027,6 +5040,48 @@ impl AppEngine for RealEngine {
 			style,
 		) {
 			return Err("failed to apply subtitle style".into());
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn set_clip_audio_effect_enabled(
+		&mut self,
+		clip: u64,
+		index: usize,
+		enabled: bool,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		if !session.set_clip_audio_effect_enabled(
+			quercus_engine_rs::node::NodeId::from_raw(clip),
+			index,
+			enabled,
+		) {
+			return Err("failed to set audio effect enabled".into());
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn remove_clip_audio_effect(
+		&mut self,
+		clip: u64,
+		index: usize,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		if !session.remove_clip_audio_effect(
+			quercus_engine_rs::node::NodeId::from_raw(clip),
+			index,
+		) {
+			return Err("failed to remove audio effect".into());
 		}
 		self.rebuild_timeline();
 		cx.notify();
