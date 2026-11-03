@@ -158,6 +158,10 @@ mod modal_ids {
 	pub const CLIP_RENAME: usize = 23;
 	/// The speed/duration prompt (编辑 → 速度/持续时间 on the timeline).
 	pub const CLIP_SPEED: usize = 24;
+	/// Subtitle font/size/outline editor.
+	pub const SUBTITLE_PROPERTIES: usize = 25;
+	/// Per-clip audio gain/pan/fade + effect parameter editor.
+	pub const AUDIO_PROPERTIES: usize = 26;
 }
 
 /// What a picked platform-dialog path should do.
@@ -286,6 +290,16 @@ enum ModalState<E: AppEngine> {
 		modal: Entity<Modal>,
 		content: Entity<crate::dialogs::MulticamWizardContent<E>>,
 	},
+	/// Subtitle font/size/outline editor.
+	SubtitleProperties {
+		modal: Entity<Modal>,
+		content: Entity<crate::dialogs::SubtitleStyleContent>,
+	},
+	/// Per-clip audio gain/pan/fade + effect parameter editor.
+	AudioProperties {
+		modal: Entity<Modal>,
+		content: Entity<crate::dialogs::AudioPropertiesContent>,
+	},
 	/// The project-explorer rename dialog (right-click → 重命名): the
 	/// content's field is prefilled with the entry's current name.
 	EntryRename {
@@ -338,6 +352,8 @@ impl<E: AppEngine> ModalState<E> {
 			| ModalState::SequenceProperties { modal, .. }
 			| ModalState::DropSequenceChoice { modal, .. }
 			| ModalState::MulticamWizard { modal, .. }
+			| ModalState::SubtitleProperties { modal, .. }
+			| ModalState::AudioProperties { modal, .. }
 			| ModalState::EntryRename { modal, .. } => Some(modal.clone()),
 			| ModalState::ExportProjectDfd { modal, .. } => Some(modal.clone()),
 			| ModalState::NewProject { modal, .. } => Some(modal.clone()),
@@ -1289,6 +1305,8 @@ impl<E: AppEngine> OakApp<E> {
 			A::ProxySettings => self.open_proxy_dialog(cx),
 			A::ProjectProperties => self.open_project_properties(cx),
 			A::MulticamWizard => self.open_multicam_wizard(cx),
+			A::SubtitleProperties => self.open_subtitle_properties(cx),
+			A::AudioProperties => self.open_audio_properties(cx),
 			A::NewSequence => self.open_new_sequence(cx),
 			A::NewFolder => {
 				if let Err(err) = self
@@ -3053,6 +3071,62 @@ impl<E: AppEngine> OakApp<E> {
 		self.close_modal(cx);
 	}
 
+	/// Opens the subtitle style editor for the selected timeline clip.
+	fn open_subtitle_properties(&mut self, cx: &mut Context<Self>) {
+		if !matches!(self.modal, ModalState::None) {
+			return;
+		}
+		if self.timeline.read(cx).selection().is_empty() {
+			return;
+		}
+		self.spawn_modal(cx, move |window, app| {
+			let content = app.new(|cx| crate::dialogs::SubtitleStyleContent::new(window, cx));
+			let modal = app.new(|cx| {
+				Modal::new(
+					modal_ids::SUBTITLE_PROPERTIES,
+					ModalOptions::new(crate::i18n::tr("subtitle.style.title"), px(520.0))
+						.with_button(DialogButton::primary(crate::i18n::tr("dialog.ok")))
+						.with_button(DialogButton::new(
+							crate::i18n::tr("dialog.cancel"),
+							crate::widgets::dialog::DialogButtonRole::Secondary,
+						)),
+					window,
+					cx,
+				)
+				.with_content(content.clone())
+			});
+			ModalState::SubtitleProperties { modal, content }
+		});
+	}
+
+	/// Opens the per-clip audio properties/effect parameter editor.
+	fn open_audio_properties(&mut self, cx: &mut Context<Self>) {
+		if !matches!(self.modal, ModalState::None) {
+			return;
+		}
+		if self.timeline.read(cx).selection().is_empty() {
+			return;
+		}
+		self.spawn_modal(cx, move |window, app| {
+			let content = app.new(|cx| crate::dialogs::AudioPropertiesContent::new(window, cx));
+			let modal = app.new(|cx| {
+				Modal::new(
+					modal_ids::AUDIO_PROPERTIES,
+					ModalOptions::new(crate::i18n::tr("audio.props.title"), px(520.0))
+						.with_button(DialogButton::primary(crate::i18n::tr("dialog.ok")))
+						.with_button(DialogButton::new(
+							crate::i18n::tr("dialog.cancel"),
+							crate::widgets::dialog::DialogButtonRole::Secondary,
+						)),
+					window,
+					cx,
+				)
+				.with_content(content.clone())
+			});
+			ModalState::AudioProperties { modal, content }
+		});
+	}
+
 	/// Opens the multicam wizard (窗口 → 多机位向导): pick the angle
 	/// footage, choose the sync mode, then create the multicam sequence.
 	fn open_multicam_wizard(&mut self, cx: &mut Context<Self>) {
@@ -3436,6 +3510,89 @@ impl<E: AppEngine> OakApp<E> {
 									content
 										.update(cx, |dialog, cx| dialog.set_error(Some(err), cx));
 								}
+							}
+						} else {
+							self.close_modal(cx);
+						}
+					}
+				}
+				modal_ids::SUBTITLE_PROPERTIES => {
+					if let ModalState::SubtitleProperties { content, .. } = &self.modal {
+						let content = content.clone();
+						if *button == 0 {
+							let style = content.read(cx).style(cx);
+							match style.and_then(|style| {
+								let Some(clip) = self
+									.timeline
+									.read(cx)
+									.selection()
+									.iter()
+									.next()
+									.map(|clip| clip.0)
+								else {
+									return Err("no clip selected".to_string());
+								};
+								self.engine.update(cx, |engine, cx| {
+									engine.set_subtitle_style(clip, &style, cx)
+								})
+							}) {
+								Ok(()) => self.close_modal(cx),
+								Err(err) => {
+									content.update(cx, |dialog, cx| {
+										dialog.set_error(Some(err), cx)
+									});
+								}
+							}
+						} else {
+							self.close_modal(cx);
+						}
+					}
+				}
+				modal_ids::AUDIO_PROPERTIES => {
+					if let ModalState::AudioProperties { content, .. } = &self.modal {
+						let content = content.clone();
+						if *button == 0 {
+							let Some(clip) = self
+								.timeline
+								.read(cx)
+								.selection()
+								.iter()
+								.next()
+								.map(|clip| clip.0)
+							else {
+								return;
+							};
+							let (gain, pan, fade_in, fade_out) =
+								content.read(cx).mix(cx);
+							let effects = content.read(cx).effects(cx).to_vec();
+							let result = self.engine.update(cx, |engine, cx| {
+								engine.set_clip_audio_gain(&[clip], gain, cx)?;
+								engine.set_clip_audio_pan(&[clip], pan, cx)?;
+								engine.set_clip_audio_fade(
+									&[clip],
+									((fade_in * 1000.0) as i64, 1000),
+									((fade_out * 1000.0) as i64, 1000),
+									cx,
+								)?;
+								for (index, (type_id, input, value)) in
+									effects.iter().enumerate()
+								{
+									engine.add_clip_audio_effect(&[clip], type_id, cx)?;
+									engine.set_clip_audio_effect_param(
+										clip,
+										index,
+										input,
+										*value,
+										cx,
+									)?;
+								}
+								Ok(())
+							});
+							match result {
+								Ok(()) => self.close_modal(cx),
+								Err(err) => content.update(cx, |dialog, cx| {
+									dialog.set_error(Some(err), cx)
+								}),
 							}
 						} else {
 							self.close_modal(cx);
@@ -3978,7 +4135,8 @@ fn make_menus(state: MenuState) -> Vec<MenuBarEntry> {
 				menu_item(A::SetWorkArea),
 				menu_item(A::ClearWorkArea).separated(),
 				menu_item(A::RemoveMarker),
-				menu_item(A::MulticamWizard).separated(),
+				menu_item(A::MulticamWizard),
+				menu_item(A::SubtitleProperties).separated(),
 				MenuItem::new(A::AudioGain50.menu_id(), tr("menu.sequence.audio")).with_submenu(
 					Menu::new(vec![
 						menu_item(A::AudioGain50),
@@ -3991,6 +4149,7 @@ fn make_menus(state: MenuState) -> Vec<MenuBarEntry> {
 						menu_item(A::AudioFadeOut).separated(),
 						menu_item(A::AudioAddVolume),
 						menu_item(A::AudioAddPan),
+						menu_item(A::AudioProperties).separated(),
 					]),
 				),
 				menu_item(A::SeqCache),

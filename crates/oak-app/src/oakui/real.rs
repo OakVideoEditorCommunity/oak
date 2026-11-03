@@ -5013,6 +5013,50 @@ impl AppEngine for RealEngine {
 		Ok(())
 	}
 
+	fn set_subtitle_style(
+		&mut self,
+		clip: u64,
+		style: &quercus_engine_rs::editor::SubtitleStyle,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		if !session.set_subtitle_style(
+			quercus_engine_rs::node::NodeId::from_raw(clip),
+			style,
+		) {
+			return Err("failed to apply subtitle style".into());
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn set_clip_audio_effect_param(
+		&mut self,
+		clip: u64,
+		index: usize,
+		input: &str,
+		value: f64,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		if !session.set_clip_audio_effect_param(
+			quercus_engine_rs::node::NodeId::from_raw(clip),
+			index,
+			input,
+			value,
+		) {
+			return Err("failed to set audio effect parameter".into());
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
 	fn import_footage(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
 		let Some(project) = self.project.clone() else {
 			return Err("no project open".into());

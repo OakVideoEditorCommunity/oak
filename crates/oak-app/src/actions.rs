@@ -111,6 +111,7 @@ define_actions! {
 	Revert { cpp: "revert", i18n: "menu.file.revert", keys: ["f12"], route: Global, menu_id: 1005 };
 	Import { cpp: "import", i18n: "menu.file.import_footage", keys: ["secondary-i"], route: Global, menu_id: 108 };
 	ImportSubtitles { cpp: "importsubtitles", i18n: "menu.file.import_subtitles", keys: [], route: Global, menu_id: 610 };
+	SubtitleProperties { cpp: "subtitleproperties", i18n: "menu.sequence.subtitle_properties", keys: [], route: Global, menu_id: 613 };
 	ExportSubtitles { cpp: "exportsubtitles", i18n: "menu.file.export_subtitles", keys: [], route: Global, menu_id: 611 };
 	Export { cpp: "export", i18n: "menu.file.export_media", keys: ["secondary-m"], route: Global, menu_id: 106 };
 	ProjectProperties { cpp: "projectproperties", i18n: "menu.file.project_properties", keys: ["shift-f10"], route: Global, menu_id: 1006 };
@@ -205,6 +206,7 @@ define_actions! {
 	AudioFadeOut { cpp: "audiofadeout", i18n: "menu.sequence.audio_fade_out", keys: [], route: Global, menu_id: 627 };
 	AudioAddVolume { cpp: "audioaddvolume", i18n: "menu.sequence.audio_add_volume", keys: [], route: Global, menu_id: 628 };
 	AudioAddPan { cpp: "audioaddpan", i18n: "menu.sequence.audio_add_pan", keys: [], route: Global, menu_id: 629 };
+	AudioProperties { cpp: "audioproperties", i18n: "menu.sequence.audio_properties", keys: [], route: Global, menu_id: 630 };
 	SeqCache { cpp: "seqcache", i18n: "menu.sequence.cache", keys: [], route: Global, menu_id: 1060 };
 	SeqCacheInOut { cpp: "seqcacheinout", i18n: "menu.sequence.cache_in_out", keys: [], route: Global, menu_id: 1061 };
 	SeqCacheClear { cpp: "seqcacheclear", i18n: "menu.sequence.cache_clear", keys: [], route: Global, menu_id: 1062 };

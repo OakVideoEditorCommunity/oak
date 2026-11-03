@@ -915,6 +915,28 @@ pub trait AppEngine:
 		Err("subtitle export not supported".into())
 	}
 
+	/// Apply a subtitle style to one Text clip.
+	fn set_subtitle_style(
+		&mut self,
+		_clip: u64,
+		_style: &quercus_engine_rs::editor::SubtitleStyle,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("subtitle styling is not supported".into())
+	}
+
+	/// Set one parameter of a clip's audio effect chain entry.
+	fn set_clip_audio_effect_param(
+		&mut self,
+		_clip: u64,
+		_index: usize,
+		_input: &str,
+		_value: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
 	/// Set per-clip audio gain (1.0 = unity) on each clip.
 	fn set_clip_audio_gain(
 		&mut self,
