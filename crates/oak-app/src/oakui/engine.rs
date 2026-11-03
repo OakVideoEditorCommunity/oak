@@ -896,6 +896,66 @@ pub trait AppEngine:
 		None
 	}
 
+	/// Import an SRT file as Text clips on the current sequence's top
+	/// video track. Returns the imported cue count.
+	fn import_subtitles(
+		&mut self,
+		_path: std::path::PathBuf,
+		_cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		Err("subtitle import not supported".into())
+	}
+
+	/// Export the current sequence's Text clips as an SRT file.
+	fn export_subtitles(
+		&mut self,
+		_path: std::path::PathBuf,
+		_cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		Err("subtitle export not supported".into())
+	}
+
+	/// Set per-clip audio gain (1.0 = unity) on each clip.
+	fn set_clip_audio_gain(
+		&mut self,
+		_clips: &[u64],
+		_gain: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Set per-clip stereo pan (-1..1).
+	fn set_clip_audio_pan(
+		&mut self,
+		_clips: &[u64],
+		_pan: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Set linear fade-in/out durations (seconds) on each clip.
+	fn set_clip_audio_fade(
+		&mut self,
+		_clips: &[u64],
+		_fade_in: (i64, i64),
+		_fade_out: (i64, i64),
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Add a Volume/Pan effect to each clip's audio chain.
+	fn add_clip_audio_effect(
+		&mut self,
+		_clips: &[u64],
+		_type_id: &str,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
 	/// Import a media file into the project (M12 P3). Default: no-op.
 	fn import_footage(
 		&mut self,

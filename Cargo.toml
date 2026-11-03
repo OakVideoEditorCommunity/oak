@@ -17,13 +17,15 @@
 # Root manifest: the Cargo workspace only. The editor app lives in
 # crates/oak-app, the CLI in oak-cli, the render worker in oak-worker and
 # the extension host in oak-extensions. The engine and the Rust SDK are
-# external: consumers depend on the published `quercus-engine-rs` crate
-# (Quercus Nonlinear Video Editing Engine Rust SDK) from crates.io.
+# external: consumers depend on `quercus-engine-rs` with BOTH a pinned
+# version and a path into the `quercus-engine` git submodule (the Cargo
+# "version + path" form: the path wins locally, the version is what a
+# crates.io consumer would resolve).
 #
 # crates/oakengine.bk is the legacy C++-era backup; not a package.
 [workspace]
 members = ["crates/*", "examples/*"]
-exclude = ["crates/oakengine.bk"]
+exclude = ["crates/oakengine.bk", "quercus-engine"]
 default-members = ["crates/oak-app", "crates/oak-cli", "crates/oak-worker"]
 resolver = "2"
 

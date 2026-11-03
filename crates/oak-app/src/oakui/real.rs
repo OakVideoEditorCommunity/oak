@@ -4899,6 +4899,120 @@ impl AppEngine for RealEngine {
 		cx.notify();
 	}
 
+	fn import_subtitles(
+		&mut self,
+		path: PathBuf,
+		cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		let count = session
+			.import_subtitles(&path, 0)
+			.map_err(|code| format!("subtitle import failed ({code})"))?;
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(count)
+	}
+
+	fn export_subtitles(
+		&mut self,
+		path: PathBuf,
+		_cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		session
+			.export_subtitles(&path)
+			.map_err(|code| format!("subtitle export failed ({code})"))
+	}
+
+	fn set_clip_audio_gain(
+		&mut self,
+		clips: &[u64],
+		gain: f64,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		for clip in clips {
+			if !session.set_clip_gain(quercus_engine_rs::node::NodeId::from_raw(*clip), gain) {
+				return Err("failed to set clip gain".into());
+			}
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn set_clip_audio_pan(
+		&mut self,
+		clips: &[u64],
+		pan: f64,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		for clip in clips {
+			if !session.set_clip_pan(quercus_engine_rs::node::NodeId::from_raw(*clip), pan) {
+				return Err("failed to set clip pan".into());
+			}
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn set_clip_audio_fade(
+		&mut self,
+		clips: &[u64],
+		fade_in: (i64, i64),
+		fade_out: (i64, i64),
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		for clip in clips {
+			if !session.set_clip_fade(
+				quercus_engine_rs::node::NodeId::from_raw(*clip),
+				quercus_engine_rs::types::Rational::new(fade_in.0, fade_in.1),
+				quercus_engine_rs::types::Rational::new(fade_out.0, fade_out.1),
+			) {
+				return Err("failed to set clip fade".into());
+			}
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
+	fn add_clip_audio_effect(
+		&mut self,
+		clips: &[u64],
+		type_id: &str,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		for clip in clips {
+			if !session.add_clip_audio_effect(
+				quercus_engine_rs::node::NodeId::from_raw(*clip),
+				type_id,
+				usize::MAX,
+			) {
+				return Err("failed to add clip audio effect".into());
+			}
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
 	fn import_footage(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
 		let Some(project) = self.project.clone() else {
 			return Err("no project open".into());

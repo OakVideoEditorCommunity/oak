@@ -15,7 +15,7 @@ macOS, Linux, and Windows. For the Chinese version see
 
 - **git** — clone the repository:
   ```sh
-  git clone https://github.com/OakVideoEditorCommunity/oak.git
+  git clone --recurse-submodules https://github.com/OakVideoEditorCommunity/oak.git
   cd oak
   ```
 - **Rust stable** via [rustup](https://rustup.rs/) (on Windows the default

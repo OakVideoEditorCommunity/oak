@@ -7,11 +7,11 @@
 > - Rust SDK：<https://crates.io/crates/quercus-engine-rs>
 > - 文档：<https://docs.rs/quercus-engine-rs>
 
-Oak 应用、CLI、worker 和 `examples/sdk_editor` 现在只依赖 crates.io 上的
-SDK：
+Oak 应用、CLI、worker 和 `examples/sdk_editor` 通过 **git submodule + 版本/路径双引用**
+消费 SDK（`quercus-engine/` 子模块；本地走 path，发布消费者按 version 解析）：
 
 ```toml
-quercus-engine-rs = "=0.5.2"
+quercus-engine-rs = { version = "=0.6.1", path = "../../quercus-engine/crates/quercus-engine-rs" }
 ```
 
 ```rust

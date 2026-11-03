@@ -261,7 +261,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -272,7 +272,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -865,7 +865,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -1652,8 +1652,8 @@ dependencies = [
  "pipewire",
  "pulseaudio",
  "web-sys",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -1927,7 +1927,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2155,7 +2155,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2757,7 +2757,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.57.0",
 ]
 
 [[package]]
@@ -4021,7 +4021,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -5748,8 +5748,9 @@ dependencies = [
 
 [[package]]
 name = "ocio-rs"
-version = "0.2.1"
-source = "git+https://github.com/Mike-Solar/ocio-rs.git?rev=30338c6a169bbbada862fb3ac256e79b656159cf#30338c6a169bbbada862fb3ac256e79b656159cf"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "618c07d5d666139deb1c3032b9de5f6b4ffb3203e102716ad87cacf6455107e6"
 dependencies = [
  "ocio-sys",
  "thiserror 1.0.69",
@@ -5757,8 +5758,9 @@ dependencies = [
 
 [[package]]
 name = "ocio-sys"
-version = "0.2.1"
-source = "git+https://github.com/Mike-Solar/ocio-rs.git?rev=30338c6a169bbbada862fb3ac256e79b656159cf#30338c6a169bbbada862fb3ac256e79b656159cf"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eb7fc9fb0d5b255278fc7b6d68dcc85150fc8b86a9deab85d92246b74016b39"
 dependencies = [
  "cc",
  "cmake",
@@ -6428,9 +6430,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-audio"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bad0824b517c795c324a4b4fed77b72a25c366125b15a872c297384f9051c24"
+version = "0.6.0"
 dependencies = [
  "cpal",
  "ffmpeg-next",
@@ -6442,9 +6442,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-codec"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "656daa2565fc2551bac60d15f753a4b00ea0fcc12b001b97d41868b730dbaf6c"
+version = "0.6.0"
 dependencies = [
  "ffmpeg-next",
  "quercus-core",
@@ -6455,9 +6453,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-core"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ddb4d8edb18480fb285b88050735853d0836868b8f4959b6ef0014a6593d914"
+version = "0.6.0"
 dependencies = [
  "ash",
  "half",
@@ -6478,9 +6474,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd7fcd656cb1eae5964bfa174a29a3b60f314e1f58aebcabbb9bc021d453875"
+version = "0.6.1"
 dependencies = [
  "libc",
  "quercus-audio",
@@ -6501,9 +6495,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine-rs"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45260efb2822e00a75a08ff1c3861fcb79e38134edc250c637a9409247d45bbd"
+version = "0.6.1"
 dependencies = [
  "quercus-engine",
  "thiserror 2.0.20",
@@ -6511,15 +6503,11 @@ dependencies = [
 
 [[package]]
 name = "quercus-ffmpeg-link"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "920f1d7d63ae4c95edf924e829c1dab3860013f06edf4a60b96a0a3449fd80e3"
+version = "0.6.0"
 
 [[package]]
 name = "quercus-node"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce701f86d8d6128d5247bef2ab091d564a5abfb9c97c80572c19d78585b89c6e"
+version = "0.6.0"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6529,9 +6517,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-ofx-plugin"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b65d829f6b3192986e9d4f5a9c9d4207fdaa79c632ed4f0cc08cb0f80fc01be7"
+version = "0.6.0"
 dependencies = [
  "cc",
  "quercus-core",
@@ -6543,9 +6529,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-otio"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1001993b2253fb2c65c241c291fd3fbdd2fd423fbd2c439de767706c30d8b68e"
+version = "0.6.0"
 dependencies = [
  "quercus-core",
  "quick-xml 0.41.0",
@@ -6556,14 +6540,11 @@ dependencies = [
 
 [[package]]
 name = "quercus-render"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f1928d74f779272beced3a65fb35012d680f3eb38a96a9c9114910c845a5e2"
+version = "0.6.0"
 dependencies = [
  "cosmic-text",
  "libc",
  "naga",
- "ocio-rs",
  "quercus-codec",
  "quercus-core",
  "quercus-node",
@@ -6576,9 +6557,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-storage"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b9be52097faca9cdd3fecb9c857e72473e280cf444b9a7c4c97ac169a0d79b"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "quercus-core",
@@ -6594,9 +6573,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-task"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4d6a5bf92f700da4785900c03e816298d5b037e2a24160c33d3079f68e339ca"
+version = "0.6.0"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6609,9 +6586,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-timeline"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77af8c8799a36d7e6e2c640036a6a062fdf58e52163dfb8d47de5ed52fa75142"
+version = "0.6.0"
 dependencies = [
  "quercus-core",
  "quercus-node",
@@ -6621,9 +6596,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-undo"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3c79420a1c7f517a148232c6950bfa59bd3e5ec0cabbf665ef61d3845163345"
+version = "0.6.0"
 dependencies = [
  "thiserror 2.0.20",
 ]
@@ -6711,7 +6684,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7316,7 +7289,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8037,7 +8010,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8564,7 +8537,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8995,7 +8968,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9763,7 +9736,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -10932,3 +10905,8 @@ dependencies = [
  "syn 2.0.119",
  "winnow 1.0.4",
 ]
+
+[[patch.unused]]
+name = "ocio-rs"
+version = "0.2.1"
+source = "git+https://github.com/Mike-Solar/ocio-rs.git?rev=30338c6a169bbbada862fb3ac256e79b656159cf#30338c6a169bbbada862fb3ac256e79b656159cf"

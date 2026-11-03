@@ -1,0 +1,3 @@
+[submodule "quercus-engine"]
+	path = quercus-engine
+	url = https://github.com/OakVideoEditorCommunity/quercus-engine.git

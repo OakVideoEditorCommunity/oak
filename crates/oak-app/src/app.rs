@@ -172,11 +172,26 @@ enum FileAction {
 	// closure, so the variant is kept with an explicit allow.
 	#[allow(dead_code)]
 	ExportProjectFile,
+	/// Import an SRT file as text clips on the current sequence.
+	ImportSubtitles,
+	/// Export the current sequence's text clips as SRT.
+	ExportSubtitles,
 	/// Import a project file into the library (the manager's 导入).
 	ImportProject,
 	/// Export the selected library project (the manager's 导出; the row's
 	/// uuid is stashed in [`OakApp::pending_export`]).
 	ExportProject,
+}
+
+/// One coarse audio-post operation from the Sequence > Audio menu.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AudioEdit {
+	Gain(f64),
+	Pan(f64),
+	FadeIn,
+	FadeOut,
+	AddVolume,
+	AddPan,
 }
 
 /// The modal currently layered on top of the shell, if any.
@@ -1065,6 +1080,18 @@ impl<E: AppEngine> OakApp<E> {
 			A::OpenProject => self.open_file_dialog(FileAction::Open, cx),
 			A::OpenFromLibrary | A::ProjectManager => self.show_project_manager(cx),
 			A::Import => self.open_file_dialog(FileAction::ImportFootage, cx),
+			A::ImportSubtitles => self.open_file_dialog(FileAction::ImportSubtitles, cx),
+			A::ExportSubtitles => self.open_file_dialog(FileAction::ExportSubtitles, cx),
+			A::AudioGain50 => self.edit_selected_audio(AudioEdit::Gain(0.5), cx),
+			A::AudioGain100 => self.edit_selected_audio(AudioEdit::Gain(1.0), cx),
+			A::AudioGain200 => self.edit_selected_audio(AudioEdit::Gain(2.0), cx),
+			A::AudioPanLeft => self.edit_selected_audio(AudioEdit::Pan(-1.0), cx),
+			A::AudioPanCenter => self.edit_selected_audio(AudioEdit::Pan(0.0), cx),
+			A::AudioPanRight => self.edit_selected_audio(AudioEdit::Pan(1.0), cx),
+			A::AudioFadeIn => self.edit_selected_audio(AudioEdit::FadeIn, cx),
+			A::AudioFadeOut => self.edit_selected_audio(AudioEdit::FadeOut, cx),
+			A::AudioAddVolume => self.edit_selected_audio(AudioEdit::AddVolume, cx),
+			A::AudioAddPan => self.edit_selected_audio(AudioEdit::AddPan, cx),
 			// The 导出工程文件… dialog: choose OTIO / OVE / FCPXML + path.
 			A::SaveProject => self.open_export_project_dfd(cx),
 			A::SaveProjectAs => self.open_save_as(cx),
@@ -2178,6 +2205,39 @@ impl<E: AppEngine> OakApp<E> {
 		cx.notify();
 	}
 
+	/// Applies one Sequence > Audio operation to the timeline selection.
+	fn edit_selected_audio(&mut self, edit: AudioEdit, cx: &mut Context<Self>) {
+		let clips: Vec<u64> = self
+			.timeline
+			.read(cx)
+			.selection()
+			.iter()
+			.map(|clip| clip.0)
+			.collect();
+		if clips.is_empty() {
+			return;
+		}
+		let result = self.engine.update(cx, |engine, cx| match edit {
+			AudioEdit::Gain(gain) => engine.set_clip_audio_gain(&clips, gain, cx),
+			AudioEdit::Pan(pan) => engine.set_clip_audio_pan(&clips, pan, cx),
+			AudioEdit::FadeIn => engine.set_clip_audio_fade(&clips, (1, 1), (0, 1), cx),
+			AudioEdit::FadeOut => engine.set_clip_audio_fade(&clips, (0, 1), (1, 1), cx),
+			AudioEdit::AddVolume => engine.add_clip_audio_effect(
+				&clips,
+				"org.olivevideoeditor.Olive.volume",
+				cx,
+			),
+			AudioEdit::AddPan => engine.add_clip_audio_effect(
+				&clips,
+				"org.olivevideoeditor.Olive.pan",
+				cx,
+			),
+		});
+		if let Err(err) = result {
+			println!("[audio] {edit:?} failed: {err}");
+		}
+	}
+
 	/// Opens the platform file dialog for `action` and routes the picked
 	/// path(s) through the engine. Open / Import use the path picker (import
 	/// footage allows multiple files); the 导出工程文件… and the manager's
@@ -2185,16 +2245,20 @@ impl<E: AppEngine> OakApp<E> {
 	/// chosen path is applied in a spawned task via [`Self::on_file_paths`].
 	fn open_file_dialog(&mut self, action: FileAction, cx: &mut Context<Self>) {
 		match action {
-			FileAction::Open | FileAction::ImportFootage | FileAction::ImportProject => {
+			FileAction::Open
+			| FileAction::ImportFootage
+			| FileAction::ImportProject
+			| FileAction::ImportSubtitles => {
 				let prompt = match action {
 					FileAction::Open => crate::i18n::tr("file.open.title"),
 					FileAction::ImportProject => crate::i18n::tr("manager.import.title"),
+					FileAction::ImportSubtitles => crate::i18n::tr("file.import_subtitles.title"),
 					_ => crate::i18n::tr("file.import_footage.title"),
 				};
 				let receiver = cx.prompt_for_paths(PathPromptOptions {
 					files: true,
 					directories: false,
-					multiple: action == FileAction::ImportFootage,
+					multiple: matches!(action, FileAction::ImportFootage | FileAction::ImportSubtitles),
 					prompt: Some(prompt.into()),
 				});
 				cx.spawn(async move |this, cx| {
@@ -2206,7 +2270,7 @@ impl<E: AppEngine> OakApp<E> {
 				})
 				.detach();
 			}
-			FileAction::ExportProjectFile => {
+			FileAction::ExportProjectFile | FileAction::ExportSubtitles => {
 				let current = self
 					.engine
 					.read(cx)
@@ -2227,7 +2291,7 @@ impl<E: AppEngine> OakApp<E> {
 				cx.spawn(async move |this, cx| {
 					if let Ok(Ok(Some(path))) = receiver.await {
 						let _ = this.update(cx, |this, cx| {
-							this.on_file_paths(FileAction::ExportProjectFile, vec![path], cx);
+							this.on_file_paths(action, vec![path], cx);
 						});
 					}
 				})
@@ -2283,6 +2347,14 @@ impl<E: AppEngine> OakApp<E> {
 			},
 			FileAction::ExportProjectFile => match paths.first() {
 				Some(path) => engine.export_project_path(path.clone(), cx),
+				None => Ok(()),
+			},
+			FileAction::ImportSubtitles => match paths.first() {
+				Some(path) => engine.import_subtitles(path.clone(), cx).map(|_| ()),
+				None => Ok(()),
+			},
+			FileAction::ExportSubtitles => match paths.first() {
+				Some(path) => engine.export_subtitles(path.clone(), cx).map(|_| ()),
 				None => Ok(()),
 			},
 			FileAction::ImportFootage => {
@@ -3810,6 +3882,8 @@ fn make_menus(state: MenuState) -> Vec<MenuBarEntry> {
 					.with_submenu(Menu::new(vec![menu_item(A::ClearOpenRecent)])),
 				menu_item(A::ProjectManager).separated(),
 				menu_item(A::Import),
+				menu_item(A::ImportSubtitles),
+				menu_item(A::ExportSubtitles),
 				menu_item(A::SaveProject),
 				menu_item(A::SaveProjectAs),
 				menu_item(A::Revert),
@@ -3903,7 +3977,22 @@ fn make_menus(state: MenuState) -> Vec<MenuBarEntry> {
 				menu_item(A::RemoveTrack).separated(),
 				menu_item(A::SetWorkArea),
 				menu_item(A::ClearWorkArea).separated(),
-				menu_item(A::RemoveMarker).separated(),
+				menu_item(A::RemoveMarker),
+				menu_item(A::MulticamWizard).separated(),
+				MenuItem::new(A::AudioGain50.menu_id(), tr("menu.sequence.audio")).with_submenu(
+					Menu::new(vec![
+						menu_item(A::AudioGain50),
+						menu_item(A::AudioGain100),
+						menu_item(A::AudioGain200),
+						menu_item(A::AudioPanLeft).separated(),
+						menu_item(A::AudioPanCenter),
+						menu_item(A::AudioPanRight).separated(),
+						menu_item(A::AudioFadeIn),
+						menu_item(A::AudioFadeOut).separated(),
+						menu_item(A::AudioAddVolume),
+						menu_item(A::AudioAddPan),
+					]),
+				),
 				menu_item(A::SeqCache),
 				menu_item(A::SeqCacheInOut),
 				menu_item(A::SeqCacheClear).separated(),
