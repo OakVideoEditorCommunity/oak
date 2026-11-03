@@ -5003,7 +5003,7 @@ impl AppEngine for RealEngine {
 			if !session.add_clip_audio_effect(
 				quercus_engine_rs::node::NodeId::from_raw(*clip),
 				type_id,
-				usize::MAX,
+				i32::MAX as usize,
 			) {
 				return Err("failed to add clip audio effect".into());
 			}
