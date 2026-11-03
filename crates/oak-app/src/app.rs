@@ -3129,15 +3129,20 @@ impl<E: AppEngine> OakApp<E> {
 			return;
 		};
 		let audio = self.engine.read(cx).clip_audio(clip).unwrap_or_default();
+		let bus = self.engine.read(cx).audio_bus_effects();
 		self.spawn_modal(cx, move |window, app| {
 			let content = app.new(|cx| {
-				crate::dialogs::AudioPropertiesContent::new(&audio, window, cx)
+				crate::dialogs::AudioPropertiesContent::new(&audio, &bus, window, cx)
 			});
 			let modal = app.new(|cx| {
 				Modal::new(
 					modal_ids::AUDIO_PROPERTIES,
 					ModalOptions::new(crate::i18n::tr("audio.props.title"), px(520.0))
 						.with_button(DialogButton::primary(crate::i18n::tr("dialog.ok")))
+						.with_button(DialogButton::new(
+							crate::i18n::tr("audio.props.measure"),
+							crate::widgets::dialog::DialogButtonRole::Secondary,
+						))
 						.with_button(DialogButton::new(
 							crate::i18n::tr("dialog.cancel"),
 							crate::widgets::dialog::DialogButtonRole::Secondary,
@@ -3575,7 +3580,12 @@ impl<E: AppEngine> OakApp<E> {
 				modal_ids::AUDIO_PROPERTIES => {
 					if let ModalState::AudioProperties { content, .. } = &self.modal {
 						let content = content.clone();
-						if *button == 0 {
+						if *button == 1 {
+							let loudness = self.engine.update(cx, |engine, _cx| {
+								engine.measure_loudness()
+							});
+							content.update(cx, |dialog, cx| dialog.set_loudness(loudness, cx));
+						} else if *button == 0 {
 							let Some(clip) = self
 								.timeline
 								.read(cx)
@@ -3652,6 +3662,14 @@ impl<E: AppEngine> OakApp<E> {
 										)?;
 									}
 								}
+								let (bus_enabled, bus_ceiling, bus_release) =
+									content.read(cx).bus_limiter(cx);
+								engine.set_audio_bus_limiter(
+									bus_enabled,
+									bus_ceiling,
+									bus_release,
+									cx,
+								)?;
 								Ok(())
 							});
 							match result {

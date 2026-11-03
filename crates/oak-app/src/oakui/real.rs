@@ -5026,6 +5026,62 @@ impl AppEngine for RealEngine {
 		session.clip_audio(quercus_engine_rs::node::NodeId::from_raw(clip))
 	}
 
+	fn measure_loudness(&mut self) -> Option<quercus_engine_rs::editor::LoudnessMeasurement> {
+		let session = self.editor_session()?;
+		let frames = self.sequence_length().0 as f64;
+		let (num, den) = self.time_base()?;
+		let seconds = frames * num as f64 / den as f64;
+		let range = quercus_engine_rs::types::TimeRange::new(
+			quercus_engine_rs::types::Rational::new(0, 1),
+			quercus_engine_rs::types::Rational::from_f64(seconds),
+		);
+		session.measure_loudness(range)
+	}
+
+	fn audio_bus_effects(&self) -> Vec<quercus_engine_rs::editor::AudioBusEffect> {
+		let Some(session) = self.editor_session() else {
+			return Vec::new();
+		};
+		session.audio_bus_effects()
+	}
+
+	fn set_audio_bus_limiter(
+		&mut self,
+		enabled: bool,
+		ceiling_db: f64,
+		release_ms: f64,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		let limiter = "org.olivevideoeditor.Olive.limiter";
+		let mut indices: Vec<usize> = session
+			.audio_bus_effects()
+			.iter()
+			.enumerate()
+			.filter(|(_, effect)| effect.type_id == limiter)
+			.map(|(index, _)| index)
+			.collect();
+		for index in indices.drain(..).rev() {
+			session.remove_audio_bus_effect(index);
+		}
+		if enabled {
+			if !session.add_audio_bus_effect(limiter, i32::MAX as usize) {
+				return Err("failed to add master limiter".into());
+			}
+			let index = session.audio_bus_effects().len().saturating_sub(1);
+			if !session.set_audio_bus_effect_param(index, "ceiling_db", ceiling_db)
+				|| !session.set_audio_bus_effect_param(index, "release_ms", release_ms)
+			{
+				return Err("failed to set master limiter parameters".into());
+			}
+		}
+		self.rebuild_timeline();
+		cx.notify();
+		Ok(())
+	}
+
 	fn set_subtitle_style(
 		&mut self,
 		clip: u64,

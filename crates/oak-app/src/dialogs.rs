@@ -7337,6 +7337,23 @@ pub struct AudioPropertiesContent {
 	comp_attack: Entity<SpinBox>,
 	comp_release: Entity<SpinBox>,
 	comp_makeup: Entity<SpinBox>,
+	limiter_enabled: Entity<CheckBox>,
+	limiter_ceiling: Entity<SpinBox>,
+	limiter_release: Entity<SpinBox>,
+	gate_enabled: Entity<CheckBox>,
+	gate_threshold: Entity<SpinBox>,
+	gate_attack: Entity<SpinBox>,
+	gate_release: Entity<SpinBox>,
+	gate_hold: Entity<SpinBox>,
+	duck_enabled: Entity<CheckBox>,
+	duck_threshold: Entity<SpinBox>,
+	duck_amount: Entity<SpinBox>,
+	duck_attack: Entity<SpinBox>,
+	duck_release: Entity<SpinBox>,
+	bus_limiter_enabled: Entity<CheckBox>,
+	bus_limiter_ceiling: Entity<SpinBox>,
+	bus_limiter_release: Entity<SpinBox>,
+	loudness: Option<quercus_engine_rs::editor::LoudnessMeasurement>,
 	initial_effects: Vec<quercus_engine_rs::editor::ClipAudioEffect>,
 	error: Option<String>,
 }
@@ -7345,6 +7362,7 @@ impl AudioPropertiesContent {
 	/// Builds the editor seeded with `audio`.
 	pub fn new(
 		audio: &quercus_engine_rs::editor::ClipAudioState,
+		bus: &[quercus_engine_rs::editor::AudioBusEffect],
 		window: &mut Window,
 		cx: &mut Context<Self>,
 	) -> Self {
@@ -7566,6 +7584,104 @@ impl AudioPropertiesContent {
 				cx,
 			)
 		});
+		let limiter = audio
+			.effects
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.limiter");
+		let limiter_param = |input: &str, default: f64| {
+			limiter.and_then(|effect| {
+				effect.params.iter().find(|(id, _)| id == input).map(|(_, v)| *v)
+			}).unwrap_or(default)
+		};
+		let limiter_enabled = cx.new(|cx| {
+			CheckBox::new(110, if limiter.is_some() { CheckState::Checked } else { CheckState::Unchecked }, window, cx)
+				.with_label(i18n::tr("audio.props.limiter_effect"))
+		});
+		subscribe_checkbox(&limiter_enabled, cx);
+		let limiter_ceiling = cx.new(|cx| {
+			SpinBox::new(111, SliderModel::new(ValueKind::Float, -24.0, 0.0, 0.1, limiter_param("ceiling_db", -1.0)), window, cx)
+		});
+		let limiter_release = cx.new(|cx| {
+			SpinBox::new(112, SliderModel::new(ValueKind::Float, 1.0, 1000.0, 1.0, limiter_param("release_ms", 50.0)), window, cx)
+		});
+		let gate = audio
+			.effects
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.gate");
+		let gate_param = |input: &str, default: f64| {
+			gate.and_then(|effect| {
+				effect.params.iter().find(|(id, _)| id == input).map(|(_, v)| *v)
+			}).unwrap_or(default)
+		};
+		let gate_enabled = cx.new(|cx| {
+			CheckBox::new(113, if gate.is_some() { CheckState::Checked } else { CheckState::Unchecked }, window, cx)
+				.with_label(i18n::tr("audio.props.gate_effect"))
+		});
+		subscribe_checkbox(&gate_enabled, cx);
+		let gate_threshold = cx.new(|cx| {
+			SpinBox::new(114, SliderModel::new(ValueKind::Float, -80.0, 0.0, 1.0, gate_param("threshold_db", -40.0)), window, cx)
+		});
+		let gate_attack = cx.new(|cx| {
+			SpinBox::new(115, SliderModel::new(ValueKind::Float, 0.1, 200.0, 0.1, gate_param("attack_ms", 5.0)), window, cx)
+		});
+		let gate_release = cx.new(|cx| {
+			SpinBox::new(116, SliderModel::new(ValueKind::Float, 1.0, 2000.0, 1.0, gate_param("release_ms", 100.0)), window, cx)
+		});
+		let gate_hold = cx.new(|cx| {
+			SpinBox::new(117, SliderModel::new(ValueKind::Float, 0.0, 500.0, 1.0, gate_param("hold_ms", 20.0)), window, cx)
+		});
+		let duck = audio
+			.effects
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.ducking");
+		let duck_param = |input: &str, default: f64| {
+			duck.and_then(|effect| {
+				effect.params.iter().find(|(id, _)| id == input).map(|(_, v)| *v)
+			}).unwrap_or(default)
+		};
+		let duck_enabled = cx.new(|cx| {
+			CheckBox::new(118, if duck.is_some() { CheckState::Checked } else { CheckState::Unchecked }, window, cx)
+				.with_label(i18n::tr("audio.props.duck_effect"))
+		});
+		subscribe_checkbox(&duck_enabled, cx);
+		let duck_threshold = cx.new(|cx| {
+			SpinBox::new(119, SliderModel::new(ValueKind::Float, -80.0, 0.0, 1.0, duck_param("threshold_db", -30.0)), window, cx)
+		});
+		let duck_amount = cx.new(|cx| {
+			SpinBox::new(120, SliderModel::new(ValueKind::Float, -40.0, 0.0, 1.0, duck_param("amount_db", -12.0)), window, cx)
+		});
+		let duck_attack = cx.new(|cx| {
+			SpinBox::new(121, SliderModel::new(ValueKind::Float, 0.1, 500.0, 0.1, duck_param("attack_ms", 50.0)), window, cx)
+		});
+		let duck_release = cx.new(|cx| {
+			SpinBox::new(122, SliderModel::new(ValueKind::Float, 1.0, 3000.0, 1.0, duck_param("release_ms", 300.0)), window, cx)
+		});
+		let bus_limiter = bus
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.limiter");
+		let bus_param = |input: &str, default: f64| {
+			bus_limiter
+				.and_then(|effect| {
+					effect.params.iter().find(|(id, _)| id == input).map(|(_, v)| *v)
+				})
+				.unwrap_or(default)
+		};
+		let bus_limiter_enabled = cx.new(|cx| {
+			CheckBox::new(
+				130,
+				if bus_limiter.is_some() { CheckState::Checked } else { CheckState::Unchecked },
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("audio.props.bus_limiter"))
+		});
+		subscribe_checkbox(&bus_limiter_enabled, cx);
+		let bus_limiter_ceiling = cx.new(|cx| {
+			SpinBox::new(131, SliderModel::new(ValueKind::Float, -24.0, 0.0, 0.1, bus_param("ceiling_db", -1.0)), window, cx)
+		});
+		let bus_limiter_release = cx.new(|cx| {
+			SpinBox::new(132, SliderModel::new(ValueKind::Float, 1.0, 1000.0, 1.0, bus_param("release_ms", 50.0)), window, cx)
+		});
 		Self {
 			gain,
 			pan,
@@ -7585,6 +7701,23 @@ impl AudioPropertiesContent {
 			comp_attack,
 			comp_release,
 			comp_makeup,
+			limiter_enabled,
+			limiter_ceiling,
+			limiter_release,
+			gate_enabled,
+			gate_threshold,
+			gate_attack,
+			gate_release,
+			gate_hold,
+			duck_enabled,
+			duck_threshold,
+			duck_amount,
+			duck_attack,
+			duck_release,
+			bus_limiter_enabled,
+			bus_limiter_ceiling,
+			bus_limiter_release,
+			loudness: None,
 			initial_effects: audio.effects.clone(),
 			error: None,
 		}
@@ -7643,7 +7776,57 @@ impl AudioPropertiesContent {
 				],
 			));
 		}
+		if self.limiter_enabled.read(cx).state() == CheckState::Checked {
+			effects.push((
+				"org.olivevideoeditor.Olive.limiter".to_string(),
+				vec![
+					("ceiling_db".to_string(), self.limiter_ceiling.read(cx).value().to_f64()),
+					("release_ms".to_string(), self.limiter_release.read(cx).value().to_f64()),
+				],
+			));
+		}
+		if self.gate_enabled.read(cx).state() == CheckState::Checked {
+			effects.push((
+				"org.olivevideoeditor.Olive.gate".to_string(),
+				vec![
+					("threshold_db".to_string(), self.gate_threshold.read(cx).value().to_f64()),
+					("attack_ms".to_string(), self.gate_attack.read(cx).value().to_f64()),
+					("release_ms".to_string(), self.gate_release.read(cx).value().to_f64()),
+					("hold_ms".to_string(), self.gate_hold.read(cx).value().to_f64()),
+				],
+			));
+		}
+		if self.duck_enabled.read(cx).state() == CheckState::Checked {
+			effects.push((
+				"org.olivevideoeditor.Olive.ducking".to_string(),
+				vec![
+					("threshold_db".to_string(), self.duck_threshold.read(cx).value().to_f64()),
+					("amount_db".to_string(), self.duck_amount.read(cx).value().to_f64()),
+					("attack_ms".to_string(), self.duck_attack.read(cx).value().to_f64()),
+					("release_ms".to_string(), self.duck_release.read(cx).value().to_f64()),
+				],
+			));
+		}
 		effects
+	}
+
+	/// `(enabled, ceiling_db, release_ms)` for the master limiter.
+	pub fn bus_limiter(&self, cx: &App) -> (bool, f64, f64) {
+		(
+			self.bus_limiter_enabled.read(cx).state() == CheckState::Checked,
+			self.bus_limiter_ceiling.read(cx).value().to_f64(),
+			self.bus_limiter_release.read(cx).value().to_f64(),
+		)
+	}
+
+	/// Displays an integrated-LUFS/peak measurement under the form.
+	pub fn set_loudness(
+		&mut self,
+		loudness: Option<quercus_engine_rs::editor::LoudnessMeasurement>,
+		cx: &mut Context<Self>,
+	) {
+		self.loudness = loudness;
+		cx.notify();
 	}
 
 	/// The effect chain as it was when the dialog opened.
@@ -7708,6 +7891,35 @@ impl Render for AudioPropertiesContent {
 				i18n::tr("audio.props.comp_makeup").into(),
 				self.comp_makeup.clone(),
 			))
+			.child(self.limiter_enabled.clone())
+			.child(form_row(&colors, i18n::tr("audio.props.limiter_ceiling").into(), self.limiter_ceiling.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.limiter_release").into(), self.limiter_release.clone()))
+			.child(self.gate_enabled.clone())
+			.child(form_row(&colors, i18n::tr("audio.props.gate_threshold").into(), self.gate_threshold.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.gate_attack").into(), self.gate_attack.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.gate_release").into(), self.gate_release.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.gate_hold").into(), self.gate_hold.clone()))
+			.child(self.duck_enabled.clone())
+			.child(form_row(&colors, i18n::tr("audio.props.duck_threshold").into(), self.duck_threshold.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.duck_amount").into(), self.duck_amount.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.duck_attack").into(), self.duck_attack.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.duck_release").into(), self.duck_release.clone()))
+			.child(gpui_kit::div().h_px().border_t_1().border_color(colors.border))
+			.child(self.bus_limiter_enabled.clone())
+			.child(form_row(&colors, i18n::tr("audio.props.bus_limiter_ceiling").into(), self.bus_limiter_ceiling.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.bus_limiter_release").into(), self.bus_limiter_release.clone()))
+			.child(if let Some(l) = self.loudness {
+				gpui_kit::div()
+					.text_xs()
+					.child(format!(
+						"{}: {:.1} LUFS / {:.1} dBFS",
+						i18n::tr("audio.props.loudness"),
+						l.integrated_lufs,
+						l.peak_dbfs
+					))
+			} else {
+				gpui_kit::div()
+			})
 			.child(if let Some(error) = &self.error {
 				div()
 					.debug_selector(|| "audio-props-error".into())

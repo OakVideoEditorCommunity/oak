@@ -920,6 +920,27 @@ pub trait AppEngine:
 		None
 	}
 
+	/// Measures loudness over the current sequence, if supported.
+	fn measure_loudness(&mut self) -> Option<quercus_engine_rs::editor::LoudnessMeasurement> {
+		None
+	}
+
+	/// Reads the current sequence's master-bus effect chain.
+	fn audio_bus_effects(&self) -> Vec<quercus_engine_rs::editor::AudioBusEffect> {
+		Vec::new()
+	}
+
+	/// Replaces the master-bus limiter (enabled/ceiling/release).
+	fn set_audio_bus_limiter(
+		&mut self,
+		_enabled: bool,
+		_ceiling_db: f64,
+		_release_ms: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("audio bus is not supported".into())
+	}
+
 	/// Reads a clip's audio mix and effect chain.
 	fn clip_audio(&self, _clip: u64) -> Option<quercus_engine_rs::editor::ClipAudioState> {
 		None
