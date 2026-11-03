@@ -7327,6 +7327,16 @@ pub struct AudioPropertiesContent {
 	volume: Entity<SpinBox>,
 	pan_effect_enabled: Entity<CheckBox>,
 	pan_effect: Entity<SpinBox>,
+	eq_enabled: Entity<CheckBox>,
+	eq_low: Entity<SpinBox>,
+	eq_mid: Entity<SpinBox>,
+	eq_high: Entity<SpinBox>,
+	comp_enabled: Entity<CheckBox>,
+	comp_threshold: Entity<SpinBox>,
+	comp_ratio: Entity<SpinBox>,
+	comp_attack: Entity<SpinBox>,
+	comp_release: Entity<SpinBox>,
+	comp_makeup: Entity<SpinBox>,
 	initial_effects: Vec<quercus_engine_rs::editor::ClipAudioEffect>,
 	error: Option<String>,
 }
@@ -7444,6 +7454,118 @@ impl AudioPropertiesContent {
 				cx,
 			)
 		});
+		let eq = audio
+			.effects
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.eq");
+		let eq_param = |input: &str, default: f64| {
+			eq.and_then(|effect| {
+				effect
+					.params
+					.iter()
+					.find(|(id, _)| id == input)
+					.map(|(_, value)| *value)
+			})
+			.unwrap_or(default)
+		};
+		let comp = audio
+			.effects
+			.iter()
+			.find(|effect| effect.type_id == "org.olivevideoeditor.Olive.compressor");
+		let comp_param = |input: &str, default: f64| {
+			comp.and_then(|effect| {
+				effect
+					.params
+					.iter()
+					.find(|(id, _)| id == input)
+					.map(|(_, value)| *value)
+			})
+			.unwrap_or(default)
+		};
+		let eq_enabled = cx.new(|cx| {
+			CheckBox::new(
+				100,
+				if eq.is_some() { CheckState::Checked } else { CheckState::Unchecked },
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("audio.props.eq_effect"))
+		});
+		subscribe_checkbox(&eq_enabled, cx);
+		let eq_low = cx.new(|cx| {
+			SpinBox::new(
+				101,
+				SliderModel::new(ValueKind::Float, -24.0, 24.0, 1.0, eq_param("low_gain_db", 0.0)),
+				window,
+				cx,
+			)
+		});
+		let eq_mid = cx.new(|cx| {
+			SpinBox::new(
+				102,
+				SliderModel::new(ValueKind::Float, -24.0, 24.0, 1.0, eq_param("mid_gain_db", 0.0)),
+				window,
+				cx,
+			)
+		});
+		let eq_high = cx.new(|cx| {
+			SpinBox::new(
+				103,
+				SliderModel::new(ValueKind::Float, -24.0, 24.0, 1.0, eq_param("high_gain_db", 0.0)),
+				window,
+				cx,
+			)
+		});
+		let comp_enabled = cx.new(|cx| {
+			CheckBox::new(
+				104,
+				if comp.is_some() { CheckState::Checked } else { CheckState::Unchecked },
+				window,
+				cx,
+			)
+			.with_label(i18n::tr("audio.props.comp_effect"))
+		});
+		subscribe_checkbox(&comp_enabled, cx);
+		let comp_threshold = cx.new(|cx| {
+			SpinBox::new(
+				105,
+				SliderModel::new(ValueKind::Float, -60.0, 0.0, 1.0, comp_param("threshold_db", -24.0)),
+				window,
+				cx,
+			)
+		});
+		let comp_ratio = cx.new(|cx| {
+			SpinBox::new(
+				106,
+				SliderModel::new(ValueKind::Float, 1.0, 20.0, 0.1, comp_param("ratio", 4.0)),
+				window,
+				cx,
+			)
+		});
+		let comp_attack = cx.new(|cx| {
+			SpinBox::new(
+				107,
+				SliderModel::new(ValueKind::Float, 0.1, 200.0, 0.1, comp_param("attack_ms", 10.0)),
+				window,
+				cx,
+			)
+		});
+		let comp_release = cx.new(|cx| {
+			SpinBox::new(
+				108,
+				SliderModel::new(ValueKind::Float, 1.0, 2000.0, 1.0, comp_param("release_ms", 100.0)),
+				window,
+				cx,
+			)
+		});
+		let comp_makeup = cx.new(|cx| {
+			SpinBox::new(
+				109,
+				SliderModel::new(ValueKind::Float, -24.0, 24.0, 1.0, comp_param("makeup_db", 0.0)),
+				window,
+				cx,
+			)
+		});
 		Self {
 			gain,
 			pan,
@@ -7453,6 +7575,16 @@ impl AudioPropertiesContent {
 			volume,
 			pan_effect_enabled,
 			pan_effect,
+			eq_enabled,
+			eq_low,
+			eq_mid,
+			eq_high,
+			comp_enabled,
+			comp_threshold,
+			comp_ratio,
+			comp_attack,
+			comp_release,
+			comp_makeup,
 			initial_effects: audio.effects.clone(),
 			error: None,
 		}
@@ -7469,20 +7601,46 @@ impl AudioPropertiesContent {
 	}
 
 	/// `Some(value)` for each enabled effect, in chain order (Volume first).
-	pub fn effects(&self, cx: &App) -> Vec<(String, String, f64)> {
+	pub fn effects(&self, cx: &App) -> Vec<(String, Vec<(String, f64)>)> {
 		let mut effects = Vec::new();
 		if self.volume_enabled.read(cx).state() == CheckState::Checked {
 			effects.push((
 				"org.olivevideoeditor.Olive.volume".to_string(),
-				"volume_in".to_string(),
-				self.volume.read(cx).value().to_f64(),
+				vec![(
+					"volume_in".to_string(),
+					self.volume.read(cx).value().to_f64(),
+				)],
 			));
 		}
 		if self.pan_effect_enabled.read(cx).state() == CheckState::Checked {
 			effects.push((
 				"org.olivevideoeditor.Olive.pan".to_string(),
-				"panning_in".to_string(),
-				self.pan_effect.read(cx).value().to_f64(),
+				vec![(
+					"panning_in".to_string(),
+					self.pan_effect.read(cx).value().to_f64(),
+				)],
+			));
+		}
+		if self.eq_enabled.read(cx).state() == CheckState::Checked {
+			effects.push((
+				"org.olivevideoeditor.Olive.eq".to_string(),
+				vec![
+					("low_gain_db".to_string(), self.eq_low.read(cx).value().to_f64()),
+					("mid_gain_db".to_string(), self.eq_mid.read(cx).value().to_f64()),
+					("high_gain_db".to_string(), self.eq_high.read(cx).value().to_f64()),
+				],
+			));
+		}
+		if self.comp_enabled.read(cx).state() == CheckState::Checked {
+			effects.push((
+				"org.olivevideoeditor.Olive.compressor".to_string(),
+				vec![
+					("threshold_db".to_string(), self.comp_threshold.read(cx).value().to_f64()),
+					("ratio".to_string(), self.comp_ratio.read(cx).value().to_f64()),
+					("attack_ms".to_string(), self.comp_attack.read(cx).value().to_f64()),
+					("release_ms".to_string(), self.comp_release.read(cx).value().to_f64()),
+					("makeup_db".to_string(), self.comp_makeup.read(cx).value().to_f64()),
+				],
 			));
 		}
 		effects
@@ -7519,6 +7677,36 @@ impl Render for AudioPropertiesContent {
 				&colors,
 				i18n::tr("audio.props.pan_value").into(),
 				self.pan_effect.clone(),
+			))
+			.child(self.eq_enabled.clone())
+			.child(form_row(&colors, i18n::tr("audio.props.eq_low").into(), self.eq_low.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.eq_mid").into(), self.eq_mid.clone()))
+			.child(form_row(&colors, i18n::tr("audio.props.eq_high").into(), self.eq_high.clone()))
+			.child(self.comp_enabled.clone())
+			.child(form_row(
+				&colors,
+				i18n::tr("audio.props.comp_threshold").into(),
+				self.comp_threshold.clone(),
+			))
+			.child(form_row(
+				&colors,
+				i18n::tr("audio.props.comp_ratio").into(),
+				self.comp_ratio.clone(),
+			))
+			.child(form_row(
+				&colors,
+				i18n::tr("audio.props.comp_attack").into(),
+				self.comp_attack.clone(),
+			))
+			.child(form_row(
+				&colors,
+				i18n::tr("audio.props.comp_release").into(),
+				self.comp_release.clone(),
+			))
+			.child(form_row(
+				&colors,
+				i18n::tr("audio.props.comp_makeup").into(),
+				self.comp_makeup.clone(),
 			))
 			.child(if let Some(error) = &self.error {
 				div()

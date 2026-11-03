@@ -3591,34 +3591,21 @@ impl<E: AppEngine> OakApp<E> {
 							let initial = content.read(cx).initial_effects().to_vec();
 							let desired = content.read(cx).effects(cx);
 							let mut used = vec![false; initial.len()];
-							let mut updates: Vec<(usize, String, f64)> = Vec::new();
-							let mut additions: Vec<(String, String, f64)> = Vec::new();
-							for (type_id, input, value) in &desired {
-								if let Some((index, effect)) = initial
+							let mut updates: Vec<(usize, Vec<(String, f64)>)> = Vec::new();
+							let mut additions: Vec<(String, Vec<(String, f64)>)> = Vec::new();
+							for (type_id, params) in &desired {
+								if let Some(position) = initial
 									.iter()
 									.enumerate()
-									.find(|(_, effect)| {
-										!used
-											.iter()
-											.enumerate()
-											.any(|(i, used)| {
-												*used && initial[i].type_id == effect.type_id
-											})
-											&& effect.type_id == *type_id
+									.find(|(index, effect)| {
+										!used[*index] && effect.type_id == *type_id
 									})
+									.map(|(index, _)| index)
 								{
-									let position = initial
-										.iter()
-										.position(|candidate| {
-											std::ptr::eq(candidate, effect)
-										})
-										.unwrap_or(index);
-									// Mark the matched entry used; the find
-									// above only excludes already-used ones.
 									used[position] = true;
-									updates.push((position, input.clone(), *value));
+									updates.push((position, params.clone()));
 								} else {
-									additions.push((type_id.clone(), input.clone(), *value));
+									additions.push((type_id.clone(), params.clone()));
 								}
 							}
 							let removals: Vec<usize> = initial
@@ -3636,10 +3623,12 @@ impl<E: AppEngine> OakApp<E> {
 									((fade_out * 1000.0) as i64, 1000),
 									cx,
 								)?;
-								for (index, input, value) in &updates {
-									engine.set_clip_audio_effect_param(
-										clip, *index, input, *value, cx,
-									)?;
+								for (index, params) in &updates {
+									for (input, value) in params {
+										engine.set_clip_audio_effect_param(
+											clip, *index, input, *value, cx,
+										)?;
+									}
 									if !initial[*index].enabled {
 										engine.set_clip_audio_effect_enabled(
 											clip, *index, true, cx,
@@ -3649,17 +3638,19 @@ impl<E: AppEngine> OakApp<E> {
 								for index in removals.iter().rev() {
 									engine.remove_clip_audio_effect(clip, *index, cx)?;
 								}
-								for (offset, (type_id, input, value)) in
+								for (offset, (type_id, params)) in
 									additions.iter().enumerate()
 								{
 									engine.add_clip_audio_effect(&[clip], type_id, cx)?;
-									engine.set_clip_audio_effect_param(
-										clip,
-										final_len + offset,
-										input,
-										*value,
-										cx,
-									)?;
+									for (input, value) in params {
+										engine.set_clip_audio_effect_param(
+											clip,
+											final_len + offset,
+											input,
+											*value,
+											cx,
+										)?;
+									}
 								}
 								Ok(())
 							});
