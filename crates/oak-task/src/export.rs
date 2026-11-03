@@ -229,6 +229,15 @@ impl ExportTask {
 				return TimeRange::new(in_, out);
 			}
 		}
+		if self.encoding_params.export_length_num > 0 && self.encoding_params.export_length_den > 0 {
+			let length = Rational::new(
+				i64::from(self.encoding_params.export_length_num),
+				i64::from(self.encoding_params.export_length_den),
+			);
+			if length > Rational::new(0, 1) {
+				return TimeRange::new(Rational::new(0, 1), length);
+			}
+		}
 		let length = nodeops::node_length(&self.viewer_node.0, self.viewer_node.1);
 		TimeRange::new(Rational::new(0, 1), length)
 	}
@@ -366,6 +375,12 @@ impl TaskBehavior for ExportTask {
 		}
 
 		let export_range = self.export_range();
+		self.render
+			.set_video_enabled(self.encoding_params.video_enabled);
+		if self.encoding_params.video_enabled {
+			self.render
+				.set_video_end(Some(nodeops::video_length(&self.viewer_node.0, self.viewer_node.1)));
+		}
 
 		// Force params: force the renderer to the requested output size and
 		// pixel format (no color-matrix scaling in this simplified path).
@@ -413,6 +428,9 @@ impl TaskBehavior for ExportTask {
 
 impl RenderTaskBehavior for ExportTask {
 	fn frame_downloaded(&mut self, task: &mut Task, frame: &Texture) -> Result<()> {
+		if !self.encoding_params.video_enabled {
+			return Ok(());
+		}
 		let Some(encoder) = &self.encoder else {
 			return Ok(());
 		};

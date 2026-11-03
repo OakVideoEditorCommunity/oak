@@ -53,6 +53,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use oak_core::texture::Texture;
 use oak_core::videoparams::VideoParams;
 use oak_node::footage::FootageBehavior;
 use oak_node::sequence::SequenceBehavior;
@@ -73,6 +74,7 @@ use oak_core::{Rational, TimeRange};
 const TICKET_VIDEO: i32 = ticket_kind::VIDEO;
 /// `oak_render::ticket::ticket_kind::AUDIO` re-export (loop-local kind).
 const TICKET_AUDIO: i32 = ticket_kind::AUDIO;
+const TICKET_BLACK: i32 = -1;
 
 /// Overrides applied to a render ticket, mirroring the C++ `ForceParams`
 /// struct in render.h (fields map onto `oakrender_video_ticket_params`).
@@ -157,6 +159,8 @@ pub struct RenderTask {
 	mode: i32,
 	/// Whether audio ranges are rendered.
 	audio_enabled: bool,
+	video_enabled: bool,
+	video_end: Option<Rational>,
 	/// The range rendered by [`RenderTask::render`].
 	export_range: TimeRange,
 	/// Whether the render loop emits progress itself (the export task
@@ -187,6 +191,8 @@ impl RenderTask {
 			behavior,
 			mode: 0,
 			audio_enabled: false,
+			video_enabled: true,
+			video_end: None,
 			export_range: TimeRange::new(Rational::new(0, 1), Rational::new(0, 1)),
 			native_progress_signalling: true,
 			total_frames: 0,
@@ -207,6 +213,16 @@ impl RenderTask {
 		self.mode = mode;
 		self.audio_enabled = audio_enabled;
 		self.export_range = export_range;
+	}
+
+	/// Enable or disable video ticket generation.
+	pub fn set_video_enabled(&mut self, enabled: bool) {
+		self.video_enabled = enabled;
+	}
+
+	/// Deliver black frames at and after the picture's end.
+	pub fn set_video_end(&mut self, end: Option<Rational>) {
+		self.video_end = end;
 	}
 
 	/// Enable/disable the render loop's own progress signalling.
@@ -255,6 +271,27 @@ impl RenderTask {
 		}
 	}
 
+	fn black_texture(&self, time: Rational) -> Option<Texture> {
+		let (width, height) = self.force_size().or_else(|| {
+			self.video_params
+				.as_ref()
+				.map(|params| (params.width(), params.height()))
+		})?;
+		if width <= 0 || height <= 0 {
+			return None;
+		}
+		let mut frame = oak_core::texture::Frame::new();
+		frame.width = width;
+		frame.height = height;
+		frame.channels = 4;
+		frame.format = oak_core::PixelFormat::F32;
+		frame.timestamp = time;
+		if !frame.allocate() {
+			return None;
+		}
+		Some(Texture::Cpu(frame))
+	}
+
 	/// The forced pixel format from [`ForceParams`], or `None`.
 	fn force_format(&self) -> Option<oak_core::PixelFormat> {
 		if self.force_params.force_format >= 0 {
@@ -275,6 +312,7 @@ impl RenderTask {
 	fn clip_effects(
 		graph: &oak_node::graph::Graph,
 		host: oak_node::id::NodeId,
+		time: Rational,
 	) -> Vec<MontageEffect> {
 		// Walk the chain: from the host's effect input upstream until an
 		// unconnected input or a node without an effect input; a `seen`
@@ -339,7 +377,10 @@ impl RenderTask {
 					if input.id == oak_node::node::ENABLED_INPUT {
 						continue;
 					}
-					params.push((input.id.clone(), entry.core.standard_value(&input.id, -1)));
+					params.push((
+						input.id.clone(),
+						entry.core.value_at_time(&input.id, -1, time),
+					));
 				}
 				Some(MontageEffect {
 					type_id: entry.behavior.type_id().to_string(),
@@ -397,6 +438,9 @@ impl RenderTask {
 				else {
 					continue;
 				};
+				if track.muted {
+					continue;
+				}
 				for block_id in &track.blocks {
 					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id) else {
 						continue;
@@ -424,12 +468,33 @@ impl RenderTask {
 						out_time: core.out(),
 						media_in: core.media_in,
 						gain: 1.0,
-						effects: Self::clip_effects(&guard.graph, *block_id),
+						effects: Self::clip_effects(&guard.graph, *block_id, time),
 					});
 				}
 			}
 		}
 		montage
+	}
+
+	fn audio_media(footage: &FootageBehavior) -> Option<(String, i32)> {
+		let original = footage
+			.streams
+			.iter()
+			.find(|stream| !stream.is_video)
+			.map(|stream| (footage.filename.clone(), stream.index))
+			.or_else(|| (!footage.filename.is_empty()).then(|| (footage.filename.clone(), 1)))?;
+		let use_proxy =
+			oak_core::configstore::ConfigStore::instance().get_bool(None, "UseProxyMedia", 1) != 0;
+		if use_proxy
+			&& footage.proxy_enabled
+			&& oak_codec::proxymanager::ProxyManager::get_proxy_state(&footage.proxy)
+				== oak_codec::proxymanager::ProxyState::Ready
+			&& oak_codec::proxymanager::ProxyManager::proxy_filename_has_audio(&footage.proxy)
+		{
+			Some((footage.proxy.clone(), 1))
+		} else {
+			Some(original)
+		}
 	}
 
 	/// Flatten the audio tracks of `sequence` into an audio montage
@@ -486,6 +551,9 @@ impl RenderTask {
 				else {
 					continue;
 				};
+				if track.muted {
+					continue;
+				}
 				for block_id in &track.blocks {
 					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id) else {
 						continue;
@@ -506,9 +574,12 @@ impl RenderTask {
 					else {
 						continue;
 					};
+					let Some((filename, stream_index)) = Self::audio_media(footage) else {
+						continue;
+					};
 					montage.push(MontageClip {
-						filename: footage.filename.clone(),
-						stream_index: 0,
+						filename,
+						stream_index,
 						in_time: core.in_(),
 						out_time: core.out(),
 						media_in: core.media_in,
@@ -761,11 +832,18 @@ impl RenderTask {
 		// Compute the frame timestamps (progress denominator mirrors the
 		// C++ `total_length <= 0 -> 1` guard).
 		let mut frame_times: Vec<Rational> = Vec::new();
-		let mut t = self.export_range.in_();
-		while t < self.export_range.out() {
-			frame_times.push(t);
-			t = t + timebase;
+		if self.video_enabled {
+			let mut t = self.export_range.in_();
+			while t < self.export_range.out() {
+				frame_times.push(t);
+				t = t + timebase;
+			}
 		}
+		let video_end = self.video_end.unwrap_or(self.export_range.out());
+		let live_frames = frame_times
+			.iter()
+			.take_while(|t| **t < video_end)
+			.count();
 		self.total_frames = frame_times.len() as i64;
 		let total_length = if frame_times.is_empty() {
 			1.0
@@ -784,9 +862,13 @@ impl RenderTask {
 				time: self.export_range.in_(),
 			});
 		}
-		for &ft in &frame_times {
+		for (index, &ft) in frame_times.iter().enumerate() {
 			slots.push(DeliverySlot {
-				kind: TICKET_VIDEO,
+				kind: if index < live_frames {
+					TICKET_VIDEO
+				} else {
+					TICKET_BLACK
+				},
 				time: ft,
 			});
 		}
@@ -880,7 +962,7 @@ impl RenderTask {
 
 		// Start the initial frame window.
 		if result.is_ok() {
-			while in_flight.len() < window && next_frame_index < frame_times.len() {
+			while in_flight.len() < window && next_frame_index < live_frames {
 				if let Err(e) = self.start_video_ticket(
 					&arena,
 					frame_times[next_frame_index],
@@ -916,7 +998,32 @@ impl RenderTask {
 			}
 
 			// Deliver contiguous results in the observable (timestamp) order.
-			while let Some((_id, ticket_result)) = pending.remove(&next_slot) {
+			while next_slot < total_slots {
+				if slots[next_slot].kind == TICKET_BLACK {
+					match self.black_texture(slots[next_slot].time) {
+						Some(texture) => {
+							if let Err(e) = behavior.frame_downloaded(task, &texture) {
+								result = Err(e);
+								break;
+							}
+						}
+						None => {
+							result = Err(Error::Failed(
+								"Could not allocate a black pad frame".to_string(),
+							));
+							break;
+						}
+					}
+					if self.native_progress_signalling {
+						progress_counter += 1.0;
+						task.emit_progress(progress_counter / total_length);
+					}
+					next_slot += 1;
+					continue;
+				}
+				let Some((_id, ticket_result)) = pending.remove(&next_slot) else {
+					break;
+				};
 				let slot = &slots[next_slot];
 				if slot.kind == TICKET_AUDIO {
 					match ticket_result {
@@ -1008,7 +1115,7 @@ impl RenderTask {
 
 			// Refill the window: one new ticket per delivered frame.
 			while in_flight.len().saturating_sub(consumed) < window
-				&& next_frame_index < frame_times.len()
+				&& next_frame_index < live_frames
 			{
 				if let Err(e) = self.start_video_ticket(
 					&arena,
@@ -1739,6 +1846,59 @@ mod tests {
 	}
 
 	#[test]
+	fn audio_montage_uses_the_audio_stream_and_skips_muted() {
+		let project = project();
+		let sequence = add_sequence(&project);
+		let footage = add_footage(&project, "clip.mp4");
+		{
+			let mut guard = project.lock().unwrap();
+			let footage = guard
+				.graph
+				.get_mut(footage)
+				.and_then(|entry| entry.behavior.as_any_mut())
+				.and_then(|any| any.downcast_mut::<FootageBehavior>())
+				.unwrap();
+			footage.streams.push(oak_node::footage::StreamInfo {
+				index: 0,
+				is_video: true,
+				video: None,
+				audio: None,
+				duration: Rational::new(5, 1),
+			});
+			footage.streams.push(oak_node::footage::StreamInfo {
+				index: 2,
+				is_video: false,
+				video: None,
+				audio: None,
+				duration: Rational::new(5, 1),
+			});
+		}
+		let clip = add_clip(
+			&project,
+			Some(footage),
+			TimeRange::new(Rational::new(0, 1), Rational::new(2, 1)),
+		);
+		let track = track_with(&project, TrackType::Audio, vec![clip]);
+		let list = track_list_with(&project, TrackType::Audio, vec![track]);
+		push_track_list(&project, sequence, list);
+
+		let montage = RenderTask::audio_montage(&project, sequence, Rational::new(1, 1));
+		assert_eq!(montage.len(), 1);
+		assert_eq!(montage[0].stream_index, 2);
+
+		let mut guard = project.lock().unwrap();
+		guard
+			.graph
+			.get_mut(track)
+			.and_then(|entry| entry.behavior.as_any_mut())
+			.and_then(|any| any.downcast_mut::<TrackBehavior>())
+			.unwrap()
+			.muted = true;
+		drop(guard);
+		assert!(RenderTask::audio_montage(&project, sequence, Rational::new(1, 1)).is_empty());
+	}
+
+	#[test]
 	fn build_audio_ticket_reads_sequence_params_and_montage() {
 		let project = project();
 		let sequence = add_sequence(&project);
@@ -1806,9 +1966,9 @@ mod tests {
 		// A node without an effect input ends the walk immediately.
 		{
 			let guard = project.lock().unwrap();
-			assert!(RenderTask::clip_effects(&guard.graph, footage).is_empty());
-			assert!(RenderTask::clip_effects(&guard.graph, folder).is_empty());
-			assert!(RenderTask::clip_effects(&guard.graph, NodeId::INVALID).is_empty());
+			assert!(RenderTask::clip_effects(&guard.graph, footage, Rational::new(0, 1)).is_empty());
+			assert!(RenderTask::clip_effects(&guard.graph, folder, Rational::new(0, 1)).is_empty());
+			assert!(RenderTask::clip_effects(&guard.graph, NodeId::INVALID, Rational::new(0, 1)).is_empty());
 		}
 
 		// A clip whose effect input is set but not connected: the walk's
@@ -1820,7 +1980,7 @@ mod tests {
 		);
 		{
 			let guard = project.lock().unwrap();
-			assert!(RenderTask::clip_effects(&guard.graph, bare).is_empty());
+			assert!(RenderTask::clip_effects(&guard.graph, bare, Rational::new(0, 1)).is_empty());
 		}
 
 		// Direct footage -> clip connection: the source node is dropped
@@ -1839,7 +1999,7 @@ mod tests {
 		}
 		{
 			let guard = project.lock().unwrap();
-			assert!(RenderTask::clip_effects(&guard.graph, direct).is_empty());
+			assert!(RenderTask::clip_effects(&guard.graph, direct, Rational::new(0, 1)).is_empty());
 		}
 
 		for enabled in [true, false] {
@@ -1873,7 +2033,7 @@ mod tests {
 				)
 				.expect("effect -> clip");
 
-			let effects = RenderTask::clip_effects(&guard.graph, clip);
+			let effects = RenderTask::clip_effects(&guard.graph, clip, Rational::new(0, 1));
 			assert_eq!(effects.len(), 1);
 			assert_eq!(
 				effects[0].type_id,
@@ -1927,7 +2087,7 @@ mod tests {
 				)
 				.expect("effect -> clip");
 
-			let effects = RenderTask::clip_effects(&guard.graph, clip);
+			let effects = RenderTask::clip_effects(&guard.graph, clip, Rational::new(0, 1));
 			assert_eq!(effects.len(), 1, "{type_name}");
 			assert_eq!(effects[0].type_id, type_name);
 			assert!(

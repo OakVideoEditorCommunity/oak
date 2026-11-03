@@ -254,6 +254,47 @@ pub fn node_length(project: &ProjectRef, node: NodeId) -> Rational {
 	Rational::new(0, 1)
 }
 
+/// Return the longest video track, ignoring audio-only timeline tails.
+pub fn video_length(project: &ProjectRef, node: NodeId) -> Rational {
+	let guard = lock_project(project);
+	let Some(entry) = guard.graph.get(node) else {
+		return Rational::new(0, 1);
+	};
+	let Some(any) = entry.behavior.as_any() else {
+		return Rational::new(0, 1);
+	};
+	if let Some(f) = any.downcast_ref::<FootageBehavior>() {
+		return f.video_length();
+	}
+	if let Some(seq) = any.downcast_ref::<SequenceBehavior>() {
+		let tracks = GraphTrackRange {
+			graph: &guard.graph,
+		};
+		let mut longest = Rational::new(0, 1);
+		for list_id in seq.track_lists.iter().filter(|i| i.valid()) {
+			let Some(le) = guard.graph.get(*list_id) else {
+				continue;
+			};
+			let Some(list) = le
+				.behavior
+				.as_any()
+				.and_then(|a| a.downcast_ref::<TrackListBehavior>())
+			else {
+				continue;
+			};
+			if list.kind != oak_node::track::TrackType::Video {
+				continue;
+			}
+			let len = list.total_length(&tracks);
+			if len > longest {
+				longest = len;
+			}
+		}
+		return longest;
+	}
+	Rational::new(0, 1)
+}
+
 /// Block-range access over the project graph (the adapter [`TrackBehavior`]
 /// queries need; `// CPP-PARITY: src/task/...` uses the node graph directly).
 pub struct GraphBlockRange<'a> {
