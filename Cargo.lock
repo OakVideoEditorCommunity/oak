@@ -6657,6 +6657,8 @@ name = "quercus-ofx-plugin"
 version = "0.6.0"
 dependencies = [
  "cc",
+ "libc",
+ "libloading 0.8.9",
  "quercus-core",
  "quercus-node",
  "quercus-render",
