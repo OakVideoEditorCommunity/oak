@@ -351,16 +351,99 @@ pub fn render_audio_range(
 	rx.recv().map(|(_, audio)| audio).map_err(|e| e.to_string())
 }
 
-/// Submits one audio chunk without blocking the UI thread. Failure produces
-/// aligned stereo silence so prefetch timing cannot drift.
-pub fn submit_audio_chunk(
+/// One audio-render job owned by [`AudioRenderWorker`].
+struct AudioRenderJob {
+	task: quercus_engine_rs::task::Task,
+	start_ts: i64,
+	expected_frames: usize,
+	tx: mpsc::Sender<(i64, RenderedAudio)>,
+}
+
+impl AudioRenderJob {
+	fn run(self) {
+		if self.task.wait() {
+			if let Some(block) = self.task.take_audio() {
+				let info = block.info();
+				let _ = self.tx.send((
+					self.start_ts,
+					RenderedAudio {
+						data: block.samples(),
+						sample_rate: info.sample_rate,
+						channel_count: info.channel_count,
+					},
+				));
+				return;
+			}
+		}
+		// Failure produces aligned stereo silence so prefetch timing
+		// cannot drift.
+		let _ = self.tx.send((
+			self.start_ts,
+			RenderedAudio {
+				data: vec![0.0; self.expected_frames * 2],
+				sample_rate: 48_000,
+				channel_count: 2,
+			},
+		));
+	}
+}
+
+/// Serializes playback-audio chunk completion onto one worker.
+///
+/// The playback prefetch submits one chunk per UI tick. Spawning a fresh
+/// OS thread for every chunk (the old behavior) creates hundreds of
+/// short-lived threads during playback, each taking the engine and audio
+/// mutexes; that is both a lock-contention source and a thread-lifetime
+/// hazard when a render stalls. One persistent worker keeps the same
+/// ordering and non-blocking submit contract with a bounded thread count.
+pub struct AudioRenderWorker {
+	tx: Option<mpsc::Sender<AudioRenderJob>>,
+	_join: std::thread::JoinHandle<()>,
+}
+
+impl AudioRenderWorker {
+	pub fn new() -> Self {
+		let (tx, rx) = mpsc::channel::<AudioRenderJob>();
+		let join = std::thread::Builder::new()
+			.name("oak-audio-render".into())
+			.spawn(move || {
+				while let Ok(job) = rx.recv() {
+					job.run();
+				}
+			})
+			.expect("spawn oak-audio-render");
+		Self {
+			tx: Some(tx),
+			_join: join,
+		}
+	}
+
+	fn submit(&self, job: AudioRenderJob) -> Result<(), String> {
+		self.tx
+			.as_ref()
+			.ok_or_else(|| "the audio render worker is closed".to_string())?
+			.send(job)
+			.map_err(|_| "the audio render worker is closed".to_string())
+	}
+}
+
+impl Drop for AudioRenderWorker {
+	fn drop(&mut self) {
+		// Close the queue; the worker exits after draining queued jobs.
+		// The JoinHandle is detached deliberately: shutdown must not block
+		// on a render that is waiting for a GPU/worker fence.
+		self.tx.take();
+	}
+}
+
+fn audio_render_job(
 	session: &quercus_engine_rs::editor::EditorSession,
 	seq: NodeId,
 	start_ts: i64,
 	len_ts: i64,
 	tb: (i64, i64),
 	tx: mpsc::Sender<(i64, RenderedAudio)>,
-) -> Result<(), String> {
+) -> Result<AudioRenderJob, String> {
 	if tb.0 <= 0 || tb.1 <= 0 {
 		return Err("the sequence has no valid frame rate".into());
 	}
@@ -379,31 +462,43 @@ pub fn submit_audio_chunk(
 		0x3,
 	)
 	.ok_or_else(|| "failed to start the audio render task".to_string())?;
-	std::thread::spawn(move || {
-		if task.wait() {
-			if let Some(block) = task.take_audio() {
-				let info = block.info();
-				let _ = tx.send((
-					start_ts,
-					RenderedAudio {
-						data: block.samples(),
-						sample_rate: info.sample_rate,
-						channel_count: info.channel_count,
-					},
-				));
-				return;
-			}
-		}
-		let _ = tx.send((
-			start_ts,
-			RenderedAudio {
-				data: vec![0.0; expected_frames * 2],
-				sample_rate: 48_000,
-				channel_count: 2,
-			},
-		));
-	});
+	Ok(AudioRenderJob {
+		task,
+		start_ts,
+		expected_frames,
+		tx,
+	})
+}
+
+/// Submits one audio chunk without blocking the UI thread. Used by the
+/// synchronous range helper; playback uses
+/// [`submit_audio_chunk_to_worker`] instead.
+pub fn submit_audio_chunk(
+	session: &quercus_engine_rs::editor::EditorSession,
+	seq: NodeId,
+	start_ts: i64,
+	len_ts: i64,
+	tb: (i64, i64),
+	tx: mpsc::Sender<(i64, RenderedAudio)>,
+) -> Result<(), String> {
+	let job = audio_render_job(session, seq, start_ts, len_ts, tb, tx)?;
+	std::thread::spawn(move || job.run());
 	Ok(())
+}
+
+/// Playback path: queue the chunk on the persistent audio worker instead
+/// of creating one OS thread per chunk.
+pub fn submit_audio_chunk_to_worker(
+	session: &quercus_engine_rs::editor::EditorSession,
+	seq: NodeId,
+	start_ts: i64,
+	len_ts: i64,
+	tb: (i64, i64),
+	tx: mpsc::Sender<(i64, RenderedAudio)>,
+	worker: &AudioRenderWorker,
+) -> Result<(), String> {
+	let job = audio_render_job(session, seq, start_ts, len_ts, tb, tx)?;
+	worker.submit(job)
 }
 
 fn rational_to_sdk(value: Rational) -> Rational {
