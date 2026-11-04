@@ -26,12 +26,27 @@ pub(crate) struct LinuxDispatcher {
 }
 
 const MIN_THREADS: usize = 2;
+/// GPUI's executor workers are for UI runnables (short tasks, redraws,
+/// callbacks), not render/decode CPU pools. One worker per logical core
+/// (24 on this workstation) is disproportionate and makes startup take
+/// dozens of mutexes before the first frame. Keep a small fixed pool;
+/// `OAK_GPUI_WORKERS` can raise/lower it for experiments.
+const DEFAULT_MAX_THREADS: usize = 4;
+
+fn worker_count() -> usize {
+    let cap = std::env::var("OAK_GPUI_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= MIN_THREADS)
+        .unwrap_or(DEFAULT_MAX_THREADS);
+    std::thread::available_parallelism()
+        .map_or(MIN_THREADS, |i| i.get().clamp(MIN_THREADS, cap))
+}
 
 impl LinuxDispatcher {
     pub fn new(main_sender: PriorityQueueCalloopSender<RunnableVariant>) -> Self {
         let (background_sender, background_receiver) = PriorityQueueReceiver::new();
-        let thread_count =
-            std::thread::available_parallelism().map_or(MIN_THREADS, |i| i.get().max(MIN_THREADS));
+        let thread_count = worker_count();
 
         let mut background_threads = (0..thread_count)
             .map(|i| {
