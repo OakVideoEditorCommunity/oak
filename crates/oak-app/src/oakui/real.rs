@@ -1300,6 +1300,8 @@ pub struct RealEngine {
 	audio_tx: Mutex<mpsc::Sender<(i64, super::renderops::RenderedAudio)>>,
 	/// The audio prefetch buffer (see [`AudioPrefetch`]).
 	audio_prefetch: Mutex<AudioPrefetch>,
+	/// One persistent worker for playback-audio chunk completion.
+	audio_worker: Arc<super::renderops::AudioRenderWorker>,
 	/// Audio-mastered playback anchor `(playhead_frame, output_clock_secs)`
 	/// recorded at the first chunk push of a play run (M12 P1a). While set,
 	/// the tick loop re-anchors the program playhead onto the frame the
@@ -1457,64 +1459,81 @@ impl RealEngine {
 		if frame < 0 {
 			return;
 		}
-		// One sequence frame of audio per chunk, keyed by the playhead
-		// frame. A per-tick wall-clock heuristic (~1/60 s) truncates to zero
-		// frames for sub-60 fps sequences, so render exactly one frame per
-		// playhead frame instead — the output device consumes one frame's
-		// audio per frame advance regardless of the rate.
 		let chunk: i64 = 1;
 
-		let mut st = self
-			.audio_prefetch
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		// Reset on seek / restart (see needs_reset): serving runs ahead of
-		// the playhead, so only genuine jumps re-arm the buffer.
-		if st.needs_reset(frame) {
-			audio_dbg(&format!(
-				"prefetch reset at frame {frame} (seek/restart; next_submit was {})",
-				st.next_submit
-			));
-			st.reset(frame, chunk);
-		}
-		// Submit chunks to cover [next_submit, frame + PREFETCH ahead). In
-		// steady state the window moves by one chunk per tick, so exactly
-		// one new ticket is posted; the rest are already buffered.
+		// Snapshot the sender up front; do not hold the prefetch mutex
+		// across task submission or the audio-device lock.
 		let tx = self
 			.audio_tx
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
 			.clone();
-		let target = frame + chunk * AUDIO_PREFETCH_CHUNKS;
+
+		// Reserve the next window under the prefetch lock, then release it
+		// before creating tasks. Task creation takes the engine/project
+		// locks and can be slow; holding the prefetch mutex there used to
+		// serialize the UI tick with every audio worker.
+		let mut jobs: Vec<(i64, i64)> = Vec::new();
+		{
+			let mut st = self
+				.audio_prefetch
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			if st.needs_reset(frame) {
+				audio_dbg(&format!(
+					"prefetch reset at frame {frame} (seek/restart; next_submit was {})",
+					st.next_submit
+				));
+				st.reset(frame, chunk);
+			}
+			let target = frame + chunk * AUDIO_PREFETCH_CHUNKS;
+			while st.next_submit < target {
+				let ts = st.next_submit;
+				st.next_submit += chunk;
+				jobs.push((ts, chunk));
+			}
+		}
+
 		let mut submitted = 0i32;
-		while st.next_submit < target {
-			let ts = st.next_submit;
+		let mut failed_at = None;
+		for (ts, len) in jobs {
 			let p = project.clone();
-			if super::renderops::submit_audio_chunk(&p, seq, ts, chunk, tb, tx.clone()).is_err() {
+			if super::renderops::submit_audio_chunk(&p, seq, ts, len, tb, tx.clone()).is_err() {
+				failed_at = Some(ts);
 				break;
 			}
-			st.next_submit += chunk;
 			submitted += 1;
 		}
-		// Drain completed chunks. With the M16 S3 audio thread the submit
-		// above only queues; the render lands here asynchronously, so the
-		// drain is the sole delivery path.
-		let rx = self.audio_rx.lock().unwrap_or_else(|e| e.into_inner());
-		while let Ok((ts, data)) = rx.try_recv() {
-			st.insert(ts, data);
+		if let Some(ts) = failed_at {
+			let mut st = self
+				.audio_prefetch
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			st.next_submit = ts;
 		}
-		drop(rx);
-		// Underrun self-heal: zero-padding advanced the output clock past
-		// the queued content, so everything audible from here on would
-		// play late (the classic "audio drifts behind video"). Resync by
-		// trimming just the stale lead from the device queue — the rest
-		// stays audible and the master-clock anchor stays valid (the
-		// clock already advanced past the zero-fill). The old full
-		// clear + prefetch reset + re-anchor skipped ~190 ms of unheard
-		// content and re-rendered already-played audio whenever the
-		// playhead lagged (audible as a pop plus a repeated phrase), and
-		// the reset that followed always dropped its first re-rendered
-		// chunk as "late" — a ~1.1 s periodic skip/repeat cycle.
+
+		// Drain completions into a local vector; insert them in one short
+		// critical section instead of holding the prefetch lock while the
+		// channel is polled.
+		let mut arrived = Vec::new();
+		{
+			let rx = self.audio_rx.lock().unwrap_or_else(|e| e.into_inner());
+			while let Ok(item) = rx.try_recv() {
+				arrived.push(item);
+			}
+		}
+		if !arrived.is_empty() {
+			let mut st = self
+				.audio_prefetch
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			for (ts, data) in arrived {
+				st.insert(ts, data);
+			}
+		}
+
+		// Underrun self-heal. The engine calls below lock the audio
+		// manager; keep the prefetch mutex out of that path.
 		if self.audio_playback.is_some() {
 			let cooldown_ok = self
 				.last_audio_resync
@@ -1539,15 +1558,21 @@ impl RealEngine {
 				self.last_audio_resync = Some(std::time::Instant::now());
 			}
 		}
-		// Push every rendered chunk to the output device in ts order (the
-		// device queue is the cushion that rides out UI stalls); chunks
-		// whose time already passed are dropped inside drain_ready.
+
+		// Serve the ready chunks; push to the device outside the prefetch
+		// lock because push_to_output takes the process-wide audio mutex.
+		let ready = {
+			let mut st = self
+				.audio_prefetch
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			st.drain_ready(frame)
+		};
 		let mut pushed = 0i32;
-		for buf in st.drain_ready(frame) {
+		for buf in ready {
 			if buf.sample_rate <= 0 || buf.channel_count <= 0 || buf.data.is_empty() {
 				continue;
 			}
-			// Packed F32; layout: 1ch → mono mask, else stereo.
 			let layout: u64 = if buf.channel_count == 1 { 0x4 } else { 0x3 };
 			let bytes: Vec<u8> = buf.data.iter().flat_map(|v| v.to_ne_bytes()).collect();
 			if let Some(mut manager) = oak_audio::manager::instance() {
@@ -1584,6 +1609,12 @@ impl RealEngine {
 			}
 		}
 		if audio_dbg_enabled() {
+			let buffered = self
+				.audio_prefetch
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.buffered
+				.len();
 			let mut secs = -1.0;
 			let mut q = -1i64;
 			if let Some(manager) = oak_audio::manager::instance() {
@@ -1591,8 +1622,7 @@ impl RealEngine {
 				q = manager.output_queued_frames();
 			}
 			audio_dbg(&format!(
-				"tick f={frame} secs={secs:.3} buf={} sub={submitted} push={pushed} q={q}",
-				st.buffered.len()
+				"tick f={frame} secs={secs:.3} buf={buffered} sub={submitted} push={pushed} q={q}"
 			));
 		}
 	}
@@ -1677,6 +1707,7 @@ impl RealEngine {
 			audio_rx: Mutex::new(audio_rx),
 			audio_tx: Mutex::new(audio_tx),
 			audio_prefetch: Mutex::new(AudioPrefetch::new()),
+			audio_worker: Arc::new(super::renderops::AudioRenderWorker::new()),
 			audio_playback: None,
 			last_audio_resync: None,
 			pending_snapshot: None,
