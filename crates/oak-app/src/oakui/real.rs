@@ -1945,8 +1945,16 @@ impl RealEngine {
 				window.submitted.remove(&frame);
 			}
 		}
+		// Hard cap on the number of live preview tasks. The forward window
+		// is a target, not a promise: under a slow decode the old code kept
+		// adding one task per tick until hundreds of threads were parked in
+		// the render queue. Keep the scheduler window bounded; completed
+		// tasks free slots on the next tick.
+		const MAX_PREVIEW_TASKS: usize = 6;
+		let slots = MAX_PREVIEW_TASKS.saturating_sub(window.requests.len());
 		let new_frames: Vec<i64> = (playhead.max(0)..end)
 			.filter(|f| !window.submitted.contains(f))
+			.take(slots)
 			.collect();
 		drop(windows);
 
