@@ -272,6 +272,12 @@ struct PreviewWindow {
 	/// is consumed by `cpu_frame` (slot released after the display image
 	/// is built) or released when it falls out of the window.
 	slots: BTreeMap<i64, PreviewSlot>,
+	/// Playhead used at the previous update. A backward jump (loop wrap or
+	/// scrub) invalidates the old window immediately instead of keeping its
+	/// tail-frame tasks in flight: otherwise the six-task cap blocks the new
+	/// head frames until the old tail drains, and the decoder must seek from
+	/// end to start while the viewer waits.
+	last_playhead: Option<i64>,
 }
 
 /// A finished frame in the playback pre-render window: a process-backend
@@ -2275,7 +2281,19 @@ impl RealEngine {
 		let mut stale_sequences: Vec<u64> = Vec::new();
 		let mut stale_keys: Vec<(u64, i64, u64)> = Vec::new();
 		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
-		if window.sequence != node_id || window.generation != self.preview_generation {
+		// A loop wrap (or a backward scrub) is a discontinuity: cancel the
+		// whole old window, not just frames below `keep_from`. The old
+		// tail-frame tasks would otherwise keep the six-task cap occupied
+		// while the playhead sits at zero, delaying the first new frame and
+		// forcing a cold decoder seek from the end of the clip.
+		let jumped = window
+			.last_playhead
+			.is_some_and(|prev| playhead < prev - 2 || playhead > prev + 2);
+		window.last_playhead = Some(playhead);
+		if window.sequence != node_id
+			|| window.generation != self.preview_generation
+			|| jumped
+		{
 			stale_sequences.push(window.sequence);
 			stale_slots.extend(std::mem::take(&mut window.slots).into_values());
 			window.submitted.clear();
