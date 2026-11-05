@@ -124,6 +124,19 @@ impl GpuContext {
 		if self.kind != BackendKind::Vulkan || width == 0 || height == 0 {
 			return Err(Error::State);
 		}
+		// A host-adopted device may not have enabled the 16-bit normalized
+		// texture feature. Creating such an external texture anyway produces
+		// an invalid bind group at draw time; report a capability gap so the
+		// decoder falls back to staging instead.
+		if matches!(
+			format,
+			wgpu::TextureFormat::R16Unorm
+				| wgpu::TextureFormat::Rg16Unorm
+				| wgpu::TextureFormat::Rgba16Unorm
+		) && !self.supports_16bit_norm_planes()
+		{
+			return Err(Error::State);
+		}
 		let Some(vk_format) = import_vk_format(format) else {
 			return Err(Error::Invalid);
 		};
