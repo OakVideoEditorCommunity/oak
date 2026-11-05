@@ -432,6 +432,17 @@ impl WgpuContext {
             );
         }
 
+        // Quercus imports hardware 10-bit decode planes as R16/RG16
+        // normalized external textures. The engine's adopted device must
+        // have the feature enabled or the planar matrix bind group is
+        // invalid at submit time.
+        if adapter
+            .features()
+            .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
+        {
+            required_features |= wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+        }
+
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
         #[cfg(target_family = "wasm")]
         let required_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
