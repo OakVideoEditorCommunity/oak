@@ -6149,7 +6149,22 @@ impl AppEngine for RealEngine {
 		}
 		let session = self.editor_session().ok_or("no project open")?;
 		let footage = quercus_engine_rs::node::NodeId::from_raw(id);
-		let task = session.generate_proxy(footage, &Self::proxy_cache_path())?;
+		let cache = Self::proxy_cache_path();
+		let task = match session.generate_proxy(footage, &cache) {
+			Ok(task) => task,
+			Err(first) => {
+				// A stale association/leftover state after Delete Proxy
+				// must not make regeneration permanently fail. Clear it
+				// and retry once; an active generation is still owned by
+				// `proxy_runs` and was rejected above.
+				if session.delete_proxy(footage).is_err() {
+					return Err(first);
+				}
+				session.generate_proxy(footage, &cache).map_err(|retry| {
+					format!("proxy generation failed ({first}); retry after reset failed ({retry})")
+				})?
+			}
+		};
 		self.proxy_runs.push(ProxyRun { footage: id, session, task });
 		cx.notify();
 		Ok(())

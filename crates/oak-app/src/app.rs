@@ -703,7 +703,7 @@ impl<E: AppEngine> OakApp<E> {
 		cx.subscribe(
 			&panels.timeline,
 			|this, _panel, event: &FootageDropNeedsSequence, cx| {
-				this.on_footage_drop_needs_sequence(*event, cx);
+				this.on_footage_drop_needs_sequence(event.clone(), cx);
 			},
 		)
 		.detach();
@@ -2819,12 +2819,17 @@ impl<E: AppEngine> OakApp<E> {
 			// the engine's auto-create behaviour.
 			println!("[shell] drop while a modal is up: using the footage probe params");
 			self.engine.update(cx, |engine, cx| {
-				engine.drop_footage(drop.footage_id, drop.track_kind, drop.track_index, drop.time, cx);
+				let mut at = drop.time;
+				for id in drop.footage_ids.iter().copied() {
+					engine.drop_footage(id, drop.track_kind, drop.track_index, at, cx);
+					let length = engine.footage_length_frames(id).unwrap_or(1).max(1);
+					at = Frame(at.0 + length);
+				}
 			});
 			return;
 		}
-		self.pending_drop = Some(drop);
 		let probe = self.engine.read(cx).footage_video_params(drop.footage_id);
+		self.pending_drop = Some(drop);
 		self.spawn_modal(cx, move |window, app| {
 			let content = app.new(|_cx| crate::dialogs::DropSequenceChoiceContent::new(probe));
 			let modal = app.new(|cx| {
@@ -2865,14 +2870,19 @@ impl<E: AppEngine> OakApp<E> {
 				// from the footage's probed video stream (the NLE
 				// convention); close the choice and place the clip.
 				self.engine.update(cx, |engine, cx| {
-					engine.drop_footage(drop.footage_id, drop.track_kind, drop.track_index, drop.time, cx);
+					let mut at = drop.time;
+					for id in drop.footage_ids.iter().copied() {
+						engine.drop_footage(id, drop.track_kind, drop.track_index, at, cx);
+						let length = engine.footage_length_frames(id).unwrap_or(1).max(1);
+						at = Frame(at.0 + length);
+					}
 				});
 				self.close_modal(cx);
 			}
 			DropSequenceChoice::SpecifyManually => {
 				// The manual path re-stashes the drop; the new-sequence
 				// dialog's OK resumes it through the same commit below.
-				self.pending_drop = Some(drop);
+				self.pending_drop = Some(drop.clone());
 				self.close_modal(cx);
 				self.open_new_sequence_for_footage(drop, cx);
 			}
@@ -2887,7 +2897,12 @@ impl<E: AppEngine> OakApp<E> {
 			return;
 		};
 		self.engine.update(cx, |engine, cx| {
-			engine.drop_footage(drop.footage_id, drop.track_kind, drop.track_index, drop.time, cx);
+			let mut at = drop.time;
+			for id in drop.footage_ids.iter().copied() {
+				engine.drop_footage(id, drop.track_kind, drop.track_index, at, cx);
+				let length = engine.footage_length_frames(id).unwrap_or(1).max(1);
+				at = Frame(at.0 + length);
+			}
 		});
 	}
 
@@ -6954,6 +6969,7 @@ mod tests {
 			app.on_footage_drop_needs_sequence(
 				FootageDropNeedsSequence {
 					footage_id: 3,
+					footage_ids: vec![3],
 					track_kind: crate::widgets::timeline::TrackKind::Video,
 					track_index: 0,
 					time: Frame(0),
@@ -8436,6 +8452,7 @@ mod tests {
 		let (_window, root) = mock_shell(cx);
 		let drop = FootageDropNeedsSequence {
 			footage_id: 3,
+			footage_ids: vec![3],
 			track_kind: crate::widgets::timeline::TrackKind::Video,
 			track_index: 0,
 			time: Frame(10),
@@ -8452,7 +8469,7 @@ mod tests {
 		cx.run_until_parked();
 		let before = drops(cx);
 		cx.update(|app| {
-			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop.clone(), cx))
 		});
 		cx.run_until_parked();
 		assert_eq!(drops(cx), before + 1);
@@ -8462,7 +8479,7 @@ mod tests {
 
 		// No modal: the choice dialog pauses the drop.
 		cx.update(|app| {
-			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop.clone(), cx))
 		});
 		cx.run_until_parked();
 		assert!(cx.read(|app| matches!(
@@ -8492,7 +8509,7 @@ mod tests {
 		// "Specify manually": the new-sequence dialog opens with the drop
 		// still paused.
 		cx.update(|app| {
-			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop.clone(), cx))
 		});
 		cx.run_until_parked();
 		cx.update(|app| {
@@ -8531,7 +8548,7 @@ mod tests {
 
 		// The choice dialog's cancel button abandons the drop too.
 		cx.update(|app| {
-			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop.clone(), cx))
 		});
 		cx.run_until_parked();
 		cx.update(|app| {
@@ -8551,7 +8568,7 @@ mod tests {
 
 		// Escape on the choice dialog abandons the paused drop as well.
 		cx.update(|app| {
-			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop, cx))
+			root.update(app, |app, cx| app.on_footage_drop_needs_sequence(drop.clone(), cx))
 		});
 		cx.run_until_parked();
 		cx.update(|app| {
@@ -8579,7 +8596,7 @@ mod tests {
 		// Escape from the manual new-sequence dialog (or the choice dialog)
 		// abandons a paused drop.
 		cx.update(|app| {
-			root.update(app, |app, _cx| app.pending_drop = Some(drop))
+			root.update(app, |app, _cx| app.pending_drop = Some(drop.clone()))
 		});
 		cx.update(|app| {
 			root.update(app, |app, cx| {
@@ -9137,6 +9154,7 @@ mod tests {
 				timeline.update(cx, |_panel, cx| {
 					cx.emit(FootageDropNeedsSequence {
 						footage_id: 3,
+						footage_ids: vec![3],
 						track_kind: crate::widgets::timeline::TrackKind::Video,
 						track_index: 0,
 						time: Frame(0),
@@ -9731,6 +9749,7 @@ mod tests {
 			root.update(app, |app, _cx| {
 				app.pending_drop = Some(FootageDropNeedsSequence {
 					footage_id: 3,
+					footage_ids: vec![3],
 					track_kind: crate::widgets::timeline::TrackKind::Video,
 					track_index: 0,
 					time: Frame(0),

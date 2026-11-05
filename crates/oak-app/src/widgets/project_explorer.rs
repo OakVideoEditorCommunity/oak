@@ -12,7 +12,8 @@ use gpui_kit::{
 	Focusable, Hsla, MouseButton, MouseDownEvent, Point, Pixels, Render, SharedString, Window,
 	colors::DefaultColors, div, hsla, img, prelude::*, px,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
+use std::sync::Arc;
 use std::path::PathBuf;
 
 /// A fully transparent color (for un-hovered rows).
@@ -100,11 +101,11 @@ fn proxy_badge_chip(badge: ProxyBadge) -> gpui_kit::Div {
 		.child(label)
 }
 
-/// The drag payload of a draggable media entry: the entry's stable id (the
-/// same value the host uses as the [`ProjectEntry`] key). Drop targets (the
-/// timeline) receive this id and place a clip of the footage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FootageDrag(pub u64);
+/// The drag payload of one or more selected media entries (the same ids the
+/// host uses as [`ProjectEntry`] keys). The timeline places one clip per id,
+/// advancing the playhead by each clip's duration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FootageDrag(pub Vec<u64>);
 
 /// The ghost rendered under the cursor while dragging a media entry.
 struct FootageDragGhost;
@@ -227,7 +228,10 @@ pub struct ProjectExplorer<D: ProjectDataSource> {
 	control: usize,
 	data: Entity<D>,
 	expanded: HashSet<u64>,
-	selected: Option<u64>,
+	/// Multi-selection (Ctrl/Shift-click, like the material bin).
+	selected: BTreeSet<u64>,
+	/// Anchor for Shift-range selection.
+	selection_anchor: Option<u64>,
 	view: ExplorerView,
 	focus_handle: FocusHandle,
 }
@@ -247,7 +251,8 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 			control,
 			data,
 			expanded: HashSet::new(),
-			selected: None,
+			selected: BTreeSet::new(),
+			selection_anchor: None,
 			view: ExplorerView::Tree,
 			focus_handle: cx.focus_handle(),
 		}
@@ -297,7 +302,11 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 	/// [`ProjectExplorerEvent::ContextMenuRequested`] for the host's menu.
 	fn context_menu(&mut self, id: Option<u64>, position: Point<Pixels>, cx: &mut Context<Self>) {
 		if let Some(id) = id {
-			self.selected = Some(id);
+			if !self.selected.contains(&id) {
+				self.selected.clear();
+				self.selected.insert(id);
+				self.selection_anchor = Some(id);
+			}
 		}
 		cx.emit(ProjectExplorerEvent::ContextMenuRequested {
 			control: self.control,
@@ -305,6 +314,36 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 			position,
 		});
 		cx.notify();
+	}
+
+	/// Applies one click to the multi-selection. `visible` is the ordered list
+	/// of visible media ids (folders are excluded so Shift ranges do not
+	/// include them).
+	fn select_click(&mut self, id: u64, visible: &[u64], modifiers: &gpui_kit::Modifiers) {
+		if modifiers.shift {
+			let anchor = self.selection_anchor.unwrap_or(id);
+			let start = visible.iter().position(|entry| *entry == anchor);
+			let end = visible.iter().position(|entry| *entry == id);
+			if let (Some(start), Some(end)) = (start, end) {
+				let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+				for entry in &visible[lo..=hi] {
+					self.selected.insert(*entry);
+				}
+			} else {
+				self.selected.clear();
+				self.selected.insert(id);
+			}
+			self.selection_anchor = Some(id);
+		} else if modifiers.control || modifiers.platform {
+			if !self.selected.remove(&id) {
+				self.selected.insert(id);
+			}
+			self.selection_anchor = Some(id);
+		} else {
+			self.selected.clear();
+			self.selected.insert(id);
+			self.selection_anchor = Some(id);
+		}
 	}
 }
 
@@ -320,7 +359,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		let colors = cx.default_colors().clone();
 		let roots = self.data.read(cx).roots();
-		let selected = self.selected;
+		let selected = self.selected.clone();
 		let control = self.control;
 
 		let toolbar = div()
@@ -355,6 +394,17 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 			ExplorerView::Tree => {
 				let expanded = self.expanded.clone();
 				let rows = flatten_tree(&roots, &expanded, |id| self.data.read(cx).children(id));
+				let media_ids: Arc<Vec<u64>> = Arc::new(
+					rows.iter()
+						.filter(|(entry, _)| !entry.is_dir)
+						.map(|(entry, _)| entry.id)
+						.collect(),
+				);
+				let selected_media: Vec<u64> = media_ids
+					.iter()
+					.copied()
+					.filter(|id| selected.contains(id))
+					.collect();
 				let mut column = div()
 					.id(ElementId::named_usize(
 						"gpui-widgets-explorer-tree",
@@ -365,9 +415,15 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 					.py_1()
 					.overflow_y_scroll();
 				for (entry, depth) in rows {
-					let is_selected = selected == Some(entry.id);
+					let is_selected = selected.contains(&entry.id);
 					let click_entry = entry.clone();
 					let entry_id = entry.id;
+					let click_media = media_ids.clone();
+					let drag_ids = if is_selected && !entry.is_dir {
+						selected_media.clone()
+					} else {
+						vec![entry.id]
+					};
 					let mut row = div()
 						.id(ElementId::named_usize(
 							"gpui-widgets-explorer-entry",
@@ -394,7 +450,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 							colors.text
 						})
 						.on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
-							this.selected = Some(click_entry.id);
+							this.select_click(click_entry.id, &click_media, &event.modifiers());
 							if click_entry.is_dir {
 								if event.click_count() >= 2 {
 									this.open(&click_entry, cx);
@@ -437,9 +493,9 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 						// rows have no thumbnail to overlay).
 						.children(entry.proxy.map(proxy_badge_chip));
 					if !entry.is_dir {
-						// Media rows are drag sources: the payload carries the
-						// entry id for the timeline drop target.
-						row = row.on_drag(FootageDrag(entry.id), footage_drag_ghost);
+						// Media rows are drag sources; a row inside the
+						// selection drags the whole selection.
+						row = row.on_drag(FootageDrag(drag_ids), footage_drag_ghost);
 					}
 					if !is_selected {
 						row = row.hover(|style| style.bg(Hsla::from(colors.selected).opacity(0.3)));
@@ -465,6 +521,18 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 						}
 					})
 					.collect();
+				let media_ids: Arc<Vec<u64>> = Arc::new(
+					visible
+						.iter()
+						.filter(|entry| !entry.is_dir)
+						.map(|entry| entry.id)
+						.collect(),
+				);
+				let selected_media: Vec<u64> = media_ids
+					.iter()
+					.copied()
+					.filter(|id| selected.contains(id))
+					.collect();
 				let mut grid = div()
 					.id(ElementId::named_usize(
 						"gpui-widgets-explorer-icons",
@@ -477,9 +545,15 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 					.p_2()
 					.overflow_y_scroll();
 				for entry in visible {
-					let is_selected = selected == Some(entry.id);
+					let is_selected = selected.contains(&entry.id);
 					let click_entry = entry.clone();
 					let entry_id = entry.id;
+					let click_media = media_ids.clone();
+					let drag_ids = if is_selected && !entry.is_dir {
+						selected_media.clone()
+					} else {
+						vec![entry.id]
+					};
 					let mut icon = div()
 						.id(ElementId::named_usize(
 							"gpui-widgets-explorer-icon",
@@ -509,7 +583,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 							}
 						})
 						.on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
-							this.selected = Some(click_entry.id);
+							this.select_click(click_entry.id, &click_media, &event.modifiers());
 							if event.click_count() >= 2 {
 								this.open(&click_entry, cx);
 							}
@@ -575,7 +649,7 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 						);
 					if !entry.is_dir {
 						// Media icons are drag sources like the tree rows.
-						icon = icon.on_drag(FootageDrag(entry.id), footage_drag_ghost);
+						icon = icon.on_drag(FootageDrag(drag_ids), footage_drag_ghost);
 					}
 					grid = grid.child(icon);
 				}
@@ -753,6 +827,25 @@ mod tests {
 		let host = window.root(cx).unwrap();
 		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
 		(cx, host)
+	}
+
+	#[gpui_kit::test]
+	async fn ctrl_and_shift_click_build_a_media_selection(cx: &mut TestAppContext) {
+		let (cx, host) = make_explorer(cx);
+		cx.update(|_, cx| {
+			host.update(cx, |host, cx| {
+				host.explorer.update(cx, |explorer, _cx| {
+					let ids = [2u64, 10];
+					explorer.select_click(2, &ids, &Modifiers::default());
+					explorer.select_click(10, &ids, &Modifiers { control: true, ..Default::default() });
+					assert_eq!(explorer.selected, BTreeSet::from([2, 10]));
+					explorer.select_click(2, &ids, &Modifiers { shift: true, ..Default::default() });
+					assert_eq!(explorer.selected, BTreeSet::from([2, 10]));
+					explorer.select_click(2, &ids, &Modifiers::default());
+					assert_eq!(explorer.selected, BTreeSet::from([2]));
+				});
+			});
+		});
 	}
 
 	#[gpui_kit::test]

@@ -443,7 +443,8 @@ impl<E: AppEngine> TimelinePanel<E> {
 			length: event
 				.dragged_item()
 				.downcast_ref::<FootageDrag>()
-				.and_then(|drag| self.engine.read(cx).footage_length_frames(drag.0))
+				.and_then(|drag| drag.0.first().copied())
+				.and_then(|id| self.engine.read(cx).footage_length_frames(id))
 				.unwrap_or(1),
 		});
 		cx.notify();
@@ -600,9 +601,13 @@ impl<E: AppEngine> TimelinePanel<E> {
 			time,
 			..
 		} = target;
+		let Some(first) = drag.0.first().copied() else {
+			return;
+		};
 		if self.engine.read(cx).current_sequence().is_none() {
 			cx.emit(FootageDropNeedsSequence {
-				footage_id: drag.0,
+				footage_id: first,
+				footage_ids: drag.0.clone(),
 				track_kind,
 				track_index,
 				time,
@@ -610,8 +615,14 @@ impl<E: AppEngine> TimelinePanel<E> {
 			cx.notify();
 			return;
 		}
+		let ids = drag.0.clone();
 		self.engine.update(cx, |engine, cx| {
-			engine.drop_footage(drag.0, track_kind, track_index, time, cx);
+			let mut at = time;
+			for id in ids {
+				engine.drop_footage(id, track_kind, track_index, at, cx);
+				let length = engine.footage_length_frames(id).unwrap_or(1).max(1);
+				at = Frame(at.0 + length);
+			}
 		});
 		cx.notify();
 	}
@@ -1493,10 +1504,12 @@ impl<E: AppEngine> EventEmitter<ContextMenuTriggered> for TimelinePanel<E> {}
 /// placed. Re-issued by the shell through
 /// [`AppEngine::drop_footage`](crate::oakui::AppEngine::drop_footage) once
 /// the sequence exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FootageDropNeedsSequence {
-	/// The footage's project-explorer entry id (the drag payload).
+	/// The first footage's project-explorer entry id (the drag payload).
 	pub footage_id: u64,
+	/// All dragged footage ids, in placement order.
+	pub footage_ids: Vec<u64>,
 	/// The pointed display track kind.
 	pub track_kind: TrackKind,
 	/// The pointed display track index.
@@ -1870,13 +1883,13 @@ mod tests {
 				.flex_col()
 				.child(
 					source("footage-drag-source")
-						.on_drag(FootageDrag(3), |_drag, _offset, _window, cx| {
+						.on_drag(FootageDrag(vec![3]), |_drag, _offset, _window, cx| {
 							cx.new(|_| DropGhost)
 						}),
 				)
 				.child(
 					source("footage-drag-source-missing").on_drag(
-						FootageDrag(9999),
+						FootageDrag(vec![9999]),
 						|_drag, _offset, _window, cx| cx.new(|_| DropGhost),
 					),
 				)
@@ -2939,7 +2952,7 @@ mod tests {
 		// No pending footage drop.
 		cx.update(|_window, app| {
 			panel.update(app, |panel, cx| {
-				panel.finish_footage_drop(&FootageDrag(3), cx);
+				panel.finish_footage_drop(&FootageDrag(vec![3]), cx);
 			});
 		});
 		assert!(cx.read(|app| panel.read(app).engine.read(app).footage_drops().is_empty()));
@@ -2948,13 +2961,27 @@ mod tests {
 		cx.update(|_window, app| {
 			panel.update(app, |panel, cx| {
 				panel.footage_drop = Some(target());
-				panel.finish_footage_drop(&FootageDrag(3), cx);
+				panel.finish_footage_drop(&FootageDrag(vec![3]), cx);
 			});
 		});
 		cx.read(|app| {
 			let panel = panel.read(app);
 			assert!(panel.footage_drop.is_none(), "the target is consumed");
 			assert_eq!(panel.engine.read(app).footage_drops().len(), 1);
+		});
+
+		// Two selected entries are placed sequentially, not on top of
+		// each other.
+		cx.update(|_window, app| {
+			panel.update(app, |panel, cx| {
+				panel.footage_drop = Some(target());
+				panel.finish_footage_drop(&FootageDrag(vec![3, 3]), cx);
+			});
+		});
+		cx.read(|app| {
+			let drops = panel.read(app).engine.read(app).footage_drops();
+			assert_eq!(drops.len(), 3);
+			assert!(drops[1].time.0 < drops[2].time.0);
 		});
 
 		let generator =
@@ -3428,7 +3455,7 @@ mod tests {
 					time: Frame(5),
 					length: 1,
 				});
-				panel.finish_footage_drop(&FootageDrag(3), cx);
+				panel.finish_footage_drop(&FootageDrag(vec![3]), cx);
 			});
 		});
 		assert!(
