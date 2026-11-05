@@ -257,6 +257,13 @@ pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 12;
 /// Config key for the forward pre-render window size (frames).
 pub const CONFIG_KEY_PREVIEW_WINDOW: &str = "PlaybackPreRenderFrames";
 
+/// How many head frames to retain for a loop wrap. The decoder still has to
+/// seek from the end of the clip back to zero; keeping the first second of
+/// already-rendered frames lets playback cover that seek instead of freezing
+/// on the wrap frame. This is a memory trade: F32 preview frames are large, so
+/// the cache is deliberately smaller than the full forward window.
+const LOOP_CACHE_FRAMES: i64 = 24;
+
 /// One monitor's playback pre-render state (UI-thread-owned; the completions
 /// delivered by the dispatcher's poll run on the UI thread too).
 #[derive(Default)]
@@ -278,6 +285,12 @@ struct PreviewWindow {
 	/// head frames until the old tail drains, and the decoder must seek from
 	/// end to start while the viewer waits.
 	last_playhead: Option<i64>,
+	/// Sequence length the head-frame cache was populated for.
+	loop_length: i64,
+	/// Already-displayed head frames, kept across a loop wrap to cover the
+	/// decoder's end-to-start seek. Cleared when the node, generation or
+	/// sequence length changes.
+	loop_cache: BTreeMap<i64, (Arc<RenderImage>, ScopeData)>,
 }
 
 /// A finished frame in the playback pre-render window: a process-backend
@@ -2281,6 +2294,10 @@ impl RealEngine {
 		let mut stale_sequences: Vec<u64> = Vec::new();
 		let mut stale_keys: Vec<(u64, i64, u64)> = Vec::new();
 		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
+		if window.loop_length != length {
+			window.loop_length = length;
+			window.loop_cache.clear();
+		}
 		// A loop wrap (or a backward scrub) is a discontinuity: cancel the
 		// whole old window, not just frames below `keep_from`. The old
 		// tail-frame tasks would otherwise keep the six-task cap occupied
@@ -2297,6 +2314,9 @@ impl RealEngine {
 			stale_sequences.push(window.sequence);
 			stale_slots.extend(std::mem::take(&mut window.slots).into_values());
 			window.submitted.clear();
+			if window.sequence != node_id || window.generation != self.preview_generation {
+				window.loop_cache.clear();
+			}
 			window.sequence = node_id;
 			window.generation = self.preview_generation;
 		}
@@ -2468,8 +2488,13 @@ impl RealEngine {
 		if window.sequence != node_id || window.generation != self.preview_generation {
 			return None;
 		}
+		if monitor == Monitor::Program && frame.0 >= 0 && frame.0 < LOOP_CACHE_FRAMES {
+			if let Some(cached) = window.loop_cache.get(&frame.0) {
+				return Some(cached.clone());
+			}
+		}
 		let slot = window.slots.remove(&frame.0)?;
-		match slot {
+		let out = match slot {
 			PreviewSlot::Shm(slot) => {
 				let out = {
 					let meta = &slot.meta;
@@ -2498,7 +2523,7 @@ impl RealEngine {
 				if let Some(m) = RenderManager::global() {
 					m.release_frame(&slot);
 				}
-				Some(out)
+				out
 			}
 			PreviewSlot::Video(texture) => {
 				// M4: the thread pipeline keeps frames on the GPU (or as an
@@ -2516,9 +2541,13 @@ impl RealEngine {
 						&samples,
 					);
 				}
-				Some((Arc::new(image), scope))
+				(Arc::new(image), scope)
 			}
+		};
+		if monitor == Monitor::Program && frame.0 >= 0 && frame.0 < LOOP_CACHE_FRAMES {
+			window.loop_cache.insert(frame.0, out.clone());
 		}
+		Some(out)
 	}
 
 	/// Cancels every monitor's pre-render window and releases its held
