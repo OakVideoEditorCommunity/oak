@@ -17,7 +17,7 @@
 |---|---|---|---|
 | T0 schema 冻结 | schema 单测全绿 + 对照表防漂移 | 22 个工具 schema、27 合法 / 13 非法样本、三张对照表；`test_schema.py` 524 项全过，Rust 侧 4 个漂移/样本测试全过；参数范围**只回填 min/max（15 键）**，choices 经 `node.list_types` 回读（显式 open，已裁断，见 §9） | **已完成** |
 | T1 工具执行层 | 真实引擎脚本 E2E：导入→铺轨→split/trim/ripple_delete→取帧→像素断言→整段 undo 还原 | 执行层 + **Mock** E2E 全过；`sdk` 后端已于 11:17 落地（`src/sdk/{mod,backend,gaps}.rs` + `tests/sdk_e2e.rs`），默认 features **59 项测试通过**（11:42 复跑）；`--features sdk` 真机验证进行中 | **部分**（缺真机验证结论，见 §2） |
-| T2 取证预筛 | 已知切点检出率达标 + 峰值表 golden 比对 | `prescan.py` 双通道独立进程；27 项测试全过（含 golden 比对、2/2 已知切点） | **已完成** |
+| T2 取证预筛 | 已知切点检出率达标 + 峰值表 golden 比对 | `prescan.py` 双通道独立进程；**32 项**测试全过（首轮 27 + 静态素材修复新增 5，含 golden 比对、2/2 已知切点）；静态素材产出空切点表 | **已完成** |
 | T3 agent 核 + 记忆 | `pi --print` 无头冒烟、跨会话召回、密钥不落盘 | `ai/agent/` 不存在；仓根 `agent/` 为 git 排除的本地探索件；`AGENTS.md` 是悬空符号链接；memlite CLI 可用 | **未开始** |
 | T4 适配层 hooks | 三档确认门行为测试 + 失败回喂闭环 | 全仓仅 `error.rs:6` 一句注释提到 `edit_failed`；无 hook 代码 | **未开始** |
 | T5 MCP 封装 | 同一 schema 的 MCP server，零漂移 | `ai/oak-ai-mcp` **已落地**（默认 `--backend mock`：lib 20 + protocol 6 + zero_drift 3 = 29 项全绿，工具名双向集合相等）；`--backend sdk` 接线未完成、未实测；尚未独立验收。`agent/mcp-oak` 仍是早期 Python 原型（不计入交付） | **部分**（待独立验收） |
@@ -30,7 +30,8 @@
   1. **prescan 对静态素材报错、产不出空切点表**（`prescan.py:220-224`，假失败）→ 已另立 **task-8**（`gongbu-mcp`）修复；本次入仓的是已通过验收的行为，修复随 task-8 单独提交。
   2. **无切点素材存在 soft 候选误报**（`motion` 素材 2 条 soft，全靠 pHash 尖峰）→ **维持已知限制**（`ai/prescan/README.md:166-174` 已写明；`kind=soft` 定义为需人工复核的带）。
   3. **T0 效果参数 `choices` 未进 schema** → **口径已定**：min/max 回填（15 键，与引擎源码一致），choices 走 `node.list_types` 回读，记为显式 open；首辅已接受（§9）。
-- **验收快照的边界（读台账必看）**：本次 T2 验收针对的是 11:32 的快照，**不含 task-8 的静态素材空切点表修复**；task-8 合入后需**重新回归验收**（至少 prescan 全套测试 + 静态素材用例 + golden 原样通过），不得把「T2 已验收」直接延伸到修复后的代码。
+- **T2 修复回归验收：pass**（`/tmp/oak-reviews/t2-fix.md`，2026-11-05，同一验收人）：修复成立（零分数按 ffmpeg 退出码判别）、**双向回归锁成立**（改回旧逻辑 → 4 项红；过度放宽 → 1 项红）、既有 cuts 数值与首轮逐值相同、golden 与容差未动、全量 32 项 OK。非阻塞项：README 测试数字陈旧（本已更新）、台账数字陈旧（本已更新）、两条残留边界（已写入 README「Known limitations」）。
+- **验收快照的边界（读台账必看）**：首轮 T2 验收针对 11:32 快照，**不含** task-8 的静态素材修复；该修复经上一条回归验收独立确认后随第二次提交入仓。
 - 交付级前置（`ai/` 未入仓）按首辅裁断 B 分两步消解：**T0（`ai/schema/`）+ 本台账 + `.gitignore` 先行入仓**（§10 第一次提交）；**T2（`ai/prescan/`）等 task-8 完成后单独提交**，届时 §10 补第二行。
 
 ## 1. T0 schema 冻结：已完成
@@ -88,10 +89,10 @@
 证据：
 
 - `ai/prescan/prescan.py`：独立进程、只用 `ffmpeg`/`ffprobe` 读素材，不触引擎/SDK（模块 docstring），双通道（scene 分数 + 32×32 灰度 DCT pHash 64 位）+ 双阈值迟滞，输出有理秒 + 帧号。
-- `python3 ai/prescan/test_prescan.py`（exit 0）：`Ran 27 tests in 51.909s / OK`，含 `TestKnownCuts.test_detection_rate`（输出 `Both known cuts detected -> 2/2`）、`TestKnownCuts.test_hard_cut_detected_within_5_frames`、`test_dissolve_band_yields_soft_candidate`、`TestGolden.test_golden_compare`（对比 `ai/prescan/golden/test_scenes.cutlist.json`）、`TestErrorPaths` 6 项、`TestUnits` 5 项。
+- `python3 ai/prescan/test_prescan.py`（exit 0）：`Ran 32 tests in 71.128s / OK`（2026-11-05 11:57 复跑；并发构建时曾测 140.8 s，耗时随机器负载浮动）。含 `TestKnownCuts.test_detection_rate`（`Both known cuts detected -> 2/2`）、`test_hard_cut_detected_within_5_frames`、`test_dissolve_band_yields_soft_candidate`、`TestGolden.test_golden_compare`（对比 `ai/prescan/golden/test_scenes.cutlist.json`）、`TestStaticMaterial` 3 项（静态素材 → `cuts: []` + exit 0）、`TestErrorPaths` 6 项、`TestUnits` 7 项。
 - 测试素材由 ffmpeg lavfi 现场生成（`test_prescan.py:65` 起的固定配方）。
 
-缺口：无阻断。风险提示：golden 与 ffmpeg 版本强绑定（`README.md`/`test_prescan.py:31-33` 已写"算法或 ffmpeg 变更后重新生成"）——进 CI（T6）前需固定 ffmpeg 版本，否则换机即红。
+缺口：无阻断。风险提示：golden 与 ffmpeg 版本强绑定（`README.md`/`test_prescan.py:31-33` 已写"算法或 ffmpeg 变更后重新生成"）——进 CI（T6）前需固定 ffmpeg 版本，否则换机即红。已知边界（随修复写入 README「Known limitations」）：① faststart 截断素材在 `-f null` 下 ffmpeg 可能 rc=0，已解出部分帧时仍按正常素材出表（旧版同样如此，非本次引入）；② 若出现「零分数且 rc=0」的坏文件，会被当作静态素材（空切点表）——回归验收未构造出可复现反例，记为残留项，后续如需保护可在 `scan()` 加 `phash_samples == 0` 判断。
 
 ## 4. T3 / T4 / T5 / T6：均未开始
 
@@ -159,7 +160,7 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 | 命令 | 退出码 | 关键输出 |
 |---|---|---|
 | `python3 ai/schema/test_schema.py` | 0 | `TOTAL: pass=524 fail=0` / `RESULT: OK`；22 schemas、38 方法（mapped 23, deferred 15） |
-| `python3 ai/prescan/test_prescan.py` | 0 | `Ran 27 tests in 51.909s` / `OK`；`Both known cuts detected -> 2/2` |
+| `python3 ai/prescan/test_prescan.py` | 0 | 11:57 复跑（含静态素材修复）：`Ran 32 tests in 71.128s` / `OK`；并发构建下曾测 140.8 s；`Both known cuts detected -> 2/2` |
 | `cargo test`（`ai/oak-ai-tools`，默认 features，无 `sdk`） | 0 | 11:04 首跑与 **11:42 复跑**（`--offline`）一致：`52 passed`（lib）+ `3 passed`（`mock_e2e`）+ `2 passed`（`registry_drift`）+ `2 passed`（`schema_samples`）= **59 项**，全部 `0 failed`；`sdk_e2e` 记 0 项（feature 门控） |
 | `cargo test --features sdk` | **进行中/未验证** | 11:12 起在 `/tmp/oak-ai-sdk-target` 构建（连带引擎 + FFmpeg/ocio）；至 11:41 仍编译依赖，无 `test result` 可引用。见 §2 第 3 条 |
 | `git commit`（T0/T2 入仓） | 见 §10 | 仅 `ai/schema/`、`ai/prescan/`、本台账、`.gitignore` 四类路径 |
@@ -201,9 +202,27 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 
 ## 10. 入仓提交
 
-- 目标：T0（`ai/schema/`）+ T2（`ai/prescan/`）+ 本台账 + `.gitignore` 一次干净提交（`add(ai): freeze the T0 tool schema face and the T2 forensics prescan`）。
-- 状态：**待提交**。11:42:40 首次 `git add` 时检测到 `ai/prescan/` 被并发改写（`prescan.py` 11:41:35、`test_prescan.py` 11:42:03、`README.md` 11:42:12，属 task-8「静态素材空切点表」在办改动），与"只提交已验收快照"冲突。已 `git restore --staged` 撤销暂存（工作树未动、索引为空），等首辅裁断后补记 commit 哈希与 `git show --stat`。
-- 已验快照（可用于核对）：`ai/schema` + `ai/prescan` 全文件 sha256 汇总，11:40:57 为 `922b6a0f…`，11:42:46 变为 `a82e5d27…`（差异即来自上述 `ai/prescan` 三文件）。
+### 10.1 第一次提交：T0 工具面 + 本台账（2026-11-05 11:44）
+
+- commit：`e94d3707b2da60d75891e25873a6d8ab1932110f`，标题 `add(ai): freeze the T0 tool schema face`（作者 `fslong`），`66 files changed, 2329 insertions(+)`。
+- 范围：`ai/schema/`（22 tools + 40 samples + `method-map.md` + `test_schema.py` = 64 文件）、本台账、`.gitignore`（增补 `__pycache__/`、`*.pyc`）。
+- 提交前复验：`python3 ai/schema/test_schema.py` exit 0、`pass=524 fail=0`；`ai/schema` 当日 0 次改动（无并发污染）。
+- 未纳入：`ai/prescan/`（task-8 在办，见 10.2）、`ai/oak-ai-tools/`、`ai/oak-ai-mcp/`、`ai/agent/`、`docs/zh/plans/resolve21-oak-applicability.md`。
+- `git show --stat HEAD` 尾部原文：
+
+  ```
+   ai/schema/tools/timeline.split_clip.json           |  49 +++
+   ai/schema/tools/timeline.trim_clip.json            |  58 +++
+   docs/zh/plans/ai-feature-status.md                 | 210 +++++++++++
+   66 files changed, 2329 insertions(+)
+  ```
+
+### 10.2 第二次提交：T2 prescan 入仓 + task-8 修复（待办）
+
+- 前置：task-8（静态素材空切点表）完成、`gongbu-mcp` 回报测试结果、并做回归验收（prescan 全套测试 + 静态素材用例 + golden 原样通过）。
+- 内容：`ai/prescan/`（含修复）+ 本台账 §10 补记第二行。
+- 状态：**未提交**（截至 11:45）。
+- 口径：10.1 的哈希回填发生在首次提交之后，因此这段回填本身随 10.2 一并入库；首次提交里的 §10 是"待提交"占位，属预期。
 
 ---
 
