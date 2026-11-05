@@ -110,6 +110,16 @@ fn build_display_lut() -> Lut3d {
 /// [`present_gpu_frame`] reports `None` and the caller stages through the
 /// CPU as before).
 pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::Arc<wgpu::Queue>) {
+	// Hand the presenter's device to the engine before it creates its own
+	// context. The engine's render textures then live on this device and can
+	// be sampled directly by the viewer (zero-copy presentation).
+	unsafe {
+		quercus_engine_rs::render::gpu_install(
+			std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
+			std::sync::Arc::as_ptr(&queue) as *const std::ffi::c_void,
+			quercus_engine_rs::render::GpuBackend::Vulkan,
+		);
+	}
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
 	}

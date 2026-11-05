@@ -107,6 +107,28 @@ impl RenderedFrame {
 			RenderedFrame::Sdk(frame) => {
 				let info = frame.info();
 				let (w, h) = (info.width.max(0) as u32, info.height.max(0) as u32);
+				// The engine may hand back the final working-space texture on
+				// the presenter's device. Register it for the viewer and use a
+				// zero-filled placeholder image only as the id/fallback carrier;
+				// pixels are sampled from the GPU texture, not uploaded again.
+				if let Some((ptr, tw, th)) = frame.take_gpu_texture() {
+					let texture = unsafe {
+						std::sync::Arc::from_raw(ptr as *const wgpu::Texture)
+					};
+					let placeholder = vec![0u8; (tw.max(1) as usize) * (th.max(1) as usize) * 4];
+					let image = bgra_bytes_to_render_image(
+						tw.max(1) as u32,
+						th.max(1) as u32,
+						&placeholder,
+					)?;
+					super::gpu::register_texture(
+						image.id.0,
+						tw.max(1) as u32,
+						th.max(1) as u32,
+						texture,
+					);
+					return Some((image, ScopeData::default(), None));
+				}
 				let data = frame.bytes();
 				match info.pixel_format {
 					quercus_engine_rs::preview_video::VideoPixelFormat::F32Rgba => {
