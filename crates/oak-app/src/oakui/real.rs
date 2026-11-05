@@ -305,6 +305,12 @@ struct PreviewWindow {
 	/// Owned rendered frames, keyed by frame number. A frame is consumed by
 	/// `cpu_frame` or dropped when it falls out of the window.
 	slots: BTreeMap<i64, PreviewSlot>,
+	/// Playhead used at the previous update. A backward jump (loop wrap or
+	/// scrub) invalidates the old window immediately instead of keeping its
+	/// tail-frame tasks in flight: otherwise the six-task cap blocks the new
+	/// head frames until the old tail drains, and the decoder must seek from
+	/// end to start while the viewer waits.
+	last_playhead: Option<i64>,
 }
 
 /// A finished, backend-independent frame in the playback pre-render window.
@@ -1873,7 +1879,19 @@ impl RealEngine {
 			.unwrap_or_else(|e| e.into_inner());
 		let window = windows.entry(monitor).or_default();
 		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
-		if window.sequence != node_id || window.generation != self.preview_generation {
+		// A loop wrap (or a backward scrub) is a discontinuity: cancel the
+		// whole old window, not just frames below `keep_from`. The old
+		// tail-frame tasks would otherwise keep the six-task cap occupied
+		// while the playhead sits at zero, delaying the first new frame and
+		// forcing a cold decoder seek from the end of the clip.
+		let jumped = window
+			.last_playhead
+			.is_some_and(|prev| playhead < prev - 2 || playhead > prev + 2);
+		window.last_playhead = Some(playhead);
+		if window.sequence != node_id
+			|| window.generation != self.preview_generation
+			|| jumped
+		{
 			for (_, task) in std::mem::take(&mut window.requests) {
 				task.cancel();
 				window.retired.push(task);
