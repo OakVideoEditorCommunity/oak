@@ -6727,7 +6727,7 @@ impl AppEngine for RealEngine {
 					state: self.proxy_state_of(f, node),
 					enabled: f.proxy_enabled,
 					has_custom: f.has_custom_proxy_params(),
-					can_generate: f.valid && f.streams.iter().any(|s| s.is_video),
+					can_generate: !f.filename.is_empty() && f.streams.iter().any(|s| s.is_video),
 					has_proxy: !f.proxy.is_empty(),
 				})
 			})
@@ -7057,7 +7057,7 @@ impl AppEngine for RealEngine {
 				state: self.proxy_state_of(f, footage),
 				enabled: f.proxy_enabled,
 				has_custom: f.has_custom_proxy_params(),
-				can_generate: f.valid && f.streams.iter().any(|s| s.is_video),
+				can_generate: !f.filename.is_empty() && f.streams.iter().any(|s| s.is_video),
 				has_proxy: !f.proxy.is_empty(),
 			});
 		}
