@@ -286,6 +286,13 @@ pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 12;
 /// Config key for the forward pre-render window size (frames).
 pub const CONFIG_KEY_PREVIEW_WINDOW: &str = "PlaybackPreRenderFrames";
 
+/// How many head frames to retain for a loop wrap. The decoder still has to
+/// seek from the end of the clip back to zero; keeping the first second of
+/// already-rendered frames lets playback cover that seek instead of freezing
+/// on the wrap frame. This is a memory trade: F32 preview frames are large, so
+/// the cache is deliberately smaller than the full forward window.
+const LOOP_CACHE_FRAMES: i64 = 24;
+
 /// One monitor's playback pre-render state. SDK tasks are polled on the UI
 /// thread, but all rendering and waiting stays on engine workers.
 #[derive(Default)]
@@ -311,6 +318,12 @@ struct PreviewWindow {
 	/// head frames until the old tail drains, and the decoder must seek from
 	/// end to start while the viewer waits.
 	last_playhead: Option<i64>,
+	/// Sequence length the head-frame cache was populated for.
+	loop_length: i64,
+	/// Already-displayed head frames, kept across a loop wrap to cover the
+	/// decoder's end-to-start seek. Cleared when the node, generation or
+	/// sequence length changes.
+	loop_cache: BTreeMap<i64, PreviewSlot>,
 }
 
 /// A finished, backend-independent frame in the playback pre-render window.
@@ -1879,6 +1892,10 @@ impl RealEngine {
 			.unwrap_or_else(|e| e.into_inner());
 		let window = windows.entry(monitor).or_default();
 		let mut stale_slots: Vec<PreviewSlot> = Vec::new();
+		if window.loop_length != length {
+			window.loop_length = length;
+			window.loop_cache.clear();
+		}
 		// A loop wrap (or a backward scrub) is a discontinuity: cancel the
 		// whole old window, not just frames below `keep_from`. The old
 		// tail-frame tasks would otherwise keep the six-task cap occupied
@@ -1898,8 +1915,26 @@ impl RealEngine {
 			}
 			stale_slots.extend(std::mem::take(&mut window.slots).into_values());
 			window.submitted.clear();
+			if window.sequence != node_id || window.generation != self.preview_generation {
+				window.loop_cache.clear();
+			}
 			window.sequence = node_id;
 			window.generation = self.preview_generation;
+		}
+		if jumped {
+			// Re-seed the new head of the timeline from the cache. These
+			// frames survive the seek back to zero and can be presented
+			// immediately; the decoder catches up in the background.
+			let cached: Vec<(i64, PreviewSlot)> = window
+				.loop_cache
+				.iter()
+				.filter(|(f, _)| **f >= playhead && **f < end)
+				.map(|(f, slot)| (*f, slot.clone()))
+				.collect();
+			for (frame, slot) in cached {
+				window.slots.insert(frame, slot);
+				window.submitted.insert(frame);
+			}
 		}
 		// Release slots that fell behind the playhead (frames passed without
 		// being displayed); the just-displayed frame was already consumed by
@@ -2020,6 +2055,11 @@ impl RealEngine {
 		let window = windows.get_mut(&monitor)?;
 		if window.sequence != node_id || window.generation != self.preview_generation {
 			return None;
+		}
+		if monitor == Monitor::Program && frame.0 >= 0 && frame.0 < LOOP_CACHE_FRAMES {
+			if let Some(slot) = window.slots.get(&frame.0) {
+				window.loop_cache.insert(frame.0, slot.clone());
+			}
 		}
 		let slot = window.slots.remove(&frame.0)?;
 		let (width, height) = {
