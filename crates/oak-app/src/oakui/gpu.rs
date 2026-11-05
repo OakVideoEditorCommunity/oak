@@ -113,11 +113,19 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	// Hand the presenter's device to the engine before it creates its own
 	// context. The engine's render textures then live on this device and can
 	// be sampled directly by the viewer (zero-copy presentation).
+	let backend = match device.adapter_info().backend {
+		wgpu::Backend::Metal => quercus_engine_rs::render::GpuBackend::Metal,
+		wgpu::Backend::Gl => quercus_engine_rs::render::GpuBackend::Gl,
+		wgpu::Backend::Vulkan => quercus_engine_rs::render::GpuBackend::Vulkan,
+		// Dx12 is not a separate engine backend discriminant; the engine's
+		// external-memory import gates on Vulkan anyway, so use Auto.
+		_ => quercus_engine_rs::render::GpuBackend::Auto,
+	};
 	unsafe {
 		quercus_engine_rs::render::gpu_install(
 			std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
 			std::sync::Arc::as_ptr(&queue) as *const std::ffi::c_void,
-			quercus_engine_rs::render::GpuBackend::Vulkan,
+			backend,
 		);
 	}
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
