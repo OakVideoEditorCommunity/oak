@@ -122,3 +122,5 @@ tarpaulin-out/
 # CD packaging artifacts
 /*.dmg
 perf.data
+__pycache__/
+*.pyc

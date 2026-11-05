@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/export.start.json",
+  "title": "export.start",
+  "type": "object",
+  "description": "Start exporting a sequence to 'output_path'. 1:1 mapping to OPP/1 section 8.8 export.start (confirmation class). 'preset' is an Oak export preset name - the preset set is app-configured and therefore open (OPP/1 v1 exposes no custom encoding). Progress is delivered as export.progress/export.done events handled by the T4 hooks layer, not as part of this tool's result.",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Sequence to export (required by OPP/1 section 8.8)."
+    },
+    "output_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Destination media file path."
+    },
+    "preset": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Oak export preset name. Open set: preset names come from the host configuration, so no enum is frozen here (see method-map.md open items)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "sequence",
+    "output_path"
+  ]
+}
