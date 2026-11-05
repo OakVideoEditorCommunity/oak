@@ -143,6 +143,25 @@ pub fn hardware_decoding_enabled() -> bool {
 /// The hardware device types to try, most preferred first. On a machine
 /// without the device/driver the candidate fails creation and the next
 /// one is tried; the software decoder is the final fallback.
+/// Hardware candidates in preference order for this stream. VAAPI on the
+/// NVIDIA driver does not implement 10-bit 4:2:2 H.264; trying it first makes
+/// libavcodec decode corrupted software frames (green bars, DC/AC concealment
+/// errors) before the next candidate is reached. Prefer NVDEC/CUDA for that
+/// profile.
+pub fn candidates_for(params: &ffmpeg::codec::Parameters) -> Vec<sys::AVHWDeviceType> {
+	let mut candidates = device_type_candidates().to_vec();
+	let format = unsafe { (*params.as_ptr()).format };
+	let ten_bit_422 = format == sys::AVPixelFormat::AV_PIX_FMT_YUV422P10LE as i32
+		|| format == sys::AVPixelFormat::AV_PIX_FMT_YUV422P10BE as i32;
+	if ten_bit_422 {
+		candidates.sort_by_key(|candidate| {
+			(*candidate != sys::AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA) as u8
+		});
+	}
+	candidates
+}
+
+/// Platform hardware decoder candidates, in default preference order.
 pub fn device_type_candidates() -> &'static [sys::AVHWDeviceType] {
 	#[cfg(target_os = "macos")]
 	{

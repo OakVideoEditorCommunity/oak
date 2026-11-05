@@ -802,7 +802,7 @@ impl DecoderState {
 			&& crate::hwdecode::hardware_decoding_enabled()
 		{
 			ffmpeg::decoder::find(codec_id).and_then(|codec| {
-				crate::hwdecode::device_type_candidates()
+				crate::hwdecode::candidates_for(&params)
 					.iter()
 					.find_map(|device_type| {
 						crate::hwdecode::open_hw_accel(&params, codec, *device_type).map(
