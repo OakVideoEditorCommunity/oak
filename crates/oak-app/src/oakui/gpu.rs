@@ -125,8 +125,21 @@ fn ensure_display_lut(ctx: &oak_core::backend::GpuContext) {
 /// [`present_gpu_frame`] reports `None` and the caller stages through the
 /// CPU as before).
 pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::Arc<wgpu::Queue>) {
+	// Sharing the window's queue with the engine is only safe on a
+	// thread-safe native backend. GL/GLES serializes through a global
+	// context and the engine's per-frame submit can deadlock the UI's
+	// surface acquisition (fence.write vs fence.read). On GL (and unknown
+	// backends) let the engine create its own context and stage frames
+	// through the CPU readback path instead.
+	let share_engine_context = device.adapter_info().backend != wgpu::Backend::Gl;
+	if !share_engine_context {
+		eprintln!("[gpu] GL backend: engine keeps its own context (no shared wgpu queue)");
+	}
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
+	}
+	if !share_engine_context {
+		return;
 	}
 	let adopted =
 		oak_core::backend::GpuContext::adopt(device, queue, oak_core::backend::BackendKind::Auto);
