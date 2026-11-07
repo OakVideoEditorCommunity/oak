@@ -165,7 +165,15 @@ pub fn render_frame(
 	// 目标帧建出真实 GL 纹理 ⟺ 离屏上下文可用，[`crate::gl_bridge`]）。
 	// 任一不满足 → 回退 CPU 路径（GL 分支在下方真正渲染）。
 	let use_opengl = match job.renderer.as_ref() {
-		Some(r) if render::renderer_is_open_gl(r) => {
+		// CPU-only by default: the OpenFX GL path shares the engine's
+		// external-memory/Vulkan state and has produced device-lost crashes
+		// on NVIDIA. Plugins still render through the CPU image-effect API;
+		// opt into GL explicitly with QUERCUS_OFX_GL=1 once that path is
+		// validated.
+		Some(r)
+			if render::renderer_is_open_gl(r)
+				&& std::env::var_os("QUERCUS_OFX_GL").is_some() =>
+		{
 			let plugin_gl = plugin_supports_opengl(inst);
 			let depth_ok =
 				crate::suites::gl_render::pick_gl_pixel_depth(&inst.plugin.descriptor.props)
