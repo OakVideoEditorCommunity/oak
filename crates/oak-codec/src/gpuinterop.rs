@@ -106,6 +106,11 @@ fn platform_import_enabled(env: &str, config: &str) -> bool {
 fn switch_from_config(key: &str) -> bool {
 	match oak_core::configstore::ConfigStore::instance().get(None, key) {
 		Ok(value) => value != "false",
+		// VAAPI import can block inside vkCreateImage/vkAllocateMemory on
+		// some drivers while the render thread (and the UI waiting on its
+		// ticket) is frozen. Keep it opt-in until that path has a
+		// driver-level watchdog; staging is the safe default.
+		Err(_) if key == CONFIG_KEY_VAAPI_IMPORT => false,
 		Err(_) => true,
 	}
 }
