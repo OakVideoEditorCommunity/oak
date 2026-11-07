@@ -121,27 +121,24 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 		// external-memory import gates on Vulkan anyway, so use Auto.
 		_ => quercus_engine_rs::render::GpuBackend::Auto,
 	};
-	// Sharing the window's queue with the engine is only safe on a
-	// thread-safe native backend. GL/GLES serializes through a global
-	// context and the engine's per-frame submit can deadlock the UI's
-	// surface acquisition (fence.write vs fence.read). On GL (and unknown
-	// backends) let the engine create its own context and stage frames
-	// through the CPU readback path instead.
-	match backend {
-		quercus_engine_rs::render::GpuBackend::Gl
-		| quercus_engine_rs::render::GpuBackend::Auto => {
-			eprintln!(
-				"[gpu] {} backend: engine keeps its own context (no shared wgpu queue)",
-				format!("{backend:?}")
-			);
-		}
-		_ => unsafe {
+	// Keep the engine on its own wgpu device/queue by default. Sharing the
+	// window queue made a driver-level stall in the render thread (VAAPI /
+	// GL import, submit, or present) block the UI's surface acquisition on
+	// the same fence lock. The zero-copy handoff is opt-in for machines where
+	// the shared path is known-good.
+	if std::env::var_os("OAK_GPU_SHARED").is_some() {
+		unsafe {
 			quercus_engine_rs::render::gpu_install(
 				std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
 				std::sync::Arc::as_ptr(&queue) as *const std::ffi::c_void,
 				backend,
 			);
-		},
+		}
+	} else {
+		eprintln!(
+			"[gpu] {} backend: engine keeps its own context (no shared wgpu queue)",
+			format!("{backend:?}")
+		);
 	}
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
