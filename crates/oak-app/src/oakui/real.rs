@@ -170,6 +170,10 @@ struct MonitorFrameCache {
 	/// one job runs per monitor; the drain re-schedules when the playhead
 	/// moves while a job is in flight.
 	pending: Option<(i64, u64)>,
+	/// Last successfully displayed image. A transient preview-slot miss
+	/// (prefetch gap, loop wrap) must not flash the synthetic color bars;
+	/// keep showing the previous frame until the next one lands.
+	last: Option<Arc<RenderImage>>,
 }
 
 impl MonitorFrameCache {
@@ -4366,18 +4370,26 @@ impl AppEngine for RealEngine {
 		// the playhead; otherwise the proxy frame is displayed (cached
 		// misses fall back to the last proxy below, filled by the background
 		// worker once the playhead rests).
-		if let Some(image) = cache.entry(monitor).or_default().image_for(frame.0) {
-			return image.clone();
+		if let Some(image) = cache
+			.entry(monitor)
+			.or_default()
+			.image_for(frame.0)
+			.cloned()
+		{
+			cache.entry(monitor).or_default().last = Some(image.clone());
+			return image;
 		}
 		// M15 S2: try the pre-rendered playback window first — the frame's
 		// pixels are already in a worker shm slot (zero copy: build the
 		// display image from the slot bytes, then release the slot).
 		if let Some((image, scope)) = self.preview_slot_frame(monitor, frame) {
-			cache.entry(monitor).or_default().proxy = Some(ProxyEntry {
+			let entry = cache.entry(monitor).or_default();
+			entry.proxy = Some(ProxyEntry {
 				frame: frame.0,
 				image: image.clone(),
 				scope,
 			});
+			entry.last = Some(image.clone());
 			return image;
 		}
 		// A cache miss must NOT block the UI thread on a synchronous render
@@ -4395,6 +4407,14 @@ impl AppEngine for RealEngine {
 		if let Some(image) = cache
 			.get(&monitor)
 			.and_then(|e| e.proxy.as_ref().map(|p| p.image.clone()))
+		{
+			return image;
+		}
+		// A cache miss at a loop wrap or prefetch gap: keep the last real
+		// frame instead of flashing the synthetic pattern.
+		if let Some(image) = cache
+			.get(&monitor)
+			.and_then(|e| e.last.as_ref().map(|i| i.clone()))
 		{
 			return image;
 		}
@@ -4422,6 +4442,7 @@ impl AppEngine for RealEngine {
 			image: image.clone(),
 			scope,
 		});
+		cache.entry(monitor).or_default().last = Some(image.clone());
 		image
 	}
 
