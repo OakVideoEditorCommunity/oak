@@ -1255,6 +1255,10 @@ pub struct RealEngine {
 	/// [`RealEngine::render_source_frame`]); the synthetic pattern is only
 	/// the failure fallback.
 	cpu_frame_cache: Mutex<HashMap<Monitor, MonitorFrameCache>>,
+	/// Last successfully displayed image per monitor. Survives a cache
+	/// invalidation and bridges preview-slot gaps, so a transient miss
+	/// shows the previous frame instead of the synthetic color bars.
+	last_display: Mutex<HashMap<Monitor, Arc<RenderImage>>>,
 	/// The display-color transform generation the frame cache was built
 	/// against (a change drops every cached image — they were produced
 	/// with the stale transform).
@@ -1709,6 +1713,7 @@ impl RealEngine {
 			program_playing: false,
 			meter_phase: 0,
 			cpu_frame_cache: Mutex::new(HashMap::new()),
+			last_display: Mutex::new(HashMap::new()),
 			display_color_gen: std::cell::Cell::new(0),
 			full_res_generation: 0,
 			preview_windows: Arc::new(Mutex::new(HashMap::new())),
@@ -4377,6 +4382,10 @@ impl AppEngine for RealEngine {
 			.cloned()
 		{
 			cache.entry(monitor).or_default().last = Some(image.clone());
+			self.last_display
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.insert(monitor, image.clone());
 			return image;
 		}
 		// M15 S2: try the pre-rendered playback window first — the frame's
@@ -4390,6 +4399,10 @@ impl AppEngine for RealEngine {
 				scope,
 			});
 			entry.last = Some(image.clone());
+			self.last_display
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.insert(monitor, image.clone());
 			return image;
 		}
 		// A cache miss must NOT block the UI thread on a synchronous render
@@ -4418,6 +4431,16 @@ impl AppEngine for RealEngine {
 		{
 			return image;
 		}
+		// Preserve the last displayed image across cache invalidation too.
+		if let Some(image) = self
+			.last_display
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(&monitor)
+			.cloned()
+		{
+			return image;
+		}
 		// Both monitors render through the oakrender ticket arena (falling
 		// back to the synthetic pattern when rendering is unavailable): the
 		// program monitor renders the current sequence, the source monitor
@@ -4443,6 +4466,10 @@ impl AppEngine for RealEngine {
 			scope,
 		});
 		cache.entry(monitor).or_default().last = Some(image.clone());
+		self.last_display
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.insert(monitor, image.clone());
 		image
 	}
 
