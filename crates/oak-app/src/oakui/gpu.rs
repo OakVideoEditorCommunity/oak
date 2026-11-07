@@ -126,7 +126,10 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	// GL import, submit, or present) block the UI's surface acquisition on
 	// the same fence lock. The zero-copy handoff is opt-in for machines where
 	// the shared path is known-good.
-	if std::env::var_os("OAK_GPU_SHARED").is_some() {
+	let shared = std::env::var("OAK_GPU_SHARED")
+		.map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+		.unwrap_or(false);
+	if shared {
 		unsafe {
 			quercus_engine_rs::render::gpu_install(
 				std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
