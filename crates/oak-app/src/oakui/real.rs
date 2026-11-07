@@ -1115,6 +1115,10 @@ pub struct RealEngine {
 	/// rests (see [`MonitorFrameCache`]). The synthetic pattern is only a
 	/// cold-cache placeholder while the first request is in flight.
 	cpu_frame_cache: Mutex<HashMap<Monitor, MonitorFrameCache>>,
+	/// Last successfully displayed image per monitor. Survives a cache
+	/// invalidation and bridges preview-slot gaps, so a transient miss
+	/// shows the previous frame instead of the synthetic color bars.
+	last_display: Mutex<HashMap<Monitor, Arc<RenderImage>>>,
 	/// The display-color transform generation the frame cache was built
 	/// against (a change drops every cached image — they were produced
 	/// with the stale transform).
@@ -1429,6 +1433,7 @@ impl RealEngine {
 			program_playing: false,
 			meter_phase: 0,
 			cpu_frame_cache: Mutex::new(HashMap::new()),
+			last_display: Mutex::new(HashMap::new()),
 			display_color_gen: std::cell::Cell::new(0),
 			full_res_generation: 0,
 			preview_windows: Arc::new(Mutex::new(HashMap::new())),
@@ -3702,6 +3707,10 @@ impl AppEngine for RealEngine {
 				scope,
 			});
 			entry.last = Some(image.clone());
+			self.last_display
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.insert(monitor, image.clone());
 			return image;
 		}
 		// The full-resolution fill replaces the proxy when its frame matches
@@ -3713,6 +3722,10 @@ impl AppEngine for RealEngine {
 			.cloned()
 		{
 			cache.entry(monitor).or_default().last = Some(image.clone());
+			self.last_display
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.insert(monitor, image.clone());
 			return image;
 		}
 		// A cache miss never blocks the UI thread. Show the last displayed
@@ -3728,6 +3741,16 @@ impl AppEngine for RealEngine {
 		if let Some(image) = cache
 			.get(&monitor)
 			.and_then(|e| e.last.as_ref().map(|i| i.clone()))
+		{
+			return image;
+		}
+		// Preserve the last displayed image across cache invalidation too.
+		if let Some(image) = self
+			.last_display
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(&monitor)
+			.cloned()
 		{
 			return image;
 		}
