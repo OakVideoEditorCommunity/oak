@@ -2052,6 +2052,7 @@ impl RealEngine {
 		monitor: Monitor,
 		frame: Frame,
 	) -> Option<(Arc<RenderImage>, ScopeData)> {
+		let _t0 = std::time::Instant::now();
 		let node = match monitor {
 			Monitor::Program => self.sequence?,
 			Monitor::Source => self.selected_footage_node()?,
@@ -2077,6 +2078,12 @@ impl RealEngine {
 		};
 		let rendered = super::renderops::RenderedFrame::Sdk(slot);
 		let (image, scope, samples) = rendered.to_display()?;
+		if std::env::var_os("OAK_DEBUG_PREVIEW").is_some() {
+			let ms = _t0.elapsed().as_millis();
+			if ms > 20 {
+				eprintln!("[preview] to_display frame={} took {}ms", frame.0, ms);
+			}
+		}
 		if let Some(samples) = samples {
 			super::gpu::register_display_frame(image.id.0, width, height, &samples);
 		}
@@ -3686,6 +3693,7 @@ impl AppEngine for RealEngine {
 	}
 
 	fn cpu_frame(&self, monitor: Monitor, cx: &App) -> Arc<RenderImage> {
+		let _t0 = std::time::Instant::now();
 		let frame = self.clock_frame(monitor, cx);
 		let mut cache = self.cpu_frame_cache.lock().unwrap();
 		// A display-color transform change (mode / ICC / content space)
