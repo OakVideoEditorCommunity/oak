@@ -32,6 +32,8 @@
 
 use std::sync::Mutex;
 
+use quercus_engine_rs::render::gpu_set_display_transform_required;
+
 /// The window's wgpu device/queue, registered by the app's window builder
 /// (the same pair gpui's renderer draws with, so textures created here are
 /// visible to it). `None` before the first window opens — uploads no-op.
@@ -39,7 +41,6 @@ static GPU_CONTEXT: Mutex<Option<(std::sync::Arc<wgpu::Device>, std::sync::Arc<w
 	Mutex::new(None);
 
 /// CPU-baked display LUT used by the wgpu display path.
-#[cfg(test)]
 struct Lut3d {
 	edge: u32,
 	data: Vec<f32>,
@@ -66,7 +67,6 @@ fn display_lut_key() -> String {
 /// what makes the GPU present path color-managed: every per-pixel step the
 /// CPU path performs runs here once per settings change, on the GPU's
 /// behalf, at full precision.
-#[cfg(test)]
 fn build_display_lut() -> Lut3d {
 	let edge = quercus_engine_rs::core::DISPLAY_EDGE;
 	let lo = quercus_engine_rs::core::DISPLAY_LO;
@@ -143,9 +143,28 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 			format!("{backend:?}")
 		);
 	}
+	let zero_copy = shared
+		&& device
+			.features()
+			.contains(wgpu::Features::FLOAT32_FILTERABLE)
+		&& install_display_lut();
+	gpu_set_display_transform_required(!zero_copy);
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
 	}
+}
+
+pub fn install_display_lut() -> bool {
+	if !quercus_engine_rs::render::gpu_is_adopted() {
+		return false;
+	}
+	let lut = build_display_lut();
+	quercus_engine_rs::render::gpu_set_display_lut(
+		lut.edge,
+		&quercus_engine_rs::core::DISPLAY_LO,
+		&quercus_engine_rs::core::DISPLAY_HI,
+		&lut.data,
+	)
 }
 
 /// Whether a GPU context is registered (a window is open). The viewer uses
@@ -158,7 +177,7 @@ pub fn context_ready() -> bool {
 /// a half-float RGBA16F GPU texture for the 10-bit display path. Returns
 /// `None` when no context is registered or the samples are malformed — the
 /// caller then falls back to the BGRA8 CPU-frame path.
-pub fn upload_rgba16f(
+pub fn upload_rgba32f(
 	width: u32,
 	height: u32,
 	samples: &[f32],
@@ -170,9 +189,15 @@ pub fn upload_rgba16f(
 		let ctx = GPU_CONTEXT.lock().ok()?;
 		ctx.as_ref().map(|(d, q)| (d.clone(), q.clone()))?
 	};
-	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_16f_bytes(width, height, samples)?;
+	if !device
+		.features()
+		.contains(wgpu::Features::FLOAT32_FILTERABLE)
+	{
+		return None;
+	}
+	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_32f_bytes(width, height, samples)?;
 	let texture = device.create_texture(&wgpu::TextureDescriptor {
-		label: Some("oak_display_rgba16f"),
+		label: Some("oak_display_rgba32f"),
 		size: wgpu::Extent3d {
 			width,
 			height,
@@ -181,7 +206,7 @@ pub fn upload_rgba16f(
 		mip_level_count: 1,
 		sample_count: 1,
 		dimension: wgpu::TextureDimension::D2,
-		format: wgpu::TextureFormat::Rgba16Float,
+		format: wgpu::TextureFormat::Rgba32Float,
 		usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 		view_formats: &[],
 	});
@@ -192,7 +217,7 @@ pub fn upload_rgba16f(
 			origin: wgpu::Origin3d::ZERO,
 			aspect: wgpu::TextureAspect::All,
 		},
-		&bytes,
+		bytes.as_ref(),
 		wgpu::TexelCopyBufferLayout {
 			offset: 0,
 			// Multi-row copies require an explicit, 256-aligned pitch; a
@@ -214,7 +239,7 @@ pub fn upload_rgba16f(
 /// 10-bit surface path. Best-effort: without a registered context it's a
 /// no-op and the viewer keeps the BGRA8 CPU-frame fallback.
 pub fn register_display_frame(image_id: usize, width: u32, height: u32, samples: &[f32]) {
-	let Some(texture) = upload_rgba16f(width, height, samples) else {
+	let Some(texture) = upload_rgba32f(width, height, samples) else {
 		return;
 	};
 	register_texture(image_id, width, height, texture);
@@ -249,16 +274,16 @@ mod tests {
 	#[test]
 	fn rgba16f_upload_rejects_malformed_arguments() {
 		// Zero dimensions.
-		assert!(upload_rgba16f(0, 1, &[]).is_none());
-		assert!(upload_rgba16f(1, 0, &[]).is_none());
+		assert!(upload_rgba32f(0, 1, &[]).is_none());
+		assert!(upload_rgba32f(1, 0, &[]).is_none());
 		// Wrong sample counts: short, long and empty for a 2x1 frame.
-		assert!(upload_rgba16f(2, 1, &[]).is_none());
-		assert!(upload_rgba16f(2, 1, &[0.0; 7]).is_none());
-		assert!(upload_rgba16f(2, 1, &[0.0; 9]).is_none());
+		assert!(upload_rgba32f(2, 1, &[]).is_none());
+		assert!(upload_rgba32f(2, 1, &[0.0; 7]).is_none());
+		assert!(upload_rgba32f(2, 1, &[0.0; 9]).is_none());
 		// Valid arguments without a registered window context decline
 		// cleanly (the boolean is context-dependent, so only the
 		// no-panic contract is asserted here).
-		let _ = upload_rgba16f(2, 1, &[0.0; 8]);
+		let _ = upload_rgba32f(2, 1, &[0.0; 8]);
 	}
 
 	/// The half-float packer clamps to [0, 1], writes little-endian f16

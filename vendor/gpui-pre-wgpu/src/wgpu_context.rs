@@ -442,6 +442,12 @@ impl WgpuContext {
         {
             required_features |= wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
         }
+        if adapter
+            .features()
+            .contains(wgpu::Features::FLOAT32_FILTERABLE)
+        {
+            required_features |= wgpu::Features::FLOAT32_FILTERABLE;
+        }
 
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
         #[cfg(target_family = "wasm")]

@@ -29,9 +29,9 @@ use quercus_engine_rs::types::Rational;
 use quercus_engine_rs::node::NodeId;
 
 use super::engine::{ExportEvent, ExportSession};
-use super::frames::{bgra_bytes_to_render_image, f32_rgba_to_bgra_image};
+use super::frames::{bgra_bytes_to_render_image, lazy_gpu_f32_rgba_to_bgra_image};
 use super::graphops::ProjectRef;
-use super::scopes::{analyze_bgra8, analyze_f32_rgba, ScopeData};
+use super::scopes::ScopeData;
 
 /// The pipeline's F32 pixel-format code.
 pub const PIXEL_FORMAT_F32: i32 = 4;
@@ -102,32 +102,29 @@ impl RenderedFrame {
 
 	/// Builds the viewer image, matching scope data and optional F32 display
 	/// samples used by the RGBA16F upload path.
-	pub fn to_display(&self) -> Option<(RenderImage, ScopeData, Option<Vec<f32>>)> {
+	pub fn to_display(&self) -> Option<(RenderImage, Option<ScopeData>, Option<Vec<f32>>)> {
 		match self {
 			RenderedFrame::Sdk(frame) => {
 				let info = frame.info();
 				let (w, h) = (info.width.max(0) as u32, info.height.max(0) as u32);
-				// The engine may hand back the final working-space texture on
-				// the presenter's device. Register it for the viewer and use a
-				// zero-filled placeholder image only as the id/fallback carrier;
-				// pixels are sampled from the GPU texture, not uploaded again.
+				// Register the display-transformed texture for the viewer. The
+				// lazy image keeps geometry and materializes bytes only for CPU consumers.
 				if let Some((ptr, tw, th)) = frame.take_gpu_texture() {
 					let texture = unsafe {
 						std::sync::Arc::from_raw(ptr as *const wgpu::Texture)
 					};
-					let placeholder = vec![0u8; (tw.max(1) as usize) * (th.max(1) as usize) * 4];
-					let image = bgra_bytes_to_render_image(
+					let image = lazy_gpu_f32_rgba_to_bgra_image(
 						tw.max(1) as u32,
 						th.max(1) as u32,
-						&placeholder,
-					)?;
+						frame.clone(),
+					);
 					super::gpu::register_texture(
 						image.id.0,
 						tw.max(1) as u32,
 						th.max(1) as u32,
 						texture,
 					);
-					return Some((image, ScopeData::default(), None));
+					return Some((image, None, None));
 				}
 				let data = frame.bytes();
 				match info.pixel_format {
@@ -135,17 +132,15 @@ impl RenderedFrame {
 						let mut samples =
 							repack_f32_rows(info.width, info.height, info.linesize, &data)?;
 						apply_output_node_f32(&mut samples);
-						let scope = analyze_f32_rgba(w, h, &samples);
 						super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
-						let image = f32_rgba_to_bgra_image(w, h, &samples);
-						Some((image, scope, Some(samples)))
+						let image = lazy_gpu_f32_rgba_to_bgra_image(w, h, frame.clone());
+						Some((image, None, Some(samples)))
 					}
 					quercus_engine_rs::preview_video::VideoPixelFormat::Bgra8 => {
-						let scope = analyze_bgra8(w, h, &data);
 						let mut owned = data;
 						super::displaycolor::apply_bgra8(&mut owned, (w * h) as i64);
 						let image = bgra_bytes_to_render_image(w, h, &owned)?;
-						Some((image, scope, None))
+						Some((image, None, None))
 					}
 				}
 			}
@@ -154,7 +149,7 @@ impl RenderedFrame {
 }
 
 /// Applies the project's output transform before display-color conversion.
-fn apply_output_node_f32(samples: &mut [f32]) {
+pub(crate) fn apply_output_node_f32(samples: &mut [f32]) {
 	quercus_engine_rs::utils::working_to_display_target(
 		samples,
 		&quercus_engine_rs::state::color_working_space(),

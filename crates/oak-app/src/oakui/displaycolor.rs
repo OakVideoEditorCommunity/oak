@@ -84,6 +84,7 @@ use std::time::{Duration, Instant};
 
 use quercus_engine_rs::color::ColorProcessor;
 use quercus_engine_rs::core::{pipeline_output_spec, OutputColorSpec};
+use quercus_engine_rs::render::gpu_set_display_transform_required;
 use quercus_engine_rs::state::Config;
 use quercus_engine_rs::utils::output_spec_to_xyz_d65;
 
@@ -443,13 +444,8 @@ pub fn is_active() -> bool {
 /// output spec changes (which rekeys the content-colorspace declaration).
 pub fn apply_to_window(window: &mut gpui_kit::Window) {
 	let active = is_active();
-	// Tell the engine whether the final output transform is ours. If it is,
-	// preview frames must stay staged so this CPU/OCIO path stays
-	// authoritative; only the identity/default-sRGB case may hand the
-	// working-space texture straight to the viewer.
-	quercus_engine_rs::render::gpu_set_display_transform_required(
-		active || pipeline_output_spec() != OutputColorSpec::default(),
-	);
+	let gpu_transform = super::gpu::install_display_lut();
+	gpu_set_display_transform_required(!gpu_transform);
 	let mode = if active {
 		gpui_kit::LayerColorManagement::SelfManaged
 	} else {
