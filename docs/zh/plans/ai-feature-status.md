@@ -18,7 +18,7 @@
 | T0 schema 冻结 | schema 单测全绿 + 对照表防漂移 | 22 个工具 schema、27 合法 / 13 非法样本、三张对照表；`test_schema.py` 524 项全过，Rust 侧 4 个漂移/样本测试全过；参数范围**只回填 min/max（15 键）**，choices 经 `node.list_types` 回读（显式 open，已裁断，见 §9） | **已完成** |
 | T1 工具执行层 | 真实引擎脚本 E2E：导入→铺轨→split/trim/ripple_delete→取帧→像素断言→整段 undo 还原 | 真机 E2E **2/2**（`tests/sdk_e2e.rs`，duration 兜底由 `:182` 断言钉住、消融删则红）；独立复跑默认 **90/0/0**、`--features sdk` **96/0/0**（task-14 `/tmp/oak-reviews/t1.md`）；22 方法全覆盖，缺能力一律 `unsupported` + 6 个 gap id | **已完成（已入仓，§10.3）** |
 | T2 取证预筛 | 已知切点检出率达标 + 峰值表 golden 比对 | `prescan.py` 双通道独立进程；**32 项**测试全过（首轮 27 + 静态素材修复新增 5，含 golden 比对、2/2 已知切点）；静态素材产出空切点表 | **已完成** |
-| T3 agent 核 + 记忆 | `pi --print` 无头冒烟、跨会话召回、密钥不落盘 | `ai/agent/` 不存在；仓根 `agent/` 为 git 排除的本地探索件；`AGENTS.md` 是悬空符号链接；memlite CLI 可用 | **未开始** |
+| T3 agent 核 + 记忆 | `pi --print` 无头冒烟、跨会话召回、密钥不落盘 | `ai/agent/` **已入仓（§10.5）**：pi 1.0.3 + 三层上下文链 + memlite 两档；stub 回放无头冒烟（未用真实 LLM）exit 0、live_tool_count=22；跨会话两进程召回复现；密钥 grep 零命中；消融 D 红吻合。验收 task-15 `/tmp/oak-reviews/t3-agent.md` pass | **已完成（已入仓，§10.5）** |
 | T4 适配层 hooks | 三档确认门行为测试 + 失败回喂闭环 | `src/hooks.rs` + `tests/hooks_{policy,readback,replan}.rs`（11/7/4）；ProposalOnly 零副作用（Spy 15/15 全部变更方法）、分级表 fail-closed 双向守（删条目 + 改长度 → 恰 2 项红）、`execute()` 签名向后兼容；全量 **90/0/0** 独立复跑（task-13 `/tmp/oak-reviews/t4-hooks.md`） | **已完成（已入仓，§10.3）** |
 | T5 MCP 封装 | 同一 schema 的 MCP server，零漂移 | `ai/oak-ai-mcp` **已入仓（§10.4）**：stdio NDJSON JSON-RPC 2.0，22 工具零漂移三方一致；协议级 **30/0/0**（含版本回声断言）独立复跑；`--backend sdk` 接线实测 7 passed（接线冒烟≠引擎功能可用）；验收 task-12 `/tmp/oak-reviews/mcp.md` + task-16 `/tmp/oak-reviews/t5-delta.md` 均 pass。`agent/mcp-oak` 仍是早期 Python 原型（不计入交付） | **已完成（已入仓，§10.4）** |
 | T6 无头 CI | Mock LLM 录制回放 + 黄金帧 + 会话回放日志进 CI | `.github/workflows/ci.yml` 无任何 `ai/` 引用；`ai/` 未入仓 | **未开始** |
@@ -96,7 +96,7 @@
 
 缺口：无阻断。风险提示：golden 与 ffmpeg 版本强绑定（`README.md`/`test_prescan.py:31-33` 已写"算法或 ffmpeg 变更后重新生成"）——进 CI（T6）前需固定 ffmpeg 版本，否则换机即红。已知边界（随修复写入 README「Known limitations」）：① faststart 截断素材在 `-f null` 下 ffmpeg 可能 rc=0，已解出部分帧时仍按正常素材出表（旧版同样如此，非本次引入）；② 若出现「零分数且 rc=0」的坏文件，会被当作静态素材（空切点表）——回归验收未构造出可复现反例，记为残留项，后续如需保护可在 `scan()` 加 `phash_samples == 0` 判断。
 
-## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T4 已入仓 §10.3、T5 已入仓 §10.4，T3 已过独立验收但尚未入仓，T6 未开始）
+## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T3、T4、T5 均已入仓 §10.3–§10.5，T6 未开始）
 
 **T3 agent 核 + 记忆**
 
@@ -254,21 +254,39 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 
 - 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。提交说明正文把第 6 个 gap 写成了 `GAP_AUDIO_LEVELS`，源码常量实为 `GAP_RENDER_AUDIO_SAMPLES`，且 `gaps.rs` 另有 `GAP_CLIP_SOURCE_QUERY`（共 7 个常量）；代码未改，不 amend。
 
-### 10.4 第四次提交：T5 MCP 薄封装入仓（2026-11-09 00:3x）
+### 10.4 第四次提交：T5 MCP 薄封装入仓（2026-11-09 00:35）
 
-- commit：`<提交后回填>`，标题 `feat(ai): add the T5 MCP thin wrapper with zero schema drift`（作者 `fslong`）。
+- commit：`dfd42eafaf1450e5af5e61043dffa53daf01764b`，标题 `feat(ai): add the T5 MCP thin wrapper with zero schema drift`（作者 `fslong`），`12 files changed, 7679 insertions(+), 6 deletions(-)`。
 - 范围：`ai/oak-ai-mcp/**` 11 文件（`Cargo.toml`、`Cargo.lock`、`.gitignore`、`README.md`、`src/{backend_select,lib,main,rpc,server}.rs`、`tests/{protocol,zero_drift}.rs`）+ 本台账；不含 `target/`（`ai/oak-ai-mcp/.gitignore:1` `/target/`）、`ai/agent/`、`docs/zh/plans/resolve21-oak-applicability.md`。
 - 验收依据（两项门全过）：
   - task-12 独立验收 `/tmp/oak-reviews/mcp.md` **pass**：默认 features 干净构建 lib 20 + protocol 6 + zero_drift 3 = 29 全绿；协议链（initialize → tools/list → tools/call → 非法参数 → 未知工具）实测；删 `structuredContent` 消融 → 3 项红；`--backend sdk` 未构建时明确拒绝（exit 2，不静默降级）。
   - task-16 增量抽查 `/tmp/oak-reviews/t5-delta.md` **pass**：全量 **30/0/0**（回声断言加入后）；删版本回声 → 恰 `protocol_version_is_echoed_or_baselined` 红（protocol.rs:443）；O1 schema 目录缺失 → `tools/list` panic exit 101，README 段落逐字复现。
   - README 整改：F1（sdk 计数 6→双口径 6/7）与 F2（测试清单）已改；`/tmp/oak-mcp-sdk-verify2.log` 实测 sdk 配置 **7 passed exit 0**（含 `protocol_version_is_echoed_or_baselined` ok）。
 - 状态改写：§0 表 T5「部分（待独立验收）」→ **已完成（已入仓，§10.4）**。
+- `git show --stat HEAD` 尾部原文：
+
+  ```
+   ai/oak-ai-mcp/tests/protocol.rs           |  495 +++
+   ai/oak-ai-mcp/tests/zero_drift.rs         |  180 ++
+   docs/zh/plans/ai-feature-status.md        |   31 +-
+   12 files changed, 7679 insertions(+), 6 deletions(-)
+  ```
+
+- 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。
+
+### 10.5 第五次提交：T3 agent 核 + 两档记忆入仓（2026-11-09 00:3x）
+
+- commit：`<提交后回填>`，标题 `feat(ai): add the agent core with the three-layer context chain and memlite memory`（作者 `fslong`）。
+- 范围：`ai/agent/**` 20 文件（`.gitignore`、`.pi/mcp.json`、`README.md`、`package.json`、`package-lock.json`、`context/{10-repo,20-project,task.example}.md`、`scripts/{build-mcp,context,lib,mcp-serve,oak-mem,smoke,start}.sh`、`tests/{stub-model-server.mjs,test.sh}`、`tests/fixtures/{memory-recall,memory-write,smoke}.json`）+ 本台账；**不含**被 `ai/agent/.gitignore` 挡下的生成物 `AGENTS.md`、`context/30-task.md`、`node_modules/`、`.agentdir/`，不含 `runs/` 产物，不含 `docs/zh/plans/resolve21-oak-applicability.md`。
+- 验收依据：task-15 独立验收 `/tmp/oak-reviews/t3-agent.md` **pass**（八项必查全绿）：smoke exit 0（51 events / 3 tool_calls / live 22 / fails=[]）；`tests/test.sh` 9 通过 0 失败；隔离三进程记忆复现（写 `4de460d66a43` → 新进程同 id 召回 → layer 4 注入）；密钥 grep 零命中；`~/.memlite/config.json` sha 六时点不变；消融摘记忆层 → 恰 D 红 8/1。
+- 整改：F1（`context/20-project.md` 枚举 22 工具改为「举例，不保证穷尽」）、F2（`README.md:142` 工具表字符数改实测 39634/42726）已完成。
+- 状态改写：§0 表 T3「未开始」→ **已完成（已入仓，§10.5）**。
 - `git show --stat HEAD`：**提交后回填**（随下一批提交入库）。
 
-### 10.5 待办：剩余里程碑提交（逐个等独立验收 pass）
+### 10.6 待办：剩余里程碑提交（逐个等独立验收 pass）
 
-- T3（`ai/agent/`，验收 `/tmp/oak-reviews/t3-agent.md` pass）单独提交；T6 未开始。
-- 口径：§10.2、§10.3、§10.4 的哈希/统计回填发生在提交之后，属工作树改动，随下一批提交入库。
+- T6 未开始；`docs/zh/plans/resolve21-oak-applicability.md` 另行处理。
+- 口径：§10.2–§10.5 的哈希/统计回填发生在提交之后，属工作树改动，随下一批提交入库。
 
 ---
 

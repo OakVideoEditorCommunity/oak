@@ -1,0 +1,33 @@
+{
+	"description": "冒烟场景：工程 → 轨道 → 总览。用法见 scripts/smoke.sh",
+	"steps": [
+		{
+			"calls": [
+				{
+					"name": "mcp__oak__project_open",
+					"arguments": { "name": "smoke", "fps": 30 }
+				}
+			]
+		},
+		{
+			"calls": [
+				{
+					"name": "mcp__oak__timeline_add_track",
+					"arguments": { "type": "video" }
+				}
+			]
+		},
+		{
+			"calls": [
+				{
+					"name": "mcp__oak__project_get_overview",
+					"arguments": {}
+				}
+			]
+		},
+		{
+			"say": "冒烟完成：建工程 → 加视频轨 → 读总览。工具面由 MCP 服务器动态给出。"
+		}
+	],
+	"final": { "say": "脚本已走完" }
+}
