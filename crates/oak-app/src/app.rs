@@ -37,14 +37,14 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::oakui::component::menu::{self, Menu, MenuBar, MenuBarEntry, MenuBarEvent, MenuItem};
 use crate::oakui::component::text_input::install_text_input_bindings;
 use crate::oakui::settings::use_proxy_media;
 use gpui_kit::component::dock::{
-	DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, DragPanel, PanelId as DockPanelId,
-	PanelStyle, panel_handle,
+	DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, DragPanel,
+	PanelId as DockPanelId, PanelStyle, panel_handle, register_panel,
 };
 use crate::panels::PanelId;
 use crate::widgets::timeline::{ClipData, ClipId, Frame, FrameRange, TimelineEvent, TimelineView, TrackData};
@@ -433,7 +433,14 @@ pub struct OakApp<E: AppEngine> {
 	/// a scripted one; production uses the real HTTPS client).
 	update_transport: Arc<dyn crate::update::UpdateTransport>,
 	floating_panels: std::collections::HashMap<PanelId, FloatingWindow>,
+	workspace_save_at: Option<Instant>,
+	workspace_persistence_suspended: bool,
 }
+
+const CONFIG_KEY_DOCK_LAYOUT: &str = "Workspace/DockLayout";
+const CONFIG_KEY_TIMELINE_VISIBLE: &str = "Workspace/TimelineVisible";
+const CONFIG_KEY_TIMELINE_HEIGHT: &str = "Workspace/TimelineHeight";
+const WORKSPACE_SAVE_DELAY: Duration = Duration::from_millis(500);
 
 struct FloatingPanel {
 	view: AnyView,
@@ -484,6 +491,24 @@ impl<E: AppEngine> Clone for ShellPanels<E> {
 }
 
 impl<E: AppEngine> ShellPanels<E> {
+	fn register_for_layout_restore(&self, cx: &mut App) {
+		macro_rules! register {
+			($name:expr, $panel:expr) => {{
+				let panel = $panel.clone();
+				register_panel(cx, $name, move |_, _, _| panel_handle(panel.clone()));
+			}};
+		}
+		register!(PROJECT, self.project);
+		register!(SOURCE_VIEWER, self.source_viewer);
+		register!(PROGRAM_VIEWER, self.program_viewer);
+		register!(NODE_EDITOR, self.node_editor);
+		register!(INSPECTOR, self.inspector);
+		register!(HISTORY, self.history);
+		register!(TIMELINE, self.timeline);
+		register!(EFFECT_LIBRARY, self.effect_library);
+		register!(MULTICAM, self.multicam);
+	}
+
 	fn id_of_raw(&self, raw: u64) -> Option<PanelId> {
 		let panels = [
 			(PROJECT, self.project.entity_id().as_u64()),
@@ -793,13 +818,18 @@ impl<E: AppEngine> OakApp<E> {
 		)
 		.detach();
 
-		// Arrange the default workspace (the design's 素材查看器 | 序列查看器 |
-		// 检查器 row, project bin + effect library tabbed on the left, history
-		// behind the inspector, timeline full width at the bottom; the
-		// multicam tabs behind the source viewer). Shared with
-		// 窗口 → 重置布局 via [`Self::seed_default_layout`].
+		panels.register_for_layout_restore(cx);
+		let saved_layout = serde_json::from_str::<DockAreaState>(
+			&crate::oakui::real::config_get_string(CONFIG_KEY_DOCK_LAYOUT),
+		)
+		.ok();
 		dock.update(cx, |dock, cx| {
-			Self::seed_default_layout(dock, &panels, window, cx);
+			let restored = saved_layout
+				.map(|state| dock.load(state, window, cx).is_ok())
+				.unwrap_or(false);
+			if !restored {
+				Self::seed_default_layout(dock, &panels, window, cx);
+			}
 		});
 
 		// --- status bar ----------------------------------------------------
@@ -830,6 +860,7 @@ impl<E: AppEngine> OakApp<E> {
 		// visible-panel set.
 		cx.subscribe(&dock, |this, _dock, event: &DockEvent, cx| {
 			if matches!(event, DockEvent::LayoutChanged) {
+				this.persist_workspace(cx);
 				this.rebuild_menu_bar(cx);
 				cx.notify();
 			}
@@ -903,8 +934,9 @@ impl<E: AppEngine> OakApp<E> {
 			plugin_progress_open: false,
 			plugin_progress_rx: Mutex::new(plugin_progress_rx),
 			focused_panel: None,
-			timeline_visible: true,
-			timeline_height: 320.0,
+			timeline_visible: crate::oakui::real::config_get_bool(CONFIG_KEY_TIMELINE_VISIBLE, true),
+			timeline_height: (crate::oakui::real::config_get_int(CONFIG_KEY_TIMELINE_HEIGHT, 320) as f32)
+				.clamp(120.0, 800.0),
 			panels,
 			active_tool: Tool::Pointer,
 			last_timeline_tool: crate::widgets::timeline::TimelineTool::Select,
@@ -913,6 +945,8 @@ impl<E: AppEngine> OakApp<E> {
 			pending_update: None,
 			update_transport: Arc::new(crate::update::HttpTransport),
 			floating_panels: std::collections::HashMap::new(),
+			workspace_save_at: None,
+			workspace_persistence_suspended: false,
 		};
 
 		// Open the CLI-provided project once the shell is up.
@@ -927,10 +961,29 @@ impl<E: AppEngine> OakApp<E> {
 		shell
 	}
 
+	fn persist_workspace(&mut self, cx: &App) {
+		crate::oakui::real::config_set_bool(CONFIG_KEY_TIMELINE_VISIBLE, self.timeline_visible);
+		crate::oakui::real::config_set_int(
+			CONFIG_KEY_TIMELINE_HEIGHT,
+			self.timeline_height.round() as i64,
+		);
+		if self.workspace_persistence_suspended || !self.floating_panels.is_empty() {
+			return;
+		}
+		if let Ok(layout) = serde_json::to_string(&self.dock.read(cx).dump(cx)) {
+			crate::oakui::real::config_set_string(CONFIG_KEY_DOCK_LAYOUT, &layout);
+		}
+		self.workspace_save_at = Some(Instant::now() + WORKSPACE_SAVE_DELAY);
+	}
+
 	/// One animation-frame tick: advance the engine, sync the timeline
 	/// playhead to the program clock, refresh the audio meter and drain the
 	/// export progress events.
 	fn tick(&mut self, cx: &mut Context<Self>) {
+		if self.workspace_save_at.is_some_and(|deadline| Instant::now() >= deadline) {
+			self.workspace_save_at = None;
+			crate::oakui::real::config_save();
+		}
 		self.engine.update(cx, |engine, cx| engine.tick(cx));
 		let frame = self.program_clock.read(cx).current_frame();
 		self.timeline
@@ -1069,6 +1122,7 @@ impl<E: AppEngine> OakApp<E> {
 					// The strip is bottom-anchored: dragging up grows it.
 					this.timeline_height =
 						(drag.start_height + f32::from(base - now)).clamp(120.0, 800.0);
+					this.persist_workspace(cx);
 					cx.notify();
 				},
 			))
@@ -1687,6 +1741,7 @@ impl<E: AppEngine> OakApp<E> {
 		let Some(view) = self.panels.floating_view(id) else {
 			return;
 		};
+		self.workspace_persistence_suspended = true;
 		self.toggle_panel(id, cx);
 		let Ok(handle) = cx.open_window(
 			WindowOptions {
@@ -1705,6 +1760,7 @@ impl<E: AppEngine> OakApp<E> {
 			},
 			move |_window, cx| cx.new(|_| FloatingPanel { view }),
 		) else {
+			self.workspace_persistence_suspended = false;
 			return;
 		};
 		let window_id = gpui_kit::AnyWindowHandle::from(handle).window_id();
@@ -1737,6 +1793,7 @@ impl<E: AppEngine> OakApp<E> {
 				_subscription: subscription,
 			},
 		);
+		self.workspace_persistence_suspended = false;
 		self.rebuild_menu_bar(cx);
 	}
 
@@ -1771,6 +1828,7 @@ impl<E: AppEngine> OakApp<E> {
 		// The timeline is shell-owned (the full-width strip), not docked.
 		if id == TIMELINE {
 			self.timeline_visible = !self.timeline_visible;
+			self.persist_workspace(cx);
 			self.rebuild_menu_bar(cx);
 			cx.notify();
 			return;
@@ -1836,6 +1894,7 @@ impl<E: AppEngine> OakApp<E> {
 		});
 		self.timeline_visible = true;
 		self.timeline_height = 320.0;
+		self.persist_workspace(cx);
 		self.rebuild_menu_bar(cx);
 		cx.notify();
 	}
