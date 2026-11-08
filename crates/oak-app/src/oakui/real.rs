@@ -177,7 +177,8 @@ struct ProxyEntry {
 	/// The viewer image.
 	image: Arc<RenderImage>,
 	/// The scope samples of the same render.
-	scope: ScopeData,
+	scope: Option<ScopeData>,
+	scope_source: Option<quercus_engine_rs::preview_video::VideoFrame>,
 }
 
 /// A full-resolution frame the background worker filled in. No scope data:
@@ -225,13 +226,6 @@ impl MonitorFrameCache {
 			}
 		}
 		None
-	}
-
-	/// The scope samples matching [`MonitorFrameCache::image_for`] (always
-	/// the proxy pass; see [`FullResEntry`]).
-	fn scope_for(&self, frame: i64) -> Option<&ScopeData> {
-		let proxy = self.proxy.as_ref()?;
-		(proxy.frame == frame).then_some(&proxy.scope)
 	}
 
 	/// Whether a background full-resolution render should be started for
@@ -286,7 +280,7 @@ enum FullResTarget {
 /// crown and playback looks frozen. A shorter window bounds the backlog
 /// to what the pool can render in a fraction of a second, so the
 /// displayed frame tracks the playhead instead of chasing it.
-pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 12;
+pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 24;
 /// Config key for the forward pre-render window size (frames).
 pub const CONFIG_KEY_PREVIEW_WINDOW: &str = "PlaybackPreRenderFrames";
 
@@ -322,6 +316,7 @@ struct PreviewWindow {
 	/// head frames until the old tail drains, and the decoder must seek from
 	/// end to start while the viewer waits.
 	last_playhead: Option<i64>,
+	seek_generation: u64,
 	/// Sequence length the head-frame cache was populated for.
 	loop_length: i64,
 	/// Already-displayed head frames, kept across a loop wrap to cover the
@@ -332,6 +327,34 @@ struct PreviewWindow {
 
 /// A finished, backend-independent frame in the playback pre-render window.
 type PreviewSlot = quercus_engine_rs::preview_video::VideoFrame;
+
+fn nearest_ready_preview_frame<T>(
+	slots: &BTreeMap<i64, T>,
+	playhead: i64,
+) -> Option<i64> {
+	if slots.contains_key(&playhead) {
+		return Some(playhead);
+	}
+	slots
+		.range(playhead..)
+		.next()
+		.map(|(frame, _)| *frame)
+}
+
+fn preview_discontinuity(
+	previous: Option<i64>,
+	playhead: i64,
+	length: i64,
+	playing: bool,
+	explicit_seek: bool,
+) -> bool {
+	explicit_seek
+		|| (playing
+			&& length > 0
+			&& previous.is_some_and(|prev| {
+				playhead < prev - 2 && playhead <= 2 && prev + 2 >= length
+			}))
+}
 
 // ---------------------------------------------------------------------------
 // Playback audio prefetch (M15 S3; M16 S3: rendered on the audio thread)
@@ -1137,6 +1160,7 @@ pub struct RealEngine {
 	/// toggle / selection / project drop); the pre-render window rebuilds
 	/// against the new generation.
 	preview_generation: u64,
+	preview_seek_generation: u64,
 	/// The channel background full-res jobs report finished frames through;
 	/// drained on the app tick. The mutex keeps the engine `Sync` (the
 	/// channel is only ever touched on the UI thread).
@@ -1438,6 +1462,7 @@ impl RealEngine {
 			full_res_generation: 0,
 			preview_windows: Arc::new(Mutex::new(HashMap::new())),
 			preview_generation: 0,
+			preview_seek_generation: 0,
 			full_res_rx: Mutex::new(full_res_rx),
 			full_res_tx: Mutex::new(full_res_tx),
 			thumbnails: Mutex::new(ThumbnailState::default()),
@@ -1525,21 +1550,55 @@ impl RealEngine {
 		graphops::sequence_set_playhead(project, seq, graphops::ts_to_rational(frame, tb));
 	}
 
-	/// The proxy resolution the viewer renders at: the sequence's aspect
-	/// scaled to a small long edge. SDK workers render both this proxy and
-	/// the divider-scaled resting fill off the UI thread.
-	fn proxy_render_size(&self) -> Option<(i32, i32)> {
+	/// Ready proxies determine the preview size; without one, the sequence
+	/// determines it.
+	fn proxy_render_size(&self, monitor: Monitor) -> Option<(i32, i32)> {
+		if super::renderops::use_proxy_media() {
+			let session = self.editor_session()?;
+			let candidates: Vec<u64> = match monitor {
+				Monitor::Source => vec![self.selected_footage_node()?.raw()],
+				Monitor::Program => session
+					.snapshot()
+					.footages
+					.into_iter()
+					.map(|footage| footage.id.raw())
+					.collect(),
+			};
+			for id in candidates {
+				if self.proxy_state(id) != Some(super::engine::ProxyMediaState::Ready) {
+					continue;
+				}
+				let params = self.proxy_effective_params(id);
+				if params.width > 0 && params.height > 0 {
+					return Some((params.width, params.height));
+				}
+				let divider = params.divider.max(1);
+				let (width, height) = if let Some(node) = self.selected_footage_node() {
+					session
+						.project()
+						.footage_video_params(node, 0)
+						.map(|params| (params.width, params.height))
+						.unwrap_or((
+							self.sequence_info.as_ref()?.format.width as i32,
+							self.sequence_info.as_ref()?.format.height as i32,
+						))
+				} else {
+					(
+						self.sequence_info.as_ref()?.format.width as i32,
+						self.sequence_info.as_ref()?.format.height as i32,
+					)
+				};
+				return Some((
+					(width / divider).max(2),
+					(height / divider).max(2),
+				));
+			}
+		}
 		let info = self.sequence_info.as_ref()?;
-		let (w, h) = (info.format.width.max(1), info.format.height.max(1));
-		// The playback resolution divider (the C++ viewer `Playback
-		// Resolution ▸` menu): render the preview at 480/divider long edge
-		// so slower machines (or debug builds) can still play in real time.
-		let divider = self.playback_divider().max(1) as u32;
-		let max_long_edge = 480 / divider;
-		let scale = max_long_edge as f64 / w.max(h) as f64;
-		let width = ((w as f64 * scale).round() as u32).max(2);
-		let height = ((h as f64 * scale).round() as u32).max(2);
-		Some((width as i32, height as i32))
+		Some((
+			info.format.width.max(1) as i32,
+			info.format.height.max(1) as i32,
+		))
 	}
 
 	/// The selected entry's footage node (M12 P3: entry ids are the
@@ -1867,7 +1926,7 @@ impl RealEngine {
 			return;
 		};
 		let Some(tb) = self.time_base() else { return };
-		let Some((width, height)) = self.proxy_render_size() else {
+		let Some((width, height)) = self.proxy_render_size(monitor) else {
 			return;
 		};
 		let Some(node) = (match monitor {
@@ -1910,10 +1969,16 @@ impl RealEngine {
 		// tail-frame tasks would otherwise keep the six-task cap occupied
 		// while the playhead sits at zero, delaying the first new frame and
 		// forcing a cold decoder seek from the end of the clip.
-		let jumped = window
-			.last_playhead
-			.is_some_and(|prev| playhead < prev - 2 || playhead > prev + 2);
+		let explicit_seek = window.seek_generation != self.preview_seek_generation;
+		let jumped = preview_discontinuity(
+			window.last_playhead,
+			playhead,
+			length,
+			playing,
+			explicit_seek,
+		);
 		window.last_playhead = Some(playhead);
+		window.seek_generation = self.preview_seek_generation;
 		if window.sequence != node_id
 			|| window.generation != self.preview_generation
 			|| jumped
@@ -1963,25 +2028,6 @@ impl RealEngine {
 		window
 			.submitted
 			.retain(|f| *f >= keep_from || (*f >= playhead && *f < end));
-		// Cancel in-flight/pending frames the playhead has already passed:
-		// when they complete they can never be displayed, but they still
-		// occupy worker time. Dropping them keeps the workers on frames
-		// around the playhead, so a stall-deferred window converges back
-		// instead of grinding through ancient history forever (the
-		// "picture frozen while the playhead moves" regression).
-		let stale_pending: Vec<i64> = window
-			.submitted
-			.iter()
-			.copied()
-			.filter(|f| *f < keep_from && !window.slots.contains_key(f))
-			.collect();
-		for f in stale_pending {
-			if let Some(task) = window.requests.remove(&f) {
-				task.cancel();
-				window.retired.push(task);
-			}
-			window.submitted.remove(&f);
-		}
 		// Reap only terminal tasks. Dropping a running SDK Task joins its worker,
 		// so cancelled requests stay in `retired` until a later tick.
 		window
@@ -2012,7 +2058,7 @@ impl RealEngine {
 		// adding one task per tick until hundreds of threads were parked in
 		// the render queue. Keep the scheduler window bounded; completed
 		// tasks free slots on the next tick.
-		const MAX_PREVIEW_TASKS: usize = 6;
+		const MAX_PREVIEW_TASKS: usize = 8;
 		let slots = MAX_PREVIEW_TASKS.saturating_sub(window.requests.len());
 		let new_frames: Vec<i64> = (playhead.max(0)..end)
 			.filter(|f| !window.submitted.contains(f))
@@ -2051,7 +2097,11 @@ impl RealEngine {
 		&self,
 		monitor: Monitor,
 		frame: Frame,
-	) -> Option<(Arc<RenderImage>, ScopeData)> {
+	) -> Option<(
+		Arc<RenderImage>,
+		Option<ScopeData>,
+		Option<quercus_engine_rs::preview_video::VideoFrame>,
+	)> {
 		let _t0 = std::time::Instant::now();
 		let node = match monitor {
 			Monitor::Program => self.sequence?,
@@ -2066,16 +2116,18 @@ impl RealEngine {
 		if window.sequence != node_id || window.generation != self.preview_generation {
 			return None;
 		}
-		if monitor == Monitor::Program && frame.0 >= 0 && frame.0 < LOOP_CACHE_FRAMES {
-			if let Some(slot) = window.slots.get(&frame.0) {
-				window.loop_cache.insert(frame.0, slot.clone());
+		let slot_frame = nearest_ready_preview_frame(&window.slots, frame.0)?;
+		if monitor == Monitor::Program && slot_frame >= 0 && slot_frame < LOOP_CACHE_FRAMES {
+			if let Some(slot) = window.slots.get(&slot_frame) {
+				window.loop_cache.insert(slot_frame, slot.clone());
 			}
 		}
-		let slot = window.slots.remove(&frame.0)?;
+		let slot = window.slots.remove(&slot_frame)?;
 		let (width, height) = {
 			let info = slot.info();
 			(info.width.max(0) as u32, info.height.max(0) as u32)
 		};
+		let scope_source = Some(slot.clone());
 		let rendered = super::renderops::RenderedFrame::Sdk(slot);
 		let (image, scope, samples) = rendered.to_display()?;
 		if std::env::var_os("OAK_DEBUG_PREVIEW").is_some() {
@@ -2087,7 +2139,7 @@ impl RealEngine {
 		if let Some(samples) = samples {
 			super::gpu::register_display_frame(image.id.0, width, height, &samples);
 		}
-		Some((Arc::new(image), scope))
+		Some((Arc::new(image), scope, scope_source))
 	}
 
 	/// Cancels every monitor's pre-render window and drops its owned frames.
@@ -3324,6 +3376,7 @@ impl EngineGateway for RealEngine {
 	}
 
 	fn request_frame(&mut self, monitor: Monitor, frame: Frame, cx: &mut Context<Self>) {
+		self.preview_seek_generation = self.preview_seek_generation.wrapping_add(1);
 		let length = self.sequence_length();
 		let clock = self.clock(monitor).clone();
 		clock.update(cx, |clock, cx| {
@@ -3372,6 +3425,8 @@ impl EngineGateway for RealEngine {
 	}
 
 	fn pause(&mut self, monitor: Monitor, cx: &mut Context<Self>) {
+		self.preview_seek_generation = self.preview_seek_generation.wrapping_add(1);
+		self.cancel_preview_window(monitor);
 		let clock = self.clock(monitor).clone();
 		clock.update(cx, |clock, cx| {
 			clock.pause();
@@ -3707,12 +3762,14 @@ impl AppEngine for RealEngine {
 		// Land the current proxy first, even when its full-res fill won the
 		// race: scopes are tied to this proxy pass and must not starve behind
 		// the full-resolution cache hit.
-		if let Some((image, scope)) = self.preview_slot_frame(monitor, frame) {
+		let presented = self.preview_slot_frame(monitor, frame);
+		if let Some((image, scope, scope_source)) = presented {
 			let entry = cache.entry(monitor).or_default();
 			entry.proxy = Some(ProxyEntry {
 				frame: frame.0,
 				image: image.clone(),
 				scope,
+				scope_source,
 			});
 			entry.last = Some(image.clone());
 			self.last_display
@@ -3774,12 +3831,31 @@ impl AppEngine for RealEngine {
 		// runs inside that render pass, so this never re-walks a frame).
 		let _ = self.cpu_frame(monitor, cx);
 		let frame = self.clock_frame(monitor, cx);
-		let cache = self.cpu_frame_cache.lock().unwrap();
-		cache
-			.get(&monitor)
-			.and_then(|entry| entry.scope_for(frame.0))
-			.cloned()
-			.unwrap_or_default()
+		let mut cache = self.cpu_frame_cache.lock().unwrap();
+		let proxy = cache
+			.get_mut(&monitor)
+			.and_then(|entry| entry.proxy.as_mut())
+			.filter(|proxy| proxy.frame == frame.0);
+		let Some(proxy) = proxy else {
+			return ScopeData::default();
+		};
+		if proxy.scope.is_none() {
+			if let Some(source) = &proxy.scope_source {
+				let info = source.info();
+				let mut samples = source.f32_samples();
+				if info.origin == quercus_engine_rs::preview_video::FrameOrigin::Cpu {
+					super::renderops::apply_output_node_f32(&mut samples);
+				}
+				if samples.len() == (info.width.max(0) * info.height.max(0) * 4) as usize {
+					proxy.scope = Some(super::scopes::analyze_f32_rgba(
+						info.width as u32,
+						info.height as u32,
+						&samples,
+					));
+				}
+			}
+		}
+		proxy.scope.clone().unwrap_or_default()
 	}
 
 	fn add_track(&mut self, kind: TrackKind, cx: &mut Context<Self>) {
@@ -7434,6 +7510,26 @@ mod session_smoke_tests {
 
 	fn test_media() -> std::path::PathBuf {
 		std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4")
+	}
+
+	#[test]
+	fn preview_rebuild_distinguishes_audio_correction_from_seek() {
+		assert!(!preview_discontinuity(Some(2), 7, 100, true, false));
+		assert!(!preview_discontinuity(Some(7), 2, 100, true, false));
+		assert!(preview_discontinuity(Some(2), 7, 100, true, true));
+		assert!(preview_discontinuity(Some(99), 0, 100, true, false));
+		assert!(!preview_discontinuity(Some(99), 0, 100, false, false));
+	}
+
+	#[test]
+	fn preview_uses_the_nearest_completed_frame_when_native_render_is_late() {
+		let slots = BTreeMap::from([(10, ()), (20, ()), (40, ())]);
+		assert_eq!(nearest_ready_preview_frame(&slots, 20), Some(20));
+		assert_eq!(nearest_ready_preview_frame(&slots, 24), Some(40));
+		assert_eq!(nearest_ready_preview_frame(&slots, 32), Some(40));
+		assert_eq!(nearest_ready_preview_frame(&slots, 5), Some(10));
+		assert_eq!(nearest_ready_preview_frame(&slots, 50), None);
+		assert_eq!(nearest_ready_preview_frame(&BTreeMap::<i64, ()>::new(), 0), None);
 	}
 
 	/// The live SDK session survives a full open → import → undo/redo →
