@@ -292,19 +292,28 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 
 - 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。
 
-### 10.6 第六次提交：T6 无头 CI 入仓（2026-11-09 02:0x）
+### 10.6 第六次提交：T6 无头 CI 入仓（2026-11-09 02:07）
 
-- commit：`<提交后回填>`，标题 `feat(ai): add the headless CI with mock-LLM replay and golden-frame invariants`（作者 `fslong`）。
+- commit：`f57af338821f3d515a5fbf7cf3741ef2877e3440`，标题 `feat(ai): add the headless CI with mock-LLM replay and golden-frame invariants`（作者 `fslong`），`18 files changed, 3336 insertions(+), 8 deletions(-)`。
 - 范围（四块）：`ai/ci/**` 15 文件（`.gitignore`、`.pi/mcp.json`、`Cargo.toml`、`Cargo.lock`、`README.md`、`package.json`、`run.sh`、`fixtures/{agent-replay,bad_black,edit_chain}.ndjson`、`fixtures/task.example.md`、`scripts/{agent-replay,lint-workflows}.sh`、`src/lib.rs`、`tests/replay.rs`）+ `.github/workflows/ai-headless.yml` + `ai/agent/scripts/context.sh`（`OAK_AI_CWD` 增量 +11 行）+ 本台账；**不含** `ai/ci/AGENTS.md`、`ai/ci/target/`、`node_modules/`（`ai/ci/.gitignore` 挡下）、不含 `crates/**`/`examples/**` 格式化改动（首辅调查中的外部事件）。
 - 验收依据：task-17 独立验收 `/tmp/oak-reviews/t6-ci.md` **pass / T6 可入仓**：`bash ai/ci/run.sh` 两次独立复跑七段全 PASS exit 0（schema 524/0、prescan 32 OK、oak-ai-tools 90/0、oak-ai-mcp 30/0、ci-replay 4/0/1ignored、agent-replay `tool_call_count=6, tool_errors=0`、workflow lint OK）；回放 session log 两次 diff=0、帧 sha256 前缀吻合；消融 `OAK_CI_BAD_FIXTURE=1` EXIT=101（坏链路守卫 `replay.rs:444`）+ 正向对照 0；`context.sh` 跨范围增量 9/9 不回归、缺省 md5 等价；密钥与本机绝对路径入库零命中。
-- README 整改（T6 线落盘，翰林三查复核通过）：D1 对账段（`:24-29` 三段合计 124 passed / 0 failed / 1 ignored，与 run1 九行求和 90+30+4 一致）；D2 措辞改「坏链路必须红」并注明 `tests/replay.rs:444` 守卫；删除 `5f5c1487`（记忆层 ID，非 git 对象，不得入仓）。
+- README 整改（T6 线落盘，翰林三查复核通过）：D1 对账段（`:24-29` 三段合计 124 passed / 0 failed / 1 ignored，与 run1 九行求和 90+30+4 一致）；D2 措辞改「坏链路必须红」并注明 `tests/replay.rs:444` 守卫；删除 README:87 的记忆层 ID 引用（记忆库 ID 非 git 对象，不得入仓）。
 - 状态改写：§0 表 T6「未开始」→ **已完成（已入仓，§10.6）**；§4 注记改为 T0–T6 全部入仓。
-- `git show --stat HEAD`：**提交后回填**（本条为最后一个里程碑提交，回填后不再有后续里程碑提交，留作工作树注记）。
+- `git show --stat HEAD` 尾部原文：
+
+  ```
+   ai/ci/src/lib.rs                   |  251 +++
+   ai/ci/tests/replay.rs              |  450 ++++++++
+   docs/zh/plans/ai-feature-status.md |   34 +-
+   18 files changed, 3336 insertions(+), 8 deletions(-)
+  ```
+
+- 口径：本条哈希与 stat 回填随下一次提交（§10.7）入库，与 §10.2–§10.5 同一流程。
 
 ### 10.7 口径注记
 
-- §10.2–§10.6 的哈希/统计回填发生在提交之后，属工作树改动；T6 之后无里程碑提交承接，回填行保留在工作树中由用户决定是否提交。
-- `ai/ci/README.md` 的 `fmt` 门禁未加（实测 130/17/0）为已知限制，见该 README「已知限制」节。
+- §10.6 回填行随本提交（§10.7 收口）入库；§10.2–§10.5 的哈希/统计回填已随 T2–T6 各次提交入库，流程一致。
+- `ai/ci/README.md` 的 `fmt` 门禁未加（实测 130/17/0）为已知限制，见该 README「已知限制」节；后续按既定裁断随 CI 处理。
 
 ---
 
