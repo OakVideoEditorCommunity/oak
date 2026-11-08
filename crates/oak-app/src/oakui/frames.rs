@@ -25,6 +25,7 @@
 
 use crate::widgets::timeline::Frame;
 use gpui_kit::RenderImage;
+use std::borrow::Cow;
 
 /// Width of the synthetic test frame (a small proxy size; the real engine
 /// will deliver full-resolution frames).
@@ -102,6 +103,12 @@ pub(crate) fn f32_rgba_to_bgra_image(width: u32, height: u32, samples: &[f32]) -
 		(width * height * 4) as usize,
 		"F32 RGBA frame must be tightly packed"
 	);
+	let bytes = f32_rgba_to_bgra_bytes(samples);
+	let buffer = image::RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
+	RenderImage::new(smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1))
+}
+
+fn f32_rgba_to_bgra_bytes(samples: &[f32]) -> Vec<u8> {
 	let mut bytes = Vec::with_capacity(samples.len());
 	for i in (0..samples.len()).step_by(4) {
 		bytes.push((samples[i + 2].clamp(0.0, 1.0) * 255.0) as u8); // B
@@ -109,8 +116,7 @@ pub(crate) fn f32_rgba_to_bgra_image(width: u32, height: u32, samples: &[f32]) -
 		bytes.push((samples[i].clamp(0.0, 1.0) * 255.0) as u8); // R
 		bytes.push((samples[i + 3].clamp(0.0, 1.0) * 255.0) as u8); // A
 	}
-	let buffer = image::RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
-	RenderImage::new(smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1))
+	bytes
 }
 
 /// Wraps a BGRA8 pixel block into the viewers' display image (M15 S2
@@ -148,6 +154,7 @@ pub(crate) fn bgra_bytes_to_render_image(
 /// `COPY_BYTES_PER_ROW_ALIGNMENT` (256) because `write_texture` requires
 /// an explicit, aligned row pitch for multi-row copies — a `None` pitch
 /// fails validation and the texture stays black.
+#[cfg(test)]
 pub(crate) fn f32_rgba_to_16f_bytes(width: u32, height: u32, samples: &[f32]) -> Option<(Vec<u8>, u32)> {
 		if samples.len() != (width * height * 4) as usize {
 			return None;
@@ -231,4 +238,48 @@ mod tests {
 			assert_eq!(&bytes[off + 24..off + 28], &[0, 0, 0, 0], "padding zeroed");
 		}
 	}
+
+	#[test]
+	fn f32_upload_borrows_aligned_rows_and_pads_unaligned_rows() {
+		let aligned = [0.5f32; 16 * 4];
+		let (bytes, pitch) = f32_rgba_to_32f_bytes(16, 1, &aligned).unwrap();
+		assert_eq!(pitch, 256);
+		assert!(matches!(bytes, Cow::Borrowed(_)));
+		let unaligned = [0.25f32; 3 * 4];
+		let (bytes, pitch) = f32_rgba_to_32f_bytes(3, 1, &unaligned).unwrap();
+		assert_eq!(pitch, 256);
+		assert_eq!(&bytes[..48], unaligned_as_bytes(&unaligned).as_slice());
+		assert!(bytes[48..].iter().all(|byte| *byte == 0));
+	}
+
+	fn unaligned_as_bytes(samples: &[f32]) -> Vec<u8> {
+		samples
+			.iter()
+			.flat_map(|sample| sample.to_ne_bytes())
+			.collect()
+	}
+}
+
+pub(crate) fn f32_rgba_to_32f_bytes<'a>(
+	width: u32,
+	height: u32,
+	samples: &'a [f32],
+) -> Option<(Cow<'a, [u8]>, u32)> {
+	if samples.len() != (width * height * 4) as usize {
+		return None;
+	}
+	let row_bytes = width as usize * 16;
+	let pitch = row_bytes.next_multiple_of(256);
+	let raw = unsafe {
+		std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
+	};
+	if row_bytes == pitch {
+		return Some((Cow::Borrowed(raw), pitch as u32));
+	}
+	let mut bytes = vec![0u8; pitch * height as usize];
+	for row in 0..height as usize {
+		bytes[row * pitch..row * pitch + row_bytes]
+			.copy_from_slice(&raw[row * row_bytes..(row + 1) * row_bytes]);
+	}
+	Some((Cow::Owned(bytes), pitch as u32))
 }

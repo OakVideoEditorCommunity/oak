@@ -453,7 +453,7 @@ pub fn apply_to_window(window: &mut gpui_kit::Window) {
 	// preview frames must stay staged so this CPU/OCIO path stays
 	// authoritative; only the identity/default-sRGB case may hand the
 	// working-space texture straight to the viewer.
-	quercus_engine_rs::render::gpu_set_display_transform_required(
+	super::gpu::set_display_transform_required(
 		active || pipeline_output_spec() != OutputColorSpec::default(),
 	);
 	let mode = if active {
