@@ -257,7 +257,7 @@ enum FullResTarget {
 /// crown and playback looks frozen. A shorter window bounds the backlog
 /// to what the pool can render in a fraction of a second, so the
 /// displayed frame tracks the playhead instead of chasing it.
-pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 12;
+pub const DEFAULT_PREVIEW_WINDOW_FORWARD: i64 = 24;
 /// Config key for the forward pre-render window size (frames).
 pub const CONFIG_KEY_PREVIEW_WINDOW: &str = "PlaybackPreRenderFrames";
 
@@ -289,6 +289,7 @@ struct PreviewWindow {
 	/// head frames until the old tail drains, and the decoder must seek from
 	/// end to start while the viewer waits.
 	last_playhead: Option<i64>,
+	seek_generation: u64,
 	/// Sequence length the head-frame cache was populated for.
 	loop_length: i64,
 	/// Already-displayed head frames, kept across a loop wrap to cover the
@@ -306,6 +307,28 @@ enum PreviewSlot {
 	/// Thread pipeline: an engine texture (GPU-resident on a shared
 	/// device, or an in-process CPU frame).
 	Video(oak_core::texture::Texture),
+}
+
+fn nearest_ready_preview_frame<T>(slots: &BTreeMap<i64, T>, playhead: i64) -> Option<i64> {
+	if slots.contains_key(&playhead) {
+		return Some(playhead);
+	}
+	slots.range(playhead..).next().map(|(frame, _)| *frame)
+}
+
+fn preview_discontinuity(
+	previous: Option<i64>,
+	playhead: i64,
+	length: i64,
+	playing: bool,
+	explicit_seek: bool,
+) -> bool {
+	explicit_seek
+		|| (playing
+			&& length > 0
+			&& previous.is_some_and(|prev| {
+				playhead < prev - 2 && playhead <= 2 && prev + 2 >= length
+			}))
 }
 
 impl PreviewSlot {
@@ -1277,6 +1300,7 @@ pub struct RealEngine {
 	/// toggle / selection / project drop); the pre-render window rebuilds
 	/// against the new generation.
 	preview_generation: u64,
+	preview_seek_generation: u64,
 	/// The channel background full-res jobs report finished frames through;
 	/// drained on the app tick. The mutex keeps the engine `Sync` (the
 	/// channel is only ever touched on the UI thread).
@@ -1716,6 +1740,7 @@ impl RealEngine {
 			full_res_generation: 0,
 			preview_windows: Arc::new(Mutex::new(HashMap::new())),
 			preview_generation: 0,
+			preview_seek_generation: 0,
 			full_res_rx: Mutex::new(full_res_rx),
 			full_res_tx: Mutex::new(full_res_tx),
 			renderer: Mutex::new(RendererSlot::Untried),
@@ -2309,10 +2334,16 @@ impl RealEngine {
 		// tail-frame tasks would otherwise keep the six-task cap occupied
 		// while the playhead sits at zero, delaying the first new frame and
 		// forcing a cold decoder seek from the end of the clip.
-		let jumped = window
-			.last_playhead
-			.is_some_and(|prev| playhead < prev - 2 || playhead > prev + 2);
+		let explicit_seek = window.seek_generation != self.preview_seek_generation;
+		let jumped = preview_discontinuity(
+			window.last_playhead,
+			playhead,
+			length,
+			playing,
+			explicit_seek,
+		);
 		window.last_playhead = Some(playhead);
+		window.seek_generation = self.preview_seek_generation;
 		if window.sequence != node_id
 			|| window.generation != self.preview_generation
 			|| jumped
@@ -2499,7 +2530,8 @@ impl RealEngine {
 				return Some(cached.clone());
 			}
 		}
-		let slot = window.slots.remove(&frame.0)?;
+		let slot_frame = nearest_ready_preview_frame(&window.slots, frame.0)?;
+		let slot = window.slots.remove(&slot_frame)?;
 		let out = match slot {
 			PreviewSlot::Shm(slot) => {
 				let out = {
@@ -2550,8 +2582,8 @@ impl RealEngine {
 				(Arc::new(image), scope)
 			}
 		};
-		if monitor == Monitor::Program && frame.0 >= 0 && frame.0 < LOOP_CACHE_FRAMES {
-			window.loop_cache.insert(frame.0, out.clone());
+		if monitor == Monitor::Program && slot_frame >= 0 && slot_frame < LOOP_CACHE_FRAMES {
+			window.loop_cache.insert(slot_frame, out.clone());
 		}
 		Some(out)
 	}
@@ -3982,6 +4014,7 @@ impl EngineGateway for RealEngine {
 	}
 
 	fn request_frame(&mut self, monitor: Monitor, frame: Frame, cx: &mut Context<Self>) {
+		self.preview_seek_generation = self.preview_seek_generation.wrapping_add(1);
 		let length = self.sequence_length();
 		let clock = self.clock(monitor).clone();
 		clock.update(cx, |clock, cx| {
@@ -4032,6 +4065,8 @@ impl EngineGateway for RealEngine {
 	}
 
 	fn pause(&mut self, monitor: Monitor, cx: &mut Context<Self>) {
+		self.preview_seek_generation = self.preview_seek_generation.wrapping_add(1);
+		self.cancel_preview_window(monitor);
 		let clock = self.clock(monitor).clone();
 		clock.update(cx, |clock, cx| {
 			clock.pause();
@@ -8483,6 +8518,26 @@ mod tests {
 	use std::sync::mpsc as std_mpsc;
 	use std::time::Duration;
 
+	#[test]
+	fn preview_rebuild_distinguishes_audio_correction_from_seek() {
+		assert!(!preview_discontinuity(Some(2), 7, 100, true, false));
+		assert!(!preview_discontinuity(Some(7), 2, 100, true, false));
+		assert!(preview_discontinuity(Some(2), 7, 100, true, true));
+		assert!(preview_discontinuity(Some(99), 0, 100, true, false));
+		assert!(!preview_discontinuity(Some(99), 0, 100, false, false));
+	}
+
+	#[test]
+	fn preview_uses_the_nearest_completed_frame_when_native_render_is_late() {
+		let slots = BTreeMap::from([(10, ()), (20, ()), (40, ())]);
+		assert_eq!(nearest_ready_preview_frame(&slots, 20), Some(20));
+		assert_eq!(nearest_ready_preview_frame(&slots, 24), Some(40));
+		assert_eq!(nearest_ready_preview_frame(&slots, 32), Some(40));
+		assert_eq!(nearest_ready_preview_frame(&slots, 5), Some(10));
+		assert_eq!(nearest_ready_preview_frame(&slots, 50), None);
+		assert_eq!(nearest_ready_preview_frame(&BTreeMap::<i64, ()>::new(), 0), None);
+	}
+
 	/// Serializes the media/FFmpeg-heavy tests (the codec library is not
 	/// thread-safe against concurrent decode sessions) and shares the
 	/// process-global undo stack with the other app test modules.
@@ -9708,6 +9763,8 @@ mod tests {
 	/// Scope samples matching the test image's pixel count.
 	fn test_scope() -> ScopeData {
 		ScopeData {
+			width: 2,
+			height: 2,
 			luma: Arc::new(vec![0.5; 4]),
 			chroma: Arc::new(vec![(0.5, 0.5); 4]),
 		}
