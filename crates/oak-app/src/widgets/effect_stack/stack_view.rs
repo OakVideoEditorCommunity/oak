@@ -304,8 +304,14 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 
 	/// Tracks an effect dragged in from the app's effect library
 	/// ([`LibraryEffectDrag`]): the insertion indicator follows the pointer
-	/// exactly like a card reorder, except nothing is being removed (the
-	/// index addresses the current card list directly).
+	/// exactly like a card reorder, except nothing is being removed (the index
+	/// addresses the current card list directly).
+	///
+	/// `card_id` is the card under the pointer and `event` the drag-move event
+	/// carrying the pointer position and the card's bounds. Points outside the
+	/// bounds are ignored; the top half of a card targets its own index, the
+	/// bottom half the index after it. When the card is no longer in the list
+	/// the indicator is cleared.
 	fn update_library_drag(
 		&mut self,
 		card_id: EffectId,
@@ -330,6 +336,11 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 	/// [`EffectStackEvent::ExpansionToggled`], and reports the card click as
 	/// [`EffectStackEvent::CardSelected`] so hosts can sync the node-graph
 	/// selection with the stack.
+	///
+	/// `id` is the card's effect; the emitted `expanded` flag is the inverse of
+	/// the card's current state (`false` when the card is unknown). Transient
+	/// drag state is cleared first, so a click that ends a drag leaves no stale
+	/// indicator behind.
 	fn toggle_expanded(&mut self, id: EffectId, cx: &mut Context<Self>) {
 		self.drag_state = DragState::default();
 		let expanded = self
@@ -350,6 +361,11 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 
 	/// Toggles a card's enabled state by emitting
 	/// [`EffectStackEvent::EnableToggled`].
+	///
+	/// `id` is the card's effect; the emitted payload carries the inverted
+	/// `enabled` flag, read from the current card state (`false` when the card
+	/// is unknown). The host applies the change, since the view only renders;
+	/// transient drag state is cleared first.
 	fn toggle_enabled(&mut self, id: EffectId, cx: &mut Context<Self>) {
 		self.drag_state = DragState::default();
 		let enabled = self
@@ -369,6 +385,10 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 
 	/// Requests removal of a card by emitting
 	/// [`EffectStackEvent::RemoveRequested`].
+	///
+	/// `id` is the card's effect. Nothing is removed here — the host owns the
+	/// data and performs the edit as one undo command; transient drag state is
+	/// cleared first.
 	fn remove(&mut self, id: EffectId, cx: &mut Context<Self>) {
 		self.drag_state = DragState::default();
 		cx.emit(EffectStackEvent::RemoveRequested(id));
@@ -377,6 +397,10 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 
 	/// Reports a secondary click on a card by emitting
 	/// [`EffectStackEvent::ContextMenuRequested`].
+	///
+	/// `id` is the card's effect and `position` the click position in window
+	/// coordinates (the host anchors its context menu there). Any in-progress
+	/// drag state is cleared first.
 	fn context_menu(&mut self, id: EffectId, position: Point<Pixels>, cx: &mut Context<Self>) {
 		self.drag_state = DragState::default();
 		cx.emit(EffectStackEvent::ContextMenuRequested {

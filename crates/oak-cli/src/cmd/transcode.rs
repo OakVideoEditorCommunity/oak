@@ -46,8 +46,13 @@ struct SourceInfo {
 	audio_streams: i32,
 }
 
-/// Run `transcode`. `width`/`format` are validated exactly like the C++
-/// loop over `argv[4..]`.
+/// Runs `transcode`: validates `width` (a positive decimal integer) and `format`
+/// (`"ppm"` or `"mp4"`, defaulting to mp4), then delegates to
+/// [`run_transcode`].
+///
+/// Returns `EXIT_USAGE` after printing the offending option when `width` is not a
+/// positive integer or `format` is unknown; otherwise returns the
+/// `EXIT_OK`/`EXIT_ERROR` code from the transcode body.
 pub fn run(input_media: String, out: String, width: Option<String>, format: Option<String>) -> i32 {
 	if let Some(w) = &width {
 		match w.parse::<i64>() {
@@ -69,7 +74,14 @@ pub fn run(input_media: String, out: String, width: Option<String>, format: Opti
 	run_transcode(&input_media, &out, width.as_deref(), is_ppm)
 }
 
-/// The transcode body.
+/// The transcode body: probes the source, derives the output geometry and frame
+/// rate, assembles a temporary sequence, then dispatches to PPM or MP4 output.
+///
+/// `width` is the requested output width as a decimal string (already validated;
+/// `None` keeps the source width); height preserves the source aspect ratio and
+/// falls back to 16:9 when the probe has no video dimensions. Frame rate falls back
+/// to 25/1 for stills. Returns an `EXIT_*` code and shuts the render manager down
+/// before returning.
 fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i32 {
 	let src = match probe_source(input) {
 		Ok(s) => s,
@@ -118,7 +130,14 @@ struct Assembly {
 	sequence: NodeId,
 }
 
-/// Build the temporary sequence for the render/export stage.
+/// Builds the temporary one-clip sequence used by the render/export stage.
+///
+/// Initializes the render manager, creates an [`EditorSession`] and a sequence
+/// named `transcode`, sets its video params to `out_w`x`out_h` at
+/// `fr_num`/`fr_den`, imports `input` as footage, and places one video clip
+/// covering `frames` (plus an audio clip when `audio_streams > 0`, so the mix has
+/// something to render). Returns the owning [`Assembly`]; failures produce a
+/// human-readable message.
 fn assemble_sequence(
 	input: &str,
 	out_w: i32,
@@ -176,8 +195,13 @@ fn assemble_sequence(
 	})
 }
 
-/// `--format ppm`: render the frame range into PPM frames (+ the audio
-/// range into a WAV when the source has audio).
+/// `--format ppm`: renders the frame range as `frame_%05d.ppm` files in `out` and,
+/// when `audio` is true, also writes the audio range as `audio.wav`.
+///
+/// `frames` frames are rendered at `out_w`x`out_h` with frame rate
+/// `fr_num`/`fr_den`; frame `i` is sampled at `i * fr_den / fr_num` seconds. The
+/// output directory is created first. Returns `EXIT_ERROR` on directory creation,
+/// render, PPM write, or WAV failure; `EXIT_OK` otherwise.
 fn transcode_ppm(
 	assembly: &Assembly,
 	out: &str,
@@ -222,7 +246,12 @@ fn transcode_ppm(
 	EXIT_OK
 }
 
-/// `--format mp4`: H.264/AAC through the unified export task.
+/// `--format mp4`: exports the assembled sequence as H.264/AAC through the unified
+/// export task.
+///
+/// `out` is the destination file, `frames` the frame count, and
+/// `fr_num`/`fr_den` the frame rate. Returns `EXIT_OK` on success, or `EXIT_ERROR`
+/// after printing the export message on failure.
 fn transcode_mp4(assembly: &Assembly, out: &str, fr_num: i32, fr_den: i32, frames: i64) -> i32 {
 	match engine::export_sequence(&assembly.project, assembly.sequence, out, fr_num, fr_den, frames) {
 		Ok(()) => EXIT_OK,
@@ -260,7 +289,13 @@ fn write_frame_ppm(frame: &engine::RenderedFrame, out: &str, index: i64) -> Resu
 	.map_err(|e| format!("cannot write \"{}\": {e}", path.display()))
 }
 
-/// Render the audio range and write it as `audio.wav` in `out`.
+/// Renders the assembled sequence's audio over the whole frame range and writes it
+/// as `audio.wav` in the output directory `out`.
+///
+/// The range is `[0, frames * fr_den / fr_num)` seconds; `frames` is the frame
+/// count and `fr_num`/`fr_den` the sequence frame rate. Prints an error and returns
+/// `EXIT_ERROR` when the audio render fails, the buffer is empty, or the WAV cannot
+/// be written; `EXIT_OK` on success.
 fn write_audio_wav(assembly: &Assembly, out: &str, frames: i64, fr_num: i32, fr_den: i32) -> i32 {
 	let range = TimeRange::new(
 		Rational::new(0, 1),

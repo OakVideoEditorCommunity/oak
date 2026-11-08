@@ -29,27 +29,42 @@
 
 #![allow(dead_code)]
 
-/// `Project: <name>` (`cmd_info`).
+/// Formats the `info` header line `Project: <name>`.
+///
+/// `name` is the project's display name and is printed verbatim (an empty
+/// name yields `Project: `); the returned line has no trailing newline.
 pub fn project_line(name: &str) -> String {
 	format!("Project: {name}")
 }
 
-/// `File: <filename>` (`cmd_info`).
+/// Formats the `info` path line `File: <filename>`.
+///
+/// `filename` is the project's stored filename/path and is printed verbatim
+/// (empty values produce `File: `); no trailing newline is added.
 pub fn file_line(filename: &str) -> String {
 	format!("File: {filename}")
 }
 
-/// `Modified: yes|no` (`cmd_info`).
+/// Formats the `info` modified flag as `Modified: yes` or `Modified: no`.
+///
+/// `modified` selects `yes` when true and `no` when false; the line has no
+/// trailing newline.
 pub fn modified_line(modified: bool) -> String {
 	format!("Modified: {}", if modified { "yes" } else { "no" })
 }
 
-/// `Sequences: <n>` (`cmd_info`).
+/// Formats the `info` summary line `Sequences: <n>`.
+///
+/// `count` is the number of sequence nodes in the project; printed verbatim
+/// and without a trailing newline.
 pub fn sequences_line(count: i64) -> String {
 	format!("Sequences: {count}")
 }
 
-/// `Footage: <n>` (`cmd_info`).
+/// Formats the `info` summary line `Footage: <n>`.
+///
+/// `count` is the number of footage entries in the project; printed verbatim
+/// and without a trailing newline.
 pub fn footage_line(count: i64) -> String {
 	format!("Footage: {count}")
 }
@@ -101,26 +116,50 @@ pub fn footage_entry(index: i64, filename: &str, online: bool) -> String {
 	)
 }
 
-/// `Decoder: <name>` (`cmd_probe`).
+/// Formats the `probe` header line `Decoder: <name>`.
+///
+/// `decoder` is the decoder identifier returned by the SDK probe; it is
+/// printed verbatim, with no trailing newline.
 pub fn decoder_line(decoder: &str) -> String {
 	format!("Decoder: {decoder}")
 }
 
-/// `Duration: <seconds> s` (`cmd_probe`).
+/// Formats the `probe` duration line `Duration: <seconds> s`.
+///
+/// `seconds` is the overall duration in seconds; it is printed with six
+/// decimals and a trailing ` s`. The line has no trailing newline.
 pub fn duration_line(seconds: f64) -> String {
 	format!("Duration: {seconds:.6} s")
 }
 
-/// `Video streams: <n>` (`cmd_probe`).
+/// Formats the `probe` summary line `Video streams: <n>`.
+///
+/// `count` is the number of video streams reported by the probe; printed
+/// verbatim, without a trailing newline.
 pub fn video_streams_line(count: i64) -> String {
 	format!("Video streams: {count}")
 }
 
-/// One video-stream line (`cmd_probe`).
+/// Formats one `probe` video-stream line:
+/// `  [i] stream S: <w>x<h>, <num>/<den> fps (<fps>), duration <ts>/<den> (<s> s), primaries=<p> trc=<t>, interlaced|progressive`.
 ///
-/// ```
-///   [0] stream 0: 1920x1080, 25/1 fps (25.000), duration 217600/12800 (17.000000 s), primaries=1 trc=1, progressive
-/// ```
+/// # Arguments
+///
+/// * `index` - display ordinal within the probe output (0-based, not the
+///   container stream index).
+/// * `stream_index` - the container's stream index.
+/// * `width` / `height` - frame size in pixels.
+/// * `frame_rate_num` / `frame_rate_den` - frame rate as a rational; a zero
+///   denominator prints `0.000` for the decimal fps instead of dividing.
+/// * `duration_ts` - stream duration in time-base ticks.
+/// * `time_base_den` - denominator of the stream time base.
+/// * `seconds` - the duration already converted to seconds; printed with six
+///   decimals.
+/// * `color_primaries` / `color_trc` - raw enum codes, printed as-is
+///   (0 means unspecified).
+/// * `interlaced` - selects the trailing `interlaced` or `progressive` word.
+///
+/// Returns the line without a trailing newline.
 pub fn video_stream(
 	index: i64,
 	stream_index: i64,
@@ -152,16 +191,30 @@ pub fn video_stream(
 	)
 }
 
-/// `Audio streams: <n>` (`cmd_probe`).
+/// Formats the `probe` summary line `Audio streams: <n>`.
+///
+/// `count` is the number of audio streams reported by the probe; printed
+/// verbatim, without a trailing newline.
 pub fn audio_streams_line(count: i64) -> String {
 	format!("Audio streams: {count}")
 }
 
-/// One audio-stream line (`cmd_probe`).
+/// Formats one `probe` audio-stream line:
+/// `  [i] stream S: <rate> Hz, <channels> channels, duration <ts>/<den> (<s> s)`.
 ///
-/// ```
-///   [0] stream 1: 48000 Hz, 2 channels, duration 816000/48000 (17.000000 s)
-/// ```
+/// # Arguments
+///
+/// * `index` - display ordinal within the probe output (0-based, not the
+///   container stream index).
+/// * `stream_index` - the container's stream index.
+/// * `sample_rate` - sample rate in Hz.
+/// * `channel_count` - channel count (the source's layout, not a bitmask).
+/// * `duration_ts` - stream duration in time-base ticks.
+/// * `time_base_den` - denominator of the stream time base.
+/// * `seconds` - the duration already converted to seconds; printed with six
+///   decimals.
+///
+/// Returns the line without a trailing newline.
 pub fn audio_stream(
 	index: i64,
 	stream_index: i64,
@@ -177,7 +230,10 @@ pub fn audio_stream(
 	)
 }
 
-/// `Subtitle streams: <n>` (`cmd_probe`).
+/// Formats the `info` summary line `Subtitle streams: <n>`.
+///
+/// `count` is the number of subtitle streams reported by the probe; the value
+/// is printed verbatim and the returned line has no trailing newline.
 pub fn subtitle_streams_line(count: i64) -> String {
 	format!("Subtitle streams: {count}")
 }

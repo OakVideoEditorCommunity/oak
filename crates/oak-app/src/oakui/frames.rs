@@ -108,6 +108,17 @@ pub(crate) fn f32_rgba_to_bgra_image(width: u32, height: u32, samples: &[f32]) -
 	RenderImage::new(smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1))
 }
 
+/// Build a lazily-converted F32 RGBA → BGRA [`RenderImage`] for the viewer.
+///
+/// `width` / `height` are the frame's geometry and `frame` is the engine's preview
+/// frame; the sample copy and conversion run inside the image's lazy closure, when
+/// the renderer first uploads the image, so a paused frame never pays for a
+/// conversion. Samples are clamped to `0.0..=1.0` and quantized to 8-bit BGRA; a
+/// sample count that is not `width * height * 4` yields an empty image instead of
+/// panicking.
+///
+/// Pairs with [`f32_rgba_to_bgra_image`], the eager variant used by the synthetic
+/// pattern path.
 pub(crate) fn lazy_gpu_f32_rgba_to_bgra_image(
 	width: u32,
 	height: u32,

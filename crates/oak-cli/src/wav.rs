@@ -30,10 +30,29 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+/// Write `v` as two little-endian bytes to `f`.
+///
+/// Header/sample helper for [`write_wav`]: it emits the channel count, PCM
+/// tag, block alignment and bits-per-sample in the `fmt ` chunk, and each
+/// clamped sample in the data chunk. Uses [`Write::write_all`], so the call
+/// either accepts both bytes or reports an error.
+///
+/// # Errors
+///
+/// Returns the writer's I/O error when `write_all` fails.
 fn write_u16_le(f: &mut impl Write, v: u16) -> io::Result<()> {
 	f.write_all(&[v as u8, (v >> 8) as u8])
 }
 
+/// Write `v` as four little-endian bytes to `f`.
+///
+/// Header helper for [`write_wav`] (RIFF chunk size, `fmt ` chunk size,
+/// sample rate, byte rate and data-chunk size). Uses [`Write::write_all`],
+/// so the call either accepts all four bytes or reports an error.
+///
+/// # Errors
+///
+/// Returns the writer's I/O error when `write_all` fails.
 fn write_u32_le(f: &mut impl Write, v: u32) -> io::Result<()> {
 	f.write_all(&[v as u8, (v >> 8) as u8, (v >> 16) as u8, (v >> 24) as u8])
 }

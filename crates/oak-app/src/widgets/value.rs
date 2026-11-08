@@ -96,6 +96,20 @@ impl RationalValue {
 	pub const ONE: Self = Self { num: 1, den: 1 };
 
 	/// Construct a normalized rational, rejecting a zero denominator.
+	///
+	/// # Arguments
+	///
+	/// * `num` - Numerator; may be negative.
+	/// * `den` - Denominator; must be nonzero. A negative denominator is moved
+	///   onto the numerator before reduction.
+	///
+	/// # Errors
+	///
+	/// Returns [`RationalError::ZeroDenominator`] when `den == 0`. On success
+	/// the fraction is fully reduced with a positive denominator, so equal
+	/// fractions compare equal (e.g. `4/6` == `2/3`); use
+	/// [`RationalValue::new_or_one`] when a zero denominator should be clamped
+	/// rather than reported.
 	pub fn new(num: i64, den: i64) -> Result<Self, RationalError> {
 		if den == 0 {
 			return Err(RationalError::ZeroDenominator);
@@ -103,7 +117,18 @@ impl RationalValue {
 		Ok(Self::new_unchecked(num, den))
 	}
 
-	/// Construct a normalized rational, clamping a zero denominator to one.
+	/// Construct a normalized rational like [`RationalValue::new`], but map a
+	/// zero denominator to `1` instead of failing.
+	///
+	/// # Arguments
+	///
+	/// * `num` - Numerator; may be negative.
+	/// * `den` - Denominator; `0` is clamped to `1`, so `new_or_one(n, 0)`
+	///   becomes the integer rational `n/1`.
+	///
+	/// Used on paths where a missing or zero denominator must degrade
+	/// gracefully rather than surface [`RationalError::ZeroDenominator`]; the
+	/// result is always normalized like [`RationalValue::new`].
 	pub fn new_or_one(num: i64, den: i64) -> Self {
 		if den == 0 {
 			return Self { num, den: 1 };
@@ -111,6 +136,14 @@ impl RationalValue {
 		Self::new_unchecked(num, den)
 	}
 
+	/// Normalizes `num/den` without the zero-denominator check: a negative
+	/// denominator is moved onto the numerator, then both are divided by their
+	/// gcd so the result has a positive denominator and is fully reduced.
+	///
+	/// Private back end of [`RationalValue::new`] and
+	/// [`RationalValue::new_or_one`]; `den` must therefore be nonzero. A zero
+	/// denominator would divide by the zero gcd and panic, so callers validate
+	/// first.
 	fn new_unchecked(num: i64, den: i64) -> Self {
 		let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
 		let gcd = num.unsigned_abs().gcd(den as u64) as i64;
@@ -130,7 +163,13 @@ impl RationalValue {
 		self.den
 	}
 
-	/// The value as `f64`.
+	/// The rational's numeric value as `f64` (`num / den`), used for painting,
+	/// interpolation and [`SliderValue::to_f64`].
+	///
+	/// The division is inexact for most fractions (`1/3` becomes the nearest
+	/// `f64`), so a `f64` round-trip through [`RationalValue::from_f64`] is
+	/// lossy; the exact pair stays available via [`RationalValue::num`] /
+	/// [`RationalValue::den`].
 	pub fn to_f64(self) -> f64 {
 		self.num as f64 / self.den as f64
 	}

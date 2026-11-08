@@ -98,6 +98,14 @@ impl EffectCard {
 	}
 
 	/// Sets the primary header label.
+	///
+	/// `title` is usually the effect's display name from
+	/// [`EffectData::title`](crate::widgets::effect_stack::EffectData::title);
+	/// it is drawn as the top line of the header, coloured with the theme's
+	/// text colour (dimmed when the card is disabled). The default is an
+	/// empty [`SharedString`], so the header line is blank unless set. Accepts
+	/// anything convertible into a `SharedString`; returns `self` for builder
+	/// chaining.
 	pub fn title(mut self, title: impl Into<SharedString>) -> Self {
 		self.title = title.into();
 		self
@@ -122,7 +130,13 @@ impl EffectCard {
 		self
 	}
 
-	/// Sets whether the remove button is shown.
+	/// Sets whether the card is treated as removable.
+	///
+	/// The button itself is drawn by `EffectStackView`'s card wrapper, which
+	/// reads [`EffectData::is_removable`](crate::widgets::effect_stack::EffectData::is_removable)
+	/// rather than this flag; here the value only adds right padding for that
+	/// button. A card that is not removable never emits
+	/// [`EffectStackEvent::RemoveRequested`](crate::widgets::effect_stack::EffectStackEvent::RemoveRequested).
 	pub fn removable(mut self, removable: bool) -> Self {
 		self.removable = removable;
 		self

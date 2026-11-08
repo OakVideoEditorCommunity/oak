@@ -52,7 +52,16 @@ pub struct ProjectExplorerPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> ProjectExplorerPanel<E> {
-	/// Builds the explorer over `engine`'s project data.
+	/// Create the material-bin panel and its child `ProjectExplorer` widget
+	/// over `engine`'s project data.
+	///
+	/// `engine` is the app engine the explorer queries (cloned into the widget),
+	/// `window` carries the widget and context-menu construction, and `cx` is
+	/// the panel context that receives the explorer subscription. That
+	/// subscription opens sequences in the timeline but selects footage in the
+	/// source viewer, imports each dropped file in turn (logging only the first
+	/// error) and opens the context menu at the requested position. The new
+	/// panel starts with no context entry and a fresh focus handle.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let explorer = cx.new(|cx| ProjectExplorer::new(1, engine.clone(), window, cx));
 		let context_menu = ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
@@ -129,7 +138,17 @@ impl<E: AppEngine> ProjectExplorerPanel<E> {
 		self.context_menu.show(position, menu, cx);
 	}
 
-	/// Handles the panel's local (non-registry) context-menu items.
+	/// Handles the panel's local (non-registry) context-menu items, acting on
+	/// `self.context_entry` — the entry the menu was opened for (`None` = the
+	/// empty area, so id-based actions do nothing).
+	///
+	/// `item` is one of the `LOCAL_*` constants produced by `footage_menu`,
+	/// `sequence_menu`, `entry_menu` and `blank_menu`: reveal in Finder, replace
+	/// footage (async file picker), rename / delete / export sequence (emit the
+	/// matching request event for the shell), properties (sequence only), and
+	/// the proxy generate/use/reveal/delete group. Unhandled ids and
+	/// not-yet-implemented actions are logged and ignored; registry-backed items
+	/// are routed by the shell, not here.
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		match item {
 			LOCAL_REVEAL_IN_FINDER => {

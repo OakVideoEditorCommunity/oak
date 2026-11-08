@@ -52,7 +52,12 @@ pub struct HistoryPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> HistoryPanel<E> {
-	/// Builds the panel over `engine`'s undo stack.
+	/// Builds the history panel over `engine`'s undo stack.
+	///
+	/// Subscribes to `engine` so every edit/undo/redo/jump notification re-reads the
+	/// stack (rows, graying and selection stay live), creates the shared right-click
+	/// [`ContextMenu`], and stores the panel focus handle. `window` is the hosting
+	/// window and `cx` the panel's context.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// The stack changes whenever the engine notifies (every edit,
 		// undo, redo and jump runs through the engine), so re-reading on
@@ -74,7 +79,12 @@ impl<E: AppEngine> HistoryPanel<E> {
 		}
 	}
 
-	/// Routes a context-menu action.
+	/// Routes a context-menu action chosen in [`Self::show_menu`].
+	///
+	/// `item` is one of `MENU_UNDO`, `MENU_REDO`, or `MENU_JUMP_HERE`; `cx` is used to
+	/// update the engine entity. Jump-here uses the row recorded by the last
+	/// right-click (`menu_row`), converted from the zero-based display row to the
+	/// engine's history index. Unknown ids are ignored.
 	fn on_menu(&mut self, item: usize, cx: &mut Context<Self>) {
 		match item {
 			MENU_UNDO => self.engine.update(cx, |engine, cx| engine.undo(cx)),
@@ -90,6 +100,11 @@ impl<E: AppEngine> HistoryPanel<E> {
 	}
 
 	/// Shows the right-click menu at `position` (window coordinates).
+	///
+	/// `row` is the history row under the cursor, or `None` when the click landed on
+	/// empty space; it is stored as `menu_row` and, when present, adds the "jump here"
+	/// item. Undo/redo entries are disabled according to the engine's
+	/// `can_undo`/`can_redo`. `cx` is the panel context used to show the menu.
 	fn show_menu(
 		&mut self,
 		row: Option<usize>,

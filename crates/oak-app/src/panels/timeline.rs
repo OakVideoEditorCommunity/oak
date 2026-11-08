@@ -133,6 +133,23 @@ struct FootageDropTarget {
 impl<E: AppEngine> TimelinePanel<E> {
 	/// Builds the panel around `timeline` (created by the app shell so it can
 	/// sync the playhead).
+	///
+	/// `engine` is retained as the single source of truth for timeline data
+	/// and edits; `timeline` is the view entity the panel drives (zoom, snap,
+	/// selection) and subscribes to for context-menu requests. The panel also
+	/// creates its docked controls and wires them once here:
+	///
+	/// * a zoom slider (control id 10, `0.1` step, range `0.5..=8.0`, default
+	///   `2.0` pixels per frame) that calls [`TimelineState::set_zoom`] with a
+	///   zero anchor;
+	/// * a track-height slider (id 11, step `8`, range `24..=160`, default
+	///   `64` pixels) that forwards to [`AppEngine::set_track_height`];
+	/// * a snapping check box (id 12, checked by default) that toggles
+	///   [`TimelineState::snap_enabled`].
+	///
+	/// The context-menu handle is created with [`Self::on_local_menu_item`] as
+	/// its local handler. The returned panel starts with no drag-drop target
+	/// and no stored context-menu target.
 	pub fn new(
 		engine: Entity<E>,
 		timeline: Entity<TimelineView<E>>,
@@ -276,6 +293,21 @@ impl<E: AppEngine> TimelinePanel<E> {
 	}
 
 	/// Handles the timeline's local (non-registry) context-menu items.
+	///
+	/// `item` is one of the menu's local ids: a `LOCAL_*` constant, a
+	/// `menu::color_label_index` value (color labels are matched first and
+	/// currently only logged, because the engine has no clip-color surface),
+	/// or the `0` used by submenu parents. Registry-backed items never reach
+	/// this method — the context-menu trigger dispatches them as actions.
+	///
+	/// Track deletion reads [`Self::context_track`] (set when the track-head
+	/// menu opened) and "Add adjustment layer" reads [`Self::context_empty`]
+	/// (set when the empty-area menu opened); both are no-ops when the stored
+	/// context is absent. Proxy and multicam items derive their target clips
+	/// from the timeline view's selection, matching the shell's menu behavior.
+	/// Cache and timecode entries are still placeholders that only log, as
+	/// does an unknown id: this handler never fails, and engine errors are
+	/// logged rather than propagated.
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		// Color labels apply to the selected clips; the engine has no
 		// clip-color surface yet, so they log for now (kept visible so the
@@ -382,6 +414,20 @@ impl<E: AppEngine> TimelinePanel<E> {
 	/// timeline itself uses (see [`TimelineState::frame_at_point`] and the
 	/// view's track-row walk). `None` above the ruler (outside the clip
 	/// area).
+	///
+	/// `now` is in timeline-body coordinates; callers subtract the drag
+	/// bounds' origin first. The frame comes from the view's
+	/// pixels-per-frame mapping after removing [`HEADER_WIDTH`], clamped
+	/// below at 0 but not above (dropping past the sequence end is how the
+	/// timeline extends). The row walk accumulates each track height clamped
+	/// to [`MIN_TRACK_HEIGHT`] and picks the first row whose bottom is below
+	/// the pointer; below the last row it falls back to the last track, or to
+	/// video track 0 when the timeline has no tracks.
+	///
+	/// # Returns
+	///
+	/// `(track kind, display track index, start frame)` for a pointer in the
+	/// clip area, `None` above the ruler.
 	fn resolve_drop_point(
 		&self,
 		now: Point<Pixels>,
@@ -428,6 +474,15 @@ impl<E: AppEngine> TimelinePanel<E> {
 	/// Resolves the footage-drop target under the cursor (see
 	/// [`Self::resolve_drop_point`]). Hovering outside the clip area
 	/// clears the target.
+	///
+	/// `event` is the drag-move event; the pointer position is converted to
+	/// timeline-body coordinates by subtracting the drag bounds' origin and
+	/// then handed to [`Self::resolve_drop_point`]. On success
+	/// [`Self::footage_drop`] is replaced, with `length` taken from the first
+	/// dragged footage's frame length (`1` when the engine cannot resolve it)
+	/// so the drag ghost has an extent. Always notifies for a resolved
+	/// target, and notifies on clearing only if a target was actually
+	/// dropped.
 	fn update_footage_drop(&mut self, event: &DragMoveEvent<FootageDrag>, cx: &mut Context<Self>) {
 		let now = event.event.position - event.bounds.origin;
 		let Some((track_kind, track_index, time)) = self.resolve_drop_point(now, cx) else {
@@ -453,6 +508,15 @@ impl<E: AppEngine> TimelinePanel<E> {
 	/// Resolves the effect-library drop target under the cursor (same
 	/// mapping as the footage drop; a generator clip's 5-second default
 	/// length in sequence frames).
+	///
+	/// `event` is the drag-move event; the pointer position is converted to
+	/// timeline-body coordinates by subtracting the drag bounds' origin and
+	/// then handed to [`Self::resolve_drop_point`]. On success
+	/// [`Self::effect_drop`] is replaced (its `length` is the 5-second
+	/// generator default rounded to whole frames, at least 1, from the
+	/// engine's frame rate); moving above the ruler clears it. Always
+	/// notifies for a resolved target, and notifies on clearing only if a
+	/// target was actually dropped.
 	fn update_effect_drop(
 		&mut self,
 		event: &DragMoveEvent<crate::widgets::effect_stack::LibraryEffectDrag>,
@@ -484,6 +548,24 @@ impl<E: AppEngine> TimelinePanel<E> {
 	/// (undoable, one row); transition effects snap to the nearest clip
 	/// edge as a junction or single-sided transition. Everything else is
 	/// ignored.
+	///
+	/// `drag` supplies the library effect's `type_id`, which selects the
+	/// branch:
+	///
+	/// * transitions (`…Olive.transition` / `.transitionfx`) go through
+	///   [`AppEngine::drop_transition_at`] with a snap window of at least one
+	///   second and at least [`crate::widgets::timeline::SNAP_THRESHOLD_PX`]
+	///   pixels converted at the current zoom (so clip edges stay hittable at
+	///   low zoom);
+	/// * generators become a new clip via [`AppEngine::drop_generator_clip`]
+	///   at the hovered track/frame (the target's resolved `length` only sizes
+	///   the drag ghost, not the placed clip);
+	/// * other effects append to the clip under the target frame and select
+	///   it (mirrored into the timeline widget's selection); empty space is
+	///   ignored.
+	///
+	/// The stored [`Self::effect_drop`] target is consumed; a drop with no
+	/// resolved target is a no-op. Engine failures are logged, not reported.
 	fn finish_effect_drop(
 		&mut self,
 		drag: &crate::widgets::effect_stack::LibraryEffectDrag,
@@ -591,6 +673,12 @@ impl<E: AppEngine> TimelinePanel<E> {
 	/// [`FootageDropNeedsSequence`], which shows the probe-vs-manual
 	/// choice (the shell re-routes the drop through [`AppEngine::drop_footage`]
 	/// once a sequence exists).
+	///
+	/// `drag` carries one or more footage ids: they are dropped in order at
+	/// the hovered track/frame, each clip advancing the insertion point by its
+	/// own length (so a multi-file drop lands back-to-back). The stored
+	/// [`Self::footage_drop`] target is consumed; a drop with no resolved
+	/// target (released outside the clip area) or an empty payload is a no-op.
 	fn finish_footage_drop(&mut self, drag: &FootageDrag, cx: &mut Context<Self>) {
 		let Some(target) = self.footage_drop.take() else {
 			return;
@@ -629,6 +717,14 @@ impl<E: AppEngine> TimelinePanel<E> {
 
 	/// Routes a transport command to the engine's program monitor (the
 	/// timeline shuttles the program, like the viewers do when focused).
+	///
+	/// `action` is the registry action forwarded unchanged to
+	/// [`crate::panels::commands::viewer_transport`] with
+	/// [`Monitor::Program`]; the engine's program clock is read first so that
+	/// play/pause can inspect the current state and in/out navigation can use
+	/// the work area. Returns that helper's result: `true` for the transport
+	/// actions it implements, `false` when `action` is not a transport
+	/// command, in which case the caller reports the command as unhandled.
 	fn transport(&mut self, action: ActionId, cx: &mut Context<Self>) -> bool {
 		let engine = self.engine.clone();
 		let clock = self.engine.read(cx).program_clock().clone();
@@ -649,8 +745,20 @@ impl<E: AppEngine> TimelinePanel<E> {
 		}
 	}
 
-	/// 上一个/下一个编辑点: the playhead jumps to the nearest clip
-	/// boundary across all tracks (sequence start/end included).
+	/// 上一个/下一个编辑点: the playhead jumps to the nearest clip boundary
+	/// across all tracks (sequence start/end included).
+	///
+	/// `forward` selects the next boundary strictly after the program
+	/// playhead; `false` selects the previous boundary strictly before it.
+	/// The candidate set is the union of every clip's in/out frame, frame 0
+	/// and the sequence length, so a cut on any track is a stop. There is no
+	/// wrap-around: at the last boundary a forward jump does nothing, and
+	/// likewise for a backward jump at frame 0. Moves the program monitor's
+	/// playhead through [`AppEngine::request_frame`] (no undo entry).
+	///
+	/// Reached through [`PanelCommandHandler::go_to_prev_cut`] /
+	/// [`PanelCommandHandler::go_to_next_cut`] when the timeline panel is
+	/// focused.
 	fn goto_cut(&mut self, forward: bool, cx: &mut Context<Self>) {
 		let playhead = self.engine.read(cx).clock_frame(Monitor::Program, cx);
 		let mut edges = std::collections::BTreeSet::new();
@@ -712,6 +820,14 @@ impl<E: AppEngine> TimelinePanel<E> {
 
 	/// Scales the timeline zoom around its left edge (the focused-panel
 	/// counterpart of 视图 → 放大/缩小).
+	///
+	/// `factor` multiplies the current pixels-per-frame zoom: `1.25` zooms in
+	/// and `0.8` zooms out, matching the app-level actions. The anchor is the
+	/// left edge (`px(0.)`), so the content at that edge stays put.
+	/// [`TimelineState::set_zoom`] clamps the result to `MIN_ZOOM..=MAX_ZOOM`
+	/// and re-clamps a negative scroll offset to zero, so extreme factors
+	/// saturate instead of inverting. Notifies the view so the ruler and
+	/// track rows repaint.
 	fn zoom_timeline(&mut self, factor: f32, cx: &mut Context<Self>) {
 		self.timeline.update(cx, |view, cx| {
 			let zoom = view.state.zoom * factor;
@@ -1731,6 +1847,19 @@ pub(crate) fn clip_menu(
 
 /// The empty-area context menu (no clips selected): view toggles plus the
 /// sequence "Properties" entry.
+///
+/// Opened when the click misses every clip, track head and marker. The menu
+/// holds, in order: "Use audio time units" (checkable),
+/// "Show thumbnails" with an Off / At in points / On submenu, "Show
+/// waveforms" (checkable), and — after a separator — "Add adjustment layer"
+/// and the sequence "Properties" item.
+///
+/// The checkable entries are built with `checked = false` and their state is
+/// not read from the engine, so the menu is stateless; the thumbnail/
+/// waveform/audio-unit items are not yet wired and currently fall through the
+/// default arm of [`TimelinePanel::on_local_menu_item`]. "Properties" carries
+/// [`ActionId::SequenceSettings`] and leaves through the registry, while the
+/// remaining items use the `LOCAL_*` ids handled by the panel.
 pub(crate) fn empty_area_menu() -> Menu {
 	let thumbnails = Menu::new(vec![
 		MenuItem::new(

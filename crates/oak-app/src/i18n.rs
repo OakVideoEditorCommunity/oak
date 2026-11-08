@@ -122,7 +122,13 @@ pub fn init() {
 	set_language_code(code.trim());
 }
 
-/// Writes the code back to the config `Language` key.
+/// Persists the active language `code` to the config `Language` key.
+///
+/// Called by [`set_language_code`] after the switch, so the choice survives a
+/// restart (`init` reads the key back). `code` must already be a valid,
+/// discovered code — the fallback is resolved by the caller, not here. The write
+/// is best-effort: a config-store error is discarded, so a failed persist leaves
+/// the running session switched and only the next start reverts.
 fn persist_language(code: &str) {
 	crate::oakui::real::config_set_string("Language", code);
 }
@@ -233,7 +239,16 @@ fn pack_dirs() -> Vec<std::path::PathBuf> {
 	dirs
 }
 
-/// Parses one YAML pack into a table (duplicate keys are an error).
+/// Parses one YAML language pack into a key-value table.
+///
+/// `code` names the pack (used only in diagnostics) and `source` is the YAML
+/// text. Keys are UI string ids (`language.name`, `menu.file.open`, ...) and
+/// values the translated strings; each value is leaked to `&'static str` so
+/// [`tr`] can return it without allocating.
+///
+/// Returns an empty table on any YAML error — malformed document or duplicate
+/// keys — after logging the reason to stderr, so one bad pack degrades to raw
+/// keys instead of failing startup.
 fn parse_pack(code: &str, source: &str) -> Table {
 	let mut table = Table::new();
 	let parsed: HashMap<String, String> = match serde_yaml::from_str(source) {

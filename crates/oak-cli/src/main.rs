@@ -132,6 +132,17 @@ enum Command {
 	},
 }
 
+/// Runs the CLI: parses one subcommand, dispatches it, and exits with its code.
+///
+/// Arguments are read from `std::env::args()` with argv[0] skipped. As the first
+/// argument, `--help`/`-h` prints [`USAGE`] and exits 0; any other first argument
+/// outside `info`, `render`, `probe` and `transcode` prints an error plus the
+/// usage text and exits with the usage code (64). Clap then validates the
+/// remaining argument shapes — a parse error prints clap's message and the usage
+/// text, also exiting 64. A valid command is dispatched to
+/// `cmd::{info,render,probe,transcode}::run`, and the process exits with the code
+/// that function returns (0 success, 1 general error, 2 rendering unavailable).
+/// This function never returns; it must only be used as the process entry point.
 fn main() {
 	let args: Vec<String> = std::env::args().skip(1).collect();
 

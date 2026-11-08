@@ -83,6 +83,17 @@ pub struct NodeEditorPanel<E: AppEngine> {
 impl<E: AppEngine> NodeEditorPanel<E> {
 	/// Builds the graph canvas over `engine` and routes its edit requests back
 	/// to the engine.
+	///
+	/// `engine` is the shared engine entity (borrowed, not owned); `window`
+	/// registers the context menu and builds the graph widget; `cx` supplies
+	/// the panel's focus handle. The constructor wires the "edits are
+	/// requests" loop: every graph gesture is forwarded through
+	/// `apply_node_graph_event` — except delete requests naming a protected
+	/// endpoint, which are filtered first — graph context-menu events open
+	/// the panel's menus, and engine notifies re-sync the highlight. A clip or
+	/// node already selected when the panel is built is pushed into the graph
+	/// immediately. All subscriptions are detached, so they live as long as
+	/// the entity.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let graph = cx.new(|cx| NodeGraphView::new(engine.clone(), window, cx));
 		// The "edits are requests" loop: every graph gesture goes to the
@@ -224,6 +235,14 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 	}
 
 	/// Handles the node editor's local (non-registry) context-menu items.
+	///
+	/// `item` is the numeric id the menu emitted on `cx`. Color-label entries
+	/// (see `menu::color_label_index`) are currently only logged — the panel
+	/// keeps no per-node label state yet. Ids at or above
+	/// `LOCAL_ADD_NODE_BASE` are Add-menu entries: the type id is looked up in
+	/// `add_menu_ids` and the node is inserted at the last background-click
+	/// position through the engine, logging instead of panicking when the
+	/// engine rejects it. Unknown ids are logged and ignored.
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		if let Some(color) = menu::color_label_index(item) {
 			println!("[node editor] set node color label to {color}");
@@ -289,6 +308,14 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 	}
 
 	/// Fits the whole graph into the canvas (the 适配 button).
+	///
+	/// The fitted rectangle is the union of every node's position and its
+	/// default element size, so it is the visible extent of the graph, not
+	/// just the node origins. `window` supplies the fallback viewport before
+	/// the canvas has been laid out (see [`Self::fit_viewport`]); `cx` is
+	/// used to read the engine's node list and to request a repaint after
+	/// the zoom/pan state changes. An empty graph returns without touching
+	/// the transform.
 	fn fit_graph(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		let Some(rect) = self.graph_bounds(cx) else {
 			return;

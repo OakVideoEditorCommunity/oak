@@ -28,6 +28,11 @@ pub struct PlayheadElement {
 
 impl PlayheadElement {
 	/// Creates the playhead element at screen position `x`.
+	///
+	/// `x` is the pre-computed screen-space position in pixels (from
+	/// [`TimelineState::point_at_frame`](super::TimelineState::point_at_frame)); the
+	/// element adds its own canvas origin and does no time math. `color` fills both
+	/// the 1 px vertical line and the ruler grab handle.
 	pub fn new(x: Pixels, color: Hsla) -> Self {
 		PlayheadElement { x, color }
 	}
@@ -105,6 +110,12 @@ pub struct PlayheadTicker {
 
 impl PlayheadTicker {
 	/// Creates a stopped ticker for sequences running at `rate`.
+	///
+	/// `rate` is the sequence frame rate used to convert elapsed wall-clock seconds
+	/// into frames (see [`PlayheadTicker::current_frame`]). The anchor frame starts at
+	/// [`Frame::ZERO`] and no instant is recorded until [`PlayheadTicker::start`], so
+	/// [`PlayheadTicker::is_playing`] is initially `false` and `current_frame()`
+	/// returns frame 0.
 	pub fn new(rate: FrameRate) -> Self {
 		PlayheadTicker {
 			rate,

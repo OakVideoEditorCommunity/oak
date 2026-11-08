@@ -83,6 +83,14 @@ fn seq(session: &EditorSession) -> Result<NodeId, String> {
 		.ok_or_else(|| "the session has no current sequence".to_string())
 }
 
+/// The primary node id an edit produced.
+///
+/// `result` is an [`EditResult`] from `EditorSession::execute`; its `primary`
+/// field names the node the command created or changed (a placed clip, an
+/// added effect, ...). Returns that id, or an error naming `what` when the
+/// command reported no primary node — some commands (split, save, export)
+/// legitimately have none, so callers pass a label such as `"import"` to make
+/// the message actionable.
 fn primary(result: EditResult, what: &str) -> Result<NodeId, String> {
 	result
 		.primary
@@ -430,6 +438,14 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	})
 }
 
+/// The sequence's content length: the largest block out-point across all of
+/// its track lists and tracks.
+///
+/// `project` is the graph and `sequence` the sequence to measure; every block
+/// of every track is visited and the maximum `block_out` is returned (a
+/// `Rational` in the sequence's time base). Returns `0/1` for a sequence with
+/// no blocks, so an empty timeline has length zero. This is the app-side
+/// length used to check the report, not the engine's own cached duration.
 fn content_length(project: &quercus_engine_rs::node::Project, sequence: NodeId) -> Rational {
 	let mut end = Rational::new(0, 1);
 	for list_index in 0..project.sequence_track_list_count(sequence) {
@@ -448,6 +464,13 @@ fn content_length(project: &quercus_engine_rs::node::Project, sequence: NodeId) 
 	end
 }
 
+/// The first video track of `sequence`, if it has one.
+///
+/// Walks the sequence's track lists in order and returns the first track of
+/// the first list whose `tracklist_kind` is 0 (video) and that has at least
+/// one track; `None` when the sequence has no video track list or that list is
+/// empty. `project` is the graph to query and `sequence` the owning sequence
+/// node. Used by the demo to find the track a placed clip landed on.
 fn video_track(project: &quercus_engine_rs::node::Project, sequence: NodeId) -> Option<NodeId> {
 	for list_index in 0..project.sequence_track_list_count(sequence) {
 		let list = project.sequence_track_list_at(sequence, list_index);
@@ -466,6 +489,13 @@ fn count_entries(snapshot: &quercus_engine_rs::editor::ProjectSnapshot) -> usize
 }
 
 /// Formats the report for the CLI (and keeps the GUI's status line short).
+///
+/// `report` is the [`DemoReport`] returned by [`run`]; the returned
+/// multi-line string always has the same five lines (ids, explorer/length/
+/// keyframes, preview/audio, reopened/undo rows, export path and size) so
+/// callers can print it verbatim. The sequence length is rounded to two
+/// decimals and the preview checksum is shown in hex. Pure formatting: no I/O
+/// and no panics beyond the `format!` of the stored values.
 pub fn summary(report: &DemoReport) -> String {
 	format!(
 		"sequence {} · footage {} · clip {} · effect {}\n\
@@ -502,6 +532,10 @@ pub fn render_program_frame(
 }
 
 /// Whether a node is a clip (used by the tiny GUI timeline).
+///
+/// `session` supplies the project and `node` is the node id to test; the
+/// project's `node_kind` must report `NodeKind::Clip` (footage, effects,
+/// tracks and sequences all return `false`, as does an unknown id).
 pub fn is_clip(session: &EditorSession, node: NodeId) -> bool {
 	session.project().node_kind(node) == Some(NodeKind::Clip)
 }

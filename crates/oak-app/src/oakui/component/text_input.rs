@@ -90,7 +90,16 @@ impl RenderOnce for TextInput {
 	}
 }
 
-/// Build the app's text input with the current theme's colors.
+/// Builds the app's text input for `id`: a borderless, backgroundless,
+/// input-accepting field with no bound state. The caller binds an
+/// [`InputState`] with [`TextInput::state`]; `_cx` is unused because the
+/// theme colors are read at render time, not at construction.
+///
+/// # Arguments
+///
+/// * `id` - element id for the field (anything convertible into an
+///   [`ElementId`]).
+/// * `_cx` - application context, kept for call-site compatibility and unused.
 pub fn text_input(id: impl Into<ElementId>, _cx: &App) -> TextInput {
 	TextInput {
 		id: id.into(),

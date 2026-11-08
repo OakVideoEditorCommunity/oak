@@ -123,12 +123,22 @@ impl CurveEditor {
 	}
 
 	/// Apply the host's reconciled curve and repaint.
+	///
+	/// `points` replaces the working copy as-is (the host is expected to hand over
+	/// a sorted list; nothing is clamped or re-sorted), and `cx` receives the
+	/// notify. Hosts must not call this mid-drag — see [`Self::is_dragging`] — since
+	/// it would steal the gesture.
 	pub fn set_points(&mut self, points: Vec<CurvePoint>, cx: &mut Context<Self>) {
 		self.points = points;
 		cx.notify();
 	}
 
 	/// Convert a window position into normalized curve coordinates.
+	///
+	/// `position` is window-space; the result is `0..=1` on both axes with y
+	/// flipped (curve origin at the bottom-left). Falls back to the center
+	/// `(0.5, 0.5)` when the editor has not been laid out yet (zero width or
+	/// height), so callers never divide by zero.
 	fn normalize(&self, position: Point<Pixels>) -> CurveVec2 {
 		let w = f32::from(self.bounds.size.width);
 		let h = f32::from(self.bounds.size.height);
@@ -153,8 +163,13 @@ impl CurveEditor {
 		DragTarget::None
 	}
 
-	/// Clamp a point's x so the list stays sorted (points cannot pass each
-	/// other), while y is clamped to the unit range.
+	/// Move point `index` to `pos`, keeping the list sorted.
+	///
+	/// `pos` is in normalized curve coordinates: x is clamped so the point cannot
+	/// pass its neighbours (a 0.001 gutter inside the neighbour's x, or the `0..=1`
+	/// edge at the ends) and y is clamped to `0..=1`. `index` must be valid (it
+	/// panics otherwise; callers take it from `hit_test`). Emits `PointMoved` with
+	/// the clamped point and repaints.
 	fn move_point(&mut self, index: usize, pos: CurveVec2, cx: &mut Context<Self>) {
 		let (prev_x, next_x) = if self.points.len() == 1 {
 			(0.0, 1.0)
@@ -179,6 +194,13 @@ impl CurveEditor {
 		cx.notify();
 	}
 
+	/// Move one side of point `index`'s control handle to `pos`.
+	///
+	/// `pos` is in normalized curve coordinates; what is stored is the offset from
+	/// the point (`pos - point`), so the tangent follows the pointer. `side` picks
+	/// the incoming or outgoing handle, `index` must exist (an out-of-range index is
+	/// ignored). `HandleMoved` is emitted with the new offset, then the widget
+	/// repaints.
 	fn move_handle(
 		&mut self,
 		index: usize,
@@ -204,6 +226,14 @@ impl CurveEditor {
 	}
 
 	/// Insert a new point at `pos` (double-click), keeping the list sorted.
+	///
+	/// `pos` is in normalized curve coordinates and is clamped to `0..=1` per axis.
+	/// The point is inserted at its sorted x position (binary search) with no
+	/// control handles, so the segments either side of it are linear until a handle
+	/// is dragged. `PointAdded` is emitted with the insertion index and the widget
+	/// repaints. A double-click always adds a point, even on top of an existing one.
+	///
+	/// `cx` is the editor context.
 	fn add_point(&mut self, pos: CurveVec2, cx: &mut Context<Self>) {
 		let x = pos.x.clamp(0.0, 1.0);
 		let y = pos.y.clamp(0.0, 1.0);
@@ -313,6 +343,18 @@ fn curve_ghost(
 	cx.new(|_| CurveGhost)
 }
 
+/// Paint the editor: the grid, the interpolated curve polyline, then every point
+/// with its in/out handle dots and tangent lines.
+///
+/// `bounds` is the canvas area in window space (a zero size paints nothing);
+/// `_content` is the canvas content bounds (unused: the curve fills `bounds`);
+/// `points` is the sorted working copy of the curve; `colors` supplies the grid,
+/// curve, point and handle colors from the host theme. `window` receives the
+/// quads and paths, `_cx` is unused, and the mapping flips y so values grow
+/// upward on screen.
+///
+/// Called from the canvas paint callback in `render`, after the prepaint stored
+/// the bounds for hit testing.
 fn paint_curve(
 	bounds: Bounds<Pixels>,
 	_content: Bounds<Pixels>,

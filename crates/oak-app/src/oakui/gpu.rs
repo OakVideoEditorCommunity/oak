@@ -154,6 +154,23 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	}
 }
 
+/// Installs the CPU-baked working-space → display 3D LUT on the GPU present
+/// path.
+///
+/// Bakes the table with [`build_display_lut`] — the output-node transform
+/// followed by the display ICC chain, i.e. exactly what
+/// [`super::displaycolor::apply_f32_rgba`] does per pixel — and uploads it to
+/// the adopted engine context, replacing any previous table, so frames
+/// presented zero-copy are color-managed like the CPU path. Call it after
+/// [`register_context`] adopted the device and again after any setting that
+/// changes the transform.
+///
+/// # Returns
+///
+/// `false` when no engine context is adopted, or when the upload is rejected;
+/// the CPU display transform then stays authoritative (see
+/// `displaycolor::apply_to_window`, which derives
+/// `gpu_set_display_transform_required` from this result).
 pub fn install_display_lut() -> bool {
 	if !quercus_engine_rs::render::gpu_is_adopted() {
 		return false;

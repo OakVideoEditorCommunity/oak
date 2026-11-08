@@ -119,6 +119,20 @@ pub struct Slider {
 
 impl Slider {
 	/// Create a slider for `control` over `model`.
+	///
+	/// Starts with the default `DefaultFormatter`, `KeyingState::NoKey`, no
+	/// active direct-entry editor and not dragging. The edited value comes from
+	/// `model`, so range, step and default are configured there; chain
+	/// `with_formatter`/`with_keying` to customize the rest.
+	///
+	/// # Arguments
+	///
+	/// * `control` - stable control id used in element ids and in every
+	///   `SliderEvent`; the host maps it to its own parameter.
+	/// * `model` - the pure range/step state, copied into the view.
+	/// * `_window` - unused; accepted so the constructor matches the other widget
+	///   constructors.
+	/// * `cx` - used for the focus handle that arrow-key navigation needs.
 	pub fn new(
 		control: usize,
 		model: SliderModel,
@@ -145,7 +159,16 @@ impl Slider {
 		self
 	}
 
-	/// Report the control's keying state for the current frame.
+	/// Report the control's keying state for the current frame (builder form).
+	///
+	/// The slider does not derive keying itself: the host recomputes the state
+	/// (animated / keyframed / no key) every frame and passes it in. The diamond
+	/// renders that state and emits `SliderEvent::Keying` when clicked, without
+	/// mutating the state.
+	///
+	/// # Arguments
+	///
+	/// * `state` - the state to display; replaces any previously set state.
 	pub fn with_keying(mut self, state: KeyingState) -> Self {
 		self.keying = state;
 		self
@@ -175,11 +198,27 @@ impl Slider {
 	}
 
 	/// Set the value directly (clamped and snapped by the model).
+	///
+	/// Delegates to `SliderModel::set_value`: clamps to `[min, max]`, snaps to the
+	/// coarse step and converts between `SliderValue` kinds where possible;
+	/// non-finite input is ignored. This is the programmatic path for hosts: it
+	/// emits no `ValueChanged` and does not repaint.
 	pub fn set_value(&mut self, value: SliderValue) {
 		self.model.set_value(value);
 	}
 
-	/// Emit `ValueChanged` if `changed` is true and repaint.
+	/// Emit `ValueChanged` if `changed` is true, then request a repaint.
+	///
+	/// The shared tail of every value gesture: `changed` is the model's answer
+	/// (`set_value`/`apply_step`/`reset`/`drag_delta`), so a gesture that leaves
+	/// the value where it was emits nothing. The repaint happens only when an
+	/// event was actually emitted.
+	///
+	/// # Arguments
+	///
+	/// * `changed` - whether the model position actually moved.
+	/// * `cx` - emit/notify target; the event is filled in with `control` and the
+	///   current value.
 	fn apply_and_notify(&mut self, changed: bool, cx: &mut Context<Self>) {
 		if changed {
 			cx.emit(SliderEvent::ValueChanged {
@@ -191,6 +230,18 @@ impl Slider {
 	}
 
 	/// Begin double-click direct entry.
+	///
+	/// Formats the current value through the injected formatter, creates an
+	/// `InputState` seeded with that text, focuses it and subscribes to its Enter
+	/// key and to focus loss. Clicking away commits what was typed, unless escape
+	/// already cancelled the session (`edit_cancelled`). An already open editor
+	/// makes this a no-op.
+	///
+	/// # Arguments
+	///
+	/// * `window` - used to create the editor input and to take focus.
+	/// * `cx` - used to create the editor entity and to subscribe; the view is
+	///   repainted at the end.
 	fn begin_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		if self.editing.is_some() {
 			return;
@@ -254,6 +305,15 @@ impl Slider {
 	}
 
 	/// Cancel direct entry, keeping the previous value.
+	///
+	/// Drops the editor and both subscriptions and emits
+	/// `SliderEvent::EditCancelled`; used by the escape path and by a focus-out
+	/// that follows a cancelled session. A no-op when no editor is open, so
+	/// calling it twice is safe.
+	///
+	/// # Arguments
+	///
+	/// * `cx` - emit/notify target.
 	fn cancel_edit(&mut self, cx: &mut Context<Self>) {
 		if self.editing.take().is_some() {
 			self.edit_subscription = None;
@@ -266,6 +326,17 @@ impl Slider {
 	}
 
 	/// Apply a wheel step.
+	///
+	/// Converts the wheel delta to whole notches (16 px per notch, rounded) and
+	/// steps the model by that many coarse or fine increments
+	/// (`SliderModel::apply_step`, shift = fine); deltas below half a notch are
+	/// ignored. Emits `ValueChanged` only when the model actually moved.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the scroll event; only `delta.y` and the shift modifier are
+	///   read.
+	/// * `cx` - emit/notify target.
 	fn apply_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
 		let delta = event.delta.pixel_delta(px(16.0));
 		let steps = (f32::from(delta.y) / 16.0).round() as i32;
@@ -444,6 +515,22 @@ fn slider_drag_ghost(
 	cx.new(|_| SliderDragGhost)
 }
 
+/// Paint a slider track, its active fill and the handle into `bounds`.
+///
+/// The fill runs from the left edge to `fraction` of the width; the handle is
+/// a circle centered on that end point, so it overhangs the track by its
+/// radius at either extreme. Called from the view's canvas paint callback with
+/// `SliderModel::fraction()`.
+///
+/// # Arguments
+///
+/// * `bounds` - element-local rectangle the track spans; the height is only
+///   used to center the 4 px track vertically.
+/// * `_content` - unused canvas content bounds.
+/// * `fraction` - normalized position in `0..=1` (clamped before painting).
+/// * `window` - paint target for the quads.
+/// * `cx` - theme colors: `border` for the track, `selected` for the fill,
+///   `text` for the handle.
 fn paint_slider(
 	bounds: Bounds<Pixels>,
 	_content: Bounds<Pixels>,

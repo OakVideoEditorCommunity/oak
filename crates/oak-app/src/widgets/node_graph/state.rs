@@ -181,7 +181,11 @@ impl GraphViewState {
 		&self.selection
 	}
 
-	/// Returns whether the given node is currently selected.
+	/// Returns whether `node` is in the current selection set.
+	///
+	/// Pure read over the sorted [`BTreeSet`]. The view uses it to avoid emitting a
+	/// redundant `SelectionChanged` when the clicked node is already the exclusive
+	/// selection.
 	pub fn is_selected(&self, node: NodeId) -> bool {
 		self.selection.contains(&node)
 	}
@@ -196,7 +200,13 @@ impl GraphViewState {
 		self.selection = nodes.into_iter().collect();
 	}
 
-	/// Adds `node` to the selection (shift-click semantics).
+	/// Adds `node` to the selection, leaving other selected nodes untouched
+	/// (Shift-click semantics; pair with [`Self::deselect`] and
+	/// [`Self::toggle_selection`]).
+	///
+	/// The set stays sorted and no event is emitted here: callers either mutate the
+	/// state directly before painting, or go through the view's
+	/// `set_selection_and_emit`, which diffs the set and emits `SelectionChanged` once.
 	pub fn select(&mut self, node: NodeId) {
 		self.selection.insert(node);
 	}
@@ -213,7 +223,11 @@ impl GraphViewState {
 		}
 	}
 
-	/// Clears the selection.
+	/// Removes every node from the selection.
+	///
+	/// No event is emitted here; the view compares the before/after set in its
+	/// `set_selection_and_emit` helper and emits `SelectionChanged` only when the set
+	/// actually changed.
 	pub fn clear_selection(&mut self) {
 		self.selection.clear();
 	}

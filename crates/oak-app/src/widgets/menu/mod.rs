@@ -77,7 +77,10 @@ pub struct MenuBarEntry {
 }
 
 impl MenuBarEntry {
-	/// Create an entry.
+	/// Creates a menu-bar entry pairing a `title` with the `menu` it drops down.
+	///
+	/// `title` is anything convertible to `SharedString` and is rendered in the bar;
+	/// `menu` is moved in. The entry is then handed to [`MenuBar::new`].
 	pub fn new(title: impl Into<SharedString>, menu: Menu) -> Self {
 		Self {
 			title: title.into(),
@@ -98,7 +101,13 @@ pub struct MenuBar {
 }
 
 impl MenuBar {
-	/// Create a menu bar.
+	/// Creates a menu bar from `entries`, with no menu open.
+	///
+	/// `control` is a caller-chosen stable id echoed in every emitted
+	/// [`MenuBarEvent`] and used in the bar's element id; `entries` are the titles
+	/// and their drop-down menus in display order; `_window` is accepted for API
+	/// symmetry but unused; `cx` supplies the focus handle. The bar starts closed and
+	/// opens menus on click or hover.
 	pub fn new(
 		control: usize,
 		entries: Vec<MenuBarEntry>,
@@ -136,6 +145,11 @@ impl MenuBar {
 		found
 	}
 
+	/// Opens the top-level menu at `index` and clears the transient hover state.
+	///
+	/// Emits [`MenuBarEvent::MenuOpened`] and repaints only when the menu is not
+	/// already the open one, so re-hovering the current title does not repeat the
+	/// event. `index` is not bounds-checked and must index `entries`.
 	fn open_menu(&mut self, index: usize, cx: &mut Context<Self>) {
 		if self.open != Some(index) {
 			self.open = Some(index);
@@ -160,6 +174,13 @@ impl MenuBar {
 		}
 	}
 
+	/// Emits a [`MenuBarEvent::Triggered`] request for `item` and closes the menu.
+	///
+	/// The label is resolved from the open menu's top-level rows first and then from
+	/// its nested submenus; an unknown `item` yields an empty label. `item` is the
+	/// id assigned by the menu model ([`MenuItem::id`]) and `control` is this bar's
+	/// stable id, letting the host route the request. The menu is closed even when
+	/// the item was not found.
 	fn trigger(&mut self, item: usize, cx: &mut Context<Self>) {
 		let label = self
 			.open
@@ -181,6 +202,12 @@ impl MenuBar {
 	/// nested submenus (the fallback when the item is not a top-level row).
 	fn find_label(&self, item: usize) -> Option<SharedString> {
 		let index = self.open?;
+		/// Recursively looks up an item's label by id inside `menu`.
+		///
+		/// Checks each top-level item in order and, when the id does not match,
+		/// descends into that item's submenu before moving on; the first match wins.
+		/// Used by [`Self::find_label`] as the fallback when a triggered item is not
+		/// a top-level row of the open menu.
 		fn search(menu: &Menu, item: usize) -> Option<SharedString> {
 			menu.items.iter().find_map(|i| {
 				if i.id == item {
@@ -193,6 +220,13 @@ impl MenuBar {
 		search(&self.entries[index].menu, item)
 	}
 
+	/// Moves the keyboard highlight within the currently open top-level menu.
+	///
+	/// `delta` steps through the enabled, non-separator rows of the open menu with
+	/// wraparound (`+1` down, `-1` up; see `Menu::navigate`). From "nothing hovered"
+	/// a positive delta selects the first row and a non-positive one the last. A
+	/// successful move also closes any open submenu and repaints; with no menu open
+	/// the call is a no-op.
 	fn navigate(&mut self, delta: i32, cx: &mut Context<Self>) {
 		if let Some(index) = self.open {
 			let menu = &self.entries[index].menu;
@@ -412,7 +446,12 @@ struct ContextMenuState {
 }
 
 impl ContextMenu {
-	/// Create a context menu (hidden until [`Self::show`]).
+	/// Creates a context menu that starts hidden.
+	///
+	/// `_control` (a caller-chosen stable id) and `_window` are accepted for API
+	/// symmetry with the menu bar but are currently unused; `cx` supplies the focus
+	/// handle used by keyboard navigation. The menu stays hidden until
+	/// [`Self::show`] is called.
 	pub fn new(_control: usize, _window: &mut Window, cx: &mut Context<Self>) -> Self {
 		Self {
 			focus_handle: cx.focus_handle(),
@@ -425,7 +464,13 @@ impl ContextMenu {
 		self.open.is_some()
 	}
 
-	/// Show the menu at `position` (window coordinates).
+	/// Shows `menu` as a context menu at `position` in window coordinates.
+	///
+	/// `position` is the popup's top-left anchor (`Point<Pixels>` in the window's
+	/// coordinate space, typically the right-click location); `menu` is moved into
+	/// the popup and rendered from the menu model. Replaces any menu already open and
+	/// requests a repaint. The menu closes itself when an item is activated or on a
+	/// click outside, and can be closed programmatically with [`Self::hide`].
 	pub fn show(&mut self, position: Point<Pixels>, menu: Menu, cx: &mut Context<Self>) {
 		self.open = Some(ContextMenuState {
 			position,
@@ -437,7 +482,12 @@ impl ContextMenu {
 		cx.notify();
 	}
 
-	/// Hide the menu.
+	/// Hides the context menu if it is open.
+	///
+	/// Drops the open state (menu, position, hover and submenu highlights) and
+	/// requests a repaint only when something was actually open; the stored focus
+	/// handle is kept so the next [`Self::show`] reuses it. Pairs with
+	/// [`Self::show`] / [`Self::is_open`].
 	pub fn hide(&mut self, cx: &mut Context<Self>) {
 		if self.open.take().is_some() {
 			cx.notify();

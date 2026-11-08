@@ -559,8 +559,45 @@ impl<E: AppEngine> ShellPanels<E> {
 }
 
 impl<E: AppEngine> OakApp<E> {
-	/// Builds the whole shell. `initial_path` (a CLI argument) is opened
-	/// after the layout is up.
+	/// Build the whole editor shell, including engine, panels, menus, dock
+	/// layout, tick loop and subscriptions.
+	///
+	/// `window` is the freshly opened main window: the theme, icons, dock
+	/// skin, every panel, the tick-loop `spawn` and the initial focus all need
+	/// it. `initial_path` is the project path from the command line; it is
+	/// opened only after the shell exists, so a bad path logs
+	/// `[app] failed to open …` instead of failing construction. `cx` is the
+	/// entity context; the returned `Self` is not yet an `Entity` — gpui's
+	/// `cx.new` wraps it ([`build_root`]).
+	///
+	/// Construction order: apply the persisted theme (`Theme` config, dark
+	/// when unset) and icons; create the `E` engine plus its source/program
+	/// clocks and the timeline view (zoom 2.0), installing the waveform
+	/// decorator when the engine exposes a waveform cache; build the menu bar
+	/// from the action registry and subscribe to its triggers; load custom
+	/// shortcut overrides, bind the action keys and the text-input editing
+	/// keys; create the dock with the tab-bar skin and the nine panel
+	/// entities; wire panel context menus, the project explorer's requests
+	/// (sequence properties/export/rename/delete/new sequence/add text
+	/// footage), timeline dialog requests and the viewers' panel events; then
+	/// restore the dock layout from `CONFIG_KEY_DOCK_LAYOUT`, falling back to
+	/// [`Self::seed_default_layout`] when it is absent or fails to load. It
+	/// adds the status bar, repaints on engine notifications, tracks the
+	/// focused panel, persists/refreshes on dock layout changes, forwards
+	/// timeline events to the engine, starts the ~60 Hz tick loop (playback
+	/// clocks, audio meter, export/plugin progress, monitor tracking), focuses
+	/// the shell, installs the OFX progress channel, and finally restores
+	/// `timeline_visible` / `timeline_height` (clamped to 120–800px) from the
+	/// config.
+	///
+	/// Side effects beyond the widget tree: config reads/writes, a spawned
+	/// timer task, global OFX progress registration, and opening
+	/// `initial_path`.
+	///
+	/// # Panics
+	///
+	/// Does not panic for user data; a malformed saved layout is treated as
+	/// "no layout" and the persisted config values are read with defaults.
 	pub fn new(window: &mut Window, initial_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
 		// The persisted theme (config `Theme`) wins; the app defaults to dark.
 		let dark = crate::oakui::real::theme_is_dark();
@@ -1049,11 +1086,21 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Routes a menu click: the dynamic language items (one per discovered
-	/// pack, above the registry id range) switch the language directly;
-	/// everything else resolves to its registry action and dispatches
-	/// through the same path the keyboard shortcuts use, so a menu click
-	/// and a key press can never diverge.
+	/// Route one menu item id to its effect.
+	///
+	/// `item` is the stable numeric id a menu entry (or a panel context menu)
+	/// reports; `cx` is the entity context. Dynamic language items live above
+	/// the registry id range: if [`menu::language_item_index`] recognises the
+	/// id, the corresponding entry of
+	/// [`crate::i18n::available_languages`] is selected and
+	/// [`Self::switch_language`] runs — an index that no longer exists is
+	/// ignored. Otherwise the id is resolved through
+	/// [`crate::actions::entry_for_menu_id`] and dispatched with
+	/// [`Self::dispatch_action_id`], the same path keyboard shortcuts use, so
+	/// a menu click and its shortcut can never diverge.
+	///
+	/// An unknown id only prints `[menu] unknown item <id>`; nothing else
+	/// happens, which makes stale menu ids from older builds harmless.
 	fn on_menu(&mut self, item: usize, cx: &mut Context<Self>) {
 		if let Some(index) = menu::language_item_index(item) {
 			let languages = crate::i18n::available_languages();
@@ -1483,8 +1530,24 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Creates the project from the dialog's name + format, then seeds its
-	/// first sequence (the old `new_project` path kept for manager fallback).
+	/// Create the project described by the new-project dialog, then seed its
+	/// first sequence.
+	///
+	/// `content` is the dialog state: it supplies the project `name`, the
+	/// `format` (sequence preset) and the `interlaced` flag. `cx` is the
+	/// entity context. Two paths:
+	/// - `library_create_project(&name)` succeeds → the dialog closes and a
+	///   first sequence is created via `create_sequence_with_params` using the
+	///   localized default name `manager.new.default_name` (not the project
+	///   name), the chosen format and the interlace flag; that call's error is
+	///   discarded.
+	/// - the library create fails → the error is printed
+	///   (`[file] library create failed (…); plain new project`), the dialog
+	///   closes anyway and the engine's plain `new_project` runs as the
+	///   fallback path (a project with no sequence from this method).
+	///
+	/// Either way the dialog never stays open: there is no in-dialog error
+	/// reporting for a failed create.
 	fn commit_new_project(&mut self, content: &Entity<crate::dialogs::NewProjectContent>, cx: &mut Context<Self>) {
 		let name = content.read(cx).name(cx).to_string();
 		let format = content.read(cx).format(cx);
@@ -1562,8 +1625,16 @@ impl<E: AppEngine> OakApp<E> {
 			.update(cx, |engine, cx| engine.set_selected_clips(Vec::new(), cx));
 	}
 
-	/// 视图 → 放大/缩小: scales the timeline zoom around its left edge
-	/// (`TimelineState::set_zoom` clamps to the widget's zoom range).
+	/// 视图 → 放大/缩小: scale the timeline zoom by `factor` around its left
+	/// edge.
+	///
+	/// `factor` is a multiplier applied to the current zoom (`> 1` zooms in,
+	/// `< 1` zooms out; the menu uses fixed steps), and `cx` is the entity
+	/// context. The widget clamps the result to its zoom range
+	/// (`TimelineState::set_zoom`), so extreme factors simply saturate at the
+	/// limit; the anchor `px(0.)` keeps the view's left edge fixed while the
+	/// content scales. Repaints the timeline view. A non-finite or negative
+	/// factor is passed through to the clamp rather than being rejected here.
 	fn zoom_timeline(&mut self, factor: f32, cx: &mut Context<Self>) {
 		self.timeline.update(cx, |view, cx| {
 			let zoom = view.state.zoom * factor;
@@ -1643,7 +1714,15 @@ impl<E: AppEngine> OakApp<E> {
 		self.dispatch_action_id(action, cx);
 	}
 
-	/// Removes the first track selected in the timeline header.
+	/// Remove the first track selected in the timeline header.
+	///
+	/// `cx` is the entity context. Reads the timeline's selected track indices,
+	/// takes the lowest one and calls the engine's `remove_track(index)`;
+	/// any further selected tracks are left alone (one track per invocation —
+	/// the menu action is the repeated unit). With no selected track it prints
+	/// `[timeline] remove track: nothing selected` and does nothing. The
+	/// engine decides what happens to the clips on the removed track (and
+	/// whether the removal is undoable); this method ignores its result.
 	fn remove_selected_track(&mut self, cx: &mut Context<Self>) {
 		let Some(&index) = self.timeline.read(cx).selected_tracks().iter().next() else {
 			println!("[timeline] remove track: nothing selected");
@@ -1816,10 +1895,22 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// 窗口 → Focus X: toggles the panel open/closed. A closed panel
-	/// reopens at its design placement; the panel entity (and its state)
-	/// survives the round trip. gpui-kit's dock has no floating panels, so
-	/// the fork's tear-off handling is gone.
+	/// Toggle one panel open/closed (窗口 → Focus X menu entries and the
+	/// viewer's panel switches).
+	///
+	/// `id` selects the panel; `cx` is the entity context. Three cases:
+	/// - the panel currently lives in a floating window → the floating window
+	///   is removed ([`Self::close_floating_panel`]) and the call ends;
+	/// - `id == TIMELINE` → the shell-owned bottom strip is shown/hidden by
+	///   flipping `timeline_visible`, then the workspace is persisted;
+	/// - any other panel → present in the dock means remove it, absent means
+	///   re-add it at its design placement/size from
+	///   [`default_dock_placement`]. The panel entity is never dropped, so all
+	///   of its state (selection, scroll, ...) survives the round trip.
+	///
+	/// All paths finish by rebuilding the menu bar (so the checkmark matches)
+	/// and notifying the shell. gpui-kit's dock has no floating-panel support,
+	/// so panels always come back docked; the fork's tear-off handling is gone.
 	fn toggle_panel(&mut self, id: PanelId, cx: &mut Context<Self>) {
 		if self.floating_panels.contains_key(id) {
 			self.close_floating_panel(id, cx);
@@ -1899,11 +1990,24 @@ impl<E: AppEngine> OakApp<E> {
 		cx.notify();
 	}
 
-	/// Seeds every panel at its design position (shared by [`OakApp::new`]
-	/// and [`Self::reset_default_layout`]): 项目 | 效果库 tabbed on the
-	/// left, 素材查看器 | 序列查看器(+节点编辑器) split in the center (the
-	/// multicam tabs behind the source viewer), 检查器 | 历史记录 tabbed on
-	/// the right, timeline full width at the bottom.
+	/// Seed every panel of `panels` at its design position in `dock`.
+	///
+	/// Shared by [`OakApp::new`] and [`Self::reset_default_layout`], so a first
+	/// launch and a layout reset produce the same arrangement: a center
+	/// h-split with 素材查看器 (source viewer, 430px) beside a tab group of
+	/// 序列查看器 (program viewer) and the node editor; 项目 (280px) and
+	/// 效果库 tabbed on the left; 检查器 (340px) and 历史记录 tabbed on the
+	/// right; the multicam page added to the center, which merges it into the
+	/// source viewer's tab group; then the active tabs are selected — project,
+	/// source viewer, program viewer, inspector. The timeline is **not**
+	/// docked: it is the shell's full-width bottom strip, rendered outside the
+	/// dock.
+	///
+	/// `window` and `cx` (the dock area's context) are needed by the dock
+	/// calls; every panel goes in through `panel_handle` so the skin can
+	/// recover its localized title, toolbar and zoom affordance. Panels must
+	/// already exist and be un-docked — the function only inserts, it never
+	/// removes, so calling it twice would duplicate entries.
 	fn seed_default_layout(
 		dock: &mut DockArea,
 		panels: &ShellPanels<E>,
@@ -1979,11 +2083,17 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Switches the UI language live: updates the [`i18n`] global, rebuilds
-	/// the menu bar (so the menu labels and the language checkmark move
-	/// immediately), and repaints the whole shell. The dock tab titles need
-	/// no explicit refresh: the skin re-evaluates each panel's `title()`
-	/// every frame through its presentation handle.
+	/// Switch the UI language live, without a restart.
+	///
+	/// `code` is an i18n language code (e.g. `en-US`, `zh-CN`); `cx` is the
+	/// entity context. Sets the [`crate::i18n`] global, rebuilds the menu bar
+	/// so its labels and the language checkmark follow immediately
+	/// ([`Self::rebuild_menu_bar`]), and notifies the shell to repaint. The
+	/// dock tab titles need no explicit refresh: the skin re-evaluates each
+	/// panel's `title()` every frame through its presentation handle.
+	///
+	/// Unknown codes are handled by [`crate::i18n::set_language_code`] (the
+	/// caller's checkmark simply won't move); no error is returned.
 	fn switch_language(&mut self, code: &str, cx: &mut Context<Self>) {
 		crate::i18n::set_language_code(code);
 		self.rebuild_menu_bar(cx);
@@ -2040,6 +2150,21 @@ impl<E: AppEngine> OakApp<E> {
 		);
 	}
 
+	/// Apply a shell-level request emitted by a viewer panel (source or
+	/// program monitor).
+	///
+	/// `monitor` says which viewer sent it — only `FullScreenRequested` uses
+	/// it, since that toggles the panel's own floating window; `cx` is the
+	/// entity context. `FullScreenRequested` delegates to
+	/// [`Self::toggle_viewer_fullscreen`] (open/floating window + video
+	/// fullscreen toggle). `SetInPoint` / `SetOutPoint` call
+	/// [`Self::set_point_at_playhead`] with `true`/`false`, marking the shared
+	/// program work-area in/out at the playhead. `ClearRange` calls the
+	/// engine's `clear_workarea` — the same undoable path the menu uses, so
+	/// both monitors and the menu edit one shared workarea.
+	///
+	/// The three range actions ignore `monitor` (there is one workarea, not
+	/// one per viewer); an engine error from `clear_workarea` is discarded.
 	fn apply_viewer_panel_event(&mut self, monitor: Monitor, event: menu::ViewerPanelEvent, cx: &mut Context<Self>) {
 		match event {
 			menu::ViewerPanelEvent::FullScreenRequested => self.toggle_viewer_fullscreen(monitor, cx),
@@ -2130,9 +2255,25 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Routes a project-manager request through the engine. Open / Create
-	/// close the dialog on success; the mutating actions reload the list;
-	/// failures land in the dialog's status line.
+	/// Dispatch one request from the project manager dialog to the engine.
+	///
+	/// `event` is the manager's [`crate::manager::ManagerEvent`]; `cx` is the
+	/// entity context. Each variant maps to one library operation:
+	/// - `Create` creates a project named with the localized default
+	///   `manager.new.default_name` and closes the manager on success.
+	/// - `Open(uuid)` opens that project and closes the manager on success.
+	/// - `Rename(uuid)` / `Delete(uuid)` swap the dialog for the respective
+	///   prompt ([`Self::open_manager_rename`],
+	///   [`Self::open_manager_delete`]); the engine call happens on confirm.
+	/// - `Duplicate(uuid)` duplicates the row and reloads the list.
+	/// - `Import` / `Export(uuid)` open the platform file dialog
+	///   ([`Self::open_file_dialog`] / [`Self::open_manager_export`]).
+	///
+	/// Failures of Create/Open/Duplicate go to the manager's status line via
+	/// [`Self::manager_status`] and leave the dialog open, except that a
+	/// successful Open/Create closes it. This is installed as a subscription
+	/// on the manager content by [`Self::show_project_manager`], so it runs
+	/// for every manager request while that dialog lives.
 	fn on_manager_event(&mut self, event: &crate::manager::ManagerEvent, cx: &mut Context<Self>) {
         use crate::manager::ManagerEvent as E;
         match event {
@@ -2172,7 +2313,14 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Reloads the open manager's list (after a library mutation).
+	/// Refresh the open project manager's row list after a library mutation.
+	///
+	/// `cx` is the entity context. Does nothing when the current modal is not
+	/// the manager (e.g. after it was closed); otherwise calls
+	/// `ProjectManager::reload` once, so the visible rows and their store
+	/// entries are re-read. Used by the create/duplicate/import paths on
+	/// success; rename and delete go back through
+	/// [`Self::back_to_manager`], which re-creates the manager instead.
 	fn reload_manager(&mut self, cx: &mut Context<Self>) {
 		if let ModalState::Manager { content, .. } = &self.modal {
 			let content = content.clone();
@@ -2180,8 +2328,16 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Shows an engine error in the open manager's status line (or logs it
-	/// when the manager is gone).
+	/// Show `message` in the open project manager's status line.
+	///
+	/// `message` is the raw engine error text (already user-facing, not
+	/// translated here); `cx` is the entity context. When the manager modal is
+	/// the current one the message is written through
+	/// [`crate::manager::ProjectManager::set_status`] and replaces any previous
+	/// status line; when the manager is gone (closed, or another modal is up)
+	/// the message only goes to stdout as `[manager] …`, so an error raised
+	/// after the dialog closed is not lost from the log. Used by the
+	/// library-mutating paths (rename/delete/duplicate/import/export).
 	fn manager_status(&mut self, message: String, cx: &mut Context<Self>) {
 		if let ModalState::Manager { content, .. } = &self.modal {
 			let content = content.clone();
@@ -2200,7 +2356,16 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Swaps the manager for the rename prompt of row `uuid`.
+	/// Swap the manager for a rename prompt for the library row `uuid`.
+	///
+	/// `uuid` is the row to rename; `cx` is the entity context. The prompt is
+	/// pre-filled with the manager's currently selected row name
+	/// ([`Self::manager_selected_name`], empty when nothing is selected — the
+	/// name is only a hint, the uuid is what gets renamed). Buttons: primary
+	/// (labelled `manager.rename.title`) and Cancel. The primary route is
+	/// [`Self::confirm_manager_rename`]; Escape/Cancel returns to the manager.
+	/// State: [`ModalState::ManagerRename`], which keeps the uuid next to the
+	/// prompt entity.
 	fn open_manager_rename(&mut self, uuid: String, cx: &mut Context<Self>) {
 		let initial = self.manager_selected_name(cx).unwrap_or_default();
 		self.spawn_modal(cx, move |window, app| {
@@ -2226,7 +2391,18 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// 编辑 → 重命名 (timeline): prompt for the selected clips' new name.
+	/// Open the 编辑 → 重命名 dialog for `clips` (timeline multi-clip rename).
+	///
+	/// `clips` are the timeline clip ids captured at invocation and stored in
+	/// the modal, so the rename targets them even if the selection changes
+	/// while the dialog is up; `cx` is the entity context. The prompt starts
+	/// empty (the clips may currently have different names, so there is no
+	/// single sensible prefill). On OK an empty name is ignored and the
+	/// dialog just closes; otherwise `rename_clips(clips, name)` runs once
+	/// for the whole batch (one engine update, so one undo step). Cancel
+	/// closes without applying.
+	///
+	/// State: [`ModalState::ClipRename`], built via [`Self::spawn_modal`].
 	fn open_clip_rename(&mut self, clips: Vec<ClipId>, cx: &mut Context<Self>) {
 		self.spawn_modal(cx, move |window, app| {
 			let content = app.new(|cx| crate::manager::NamePrompt::new("", window, cx));
@@ -2250,8 +2426,20 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// 编辑 → 速度/持续时间 (timeline): prompt for the speed factor (1.0 =
-	/// 100%).
+	/// Open the 速度/持续时间 dialog for `clips` and prompt for a speed
+	/// factor.
+	///
+	/// `clips` is the timeline selection captured by the caller (the dialog
+	/// stores the ids, so it applies to the same clips even if the selection
+	/// changes afterwards); `cx` is the entity context. The prompt starts
+	/// with `1.0` (100% = normal speed). On OK the entered text is parsed as
+	/// a plain factor (`2`, `2.0`) or a percentage (`200%` → 2.0) and applied
+	/// only when it parses to a finite value `> 0`; anything else (empty,
+	/// zero, negative, `NaN`, junk) is silently discarded, and the dialog
+	/// still closes. Cancel/Escape closes without applying.
+	///
+	/// The resulting state is [`ModalState::ClipSpeed`]; the engine call is
+	/// `set_clips_speed` through [`Self::on_modal`].
 	fn open_clip_speed(&mut self, clips: Vec<ClipId>, cx: &mut Context<Self>) {
 		self.spawn_modal(cx, move |window, app| {
 			let content = app.new(|cx| crate::manager::NamePrompt::new("1.0", window, cx));
@@ -2275,7 +2463,17 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Swaps the manager for the delete confirmation of row `uuid`.
+	/// Swap the manager for a delete confirmation of the library row `uuid`.
+	///
+	/// `uuid` identifies the project to delete; `cx` is the entity context.
+	/// The confirmation text is `manager.delete.confirm` with `{name}`
+	/// replaced by the manager's currently selected row name
+	/// ([`Self::manager_selected_name`], empty if there is no selection, so
+	/// the dialog still reads correctly). Buttons: primary "delete" and
+	/// Cancel; the primary route is [`Self::confirm_manager_delete`], while
+	/// Escape/Cancel returns to the manager (see [`Self::on_modal`]). The
+	/// resulting modal state is [`ModalState::ManagerDelete`], which keeps
+	/// only `uuid` (the prompt text lives in the content entity).
 	fn open_manager_delete(&mut self, uuid: String, cx: &mut Context<Self>) {
 		let name = self.manager_selected_name(cx).unwrap_or_default();
 		let text = crate::i18n::tr("manager.delete.confirm").replace("{name}", &name);
@@ -2296,7 +2494,20 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Confirms the rename prompt (button 0).
+	/// Confirm the rename prompt: apply the entered name to the project row,
+	/// then return to the manager.
+	///
+	/// Requires `self.modal` to be [`ModalState::ManagerRename`] (otherwise
+	/// no-op) and reads the row's `uuid` from it. An empty name (not trimmed
+	/// here) cancels the rename and just goes back. Otherwise calls
+	/// `library_rename_project(&uuid, &name)`; like
+	/// [`Self::confirm_manager_delete`], success and failure both return to
+	/// the manager and a failure is reported in the manager's status line
+	/// ([`Self::manager_status`]). The list itself is refreshed because
+	/// [`Self::back_to_manager`] re-creates the manager dialog (a fresh
+	/// [`crate::manager::ProjectManager`] reloads its rows).
+	///
+	/// `cx` is the entity context.
 	fn confirm_manager_rename(&mut self, cx: &mut Context<Self>) {
 		let ModalState::ManagerRename { content, uuid, .. } = &self.modal else {
 			return;
@@ -2319,7 +2530,18 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Confirms the delete confirmation (button 0).
+	/// Confirm the delete confirmation dialog: delete the project from the
+	/// library, then return to the manager.
+	///
+	/// Requires `self.modal` to be [`ModalState::ManagerDelete`] (otherwise
+	/// no-op) and takes the row's `uuid` from it. Calls
+	/// `library_delete_project(&uuid)`; success and failure both go back to
+	/// the manager ([`Self::back_to_manager`]), a failure additionally
+	/// surfaces the message in the manager's status line through
+	/// [`Self::manager_status`]. There is no confirmation of the deletion
+	/// beyond the dialog itself, and no undo.
+	///
+	/// `cx` is the entity context.
 	fn confirm_manager_delete(&mut self, cx: &mut Context<Self>) {
 		let ModalState::ManagerDelete { uuid, .. } = &self.modal else {
 			return;
@@ -2367,7 +2589,19 @@ impl<E: AppEngine> OakApp<E> {
 	// Modal dialogs
 	// -----------------------------------------------------------------------
 
-	/// Closes the current modal.
+	/// Close the current modal and repaint the shell.
+	///
+	/// Sets `self.modal` to [`ModalState::None`], calls `cx.notify()`, then
+	/// opens any update prompt that was deferred while a modal was up
+	/// (`pending_update`, e.g. a startup update check completing behind the
+	/// project manager) via [`Self::open_update_available`]. Safe to call when
+	/// no modal is open: it is just a repaint plus the deferred-prompt check.
+	/// Closing a manager sub-dialog this way does *not* return to the manager;
+	/// [`Self::back_to_manager`] does that.
+	///
+	/// `cx` is the entity context. Callers that resume background work
+	/// (export, drop) rely on the modal state being cleared before the next
+	/// event, which this guarantees.
 	pub fn close_modal(&mut self, cx: &mut Context<Self>) {
 		self.modal = ModalState::None;
 		cx.notify();
@@ -2419,9 +2653,23 @@ impl<E: AppEngine> OakApp<E> {
 		self.spawn_modal_now(cx, build);
 	}
 
-	/// Builds and installs a modal immediately (the deferred half of
-	/// [`Self::spawn_modal`]; also called directly when the caller already
-	/// runs outside a window update).
+	/// Build and install a modal immediately (the non-deferred half of
+	/// [`Self::spawn_modal`]).
+	///
+	/// `build` is called inside a window update so modal widgets get their
+	/// `&mut Window`; its resulting [`ModalState`] is moved into `self.modal`
+	/// (the swap happens outside the window callback, on this entity's own
+	/// context, to avoid re-entering the entity) and the modal entity is
+	/// subscribed to [`Self::on_modal`], then `cx.notify()` repaints.
+	///
+	/// Becomes a silent no-op with no windows yet, when the `update_window`
+	/// call fails (the caller is inside a window update — use
+	/// [`Self::spawn_modal`] instead, which probes and defers), or if the
+	/// built state somehow carries no modal entity (the
+	/// `expect("spawned modal always carries a Modal")` then panics).
+	///
+	/// The fast path is synchronous: after a successful call, `self.modal`
+	/// already holds the new dialog, which callers rely on.
 	fn spawn_modal_now(
 		&mut self,
 		cx: &mut Context<Self>,
@@ -2445,7 +2693,22 @@ impl<E: AppEngine> OakApp<E> {
 		cx.notify();
 	}
 
-	/// Applies one Sequence > Audio operation to the timeline selection.
+	/// Apply one Sequence > Audio menu operation to every selected clip.
+	///
+	/// `edit` selects the engine call: `Gain(factor)` sets the audio gain
+	/// (`1.0` = unity, `0.0` = silence, linear — the menu offers 0.5 / 1.0 /
+	/// 2.0), `Pan(value)` sets constant-power pan in `-1.0` (hard left) ..
+	/// `1.0` (hard right) with `0.0` centre, `FadeIn`/`FadeOut` set the
+	/// clip's fades to a 1-second ramp on that side while clearing the other
+	/// (`(1,1)` vs `(0,1)` rational seconds, `(0,1)` meaning "no fade"), and
+	/// `AddVolume`/`AddPan` append the built-in volume/pan node to each clip's
+	/// audio effect chain.
+	///
+	/// `cx` is the entity context. Does nothing when the timeline selection
+	/// is empty. Failures (no project, a rejected clip, or an engine without
+	/// clip-audio support) are printed as `[audio] <edit> failed: …` after
+	/// the clips already written by that call stayed written — there is no
+	/// error dialog and no rollback.
 	fn edit_selected_audio(&mut self, edit: AudioEdit, cx: &mut Context<Self>) {
 		let clips: Vec<u64> = self
 			.timeline
@@ -2543,8 +2806,28 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Applies paths picked in the platform dialog through the engine, using
-	/// the action's routing (open / import / export).
+	/// Deliver paths chosen in a platform file dialog to the engine according
+	/// to `action`.
+	///
+	/// `paths` are the picked files (`Vec` because footage import accepts
+	/// several; every other action only reads the first entry, so extra
+	/// selections are ignored). `cx` is the entity context; the engine call
+	/// runs inside one `engine.update`, so the whole batch is one app update.
+	///
+	/// Routing: `Open` / `ExportProjectFile` / `ImportSubtitles` /
+	/// `ExportSubtitles` take `paths.first()` (no path = no-op `Ok`);
+	/// `ImportFootage` imports all of them in order and reports the **first**
+	/// failure after attempting the rest. The manager-only actions are
+	/// handled first and return early: `ImportProject` imports into the
+	/// project library and reloads the manager list on success
+	/// ([`Self::reload_manager`]), `ExportProject` consumes the uuid stashed
+	/// in `pending_export` and exports that project to the first path — both
+	/// report failures through [`Self::manager_status`] (the manager's status
+	/// line) rather than the log.
+	///
+	/// Failures on the remaining actions are printed as
+	/// `[file] <action> failed: …`; there is no error dialog. An empty
+	/// `paths` for a single-path action is a silent no-op.
 	fn on_file_paths(&mut self, action: FileAction, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
 		// The manager's library import/export refresh the open manager and
 		// report failures in its status line.
@@ -2830,8 +3113,19 @@ impl<E: AppEngine> OakApp<E> {
 		.detach();
 	}
 
-	/// Applies one finished check: a newer release opens (or defers) the
-	/// prompt; an equal/older release and transport failures are silent.
+	/// Apply the outcome of one update check, possibly opening the
+	/// "update available" prompt.
+	///
+	/// `result` is what [`Self::start_update_check`]'s background fetch
+	/// produced: `Ok(release)` with the newest release, or `Err(message)`
+	/// from the transport/parse. A release that
+	/// [`crate::update::should_notify`] considers newer than the running
+	/// version is logged (`[update] <version> is available (running …)`) and
+	/// handed to [`Self::open_update_available`], which either shows the
+	/// dialog or stashes it behind the current modal. An equal/older release
+	/// is silent, and a check failure only prints `[update] check failed: …`
+	/// — no UI, no retry, so a machine that is offline at startup just sees
+	/// nothing. `cx` is the entity context, used to spawn the dialog.
 	fn on_update_checked(
 		&mut self,
 		result: Result<crate::update::LatestRelease, String>,
@@ -3075,8 +3369,25 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// The drop-pause flow's chosen outcome: resume the paused drop, open
-	/// the manual setup dialog, or drop nothing (cancel).
+	/// Apply the paused-drop choice: place the clips now, hand off to the
+	/// manual new-sequence dialog, or drop nothing.
+	///
+	/// `choice` comes from the drop-choice dialog's buttons (0 =
+	/// [`DropSequenceChoice::UseFootageParams`], 1 =
+	/// [`DropSequenceChoice::SpecifyManually`]); `cx` is the entity context.
+	/// The paused drop is taken out of `pending_drop` first: if there is none
+	/// (a stale dialog event) the modal is just closed.
+	///
+	/// `UseFootageParams` resumes the drop through the engine's
+	/// `drop_footage` path, which sizes the auto-created sequence from the
+	/// footage's probed video stream; clips are placed back-to-back starting
+	/// at the recorded drop time, each advancing by
+	/// `footage_length_frames` (1 frame when unknown, floored at 1). The
+	/// dialog then closes. `SpecifyManually` re-stashes the drop and opens
+	/// [`Self::open_new_sequence_for_footage`], whose commit resumes it via
+	/// [`Self::resume_pending_drop`] — so the drop is only placed after the
+	/// new sequence exists. Cancelling the choice dialog is handled as a
+	/// dismissal in [`Self::on_modal`], which clears `pending_drop`.
 	fn resolve_drop_sequence_choice(
 		&mut self,
 		choice: DropSequenceChoice,
@@ -3128,10 +3439,21 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Opens the sequence properties dialog for the given sequence (the
-	/// project explorer's context menu; the C++ `SequencePropertiesDialog`).
-	/// The OK button applies the name / format edits through the content's
-	/// `commit`.
+	/// Open the sequence properties dialog for `sequence_id` (the project
+	/// explorer's context menu; the C++ `SequencePropertiesDialog`).
+	///
+	/// Silently does nothing when another modal is already open. The title
+	/// carries the sequence's current name (`seqprops.title — <name>`, a
+	/// blank name when the engine has no parameters for the id), and the
+	/// dialog is constructed with the engine handle and the sequence id so it
+	/// can read/write that sequence directly. OK applies the name/format
+	/// edits through the content's `commit`: an engine rejection keeps the
+	/// dialog open with the error shown, otherwise it closes (see
+	/// [`Self::on_modal`]).
+	///
+	/// `cx` is the entity context; building is deferred through
+	/// [`Self::spawn_modal`] and the state is
+	/// [`ModalState::SequenceProperties`].
 	fn open_sequence_properties(&mut self, sequence_id: u64, cx: &mut Context<Self>) {
 		if !matches!(self.modal, ModalState::None) {
 			return;
@@ -3293,7 +3615,18 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Confirms the save-as dialog: duplicate + switch to the copy.
+	/// Apply the save-as dialog: duplicate the open project into the library
+	/// under the entered name, switch to the copy, then close the dialog.
+	///
+	/// `content` is the dialog's rename field; its current text is used
+	/// verbatim (no trimming and no duplicate-name check here — the library
+	/// layer owns naming rules). The engine call `save_project_as(&name)`
+	/// decides the result; a failure is only printed (`[file] save as
+	/// failed: …`) and the dialog is closed anyway, so the user gets no
+	/// in-dialog error and the original project simply stays current.
+	///
+	/// `cx` is the entity context. Always ends by calling
+	/// [`Self::close_modal`].
 	fn commit_save_as(
 		&mut self,
 		content: &Entity<crate::dialogs::RenameContent>,
@@ -3308,7 +3641,18 @@ impl<E: AppEngine> OakApp<E> {
 		self.close_modal(cx);
 	}
 
-	/// Opens the subtitle style editor for the selected timeline clip.
+	/// Open the subtitle style editor for the first selected timeline clip.
+	///
+	/// Silently returns when another modal is already open or the timeline
+	/// selection is empty. The dialog is seeded from the engine's
+	/// `subtitle_style(clip)` (default style when the query fails) and stored
+	/// as [`ModalState::SubtitleProperties`]; OK applies the style to that
+	/// same clip — the clip is looked up again from the live selection on
+	/// commit, so if the selection changed in the meantime the commit fails
+	/// with "no clip selected" and the dialog stays open with the message.
+	///
+	/// `cx` is the entity context; building is deferred through
+	/// [`Self::spawn_modal`].
 	fn open_subtitle_properties(&mut self, cx: &mut Context<Self>) {
 		if !matches!(self.modal, ModalState::None) {
 			return;
@@ -3350,7 +3694,20 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// Opens the per-clip audio properties/effect parameter editor.
+	/// Open the audio properties editor for the first selected timeline clip.
+	///
+	/// Silently returns when another modal is already up or when the timeline
+	/// has no selection — the menu item is a no-op rather than an error.
+	/// Reads the clip's mix state with `clip_audio` (falling back to defaults
+	/// when the clip is not resolvable) and the current sequence's master-bus
+	/// chain with `audio_bus_effects`, then builds
+	/// [`crate::dialogs::AudioPropertiesContent`] over both. Buttons are OK
+	/// (apply, see [`Self::on_modal`]), `audio.props.measure` (button 1,
+	/// runs a loudness measurement and displays it) and Cancel.
+	///
+	/// `cx` is the entity context; the dialog is created through
+	/// [`Self::spawn_modal`] and stored as
+	/// [`ModalState::AudioProperties`].
 	fn open_audio_properties(&mut self, cx: &mut Context<Self>) {
 		if !matches!(self.modal, ModalState::None) {
 			return;
@@ -3425,9 +3782,28 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// The wizard's OK: run the sync (or use timecode/no-align per the
-	/// chosen mode), create the multicam sequence, then close. A rejected
-	/// create keeps the dialog open with a message row.
+	/// Apply the multicam wizard: compute per-angle sync offsets, then create
+	/// the multicam sequence and close.
+	///
+	/// `content` is the wizard's dialog state; `cx` is the entity context.
+	/// Requires at least two selected angle clips, otherwise returns
+	/// `Err(multicam.wizard.need_two)` and the caller keeps the dialog open
+	/// with a message row.
+	///
+	/// Offsets are in seconds, aligned to `selection` order, and depend on
+	/// `sync_mode(cx)`: `0` asks the engine for waveform-correlation offsets
+	/// (`multicam_wizard_sync_offsets`); if the engine fails (for example when
+	/// the reference angle has no decodable audio) — or omits an angle — the
+	/// fallback is the source-timecode delta in seconds relative to the first
+	/// angle (missing timecode counts as `0`); `1` always uses those
+	/// timecode deltas; any other value (no alignment) gives all-zero
+	/// offsets, i.e. every angle starts at 0.
+	///
+	/// Returns the engine's outcome from `multicam_create_sequence(selection,
+	/// offsets, name)`, mapped to `()`: `Ok` means the sequence exists (the
+	/// caller closes the dialog), `Err(message)` is the engine's rejection
+	/// text, displayed in the dialog. Sync fallbacks are silent — a degraded
+	/// alignment is not reported as an error.
 	fn commit_multicam_wizard(
 		&mut self,
 		content: &Entity<crate::dialogs::MulticamWizardContent<E>>,
@@ -3506,10 +3882,23 @@ impl<E: AppEngine> OakApp<E> {
 		result.map(|_| ())
 	}
 
-	/// Opens the export dialog.
-	/// Opens the 导出序列 dialog: any sequence of the open project is
-	/// pickable (the current one preselected, or `preselect` when the
-	/// project explorer's 导出序列 context item opened the dialog).
+	/// Open the 导出序列 (export) dialog for one of the project's sequences.
+	///
+	/// `preselect` is the sequence to select when the dialog is opened from
+	/// the project explorer's 导出序列 context item; `None` means "use the
+	/// engine's current sequence". The id is validated against the engine's
+	/// sequence list, so a stale preselect or a stale current id simply
+	/// leaves no entry selected (the dialog then shows its first entry) —
+	/// it never selects a sequence that is not in the list. The dialog is
+	/// seeded with the full `(id, name)` list, the selection and a default
+	/// path from [`Self::default_export_path`].
+	///
+	/// When the project has no sequences the call only prints
+	/// `[export] the project has no sequences` and leaves the UI untouched
+	/// (no empty dialog). Building is deferred through
+	/// [`Self::spawn_modal`]; the resulting state is
+	/// [`ModalState::Export`], with the primary button running
+	/// [`Self::begin_export`] and the secondary cancelling.
 	fn open_export_dialog(&mut self, preselect: Option<u64>, cx: &mut Context<Self>) {
 		let sequences = self.engine.read(cx).sequence_entries();
 		if sequences.is_empty() {
@@ -3541,8 +3930,23 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
-	/// A default output path for the export dialog: the picked sequence's
-	/// name with the format's extension, next to the project file.
+	/// Suggest an output path for the export dialog: `<sequence>.mp4` next to
+	/// the project file.
+	///
+	/// `sequences` is the engine's `(sequence id, display name)` list and
+	/// `selected` the id currently chosen in the dialog (or `None` for
+	/// "first entry"). The base name is the selected sequence's name, else
+	/// the first sequence's, else the project's name, else `"untitled"`;
+	/// empty names are skipped at each step, so a blank sequence label falls
+	/// through to the project name. The directory is the project file's
+	/// parent, or `.` when no project is open (i.e. the process working
+	/// directory), and the result is a lossy UTF-8 string.
+	///
+	/// The `.mp4` suffix is hardcoded here and does **not** follow the
+	/// format chosen in the dialog; it is only a default the user can edit,
+	/// and [`Self::begin_export`] appends the real format extension when the
+	/// path has none. `cx` is the app context used to read the engine's
+	/// project handle.
 	fn default_export_path(
 		&self,
 		cx: &App,
@@ -3566,8 +3970,25 @@ impl<E: AppEngine> OakApp<E> {
 			.into_owned()
 	}
 
-	/// Starts the export from the export dialog's state and swaps the dialog
-	/// for the progress dialog.
+	/// Start the export configured in the export dialog and replace that
+	/// dialog with the progress dialog.
+	///
+	/// Only runs while `self.modal` is [`ModalState::Export`]; any other
+	/// state makes it a no-op. Reads the dialog's settings, container
+	/// extension, output path and selected sequence; an all-whitespace path
+	/// or a missing selection returns without changing anything, leaving the
+	/// dialog up for the user to fix it. When the typed path has no
+	/// non-empty extension the format's extension is appended
+	/// (`path + "." + ext`) — an existing extension is respected as typed,
+	/// even if it disagrees with the chosen format.
+	///
+	/// The engine call `start_export_of(sequence, &settings, path)` decides
+	/// the two outcomes: on success the returned session is stored in
+	/// `self.export` (so [`Self::poll_export`] can drain progress and
+	/// [`Self::cancel_export`] can abort) and the modal is swapped for the
+	/// progress dialog; on failure the error is printed to stdout and the
+	/// dialog is simply closed — the UI shows no failure message, so a start
+	/// error is only visible in the log.
 	fn begin_export(&mut self, cx: &mut Context<Self>) {
 		let ModalState::Export { content, .. } = &self.modal else {
 			return;
@@ -3660,7 +4081,30 @@ impl<E: AppEngine> OakApp<E> {
 		}
 	}
 
-	/// Routes a modal dialog event.
+	/// Route one modal-dialog event: the single dispatch point from dialog
+	/// widgets back into app state.
+	///
+	/// `event` is either [`ModalEvent::ButtonClicked`] (a button index per
+	/// dialog's wiring) or [`ModalEvent::Dismissed`] (Escape or backdrop
+	/// click); it is matched against the `control` id in `modal_ids`, so a
+	/// control id that no longer matches the active [`ModalState`] is inert.
+	/// `cx` is the entity context used to read dialog content, drive the
+	/// engine and repaint.
+	///
+	/// Button semantics follow each dialog's contract: index `0` is the
+	/// primary ("OK"-style) action and the rest cancel/close, with notable
+	/// exceptions — export progress only acts on cancel (button 1) and the
+	/// finished event closes it; the proxy dialog's buttons are
+	/// generate/delete/accept; audio properties button 1 measures loudness.
+	/// Primary actions that the engine can reject keep the dialog open with
+	/// the error pushed into the dialog (project properties, sequence
+	/// properties, subtitle properties, multicam wizard), while the others
+	/// close unconditionally (clip rename/speed). Dismissal is treated as
+	/// cancel: it aborts a running export, returns from manager sub-dialogs
+	/// to the manager, commits preferences, and abandons a paused drag-drop
+	/// for the drop-choice/new-sequence dialogs. All dialog mutations happen
+	/// through `self.engine.update`, so they are recorded by the active
+	/// engine implementation.
 	fn on_modal(&mut self, event: &ModalEvent, cx: &mut Context<Self>) {
 		match event {
 			ModalEvent::ButtonClicked { control, button } => match *control {
@@ -4614,7 +5058,19 @@ impl AppArgs {
 	}
 }
 
-/// Builds the app root entity for the chosen backend.
+/// Create the window's root view: a freshly constructed [`OakApp`] for the
+/// `E` backend.
+///
+/// `window` is passed straight through to [`OakApp::new`], which needs it to
+/// read window scale/theme state while building the shell; `initial` is the
+/// project path from the command line (or `None`), opened only after the
+/// layout is up; `cx` is the gpui app context used to mint the entity.
+/// Returns the `Entity<OakApp<E>>` that the window (and [`run_with`]) keeps
+/// as its root — a handle, so callers can later `update` it on the app
+/// context.
+///
+/// Thin by design: the constructor runs inside `cx.new`, so the entity is
+/// created immediately on the calling thread rather than lazily.
 fn build_root<E: AppEngine>(
 	window: &mut Window,
 	initial: Option<PathBuf>,
@@ -4636,7 +5092,41 @@ pub fn run() {
 	}
 }
 
-/// Runs the app window with `E` as the engine backend.
+/// Run the editor's main event loop on the `E` engine backend.
+///
+/// `args` is the parsed command line ([`AppArgs`]): its `project` path, when
+/// present, is opened after the shell is built (and suppresses the startup
+/// project manager). The function owns `AppArgs` by value because the gpui
+/// closure must be `move`. `E` picks the engine implementation; [`run`]
+/// selects [`MockEngine`] or [`RealEngine`].
+///
+/// Startup order inside the gpui closure (each step's comments explain why
+/// it must happen here): install gpui-kit's theme, load `config.ini`, init
+/// the UI language, configure the project library storage backend, bring up
+/// the audio manager with the persisted devices, scan/register OFX plugins
+/// (failures only log), surface the persisted display bit depth through
+/// `OAK_DISPLAY_BIT_DEPTH` so the wgpu layer can pick the swapchain format
+/// before the surface exists, then open a 1600x900 centered window with app
+/// id `oak` and the embedded icon. In the window callback it declares the
+/// display-colour mapping, registers the window's wgpu device on
+/// Linux/FreeBSD (for the RGBA16F path), sets the compact 14px rem size and
+/// builds the root entity with [`build_root`]. Afterwards it optionally
+/// shows the project manager, starts the (deferred) update check, activates
+/// the app, and on the last window close shuts OFX down, saves the config,
+/// flushes the storage backlog and quits.
+///
+/// No `Result`: fatal startup failures panic (see below) and normal
+/// termination is the event loop returning. Plugin, config and storage
+/// problems degrade to logs.
+///
+/// # Panics
+///
+/// Panics with `the embedded app icon must decode` when the compiled-in
+/// `assets/appicon/icon.png` is not a valid image, and with
+/// `failed to open the main window` when the platform window cannot be
+/// created. Also panics if the `OAK_DISPLAY_BIT_DEPTH` environment override
+/// cannot be set (it is set before any thread/window exists, so the
+/// `set_var` is sound in practice).
 fn run_with<E: AppEngine>(args: AppArgs) {
 	let initial = args.project.clone();
 	gpui_kit::application()

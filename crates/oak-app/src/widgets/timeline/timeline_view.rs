@@ -139,6 +139,9 @@ impl TimelineTool {
 	];
 
 	/// The tool at toolbar `index`, or `None` when out of range.
+	///
+	/// Order matches [`TimelineTool::ALL`], so this is the inverse of
+	/// [`Self::index`]: `from_index(tool.index()) == Some(tool)`.
 	pub fn from_index(index: usize) -> Option<TimelineTool> {
 		Self::ALL.get(index).copied()
 	}
@@ -482,6 +485,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	}
 
 	/// Sets the active editing tool, repainting if it changed.
+	///
+	/// The tool decides which gestures `render` wires up (clip move/trim,
+	/// marquee, roll, slide, slip, zoom, track select); setting the tool that
+	/// is already active is a no-op.
+	///
+	/// # Arguments
+	///
+	/// * `tool` - the new [`TimelineTool`].
+	/// * `cx` - used to request the repaint when the tool changed.
 	pub fn set_tool(&mut self, tool: TimelineTool, cx: &mut Context<Self>) {
 		if self.tool != tool {
 			self.tool = tool;
@@ -520,7 +532,14 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		self
 	}
 
-	/// Builder: enables or disables snapping initially.
+	/// Builder: enables or disables snapping initially (the
+	/// [`TimelineState`] default is enabled). While snapping is on, every
+	/// drag snaps to nearby snap points within [`SNAP_THRESHOLD_PX`].
+	///
+	/// # Arguments
+	///
+	/// * `enabled` - the initial [`TimelineState::snap_enabled`] value; later
+	///   changes go through the state, not this builder.
 	pub fn snap_enabled(mut self, enabled: bool) -> Self {
 		self.state.snap_enabled = enabled;
 		self
@@ -539,6 +558,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// Zoom to fit the whole sequence (View > Show All): the sequence's
 	/// full length lands in the clip area's current width, scrolled back
 	/// to the start.
+	///
+	/// Does nothing when the clip area has not been laid out yet
+	/// (`clip_area_width <= 0`) or when `sequence_length` is zero/negative.
+	///
+	/// # Arguments
+	///
+	/// * `sequence_length` - the sequence length in frames; callers pass the
+	///   data source's current length (see [`Self::sequence_length`]).
+	/// * `cx` - used to emit [`TimelineEvent::ZoomChanged`] and repaint.
 	pub fn show_all(&mut self, sequence_length: Frame, cx: &mut Context<Self>) {
 		if self.clip_area_width <= 0.0 || sequence_length.0 <= 0 {
 			return;
@@ -576,7 +604,13 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		}
 	}
 
-	/// The sequence length from the data source.
+	/// The sequence length in frames, read fresh from the data source on every
+	/// call. The view uses it to clamp seeks, trims, and work-area drags, so it
+	/// is re-read after each host edit rather than cached.
+	///
+	/// # Arguments
+	///
+	/// * `cx` - the view context used to read the source entity.
 	fn sequence_length(&self, cx: &mut Context<Self>) -> Frame {
 		self.source.read(cx).sequence_length()
 	}
@@ -671,7 +705,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	}
 
 	/// Updates a clip-move drag from the pointer position: computes the new
-	/// start frame (with snapping) and the track under the cursor.
+	/// start frame (with snapping) and the track under the cursor, then stores
+	/// both on the [`ClipDrag`] payload and repaints the move ghost.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the horizontal delta from the press
+	///   point is converted to frames at the current zoom.
+	/// * `cx` - used to read the snap points (the dragged clip is excluded) and
+	///   the track layout, and to repaint.
 	fn update_clip_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<ClipDrag>>>,
@@ -704,6 +746,13 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// Updates a trim drag from the pointer position: computes the new
 	/// position of the grabbed edge, clamped to keep the clip non-empty and
 	/// inside the sequence, then snapped and re-clamped.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; for the end edge the handle width is
+	///   added so the pointer tracks the edge's far side.
+	/// * `cx` - used to read the sequence length, the clip's current range, and
+	///   the snap points (the trimmed clip is excluded).
 	fn update_trim_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<TrimDrag>>>,
@@ -740,7 +789,16 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		drag.new_frame = new_frame;
 	}
 
-	/// Updates a track-height drag from the pointer position.
+	/// Updates a track-height drag from the pointer position: the new height is
+	/// the start height plus the vertical pointer delta, clamped to at least
+	/// [`MIN_TRACK_HEIGHT`]. The value is in pixels and is not committed until
+	/// [`Self::finish_height_drag`] runs on drop.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the press point and the separator's
+	///   offset within the header come from the [`HeightDrag`] payload.
+	/// * `cx` - used to access the drag payload through the view context.
 	fn update_height_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<HeightDrag>>>,
@@ -790,6 +848,13 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// Emits [`TimelineEvent::ClipMoveRequested`] for a finished clip move,
 	/// unless the gesture didn't move the clip or a locked track was involved.
 	/// Always repaints so the move ghost disappears after the drop.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`ClipDrag`] payload: the clip, its original and
+	///   requested start frames/track indices.
+	/// * `cx` - used to check whether the source and target tracks are locked,
+	///   to emit the event, and to clear the move ghost.
 	fn finish_clip_drag(&mut self, drag: &Arc<RwLock<ClipDrag>>, cx: &mut Context<Self>) {
 		self.active_clip_drag = None;
 		let (clip, original_start, original_track, new_start, new_track) = {
@@ -819,6 +884,14 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// [`TimelineEvent::ClipRippleTrimRequested`] (ripple tool) for a finished
 	/// trim — the ripple variant also slides the track's later clips, which
 	/// the host composes as one undoable entry.
+	///
+	/// Nothing is emitted when the edge did not move.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`TrimDrag`] payload: the clip, the grabbed edge,
+	///   and the original vs. requested frame positions of that edge.
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_trim_drag(&mut self, drag: &Arc<RwLock<TrimDrag>>, cx: &mut Context<Self>) {
 		let (clip, edge, original_frame, new_frame) = {
 			let drag = drag.read().expect("trim drag lock is not poisoned");
@@ -844,6 +917,14 @@ impl<D: TimelineDataSource> TimelineView<D> {
 
 	/// The horizontal drag distance converted to a frame delta at the current
 	/// zoom — the shared base of the slide, slip, and roll gestures.
+	///
+	/// The result is rounded to the nearest frame and negative when the
+	/// pointer moved left of the press point.
+	///
+	/// # Arguments
+	///
+	/// * `press` - the pointer position at drag start, in window pixels.
+	/// * `now` - the current pointer position, in the same coordinate space.
 	fn drag_frame_delta(&self, press: Point<Pixels>, now: Point<Pixels>) -> i64 {
 		((now.x.as_f32() - press.x.as_f32()) / self.state.zoom).round() as i64
 	}
@@ -851,6 +932,12 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// Updates a slide drag from the pointer position: the clip's start shifts
 	/// by the mouse delta (snapped when snap is enabled) but never before frame
 	/// zero.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the horizontal delta is converted to
+	///   frames by [`Self::drag_frame_delta`].
+	/// * `cx` - used to read the snap points and to repaint the drag ghost.
 	fn update_slide_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<SlideDrag>>>,
@@ -878,6 +965,12 @@ impl<D: TimelineDataSource> TimelineView<D> {
 
 	/// Emits [`TimelineEvent::ClipSlideRequested`] for a finished slide unless
 	/// the clip didn't move.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`SlideDrag`] payload: the clip and the original
+	///   vs. requested start frames.
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_slide_drag(&mut self, drag: &Arc<RwLock<SlideDrag>>, cx: &mut Context<Self>) {
 		let (clip, original_start, new_start) = {
 			let drag = drag.read().expect("slide drag lock is not poisoned");
@@ -891,6 +984,12 @@ impl<D: TimelineDataSource> TimelineView<D> {
 
 	/// Updates a slip drag from the pointer position: the media in-point moves
 	/// by the mouse delta, clamped to non-negative source frames.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the horizontal delta is converted to
+	///   frames by [`Self::drag_frame_delta`].
+	/// * `cx` - used to access the drag payload and to repaint.
 	fn update_slip_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<SlipDrag>>>,
@@ -907,6 +1006,12 @@ impl<D: TimelineDataSource> TimelineView<D> {
 
 	/// Emits [`TimelineEvent::ClipSlipRequested`] for a finished slip unless
 	/// the media in-point didn't move.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`SlipDrag`] payload: the clip and the original
+	///   vs. requested media in-points, in source frames.
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_slip_drag(&mut self, drag: &Arc<RwLock<SlipDrag>>, cx: &mut Context<Self>) {
 		let (clip, original_media_in, new_media_in) = {
 			let drag = drag.read().expect("slip drag lock is not poisoned");
@@ -921,6 +1026,13 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// Updates a roll drag from the pointer position: the shared boundary moves
 	/// with the pointer, clamped to keep both clips non-empty (inside
 	/// `min + 1 .. max - 1`), then snapped and re-clamped.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the pointer x is converted to a frame
+	///   through the current zoom and scroll.
+	/// * `cx` - used to read the snap points (the left clip is excluded) and to
+	///   repaint when the boundary preview changes.
 	fn update_roll_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<RollDrag>>>,
@@ -949,6 +1061,12 @@ impl<D: TimelineDataSource> TimelineView<D> {
 
 	/// Emits [`TimelineEvent::ClipRollRequested`] for a finished roll unless
 	/// the boundary didn't move.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`RollDrag`] payload: the two clips sharing the
+	///   boundary plus the original vs. requested boundary frame.
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_roll_drag(&mut self, drag: &Arc<RwLock<RollDrag>>, cx: &mut Context<Self>) {
 		let (clip_a, clip_b, boundary, new_frame) = {
 			let drag = drag.read().expect("roll drag lock is not poisoned");
@@ -964,8 +1082,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		}
 	}
 
-	/// Apply a transition-resize drag move: scale the requested length by the
-	/// horizontal mouse delta and clamp to the clip length.
+	/// Applies a transition-resize drag move: converts the horizontal mouse
+	/// delta to frames at the current zoom and clamps the requested length to
+	/// `1..=clip_length` (at least one frame) before storing it in the drag.
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the delta is measured from the press
+	///   point recorded in the drag payload.
+	/// * `cx` - used to read the clip's current range and to repaint.
 	fn update_transition_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<TransitionDrag>>>,
@@ -987,7 +1112,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		cx.notify();
 	}
 
-	/// Emits [`TimelineEvent::TransitionChanged`] for a finished resize.
+	/// Emits [`TimelineEvent::TransitionChanged`] for a finished
+	/// transition-resize drag, unless the length is unchanged.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`TransitionDrag`] payload: the clip, which edge
+	///   the transition sits on, and the original vs. requested lengths in
+	///   frames.
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_transition_drag(
 		&mut self,
 		drag: &Arc<RwLock<TransitionDrag>>,
@@ -1007,7 +1140,15 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		}
 	}
 
-	/// Emits [`TimelineEvent::TrackHeightChanged`] for a finished resize.
+	/// Emits [`TimelineEvent::TrackHeightChanged`] for a finished resize,
+	/// unless the height is unchanged.
+	///
+	/// # Arguments
+	///
+	/// * `drag` - the shared [`HeightDrag`] payload: the track index and the
+	///   pre-drag vs. current heights in pixels (already clamped to
+	///   [`MIN_TRACK_HEIGHT`] by [`Self::update_height_drag`]).
+	/// * `cx` - used to emit the event and repaint.
 	fn finish_height_drag(&mut self, drag: &Arc<RwLock<HeightDrag>>, cx: &mut Context<Self>) {
 		let (track, start_height, new_height) = {
 			let drag = drag.read().expect("height drag lock is not poisoned");
@@ -1035,6 +1176,13 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	/// immediately and emits [`TimelineEvent::WorkAreaPreview`] so the host
 	/// can apply the range live (not undoable). A plain click never reaches
 	/// here — it only seeks (the ruler's `on_mouse_down`).
+	///
+	/// # Arguments
+	///
+	/// * `event` - the drag-move frame; the pointer is converted to clip-area
+	///   space and then to a frame, clamped to `0..=sequence_length`.
+	/// * `cx` - used to read the sequence length (and the drag payload) and to
+	///   emit the live [`TimelineEvent::WorkAreaPreview`].
 	fn update_ruler_drag(
 		&mut self,
 		event: &DragMoveEvent<Arc<RwLock<RulerDrag>>>,
@@ -1135,15 +1283,34 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	// retained (with `#[allow(dead_code)]`) as documentation of the
 	// gesture set the view wires up.
 
+	/// Documents the ruler-press gesture: a plain left press seeks the playhead
+	/// to the pointed frame ([`Self::seek`]); a drag past the click threshold
+	/// reshapes the work area (see [`Self::update_ruler_drag`]). The live
+	/// listener is installed in `render`; this empty method only records the
+	/// gesture and never runs.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_ruler_mouse_down(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 
+	/// Documents the clip-move gesture's pointer tracking: the drag ghost for
+	/// `_clip` follows the snapped start frame and the track under the cursor
+	/// (see [`Self::update_clip_drag`]). This empty method only records the
+	/// gesture and never runs.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_clip_drag_move(&mut self, _clip: ClipId, _window: &mut Window, _cx: &mut Context<Self>) {}
 
+	/// Documents the clip-drop gesture: releasing a moved clip emits
+	/// [`TimelineEvent::ClipMoveRequested`] unless the clip did not move or
+	/// either the source or target track is locked (see
+	/// [`Self::finish_clip_drag`]). This empty method only records the gesture
+	/// and never runs.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_clip_drag_drop(&mut self, _clip: ClipId, _window: &mut Window, _cx: &mut Context<Self>) {}
 
+	/// Documents the clip-edge trim gesture: `_clip`'s grabbed `_edge` follows
+	/// the pointer and, on release, emits [`TimelineEvent::ClipTrimRequested`]
+	/// (or the ripple variant on the ripple tool) unless the edge did not move.
+	/// The live listeners call [`Self::update_trim_drag`] /
+	/// [`Self::finish_trim_drag`]; this empty method only records the gesture.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_trim_drag(
 		&mut self,
@@ -1154,9 +1321,19 @@ impl<D: TimelineDataSource> TimelineView<D> {
 	) {
 	}
 
+	/// Documents the marquee (rubber-band) selection gesture: dragging on empty
+	/// clip-area space selects the enabled clips intersecting the
+	/// press-to-cursor rect; it is only wired on the select tool. The live
+	/// listeners call [`Self::update_marquee`] / [`Self::finish_marquee`];
+	/// this empty method only records the gesture and never runs.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_marquee(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 
+	/// Documents the clip area's scroll-wheel gesture: a plain wheel delta pans
+	/// the clip area horizontally, while ctrl/cmd (platform) zooms around the
+	/// pointer and emits [`TimelineEvent::ZoomChanged`]. The live handler is the
+	/// `on_scroll_wheel` listener installed in `render`; this empty method only
+	/// records the gesture and never runs.
 	#[allow(dead_code)] // gesture documentation; see the section comment above
 	fn on_scroll(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 }

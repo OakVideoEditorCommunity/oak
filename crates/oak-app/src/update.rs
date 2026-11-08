@@ -128,6 +128,11 @@ pub fn check_enabled() -> bool {
 }
 
 /// Persists the preferences toggle.
+///
+/// `enabled` is written to `CONFIG_KEY_CHECK_UPDATES` as a bool in the config
+/// store and governs the next startup check; the store reaches disk when the app
+/// saves its configuration (on exit). Counterpart of [`check_enabled`], which
+/// defaults to `true` when the key is absent.
 pub fn set_check_enabled(enabled: bool) {
 	crate::oakui::real::config_set_bool(CONFIG_KEY_CHECK_UPDATES, enabled);
 }
@@ -165,6 +170,16 @@ impl UpdateTransport for HttpTransport {
 }
 
 /// Fetches and parses the latest release through `transport`.
+///
+/// `transport` performs the single blocking GET against the fixed
+/// `UPDATE_ENDPOINT`; it is a trait object so tests can inject a fake without
+/// network access. The call blocks for as long as the transport does, so the
+/// UI runs it on the background executor.
+///
+/// # Errors
+///
+/// Returns the transport's error text when the GET fails, or the parse error
+/// when the response body is not a valid release document.
 pub fn fetch_latest(transport: &dyn UpdateTransport) -> Result<LatestRelease, String> {
 	let body = transport.get(UPDATE_ENDPOINT)?;
 	parse_latest(&body)

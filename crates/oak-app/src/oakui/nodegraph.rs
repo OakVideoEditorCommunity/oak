@@ -72,8 +72,20 @@ const TYPE_ID_GAP_BLOCK: &str = "org.olivevideoeditor.Olive.gapblock";
 const TYPE_ID_TRANSITION_BLOCK: &str = "org.olivevideoeditor.Olive.transitionblock";
 
 /// The real factory's Add-menu entries, converted to app-owned DTOs.
+///
+/// Walks the engine's static factory entries, skipping those flagged
+/// `NODE_FLAG_DONT_SHOW_IN_CREATE_MENU` and those whose category has no
+/// visible Add-menu key, and maps each to a [`NodeLibraryEntry`] (display name
+/// falls back to the type id when the factory has none). Dynamic (OpenFX)
+/// factory entries are appended afterwards, all filed under the OpenFX
+/// category, which must be visible (the `expect` is a maintenance guard, not a
+/// user-facing failure). Returns entries in factory order; the caller groups
+/// them by `category_key` for the menu. Takes no arguments because the
+/// factory registry is global.
 pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 	use super::engine::{NodeCategory, NodeLibraryEntry, node_category_key};
+	/// One-to-one mapping of the engine's category enum onto the app's
+	/// Add-menu category DTO; `value` is the node's declared category.
 	fn category(value: quercus_engine_rs::effect::NodeCategory) -> NodeCategory {
 		use quercus_engine_rs::effect::NodeCategory as In;
 		match value {
@@ -135,6 +147,12 @@ fn out_type() -> PortDataType {
 	PortDataType::new("video", hsla(0.08, 0.7, 0.55, 1.0))
 }
 /// Pack a node identity + kind + index into a global `PortId`.
+///
+/// `node` is the raw module node identity, `kind` the port direction and
+/// `index` the input position (0..7; only three bits survive
+/// [`unpack_port`]). Encoding is `(node << 4) | (index << 1)` for inputs and
+/// `(node << 4) | 1` for the single implicit output. Identities are arena
+/// slots, so the shift is injective and the two directions cannot collide.
 fn port_id(node: u64, kind: PortKind, index: u32) -> PortId {
 	match kind {
 		PortKind::Input => PortId((node << 4) | ((index as u64) << 1)),
@@ -143,6 +161,12 @@ fn port_id(node: u64, kind: PortKind, index: u32) -> PortId {
 }
 
 /// Unpack a `PortId` into `(node identity, kind, index)`.
+///
+/// `id` is a port packed by [`port_id`]; the low bit selects the direction
+/// and the next three bits hold the input index (0..7, any higher bits are
+/// masked off), so an output port always reports index 0. Inverse of
+/// [`port_id`]; used by the connection rules to recover node and port from a
+/// wire endpoint.
 fn unpack_port(id: PortId) -> (u64, PortKind, u32) {
 	let raw = id.0;
 	let node = raw >> 4;
@@ -320,6 +344,13 @@ impl EdgeData for RealEdge {
 }
 
 /// Deterministic header accents per node identity.
+///
+/// `ident` is the raw node identity; the hue is picked from a fixed 8-entry
+/// palette by `ident % 8`, with fixed saturation 0.5 and lightness 0.35 so
+/// the accent stays legible on the graph background. Same node, same colour
+/// on every frame and after reload; different nodes usually differ, but the
+/// palette repeats every 8 identities. Endpoint cards bypass this with
+/// [`endpoint_color`].
 fn node_color(ident: u64) -> Hsla {
 	let hues = [0.55f32, 0.6, 0.08, 0.3, 0.78, 0.45, 0.9, 0.15];
 	hsla(hues[(ident as usize) % hues.len()], 0.5, 0.35, 1.0)
@@ -389,6 +420,12 @@ struct TypedNode {
 /// the full `footage → effects → clip` chain. The sequence node is NOT part
 /// of a clip's context — the chain is self-contained, so the filtered view
 /// shows no output card and no synthesized clip→output wires.
+///
+/// `snapshot` must already be the clip-scoped snapshot (built with the clip
+/// argument), since this function only filters what it is given; `seq` is the
+/// sequence node id, dropped from the filtered list and re-appended as the
+/// output entry. Returns the same shape as [`graph_nodes`] (identity order,
+/// one sequence entry) but over the smaller clip chain.
 fn clip_context_nodes(
 	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
@@ -398,6 +435,13 @@ fn clip_context_nodes(
 
 /// The displayable nodes of the sequence's graph, in identity order (the
 /// sequence node itself exactly once).
+///
+/// `snapshot` is the engine's graph snapshot, `seq` the sequence node id.
+/// Filters out the structural timeline nodes (tracks, track lists, gaps,
+/// transitions) via [`is_displayed`], replaces the sequence node with a
+/// `TYPE_ID_SEQUENCE` entry appended once, and sorts everything by raw node
+/// identity so the order is stable across frames. Thin wrapper over
+/// [`snapshot_nodes`]; used by the drag math in [`fallback_base`].
 fn graph_nodes(
 	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
@@ -405,6 +449,17 @@ fn graph_nodes(
 	snapshot_nodes(snapshot, seq)
 }
 
+/// The raw displayed-node list both [`graph_nodes`] and
+/// [`clip_context_nodes`] build from: every snapshot node whose type is
+/// displayable, keyed by its identity plus the sequence node itself exactly
+/// once, sorted by identity.
+///
+/// `snapshot` is the engine graph snapshot (already clip-scoped when the
+/// caller asked for a clip chain) and `seq` the sequence node id, which is
+/// dropped from the filtered list and re-appended as the output entry. Panics
+/// if a node's domain identity cannot be resolved (`graphops::id_of`).
+/// Converts to [`TypedNode`], carrying the domain id (for later lookups), the
+/// raw identity (sort key / port packing) and the type id (role).
 fn snapshot_nodes(
 	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,
@@ -559,6 +614,13 @@ fn session_for_graph(
 }
 
 /// Build the (nodes, edges) snapshot of the sequence's node graph.
+///
+/// `project` is the app's project Arc, adopted by a short-lived engine
+/// session, and `seq` is the sequence node to display (its graph is the whole
+/// media chain footage → effects → clips plus the sequence output card).
+/// Returns the layout-ready cards and wires, with unplaced nodes already
+/// positioned by the role grid; a session or snapshot failure yields empty
+/// vectors. For the per-clip view use [`build_graph_for_clip`].
 pub fn build_graph(project: &ProjectRef, seq: DomainNodeId) -> (Vec<RealNode>, Vec<RealEdge>) {
 	build_graph_impl(project, seq, None)
 }
@@ -568,6 +630,14 @@ pub fn build_graph(project: &ProjectRef, seq: DomainNodeId) -> (Vec<RealNode>, V
 /// chain is footage → effects → clip; the sequence output card and the
 /// synthesized wires are not part of a clip's context. An invalid clip
 /// identity yields an empty graph.
+///
+/// `project` supplies the project Arc the engine session is adopted from,
+/// `seq` is the sequence node the clip lives in and `clip_ident` is the raw
+/// identity of the selected clip block (resolved with
+/// [`graphops::id_of`]). A session or snapshot failure also yields
+/// `(Vec::new(), Vec::new())`, so callers must treat an empty graph as
+/// "nothing to show" rather than as an error. Counterpart of
+/// [`build_graph`], which shows the whole sequence.
 pub fn build_graph_for_clip(
 	project: &ProjectRef,
 	seq: DomainNodeId,
@@ -581,6 +651,12 @@ pub fn build_graph_for_clip(
 
 /// The role column of a displayed node (footage | effects | clips |
 /// output); drives the fallback grid's x position.
+///
+/// `type_id` is the node's engine type id; `is_output` marks the sequence
+/// node, which is checked first because it is identified by position rather
+/// than type. Returns 0 for footage, 1 for anything else (effects and other
+/// misc nodes), 2 for clip blocks and 3 for the output, matching the
+/// `40 + role * 260` column formula in the fallback layout.
 fn role_of(type_id: &str, is_output: bool) -> u32 {
 	if is_output {
 		3
@@ -598,6 +674,17 @@ fn role_of(type_id: &str, is_output: bool) -> u32 {
 /// sorted display order (mirrors the fallback grid in `build_graph`).
 /// `apply_edit` uses it so the first drag release writes
 /// `(displayed base + delta)` instead of `(origin + delta)`.
+///
+/// `snapshot` is the graph the node belongs to, `seq` the sequence node id
+/// (which marks the output role) and `ident` the identity of the node being
+/// moved. Returns the `(x, y)` graph-space base in pixels, computed from the
+/// sequence-wide node list ([`graph_nodes`]): the role column sets x and the
+/// number of earlier unplaced nodes of the same role sets y.
+///
+/// # Panics
+///
+/// Panics when `ident` is not part of the displayed graph (the caller is
+/// expected to pass a node the editor shows).
 fn fallback_base(
 	snapshot: &quercus_engine_rs::editor::GraphSnapshot,
 	seq: DomainNodeId,

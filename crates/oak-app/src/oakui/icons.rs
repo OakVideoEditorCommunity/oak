@@ -49,12 +49,24 @@ pub const ICON_NEXT: &str = "next";
 pub const ICON_REW: &str = "rew";
 pub const ICON_FF: &str = "ff";
 
-/// The theme-dependent filesystem path of an icon. The icons root is
-/// resolved at runtime — the packagers install `assets/icons` next to the
-/// binary (Windows/Linux packages), into `Contents/Resources` (macOS
-/// bundle) or `/usr/share/oak` (deb/rpm/pacman system installs) — with
-/// the dev checkout as a fallback. Absolute, so it works from any working
-/// directory.
+/// The absolute path of an icon PNG for the active theme.
+///
+/// # Arguments
+///
+/// * `name` - Icon file stem WITHOUT the `.png` suffix, normally one of the
+///   `ICON_*` constants (e.g. [`ICON_PLAY`] → `play`).
+/// * `cx` - App handle used to read the active theme; the default `"Olive
+///   Dark"` theme selects the `dark` glyph family, every other theme the
+///   `light` family.
+///
+/// # Returns
+///
+/// `<icons root>/<dark|light>/<name>.png`. The root is resolved once per process
+/// (packaged `assets/icons` next to the binary, `Contents/Resources` in the
+/// macOS bundle, or `/usr/share/oak`, with the dev checkout as fallback), so the
+/// path is absolute and works from any working directory. The file's existence
+/// is not checked here; a missing PNG renders as a blank button, so callers
+/// should tolerate an absent path.
 pub fn icon_path(name: &str, cx: &App) -> PathBuf {
 	let theme = crate::widgets::theme::current_theme(cx);
 	let family = if theme.name == "Olive Dark" {

@@ -144,6 +144,11 @@ pub trait ClipDecorator: 'static {
 	/// [`ClipData::media_in`](super::ClipData::media_in), so frame
 	/// `visible_range.start` of the *timeline* maps to source frame
 	/// `media_in + (visible_range.start - clip.range().start)`.
+	///
+	/// `window` is the paint context, `clip` the element's id (the thumbnail
+	/// cache key), `visible_range` the on-screen part of the clip in timeline
+	/// frames and `bounds` the pixel rect to fill. Default implementation is a
+	/// no-op; implementors should cache, since paint runs every frame.
 	fn paint_thumbnail(
 		&mut self,
 		_window: &mut Window,
@@ -158,6 +163,12 @@ pub trait ClipDecorator: 'static {
 	/// `bounds`. Same media-time mapping as
 	/// [`ClipDecorator::paint_thumbnail`]. Typically drawn with
 	/// [`PathBuilder`](gpui_kit::PathBuilder) from cached peak data.
+	///
+	/// `window` is the paint context, `clip` the element's id (the natural cache
+	/// key for peak data), `visible_range` the on-screen part of the clip in
+	/// timeline frames and `bounds` the pixel rect to fill. Default
+	/// implementation is a no-op, so decorators that draw no waveform inherit it
+	/// unchanged.
 	fn paint_waveform(
 		&mut self,
 		_window: &mut Window,
@@ -237,6 +248,12 @@ impl ClipElement {
 	}
 
 	/// Builder: render in the selected state (selection outline).
+	///
+	/// `selected` is stored as-is; the element starts unselected, so this is only
+	/// needed when the clip is part of the timeline selection. The outline is
+	/// drawn in addition to transition wedges and decorator content. Returns
+	/// `self` for chaining with [`Self::enabled`], [`Self::locked`] and the other
+	/// builder flags.
 	pub fn selected(mut self, selected: bool) -> Self {
 		self.selected = selected;
 		self

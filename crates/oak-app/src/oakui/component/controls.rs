@@ -130,7 +130,20 @@ pub struct Slider {
 }
 
 impl Slider {
-	/// Create a slider for `control` over `model`.
+	/// Creates a slider control over `model`.
+	///
+	/// Seeds the inline value box with the model's formatted value and
+	/// subscribes to its Enter key so typed input commits through the
+	/// control's apply path. The control never validates the model itself: it
+	/// reads/clamps through [`SliderModel`] and emits [`SliderEvent`]s for the
+	/// host to apply.
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable control id reported in events and used in element ids.
+	/// * `model` - Range/value model; owned by the control.
+	/// * `window` - Window used to build the attached text input.
+	/// * `cx` - Context used to create the focus handle and subscription.
 	pub fn new(
 		control: usize,
 		model: SliderModel,
@@ -210,7 +223,16 @@ impl Slider {
 		}
 	}
 
-	/// Open the numeric editor with the current value as its text.
+	/// Opens the numeric editor seeded with the current value.
+	///
+	/// The editor commits on focus loss unless Escape set `edit_cancel`; the
+	/// slider then re-syncs its display text. The editor entity is stored so
+	/// the render pass can show it, and a repaint is requested.
+	///
+	/// # Arguments
+	///
+	/// * `window` - Window used to create and focus the editor.
+	/// * `cx` - Context used for the focus-out subscription and repaint.
 	fn begin_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		let text = self.display();
 		let editor = cx.new(|cx| InputState::new(window, cx));
@@ -239,7 +261,17 @@ impl Slider {
 		cx.notify();
 	}
 
-	/// Parse `text` as the model's value kind, clamp it and apply + emit.
+	/// Parses typed text, clamps it through the model and reports a change.
+	///
+	/// Integer-valued models parse as `i64`; all other kinds parse as `f64`.
+	/// Unparsable text is ignored silently (no event, no repaint). When the
+	/// clamped value differs from the model's current value, emits
+	/// [`SliderEvent::ValueChanged`] and notifies.
+	///
+	/// # Arguments
+	///
+	/// * `text` - Raw editor text; surrounding whitespace is ignored.
+	/// * `cx` - Context used to emit the change and repaint.
 	fn apply_text(&mut self, text: &str, cx: &mut Context<Self>) {
 		let parsed: Option<f64> = match self.model.value() {
 			SliderValue::Integer(_) => text.trim().parse::<i64>().ok().map(|v| v as f64),
@@ -259,7 +291,15 @@ impl Slider {
 		Self::display_value(&self.model)
 	}
 
-	/// Format a model's value for display.
+	/// Formats a model's value for display in a control.
+	///
+	/// Integer -> plain decimal, Float -> [`format_value`], Angle -> one decimal
+	/// plus a degree sign, Rational -> `num/den`. This is the text seeded into
+	/// the inline value box and the numeric editor.
+	///
+	/// # Arguments
+	///
+	/// * `model` - Model whose current value is formatted.
 	fn display_value(model: &SliderModel) -> SharedString {
 		match model.value() {
 			SliderValue::Integer(v) => v.to_string().into(),
@@ -538,7 +578,15 @@ impl Render for Slider {
 	}
 }
 
-/// Format a float without trailing zeros ("0.5", "1", "0.25").
+/// Formats a float without trailing zeros.
+///
+/// Whole numbers print with no decimal point (`1`), other values are
+/// rounded to three decimals and stripped of trailing zeros (`0.5`,
+/// `0.25`). Negative zero follows the whole-number branch and prints `-0`.
+///
+/// # Arguments
+///
+/// * `v` - Value to format.
 fn format_value(v: f64) -> String {
 	if v.fract() == 0.0 {
 		format!("{v:.0}")
@@ -593,7 +641,17 @@ pub struct CheckBox {
 }
 
 impl CheckBox {
-	/// Create a checkbox for `control` in `state`.
+	/// Creates a checkbox row.
+	///
+	/// Request-only: the box never changes its own state; it emits
+	/// [`CheckBoxEvent::Toggled`] and waits for [`CheckBox::set_state`].
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable control id reported in events and used in element ids.
+	/// * `state` - Initial visual state.
+	/// * `_window` - Unused; kept for constructor symmetry with the other controls.
+	/// * `cx` - Context used to create the focus handle.
 	pub fn new(
 		control: usize,
 		state: CheckState,
@@ -608,18 +666,36 @@ impl CheckBox {
 		}
 	}
 
-	/// A label shown next to the box.
+	/// Sets the label shown next to the box.
+	///
+	/// Builder-style: consumes and returns `self`. Without it the row shows only
+	/// the box.
+	///
+	/// # Arguments
+	///
+	/// * `label` - Text displayed to the right of the box.
 	pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
 		self.label = Some(label.into());
 		self
 	}
 
-	/// The current state.
+	/// Returns the current visual state.
+	///
+	/// This is the state last accepted through [`CheckBox::set_state`], not the
+	/// state the next click would request.
 	pub fn state(&self) -> CheckState {
 		self.state
 	}
 
-	/// The host's acceptance path: apply `state` (also repaints).
+	/// Applies an accepted state to the checkbox (the host's acceptance path).
+	///
+	/// The control emits nothing; callers that need a repaint must notify the
+	/// context themselves (`_cx` is unused here).
+	///
+	/// # Arguments
+	///
+	/// * `state` - State to display.
+	/// * `_cx` - Unused; kept for symmetry with the other controls' setters.
 	pub fn set_state(&mut self, state: CheckState, _cx: &mut Context<Self>) {
 		self.state = state;
 	}
@@ -755,7 +831,15 @@ pub struct ComboBoxOption {
 }
 
 impl ComboBoxOption {
-	/// Create an option with `index` and `label`.
+	/// Creates a combo-box option.
+	///
+	/// `index` is the value reported by [`ComboBoxEvent::Selected`] (not the
+	/// option's position); `label` is the text shown in the button and popup.
+	///
+	/// # Arguments
+	///
+	/// * `index` - Caller-defined value for this option.
+	/// * `label` - Display label; converted into a `SharedString`.
 	pub fn new(index: usize, label: impl Into<SharedString>) -> Self {
 		Self {
 			index,
@@ -790,7 +874,19 @@ pub struct ComboBox {
 }
 
 impl ComboBox {
-	/// Create a combo box for `control` with `options`.
+	/// Creates a combo box over a fixed option list.
+	///
+	/// Initial state: nothing selected (the placeholder shows) and the popup
+	/// closed. The host must call [`ComboBox::set_selected`] to reflect its own
+	/// model.
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable control id used in element ids.
+	/// * `options` - Options in display order; their `index` values are what
+	///   selection events report.
+	/// * `_window` - Unused; kept for constructor symmetry.
+	/// * `cx` - Context used to create the focus handle.
 	pub fn new(
 		control: usize,
 		options: Vec<ComboBoxOption>,
@@ -808,7 +904,13 @@ impl ComboBox {
 		}
 	}
 
-	/// The placeholder shown while nothing is selected.
+	/// Sets the text shown while nothing is selected.
+	///
+	/// Builder-style: consumes and returns `self`.
+	///
+	/// # Arguments
+	///
+	/// * `placeholder` - Text displayed when `selected` is `None`.
 	pub fn with_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
 		self.placeholder = placeholder.into();
 		self
@@ -819,8 +921,17 @@ impl ComboBox {
 		self.selected
 	}
 
-	/// Replaces the option list (a container/format switch rebuilds the
-	/// compatible codec lists); selection resets to the first entry.
+	/// Replaces the option list and clears the selection.
+	///
+	/// Used when a container/format switch rebuilds the compatible codec list.
+	/// After the replacement the selection is `None` (the placeholder shows),
+	/// the highlight resets to the first row, any open popup closes, and the
+	/// control repaints.
+	///
+	/// # Arguments
+	///
+	/// * `options` - New options in display order.
+	/// * `cx` - Context notified for the repaint.
 	pub fn set_options(&mut self, options: Vec<ComboBoxOption>, cx: &mut Context<Self>) {
 		self.options = options;
 		self.selected = None;
@@ -829,11 +940,30 @@ impl ComboBox {
 		cx.notify();
 	}
 
-	/// The selected option index (external sync; also repaints).
+	/// Sets the selected option index from an external sync.
+	///
+	/// The host calls this to reflect its model; nothing is emitted. The value
+	/// is stored as-is (it indexes `options` when rendering, so an out-of-range
+	/// index renders as no selection) and no repaint is requested — the caller
+	/// notifies.
+	///
+	/// # Arguments
+	///
+	/// * `selected` - New selected option index, or `None` for no selection.
+	/// * `_cx` - Unused; kept for symmetry with the other controls' setters.
 	pub fn set_selected(&mut self, selected: Option<usize>, _cx: &mut Context<Self>) {
 		self.selected = selected;
 	}
 
+	/// Selects an option, closes the popup and broadcasts the choice.
+	///
+	/// Emits [`ComboBoxEvent::Selected`] with the option's value and repaints.
+	///
+	/// # Arguments
+	///
+	/// * `index` - Value to select; callers pass an index from `options` (no
+	///   bounds check is performed here).
+	/// * `cx` - Context used to emit the event and repaint.
 	fn select(&mut self, index: usize, cx: &mut Context<Self>) {
 		self.selected = Some(index);
 		self.open = false;
@@ -841,6 +971,17 @@ impl ComboBox {
 		cx.notify();
 	}
 
+	/// Moves the selection by `dir` steps, wrapping around the option list.
+	///
+	/// Starts from the current selection (or the first option when nothing is
+	/// selected) and wraps with `rem_euclid`, then commits through
+	/// [`ComboBox::select`] (which emits the event and repaints). An empty
+	/// option list is a no-op.
+	///
+	/// # Arguments
+	///
+	/// * `dir` - Signed step: positive moves forward, negative backward.
+	/// * `cx` - Context used to commit the selection.
 	fn move_selection(&mut self, dir: i32, cx: &mut Context<Self>) {
 		if self.options.is_empty() {
 			return;
@@ -1043,7 +1184,17 @@ pub struct SpinBox {
 }
 
 impl SpinBox {
-	/// Create a spin box for `control` over `model`.
+	/// Creates a numeric spin box over `model`.
+	///
+	/// The widget has no inline text box (unlike [`Slider`]); typed values
+	/// arrive through the double-click editor. Initial state: no editor open.
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable control id reported in events and used in element ids.
+	/// * `model` - Range/value model; owned by the control.
+	/// * `_window` - Unused; kept for constructor symmetry with the other controls.
+	/// * `cx` - Context used to create the focus handle.
 	pub fn new(
 		control: usize,
 		model: SliderModel,
@@ -1059,7 +1210,16 @@ impl SpinBox {
 		}
 	}
 
-	/// The current value (external sync).
+	/// Sets the field's value from an external sync.
+	///
+	/// This is the host's write path (engine read-back / panel re-sync): the
+	/// value is stored in the model silently. It does not emit
+	/// [`SpinBoxEvent`] or repaint; the caller notifies if a repaint is needed.
+	///
+	/// # Arguments
+	///
+	/// * `value` - New model value, in the model's own kind/range.
+	/// * `_cx` - Unused; kept for symmetry with the other controls' setters.
 	pub fn set_value(&mut self, value: SliderValue, _cx: &mut Context<Self>) {
 		self.model.set_value(value);
 	}
@@ -1069,6 +1229,15 @@ impl SpinBox {
 		self.model.value()
 	}
 
+	/// Emits a value-changed event when the model actually moved.
+	///
+	/// A `false` `changed` is a no-op (no event, no repaint), so gestures that
+	/// clamp back to the same value stay silent.
+	///
+	/// # Arguments
+	///
+	/// * `changed` - Whether the model's value changed in this gesture.
+	/// * `cx` - Context used to emit [`SpinBoxEvent::ValueChanged`] and repaint.
 	fn emit_changed(&mut self, changed: bool, cx: &mut Context<Self>) {
 		if changed {
 			cx.emit(SpinBoxEvent::ValueChanged {
@@ -1106,7 +1275,17 @@ impl SpinBox {
 		cx.notify();
 	}
 
-	/// Parse `text` as the model's value kind, clamp it and apply + emit.
+	/// Parses typed text, clamps it through the model and reports a change.
+	///
+	/// Integer-valued models parse as `i64`; all other kinds parse as `f64`.
+	/// Unparsable text is ignored silently. A real change is reported as
+	/// [`SpinBoxEvent::ValueChanged`] (the same path as wheel/arrow gestures)
+	/// when the model actually moved.
+	///
+	/// # Arguments
+	///
+	/// * `text` - Raw editor text; surrounding whitespace is ignored.
+	/// * `cx` - Context used to emit the change and repaint.
 	fn apply_text(&mut self, text: &str, cx: &mut Context<Self>) {
 		let parsed: Option<f64> = match self.model.value() {
 			SliderValue::Integer(_) => text.trim().parse::<i64>().ok().map(|v| v as f64),

@@ -63,18 +63,31 @@ pub enum RenderedFrame {
 }
 
 impl RenderedFrame {
+	/// Width in pixels of the rendered frame.
+	///
+	/// Taken as-is from the SDK frame info; the display path clamps negative
+	/// values with `max(0)` before creating images or buffers.
 	pub fn width(&self) -> i32 {
 		match self {
 			RenderedFrame::Sdk(frame) => frame.info().width,
 		}
 	}
 
+	/// Height in pixels of the rendered frame.
+	///
+	/// Taken as-is from the SDK frame info; the display path clamps negative
+	/// values with `max(0)` before creating images or buffers.
 	pub fn height(&self) -> i32 {
 		match self {
 			RenderedFrame::Sdk(frame) => frame.info().height,
 		}
 	}
 
+	/// The pipeline format code for this frame's pixels.
+	///
+	/// Returns `PIXEL_FORMAT_F32` (4) for F32 RGBA frames and
+	/// `SLOT_FORMAT_BGRA8` (100) for BGRA8 frames — the wire codes the app's
+	/// GPU/display slots expect.
 	pub fn format(&self) -> i32 {
 		match self {
 			RenderedFrame::Sdk(frame) => match frame.info().pixel_format {
@@ -84,6 +97,10 @@ impl RenderedFrame {
 		}
 	}
 
+	/// Whether the frame is backed by shared memory rather than a GPU texture.
+	///
+	/// True when the SDK frame origin is `SharedMemory` (a CPU plane the app can
+	/// read without an extra copy); used to choose the display upload path.
 	pub fn is_shm(&self) -> bool {
 		match self {
 			RenderedFrame::Sdk(frame) => {
@@ -92,6 +109,10 @@ impl RenderedFrame {
 		}
 	}
 
+	/// Whether the frame is backed by a GPU texture.
+	///
+	/// True when the SDK frame origin is `Gpu`; such frames can be displayed
+	/// zero-copy through `to_display`'s texture registration.
 	pub fn is_gpu(&self) -> bool {
 		match self {
 			RenderedFrame::Sdk(frame) => {
@@ -100,8 +121,18 @@ impl RenderedFrame {
 		}
 	}
 
-	/// Builds the viewer image, matching scope data and optional F32 display
-	/// samples used by the RGBA16F upload path.
+	/// Converts this frame into the viewer image plus optional display samples.
+	///
+	/// Three paths: a GPU texture is registered for zero-copy display and the
+	/// result is `(lazy image, None, None)`; an F32 RGBA CPU frame is repacked
+	/// tightly, passed through the project output transform and display-color
+	/// conversion, and returned with its samples (`(image, None, Some(samples))`)
+	/// for the RGBA16F upload/scopes; a BGRA8 frame is display-color converted
+	/// and wrapped as an image (`(image, None, None)`).
+	///
+	/// Returns `None` when the frame has invalid dimensions or the repack/image
+	/// conversion fails. The middle tuple slot is currently always `None`
+	/// (reserved for scope payloads).
 	pub fn to_display(&self) -> Option<(RenderImage, Option<ScopeData>, Option<Vec<f32>>)> {
 		match self {
 			RenderedFrame::Sdk(frame) => {
@@ -158,7 +189,17 @@ pub(crate) fn apply_output_node_f32(samples: &mut [f32]) {
 	);
 }
 
-/// Repacks padded F32 RGBA rows into tightly packed samples.
+/// Repacks padded F32 RGBA rows into a tightly packed sample vector.
+///
+/// # Arguments
+///
+/// * `width` / `height` - frame size in pixels; must be positive.
+/// * `linesize` - row stride in bytes as reported by the frame; values smaller
+///   than `width * 16` are treated as tightly packed.
+/// * `data` - raw frame bytes, at least `linesize * height` long.
+///
+/// Returns `None` for non-positive dimensions or a short buffer; otherwise a
+/// `width * height * 4` F32 vector in RGBA order (native-endian f32s).
 fn repack_f32_rows(width: i32, height: i32, linesize: i32, data: &[u8]) -> Option<Vec<f32>> {
 	if width <= 0 || height <= 0 {
 		return None;
@@ -179,6 +220,15 @@ fn repack_f32_rows(width: i32, height: i32, linesize: i32, data: &[u8]) -> Optio
 	Some(samples)
 }
 
+/// Checks that a render request has positive dimensions and a positive time base.
+///
+/// # Arguments
+///
+/// * `width` / `height` - requested output size in pixels.
+/// * `tb` - frame time base `(num, den)`.
+///
+/// Returns `Err("invalid render geometry or frame rate")` when any value is
+/// non-positive; called before submitting a task so bad geometry fails fast.
 fn validate_geometry(width: i32, height: i32, tb: (i64, i64)) -> Result<(), String> {
 	if width <= 0 || height <= 0 || tb.0 <= 0 || tb.1 <= 0 {
 		return Err("invalid render geometry or frame rate".to_string());
@@ -197,6 +247,22 @@ pub fn full_res_render_size(seq_width: u32, seq_height: u32, divider: u32) -> (i
 }
 
 /// Starts one sequence/footage frame render on an SDK engine worker.
+///
+/// Thin wrapper over [`submit_video_frame_scheduled`] with no playback
+/// metadata; the returned task must be awaited or polled by the caller.
+///
+/// # Arguments
+///
+/// * `p` - project the viewer belongs to.
+/// * `viewer` - sequence or footage node to render.
+/// * `frame_ts` / `tb` - frame timestamp and time base.
+/// * `width` / `height` - output size in pixels.
+/// * `format` - requested pixel format (`None` → BGRA8).
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing session, or a task
+/// that cannot be started.
 pub fn submit_video_frame(
 	p: &ProjectRef,
 	viewer: NodeId,
@@ -211,7 +277,27 @@ pub fn submit_video_frame(
 	)
 }
 
-/// Starts a forward-window frame at Playback priority.
+/// Starts one sequence/footage frame render at playback priority.
+///
+/// Same as [`submit_video_frame`] but tags the request with the current
+/// playhead and a generation counter, letting the engine prefer/drop frames by
+/// distance from the playhead and discard results from an older generation.
+///
+/// # Arguments
+///
+/// * `p` - project the viewer belongs to.
+/// * `viewer` - sequence or footage node to render.
+/// * `frame_ts` / `tb` - frame timestamp and time base.
+/// * `width` / `height` - output size in pixels.
+/// * `format` - requested pixel format (`None` → BGRA8).
+/// * `playhead` - current playhead timestamp in the same units as `frame_ts`.
+/// * `generation` - monotonically increasing playback generation; stale
+///   generations are ignored by the scheduler.
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing session, or a task
+/// that cannot be started.
 pub fn submit_playback_video_frame(
 	p: &ProjectRef,
 	viewer: NodeId,
@@ -235,6 +321,29 @@ pub fn submit_playback_video_frame(
 	)
 }
 
+/// Shared submission path for [`submit_video_frame`] and its playback variant.
+///
+/// Validates geometry, resolves the editor session for `p`, maps the requested
+/// [`PixelFormat`] to the SDK's video format (F32 → F32 RGBA, anything else →
+/// BGRA8), converts `frame_ts`/`tb` to rational seconds, then starts either the
+/// playback-priority render (`playback = Some((playhead, generation))`, distance
+/// `|frame_ts - playhead|`) or an ordinary render.
+///
+/// # Arguments
+///
+/// * `p` - project the viewer belongs to.
+/// * `viewer` - node id of the sequence or footage being rendered.
+/// * `frame_ts` - frame timestamp in `tb` units.
+/// * `tb` - frame time base `(num, den)`; both positive.
+/// * `width` / `height` - output size in pixels; must be positive.
+/// * `format` - requested pixel format (`None` → BGRA8).
+/// * `playback` - optional `(playhead_ts, generation)` for playback scheduling;
+///   `generation` invalidates stale in-flight frames.
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing session, or a task
+/// that cannot be started.
 fn submit_video_frame_scheduled(
 	p: &ProjectRef,
 	viewer: NodeId,
@@ -278,7 +387,19 @@ fn submit_video_frame_scheduled(
 	.ok_or_else(|| "failed to start the video render task".to_string())
 }
 
-/// Waits on a background caller and transfers an SDK frame exactly once.
+/// Waits for an SDK video task and takes its frame exactly once.
+///
+/// Blocks on the task; on failure returns the task's error message (or
+/// `"video render failed"` when empty). On success takes the frame with
+/// `take_video`, which consumes it, so the caller must not take again.
+///
+/// # Arguments
+///
+/// * `task` - the video render task returned by `submit_*`; ownership moves in.
+///
+/// # Errors
+///
+/// Returns an error string when the task fails/cancels or produces no frame.
 fn wait_video_frame(task: quercus_engine_rs::task::Task) -> Result<RenderedFrame, String> {
 	if !task.wait() {
 		let error = task.error();
@@ -293,7 +414,25 @@ fn wait_video_frame(task: quercus_engine_rs::task::Task) -> Result<RenderedFrame
 		.ok_or_else(|| "video render produced no frame".to_string())
 }
 
-/// Renders one sequence frame through an SDK task.
+/// Renders one sequence frame through an SDK task and waits for it.
+///
+/// Submits the frame (see [`submit_video_frame`]) and blocks on
+/// [`wait_video_frame`]; the synchronous counterpart is for background
+/// workers/tests — the UI path submits and polls instead.
+///
+/// # Arguments
+///
+/// * `p` - project the sequence belongs to.
+/// * `seq` - sequence node to render.
+/// * `frame_ts` / `tb` - frame time and its time base.
+/// * `width` / `height` - output size in pixels.
+/// * `format` - requested pixel format; `Some(PixelFormat::F32)` selects F32
+///   RGBA, anything else selects BGRA8.
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing session, a task that
+/// cannot start, or a render failure.
 pub fn render_sequence_frame(
 	p: &ProjectRef,
 	seq: NodeId,
@@ -308,7 +447,24 @@ pub fn render_sequence_frame(
 	)?)
 }
 
-/// Renders one source-footage frame through an SDK task.
+/// Renders one source-footage frame through an SDK task and waits for it.
+///
+/// Same as [`render_sequence_frame`] but `footage` identifies a footage node
+/// (the viewer renders the source directly, without the sequence graph).
+///
+/// # Arguments
+///
+/// * `p` - project the footage belongs to.
+/// * `footage` - footage node to render.
+/// * `frame_ts` / `tb` - frame time and its time base.
+/// * `width` / `height` - output size in pixels.
+/// * `format` - requested pixel format; `Some(PixelFormat::F32)` selects F32
+///   RGBA, anything else selects BGRA8.
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing session, a task that
+/// cannot start, or a render failure.
 pub fn render_footage_frame(
 	p: &ProjectRef,
 	footage: NodeId,
@@ -323,7 +479,23 @@ pub fn render_footage_frame(
 	)?)
 }
 
-/// Renders one single-track multicam angle through an SDK task.
+/// Renders one single-track multicam angle and waits for the frame.
+///
+/// Always requests F32 RGBA (the multicam compositor's output format) and uses
+/// the sequence/track ids directly rather than the viewer path.
+///
+/// # Arguments
+///
+/// * `p` - project the sequence belongs to.
+/// * `seq` - sequence node owning the tracks.
+/// * `track` - track node holding the angle clips.
+/// * `frame_ts` / `tb` - frame time and its time base; converted to seconds.
+/// * `width` / `height` - output size in pixels; must be positive.
+///
+/// # Errors
+///
+/// Returns an error string for invalid geometry, a missing editor session, a
+/// task that cannot start, or a render failure.
 pub fn render_multicam_angle_frame(
 	p: &ProjectRef,
 	seq: NodeId,
@@ -354,7 +526,23 @@ pub struct RenderedAudio {
 	pub channel_count: i32,
 }
 
-/// Renders an audio range on a background caller.
+/// Renders an audio range synchronously on a background caller.
+///
+/// Creates a channel, submits one chunk (which runs on its own thread) and
+/// blocks until the chunk arrives; used by non-realtime callers/tests, not the
+/// playback prefetch.
+///
+/// # Arguments
+///
+/// * `p` - project the sequence belongs to.
+/// * `seq` - sequence node to render.
+/// * `start_ts` / `len_ts` - range start and length in frames.
+/// * `tb` - frame time base `(num, den)`.
+///
+/// # Errors
+///
+/// Returns an error string when the session/job cannot be created or the
+/// channel closes before delivering a chunk.
 pub fn render_audio_range(
 	p: &ProjectRef,
 	seq: NodeId,
@@ -377,6 +565,13 @@ struct AudioRenderJob {
 }
 
 impl AudioRenderJob {
+	/// Waits for the job's render task and forwards the result on its channel.
+	///
+	/// On success sends the decoded block's samples together with its sample
+	/// rate and channel count. On failure (task error, cancellation, or no audio
+	/// block) sends `expected_frames * 2` zeros at 48 kHz stereo, so a failed
+	/// prefetch keeps the playback timeline aligned instead of stalling. The
+	/// send is best-effort; a closed receiver is ignored.
 	fn run(self) {
 		if self.task.wait() {
 			if let Some(block) = self.task.take_audio() {
@@ -419,6 +614,17 @@ pub struct AudioRenderWorker {
 }
 
 impl AudioRenderWorker {
+	/// Starts the persistent audio-render worker thread.
+	///
+	/// Spawns one named thread (`oak-audio-render`) that drains queued
+	/// [`AudioRenderJob`]s in submission order, so playback needs no
+	/// thread-per-chunk. The worker exits when the sender is dropped (see the
+	/// `Drop` impl); the join handle is kept only to detach deliberately.
+	///
+	/// # Panics
+	///
+	/// Panics if the OS thread cannot be spawned (`.expect("spawn
+	/// oak-audio-render")`); this is a startup-time resource failure.
 	pub fn new() -> Self {
 		let (tx, rx) = mpsc::channel::<AudioRenderJob>();
 		let join = std::thread::Builder::new()
@@ -453,6 +659,25 @@ impl Drop for AudioRenderWorker {
 	}
 }
 
+/// Builds (but does not run) one audio-render job for `[start_ts, start_ts+len_ts)`.
+///
+/// Converts the frame range to rational seconds using `tb`, computes the number
+/// of 48 kHz frames the chunk should contain (used to pad failures with aligned
+/// silence), and starts an SDK `render_audio` task at 48 kHz with the stereo
+/// layout mask `0x3`.
+///
+/// # Arguments
+///
+/// * `session` - editor session that owns the project.
+/// * `seq` - sequence node to render.
+/// * `start_ts` / `len_ts` - chunk start and length in frames.
+/// * `tb` - frame time base `(num, den)`; must be positive.
+/// * `tx` - channel the job reports `(start_ts, RenderedAudio)` on.
+///
+/// # Errors
+///
+/// Returns an error string for an invalid time base or when the SDK cannot
+/// start the render task.
 fn audio_render_job(
 	session: &quercus_engine_rs::editor::EditorSession,
 	seq: NodeId,
@@ -487,9 +712,26 @@ fn audio_render_job(
 	})
 }
 
-/// Submits one audio chunk without blocking the UI thread. Used by the
-/// synchronous range helper; playback uses
-/// [`submit_audio_chunk_to_worker`] instead.
+/// Submits one audio chunk on a one-shot thread without blocking the UI.
+///
+/// Builds the render job synchronously (so invalid ranges/time base fail here)
+/// then spawns an OS thread that waits for it and reports
+/// `(start_ts, RenderedAudio)` through `tx`. Used by the synchronous
+/// [`render_audio_range`] helper; the playback path uses
+/// [`submit_audio_chunk_to_worker`] instead to avoid one thread per chunk.
+///
+/// # Arguments
+///
+/// * `session` - editor session that owns the project.
+/// * `seq` - sequence node to render.
+/// * `start_ts` / `len_ts` - chunk start and length in frames.
+/// * `tb` - frame time base `(num, den)`; both must be positive.
+/// * `tx` - channel receiving the mixed chunk (or silence on failure).
+///
+/// # Errors
+///
+/// Returns an error string when the time base is invalid or the SDK cannot
+/// start the audio render task.
 pub fn submit_audio_chunk(
 	session: &quercus_engine_rs::editor::EditorSession,
 	seq: NodeId,
@@ -526,6 +768,28 @@ const EXPORT_SAMPLE_RATE: i32 = 48_000;
 const EXPORT_CHANNEL_LAYOUT: u64 = 0x3;
 
 /// Builds export parameters with the container's first video/audio codecs.
+///
+/// Used by callers that pick only a container (no per-codec dialog). The
+/// sequence's video size and rate are used; `workarea` (frames) becomes the
+/// custom range when non-empty, otherwise `length_frames` sets the export
+/// length. Video/audio are enabled, subtitles disabled, audio fixed at 48 kHz
+/// stereo (layout mask `0x3`), bitrates left at 0 (codec defaults) and color
+/// override disabled.
+///
+/// # Arguments
+///
+/// * `p` - project the sequence belongs to.
+/// * `seq` - sequence node to export.
+/// * `format` - export container as a `Format` discriminant.
+/// * `_path` - reserved for per-output-path overrides; currently unused.
+/// * `workarea` - optional `(in_ts, out_ts)` in frames; used only when
+///   `out_ts > in_ts`.
+/// * `length_frames` - timeline length in frames when there is no workarea.
+///
+/// # Errors
+///
+/// Returns an error string when the format is unknown, the container has no
+/// video or audio codec, or the sequence has no video parameters.
 pub fn encoding_params(
 	p: &ProjectRef,
 	seq: NodeId,
@@ -597,7 +861,29 @@ pub fn encoding_params(
 	})
 }
 
-/// Builds export parameters with the dialog's full overrides.
+/// Builds export parameters from the export dialog's full overrides.
+///
+/// Unlike [`encoding_params`], the container and codecs must match the user's
+/// selection, and size/frame rate/range/bit depth/color come from `settings`
+/// when set. A positive `settings.frame_rate` replaces the sequence rate with
+/// that integer rate (denominator 1); `settings.range` (seconds) wins over
+/// `workarea`; a 10-bit setting maps to pixel format code 1, otherwise 0.
+///
+/// # Arguments
+///
+/// * `p` - project the sequence belongs to.
+/// * `seq` - sequence node to export.
+/// * `settings` - dialog overrides: format, video/audio codec, optional size,
+///   frame rate, range in seconds, bit depth, bitrates and color metadata.
+/// * `_path` - reserved for per-output-path overrides; currently unused.
+/// * `workarea` - optional `(in_ts, out_ts)` frame range used when
+///   `settings.range` is absent or invalid.
+/// * `length_frames` - fallback length when neither range applies.
+///
+/// # Errors
+///
+/// Returns an error string when the format is unknown, either selected codec is
+/// not offered by the container, or the sequence has no video parameters.
 pub fn encoding_params_with_settings(
 	p: &ProjectRef,
 	seq: NodeId,
@@ -708,7 +994,26 @@ pub fn encoding_params_with_settings(
 	})
 }
 
-/// Starts an SDK export and adapts polling to the app's event protocol.
+/// Starts an SDK export and adapts its polling to the app's event protocol.
+///
+/// Starts `task::export` on the sequence, then spawns a polling thread that emits
+/// `ExportEvent::Started`, a `Progress` value clamped to 0..1 (every 10 ms while
+/// running) and finally `Finished(ok, message)` — the message is empty on
+/// success and the task error (or `"export failed"`) on failure/cancel. The
+/// returned `ExportSession` exposes the event receiver and a cancel closure.
+///
+/// # Arguments
+///
+/// * `session` - editor session that owns the project.
+/// * `seq` - sequence node to export.
+/// * `filename` - output file path passed to the SDK exporter.
+/// * `params` - encoding parameters (from `encoding_params` or
+///   `encoding_params_with_settings`).
+///
+/// # Errors
+///
+/// Returns an error string when the SDK cannot start the export task (no task
+/// id). Per-frame failures are reported through `ExportEvent::Finished`.
 pub fn spawn_export(
 	session: &quercus_engine_rs::editor::EditorSession,
 	seq: quercus_engine_rs::node::NodeId,

@@ -64,7 +64,14 @@ pub struct WaveformCache {
 }
 
 impl WaveformCache {
-	/// Create an empty cache at the given frame rate.
+	/// Creates an empty cache for a timeline running at `fps` frames per second.
+	///
+	/// A non-positive `fps` falls back to 25.0 so downstream frame-to-time arithmetic
+	/// cannot divide by zero; the value is only forwarded to `extract` today, which
+	/// ignores it (peaks are addressed in source samples). The cache is returned in
+	/// an `Arc` because the clip decorator and the background extraction share it.
+	/// Fill it with [`WaveformCache::refresh`], read it back with
+	/// [`WaveformCache::get`].
 	pub fn new(fps: f32) -> Arc<WaveformCache> {
 		Arc::new(WaveformCache {
 			map: Mutex::new(HashMap::new()),
@@ -78,7 +85,13 @@ impl WaveformCache {
 		self.version.load(std::sync::atomic::Ordering::Relaxed)
 	}
 
-	/// The cached waveform of `clip`, if extracted.
+	/// The cached waveform of `clip`, if one has been extracted.
+	///
+	/// `clip` is the numeric clip id (`ClipId.0`). Returns a shared handle to the
+	/// immutable peaks, or `None` when nothing is extracted yet — the usual answer
+	/// while the background extraction is still running, so callers draw no
+	/// waveform rather than blocking. Takes only the map lock; the decode itself
+	/// happens in [`WaveformCache::refresh`].
 	pub fn get(&self, clip: u64) -> Option<Arc<ClipWaveform>> {
 		self.map
 			.lock()
@@ -107,8 +120,16 @@ impl WaveformCache {
 	}
 }
 
-/// Extract a clip's waveform (first channel) through the SDK. The caller is
-/// already on a media worker, so the blocking handle API does not stall GPUI.
+/// Extracts a clip's waveform (first channel) through the SDK.
+///
+/// `filename` is the clip's media path, `duration_frames` the clip length in
+/// timeline frames stored alongside the peaks, and `_fps` is unused (the
+/// extractor works in source samples). Peaks summarise 256 source samples per
+/// point. The caller is already on a media worker, so the blocking decode does
+/// not stall GPUI.
+///
+/// Returns `None` when the file cannot be decoded or the stream reports no
+/// channels/points; the clip is then drawn without a waveform.
 fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
 	const SAMPLES_PER_POINT: i32 = 256;
 	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
@@ -130,15 +151,18 @@ fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWavefo
 	})
 }
 
-/// Extract an audio RMS peak envelope directly from a media file's
-/// audio stream — the multicam wizard's sync correlation input. Uses
-/// the oakaudio waveform extractor's min/max points (per 256 source
-/// samples), keeps the first channel, and maps each point onto a tiny
-/// norm that the envelope correlator can compare across angles (the
-/// point's peak = max(|min|, |max|), windowed 1/10 s).
+/// Extracts an audio RMS peak envelope straight from a media file's audio
+/// stream — the multicam wizard's sync-correlation input.
 ///
-/// Returns `None` when the file has no decodable audio (the wizard then
-/// falls back to timecode alignment).
+/// `filename` is the media path and `stream_index` the 0-based audio stream to
+/// decode (negative values are rejected by the extractor). Points summarise 256
+/// source samples each and only channel 0 is used; each point contributes
+/// `max(|min|, |max|)`. Those per-point peaks are then folded into windows of
+/// about 1/10 s (rounded, at least one point), giving a rate-independent
+/// envelope the correlator can compare across angles.
+///
+/// Returns `None` when the file has no decodable audio (the wizard then falls
+/// back to timecode alignment).
 pub fn extract_audio_envelope(filename: &str, stream_index: i32) -> Option<Vec<f64>> {
 	const SAMPLES_PER_POINT: i32 = 256;
 	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(

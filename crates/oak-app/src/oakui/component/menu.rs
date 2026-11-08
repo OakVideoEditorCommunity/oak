@@ -80,7 +80,18 @@ impl ContextMenuHandle {
 		Self { menu }
 	}
 
-	/// Open the menu at `position` (window coordinates).
+	/// Opens the panel's context menu at `position`.
+	///
+	/// `position` is the popup's top-left anchor in window coordinates (usually
+	/// the right-click location) and `menu` is the fully built menu model, moved
+	/// into the popup. Forwards to [`ContextMenu::show`], which replaces any menu
+	/// already open and requests a repaint. The popup is only visible when
+	/// `self.widget()` is rendered as a child of the panel, so it paints above
+	/// the panel content.
+	///
+	/// Activation of an item is routed by [`ContextMenuHandle::new`]: registry
+	/// items are re-emitted as [`ContextMenuTriggered`], everything else goes to
+	/// the panel's `on_local_item` callback.
 	pub fn show(&self, position: Point<Pixels>, menu: Menu, cx: &mut App) {
 		self.menu
 			.update(cx, |menu_view, cx| menu_view.show(position, menu, cx));

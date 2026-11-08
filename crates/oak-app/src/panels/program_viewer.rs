@@ -246,10 +246,12 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		}
 	}
 
-	/// Handles the viewer's local (non-registry) context-menu items by
-	/// resolving them into [`menu::ViewerMenuAction`] and applying the action
-	/// (the id resolution and the menu construction are shared with the source
-	/// viewer, so both monitors behave identically).
+	/// Handles the viewer's local (non-registry) context-menu items.
+	///
+	/// `item` is the numeric id emitted by the shared viewer menu; it is resolved
+	/// through `menu::viewer_menu_action` and then applied by `apply_viewer_action`,
+	/// the same path the source viewer uses, so both monitors behave identically. An
+	/// unrecognised id is logged and ignored rather than panicking.
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		let Some(action) = menu::viewer_menu_action(item) else {
 			println!("[program viewer] context-menu item {item} (not handled)");
@@ -339,8 +341,14 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		}
 	}
 
-	/// Routes a transport command to the engine's program monitor through
-	/// the shared viewer transport helper.
+	/// Routes a transport command to the engine's program monitor.
+	///
+	/// `action` is a viewer transport action id (play/pause, step, shuttle,
+	/// go-to-start/end, in/out, play-in-to-out). The shared
+	/// `panel_commands::viewer_transport` helper applies it to the engine and its
+	/// clock for `Monitor::Program` — the same code the source viewer drives for
+	/// `Monitor::Source`, so both monitors stay in lockstep. Returns `false` when the
+	/// action is not a transport command, letting the caller fall through.
 	fn transport(&mut self, action: ActionId, cx: &mut Context<Self>) -> bool {
 		let engine = self.engine.clone();
 		let clock = self.clock.clone();
@@ -521,8 +529,12 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		}
 	}
 
-	/// Forwards a key event to the active OFX interact. No-op without an
-	/// active interact.
+	/// Forwards a key event to the active OFX interact, for plugins that consume
+	/// keyboard input.
+	///
+	/// `down` selects key-down (`true`) or key-up (`false`); `keystroke` supplies the
+	/// key symbol and printable string the interact receives, together with the
+	/// current playhead time. No-op when no interact is active.
 	///
 	/// # Consumption semantics
 	///
@@ -552,7 +564,13 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		}
 	}
 
-	/// One header tab button (picture / scopes), highlighted when active.
+	/// Builds one viewer header tab button (picture / scopes).
+	///
+	/// `id` is the gpui element id, `label` the visible text, `tab` the state the
+	/// button selects on click, and `colors` the active theme. The button is drawn
+	/// highlighted (selected background, accent hover) when `tab` equals the panel's
+	/// current tab; clicking assigns it and notifies the panel so the picture or
+	/// scopes repaint. Returns the button element for the header row.
 	fn tab_button(
 		&self,
 		id: &'static str,

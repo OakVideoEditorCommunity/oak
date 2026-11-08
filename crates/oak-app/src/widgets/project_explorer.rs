@@ -56,6 +56,11 @@ pub struct ProjectEntry {
 
 impl ProjectEntry {
 	/// Create an entry.
+	///
+	/// `id` is the host-side stable key (also used by events and selection),
+	/// `name` is the display name, and `is_dir` marks an expandable folder.
+	/// `thumbnail` and `proxy` start as `None`; chain [`Self::with_thumbnail`]
+	/// / [`Self::with_proxy_badge`] to set them.
 	pub fn new(id: u64, name: impl Into<SharedString>, is_dir: bool) -> Self {
 		Self {
 			id,
@@ -67,12 +72,19 @@ impl ProjectEntry {
 	}
 
 	/// Attach a thumbnail asset path.
+	///
+	/// Sets [`ProjectEntry::thumbnail`] to an `img`-renderable asset path;
+	/// consumes and returns `self` for builder chaining. Without one the
+	/// entry falls back to the placeholder swatch.
 	pub fn with_thumbnail(mut self, thumbnail: impl Into<SharedString>) -> Self {
 		self.thumbnail = Some(thumbnail.into());
 		self
 	}
 
 	/// Attach a proxy-state badge.
+	///
+	/// Sets [`ProjectEntry::proxy`] so the tree row / icon view draws the
+	/// lifecycle chip; consumes and returns `self` for builder chaining.
 	pub fn with_proxy_badge(mut self, badge: ProxyBadge) -> Self {
 		self.proxy = Some(badge);
 		self
@@ -123,6 +135,9 @@ impl Render for FootageDragGhost {
 
 /// Builds the drag ghost for a footage drag (see
 /// [`StatefulInteractiveElement::on_drag`](gpui_kit::StatefulInteractiveElement::on_drag)).
+///
+/// `_drag` (the dragged ids), `_offset` and `_window` are unused: the ghost
+/// is a fixed-size translucent swatch. `cx` creates the ghost entity.
 fn footage_drag_ghost(
 	_drag: &FootageDrag,
 	_offset: Point<Pixels>,
@@ -200,6 +215,12 @@ pub fn flatten_tree<F>(
 where
 	F: Fn(u64) -> Vec<ProjectEntry>,
 {
+	/// Recursively append `entries` and their expanded descendants to `out`.
+	///
+	/// Each row is pushed as `(entry.clone(), depth)`; a directory is
+	/// descended only when its id is in `expanded`, and `children` resolves
+	/// its entries. `depth` is the row's indent level: 0 for roots and one
+	/// more per nesting level.
 	fn walk<F>(
 		entries: &[ProjectEntry],
 		depth: usize,
@@ -238,6 +259,12 @@ pub struct ProjectExplorer<D: ProjectDataSource> {
 
 impl<D: ProjectDataSource> ProjectExplorer<D> {
 	/// Create an explorer over `data`.
+	///
+	/// `control` is the explorer's stable index (carried in every emitted
+	/// [`ProjectExplorerEvent`] payload and used in gpui element ids); `data`
+	/// is the host model entity, observed so model changes re-render;
+	/// `_window` is unused. The explorer starts in [`ExplorerView::Tree`]
+	/// with nothing expanded and an empty multi-selection.
 	pub fn new(
 		control: usize,
 		data: Entity<D>,
@@ -264,6 +291,10 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 	}
 
 	/// Set the view mode from the host.
+	///
+	/// Unlike [`set_view_mode`](Self::set_view_mode) this emits no
+	/// [`ProjectExplorerEvent::ViewChanged`] — the host is the source of the
+	/// change — and only notifies when the mode actually differs.
 	pub fn set_view(&mut self, view: ExplorerView, cx: &mut Context<Self>) {
 		if self.view != view {
 			self.view = view;
@@ -271,6 +302,11 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 		}
 	}
 
+	/// Toggle the expansion of folder `id` in the tree view.
+	///
+	/// Inserts `id` when it is collapsed and removes it when expanded, then
+	/// notifies so the tree re-renders. Only folder entries call this (files
+	/// open on double-click instead).
 	fn toggle(&mut self, id: u64, cx: &mut Context<Self>) {
 		if !self.expanded.remove(&id) {
 			self.expanded.insert(id);
@@ -278,6 +314,11 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 		cx.notify();
 	}
 
+	/// Emit [`ProjectExplorerEvent::OpenRequested`] for `entry`.
+	///
+	/// Called for a double-clicked file or folder; the widget only requests
+	/// the open (the host performs it). `entry` supplies the id and name
+	/// carried by the event. Always re-renders afterwards.
 	fn open(&mut self, entry: &ProjectEntry, cx: &mut Context<Self>) {
 		cx.emit(ProjectExplorerEvent::OpenRequested {
 			control: self.control,
@@ -287,6 +328,11 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 		cx.notify();
 	}
 
+	/// Switch the view mode and emit [`ProjectExplorerEvent::ViewChanged`]
+	/// so the host can persist the choice.
+	///
+	/// The toolbar buttons call this. Does nothing when `view` already matches
+	/// the current mode; otherwise sets it, emits the event, and re-renders.
 	fn set_view_mode(&mut self, view: ExplorerView, cx: &mut Context<Self>) {
 		if self.view != view {
 			self.view = view;
@@ -300,6 +346,13 @@ impl<D: ProjectDataSource> ProjectExplorer<D> {
 
 	/// Reports a right-click: selects the entry (if any) and emits
 	/// [`ProjectExplorerEvent::ContextMenuRequested`] for the host's menu.
+	///
+	/// `id` is the clicked entry, or `None` when the empty area was
+	/// right-clicked (the host then shows the background menu). A clicked
+	/// entry outside the current multi-selection becomes the sole selection
+	/// first; an entry already selected keeps the rest of the selection.
+	/// `position` is in window coordinates. The widget only emits — it never
+	/// opens a menu itself.
 	fn context_menu(&mut self, id: Option<u64>, position: Point<Pixels>, cx: &mut Context<Self>) {
 		if let Some(id) = id {
 			if !self.selected.contains(&id) {
@@ -684,10 +737,27 @@ impl<D: ProjectDataSource> Render for ProjectExplorer<D> {
 	}
 }
 
+/// Whether `id` is in the `expanded` folder set.
+///
+/// A helper for the render closures, which capture a clone of the set;
+/// equivalent to `expanded.contains(&id)` and used to pick the chevron
+/// direction.
 fn this_expanded(expanded: &HashSet<u64>, id: u64) -> bool {
 	expanded.contains(&id)
 }
 
+/// Build one toolbar toggle button (the tree / icon view switch).
+///
+/// # Arguments
+///
+/// * `id` - Stable gpui element id, also used as the debug selector.
+/// * `glyph` - Icon drawn in the label's active/inactive color.
+/// * `label` - Tooltip text (the caller passes a translated string).
+/// * `active` - Whether this button represents the current view mode; the
+///   active button gets the selected background and icon color.
+/// * `colors` - Theme colors to draw with.
+/// * `on_click` - Click handler; the caller switches [`ExplorerView`] and
+///   notifies.
 fn toggle_button(
 	id: &'static str,
 	glyph: crate::widgets::glyphs::Glyph,

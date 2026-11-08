@@ -108,6 +108,20 @@ struct GhostSnapshot {
 }
 
 /// Returns whether the two axis-aligned rectangles overlap (touching counts).
+///
+/// Both rectangles are given by their min/max corners in the same coordinate
+/// space (the marquee path passes graph-space corners), so dragged corners must
+/// be normalized first, as `SelectionRect::normalized` does.
+///
+/// # Arguments
+///
+/// * `min1` / `max1` - first rectangle's top-left and bottom-right corners.
+/// * `min2` / `max2` - second rectangle's corners, in the same space.
+///
+/// # Returns
+///
+/// `true` when the projections overlap on both axes, exact edge contact
+/// included.
 fn rects_intersect(
 	min1: Point<Pixels>,
 	max1: Point<Pixels>,
@@ -407,6 +421,16 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 
 	/// Handles pointer movement during a node drag: updates the accumulated
 	/// drag delta in graph space and emits [`NodeGraphEvent::NodeMovePreview`].
+	///
+	/// The delta is recomputed from the drag anchor on every move (never added
+	/// incrementally), so a zoom change mid-drag cannot accumulate error; the
+	/// widget draws dragged nodes at model position + delta. Panics (`expect`) if
+	/// no node drag is in progress.
+	///
+	/// # Arguments
+	///
+	/// * `window` - source of the current cursor position.
+	/// * `cx` - emit/notify target.
 	fn on_node_drag_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		let drag = self.node_drag.as_mut().expect("node drag in progress");
 		let cursor = window.mouse_position() - self.viewport.origin;
@@ -419,6 +443,15 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 	/// Handles pointer release at the end of a node drag: emits the final
 	/// [`NodeGraphEvent::NodeMoveRequested`] with the accumulated delta and
 	/// clears the transient drag state.
+	///
+	/// Nothing is emitted when the delta is zero (a click, not a drag), but the
+	/// drag state is always cleared and the view repaints, so a later release
+	/// cannot replay a stale drag. The event is the undoable operation; the
+	/// preceding `NodeMovePreview` events are only live feedback.
+	///
+	/// # Arguments
+	///
+	/// * `cx` - emit/notify target; the window is unused.
 	fn on_node_drag_end(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
 		if let Some(drag) = self.node_drag.take() {
 			if drag.delta != point(px(0.0), px(0.0)) {
@@ -513,6 +546,17 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 	/// [`NodeGraphDataSource::can_connect`] for each port of the opposite
 	/// kind. Ports that pass are highlighted; the ghost wire is drawn in its
 	/// invalid state while hovering a port that fails.
+	///
+	/// The free end snaps to a port anchor when the cursor is within
+	/// `PORT_GRAB_RADIUS` of it, and `target_valid` reflects only that hovered
+	/// port. The drag direction (which end is the output) comes from the ghost
+	/// wire; for a picked-up edge the output is recovered from the edge itself.
+	/// Panics (`expect`) if no wire drag is in progress.
+	///
+	/// # Arguments
+	///
+	/// * `window` - source of the current cursor position.
+	/// * `cx` - data source read plus notify target.
 	fn update_wire_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		let data = self.data.read(cx);
 		let drag = self.wire_drag.as_mut().expect("wire drag in progress");
@@ -565,6 +609,18 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 	/// emits [`NodeGraphEvent::BackgroundClicked`] at the drop position so
 	/// the app may open an "add node" menu pre-wired to the dragged port. On
 	/// an incompatible port (or back on the source port): cancels silently.
+	///
+	/// The hit test re-runs `can_connect` at the drop point and uses
+	/// `PORT_GRAB_RADIUS`, matching `update_wire_drag`; `ConnectionRequested.from`
+	/// is always the output port, even when the drag started at an input. A drag
+	/// that picked up an existing edge (`picked_edge`) and ends in empty space
+	/// emits [`NodeGraphEvent::DisconnectionRequested`] for that edge instead of
+	/// `BackgroundClicked`. Returns immediately when no wire drag is in progress.
+	///
+	/// # Arguments
+	///
+	/// * `window` - source of the current cursor position.
+	/// * `cx` - data source read for ports/edges, plus emit/notify target.
 	fn end_wire_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 		let drag = match self.wire_drag.take() {
 			Some(drag) => drag,
@@ -657,6 +713,16 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 
 	/// Handles pointer movement during a pan drag: repositions the viewport
 	/// offset and emits [`NodeGraphEvent::ViewChanged`].
+	///
+	/// The offset becomes `start_offset + (position - start_mouse)`, so the view
+	/// follows the cursor exactly; zoom is untouched. Panics (`expect`) if no pan
+	/// drag is in progress, which only happens if the mouse-down that started it
+	/// was missed.
+	///
+	/// # Arguments
+	///
+	/// * `position` - current window-space cursor position.
+	/// * `cx` - emit/notify target.
 	fn on_pan_drag_move(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
 		let pan = self.pan_drag.as_ref().expect("pan drag in progress");
 		let (start_mouse, start_offset) = (pan.start_mouse, pan.start_offset);
@@ -671,6 +737,17 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 
 	/// Handles scroll-wheel and pinch gestures: zooms at the cursor via
 	/// [`GraphViewState::zoom_at`] and emits [`NodeGraphEvent::ViewChanged`].
+	///
+	/// Zoom is clamped to `MIN_ZOOM..=MAX_ZOOM` inside `zoom_at`, and the graph
+	/// point under the cursor stays put. `ViewChanged` is emitted even when the
+	/// clamp left the zoom unchanged, so the app sees every gesture.
+	///
+	/// # Arguments
+	///
+	/// * `position` - window-space cursor position; converted to element-local
+	///   space before the anchor is applied.
+	/// * `factor` - multiplicative zoom step (> 1 zooms in, < 1 zooms out).
+	/// * `cx` - emit/notify target.
 	fn on_scroll_or_pinch(&mut self, position: Point<Pixels>, factor: f32, cx: &mut Context<Self>) {
 		self.state.zoom_at(position - self.viewport.origin, factor);
 		cx.emit(ViewChanged {
@@ -683,6 +760,16 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 	/// Handles the delete/backspace key: collects the selected nodes plus all
 	/// edges incident to them and emits [`NodeGraphEvent::DeleteRequested`].
 	/// Does nothing with an empty selection.
+	///
+	/// The view tracks a node selection only, so `edges` is derived from it: every
+	/// edge whose `from_node` or `to_node` is selected. Delivering both in one
+	/// event lets the app remove them as a single undo step; the widget itself
+	/// only emits the request.
+	///
+	/// # Arguments
+	///
+	/// * `cx` - data source read for the edge list, plus emit/notify target; the
+	///   window is unused.
 	fn on_delete_key(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
 		let nodes = self.state.selection().iter().copied().collect::<Vec<_>>();
 		if nodes.is_empty() {
@@ -717,6 +804,18 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 	/// treats the press as a plain background click (clear selection + emit
 	/// [`NodeGraphEvent::BackgroundClicked`]) when the drag was too small to
 	/// count.
+	///
+	/// "Too small" means the normalized rectangle moved less than
+	/// `MARQUEE_DRAG_THRESHOLD` on both axes. Intersection is tested in graph
+	/// space against each node's `DEFAULT_NODE_WIDTH` × measured-height box, with
+	/// touching counting as inside (`rects_intersect`). Returns quietly when no
+	/// marquee is in progress; selection changes are emitted through
+	/// `set_selection_and_emit` (no event when the selection is unchanged).
+	///
+	/// # Arguments
+	///
+	/// * `cx` - data source read for the node list, plus emit/notify target; the
+	///   window is unused.
 	fn end_marquee_or_click(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
 		let rect = match self.state.end_marquee() {
 			Some(rect) => rect,
@@ -873,6 +972,21 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 
 	/// Paints a [`GraphDraw`] snapshot: background, grid, wires, nodes, ghost
 	/// wire and marquee overlay.
+	///
+	/// Static because the paint closure cannot borrow the view: everything it
+	/// needs is in `draw`. The order is bottom-to-top and matters: background
+	/// quad, grid lines (spaced `GRID_SIZE` graph pixels, scaled by `draw.zoom`
+	/// and shifted by `draw.offset`), wires, nodes, ghost wire, marquee.
+	///
+	/// # Arguments
+	///
+	/// * `draw` - the frame snapshot built by the canvas prepaint; node/wire
+	///   geometry is already in window space, the marquee stays element-local.
+	/// * `bounds` - element-local paint area: the background fills it and the
+	///   grid lines are generated to cover it.
+	/// * `window` - paint target for quads and wires.
+	/// * `cx` - only consulted for the theme's default `background`, `border`
+	///   and `selected` colors.
 	fn paint_draw(draw: &GraphDraw, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
 		let colors = cx.default_colors().clone();
 		window.paint_quad(fill(bounds, Hsla::from(colors.background)));

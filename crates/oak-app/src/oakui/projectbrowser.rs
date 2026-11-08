@@ -27,7 +27,12 @@ use crate::widgets::project_explorer::ProjectEntry;
 
 use crate::oakui::graphops::ProjectRef;
 
-/// One child entry of a folder with its identity.
+/// Converts one graph child, `snapshot`, into a project browser row.
+///
+/// The row id is the node's stable identity (`snapshot.id.raw()`), its label
+/// is `snapshot.name`, and it is marked as a folder only when
+/// `snapshot.kind` is [`quercus_engine_rs::node::NodeKind::Folder`]; a node
+/// with no kind therefore renders as a leaf.
 fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEntry {
 	ProjectEntry::new(
 		snapshot.id.raw(),
@@ -36,7 +41,11 @@ fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEn
 	)
 }
 
-/// The children of a folder node.
+/// Maps each child of the folder node `snapshot` to a [`ProjectEntry`].
+///
+/// `snapshot` must be a folder from the project graph; its `children` are the
+/// entries directly beneath it, in graph order. The folder's own identity and
+/// name are not included in the result.
 fn folder_children(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> Vec<ProjectEntry> {
 	snapshot
 		.children
@@ -58,7 +67,13 @@ fn find_snapshot<'a>(
 		.find_map(|child| find_snapshot(child, identity))
 }
 
-/// The top-level entries: the project root folder's children.
+/// Lists the project browser's top-level entries for `project`.
+///
+/// The entries are the children of the project graph's root folder, in graph
+/// order; each [`ProjectEntry`] carries the node's stable identity as its id,
+/// the display name, and whether it is a folder. `project` is resolved to an
+/// editor session; when that fails (for example the project is not open) an
+/// empty vector is returned rather than an error.
 pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
 	let Ok(session) = super::real::editor_session_for_project(project) else {
 		return Vec::new();

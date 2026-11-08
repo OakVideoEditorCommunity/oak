@@ -23,7 +23,17 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-	/// Create a plain enabled item.
+	/// Creates a plain enabled item with no shortcut, checkmark, submenu or
+	/// trailing separator; use the `with_*`/`separated` builders to add those.
+	///
+	/// # Arguments
+	///
+	/// * `id` - Stable item id reported by [`MenuEvent`](super::MenuEvent) on
+	///   activation and used by [`Menu::set_item_checked`] to find the item, so
+	///   ids should be unique within a menu tree.
+	/// * `label` - Display text (`impl Into<SharedString>`, so `&str`/`String`
+	///   work). An empty label marks the item as a separator
+	///   ([`Menu::is_separator`]), which navigation then skips.
 	pub fn new(id: usize, label: impl Into<SharedString>) -> Self {
 		Self {
 			id,
@@ -42,13 +52,25 @@ impl MenuItem {
 		self
 	}
 
-	/// Attach a shortcut label.
+	/// Builder: attaches a display-only shortcut label (e.g. `"⌘S"`), drawn on
+	/// the right of the item.
+	///
+	/// The text is neither parsed nor bound to a key handler; callers format it
+	/// themselves. Takes and returns `self` so it chains after
+	/// [`MenuItem::new`]; the item keeps its previous shortcut if the builder
+	/// is not used.
 	pub fn with_shortcut(mut self, shortcut: impl Into<SharedString>) -> Self {
 		self.shortcut = Some(shortcut.into());
 		self
 	}
 
-	/// Set a checked state.
+	/// Builder: gives the item a checkmark and sets its state.
+	///
+	/// `true` draws a tick and `false` draws an unchecked item that still
+	/// reserves the checkmark slot; `None` (the default) draws no mark at all.
+	/// For toggling a menu already handed to a view, use
+	/// [`MenuItem::set_checked`] / [`Menu::set_item_checked`] instead of
+	/// rebuilding the menu.
 	pub fn with_checked(mut self, checked: bool) -> Self {
 		self.checked = Some(checked);
 		self
@@ -73,7 +95,12 @@ impl MenuItem {
 		self
 	}
 
-	/// Attach a submenu.
+	/// Builder: attaches a nested submenu, opened on hover/click of this item.
+	///
+	/// The submenu is boxed inside the item; its items are ordinary
+	/// [`MenuItem`]s with their own ids, so [`Menu::set_item_checked`] searches
+	/// into it recursively. Takes and returns `self` so it chains after
+	/// [`MenuItem::new`].
 	pub fn with_submenu(mut self, submenu: Menu) -> Self {
 		self.submenu = Some(Box::new(submenu));
 		self
@@ -94,7 +121,11 @@ pub struct Menu {
 }
 
 impl Menu {
-	/// Create a menu.
+	/// Creates a menu from an ordered item list; the order is both the
+	/// top-to-bottom display order and the navigation order.
+	///
+	/// `items` may contain separators (empty labels) and disabled items; both
+	/// are skipped by [`Menu::navigate`]. Use `Menu::default` for an empty menu.
 	pub fn new(items: Vec<MenuItem>) -> Self {
 		Self { items }
 	}

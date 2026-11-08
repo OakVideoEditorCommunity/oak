@@ -42,21 +42,37 @@ pub fn load_project(path: &str) -> Result<LoadedProject, String> {
 }
 
 /// The project display name.
+///
+/// The name stored in the project document (shown in the UI and in CLI
+/// output); "" when the name is unset. Distinct from
+/// [`project_filename`], which is the on-disk path.
 pub fn project_name(project: &Project) -> String {
 	project.name()
 }
 
-/// The recorded project filename.
+/// The recorded project filename ("" for an unsaved project).
+///
+/// This is the path the project was opened from or last saved to, not a
+/// display label; a project that has never been saved returns "". The CLI
+/// falls back to the user-supplied path in that case.
 pub fn project_filename(project: &Project) -> String {
 	project.filename()
 }
 
 /// Whether the project has unsaved changes.
+///
+/// Reads the underlying project document's modified flag (not a CLI-local
+/// dirty bit); true after any edit that has not been saved.
 pub fn project_modified(project: &Project) -> bool {
 	project.modified()
 }
 
 /// Every sequence node, in arena order.
+///
+/// Arena order is an implementation detail that changes as nodes are added
+/// or removed — iterate with it, but do not treat it as stable. The filter
+/// is the coarse [`NodeKind::Sequence`]; the CLI's default-sequence choice
+/// is simply the first entry.
 pub fn sequence_ids(project: &Project) -> Vec<NodeId> {
 	project
 		.node_ids()
@@ -66,6 +82,11 @@ pub fn sequence_ids(project: &Project) -> Vec<NodeId> {
 }
 
 /// Every footage node, in arena order.
+///
+/// Arena order is an implementation detail that changes as nodes are added
+/// or removed — iterate with it, but do not treat it as stable. The filter
+/// is the coarse [`NodeKind::Footage`]; pairs with [`node_label`] and
+/// [`footage_filename`] for listing.
 pub fn footage_ids(project: &Project) -> Vec<NodeId> {
 	project
 		.node_ids()
@@ -74,32 +95,59 @@ pub fn footage_ids(project: &Project) -> Vec<NodeId> {
 		.collect()
 }
 
-/// A node's display label.
+/// A node's display label ("" when unset).
+///
+/// `id` is any node token. The label is user-visible but not unique, and may
+/// be empty for generated nodes or unknown tokens; it is the same string the
+/// UI shows, not a stable identifier.
 pub fn node_label(project: &Project, id: NodeId) -> String {
 	project.node_label(id)
 }
 
-/// A footage node's media path.
+/// A footage node's media path ("" when unavailable).
+///
+/// `id` must name a footage node. Returns the absolute source file path; an
+/// unset path, a non-footage id or non-UTF-8 bytes produce "", which callers
+/// render as an empty path rather than failing the whole listing.
 pub fn footage_filename(project: &Project, id: NodeId) -> String {
 	project.footage_filename(id).unwrap_or_default()
 }
 
 /// The sequence's content length (rational seconds).
+///
+/// `id` must name the sequence node. The length is the extent of the
+/// content on its tracks, falling back to the last requested length when
+/// the content is empty; a non-sequence returns the null rational
+/// (`den == 0`).
 pub fn sequence_length(project: &Project, id: NodeId) -> Rational {
 	project.sequence_length(id)
 }
 
-/// The sequence's frame rate.
+/// The sequence's frame rate as a rational.
+///
+/// `id` must name the sequence node. A non-sequence, or a sequence without
+/// video params, returns the null rational (`den == 0`); callers must not
+/// divide by its denominator without checking.
 pub fn sequence_frame_rate(project: &Project, id: NodeId) -> Rational {
 	project.sequence_frame_rate(id)
 }
 
-/// The sequence's output geometry.
+/// The sequence's output geometry `(width, height)` in pixels.
+///
+/// `id` must name the sequence node. Returns `(0, 0)` when the node is not
+/// a sequence or has no video params; [`export_sequence`] treats that as
+/// "no video parameters" and refuses to export.
 pub fn sequence_geometry(project: &Project, id: NodeId) -> (i32, i32) {
 	project.sequence_geometry(id).unwrap_or((0, 0))
 }
 
 /// `(video, audio, subtitle)` track counts.
+///
+/// Sums the track counts of every track list under sequence `id`, bucketing
+/// by track-list kind (0 video, 1 audio, 2 subtitle; unknown kinds are
+/// ignored). A non-sequence id yields `(0, 0, 0)`, so callers cannot tell
+/// "empty sequence" from "not a sequence" here — check the node kind first
+/// when that distinction matters.
 pub fn sequence_track_counts(project: &Project, id: NodeId) -> (i64, i64, i64) {
 	let mut counts = (0i64, 0i64, 0i64);
 	for list_index in 0..project.sequence_track_list_count(id) {
@@ -116,6 +164,11 @@ pub fn sequence_track_counts(project: &Project, id: NodeId) -> (i64, i64, i64) {
 }
 
 /// The sequence playhead (rational seconds).
+///
+/// `id` must name the sequence node; the value is relative to the sequence
+/// start. A non-sequence id returns the null rational (`den == 0`), which
+/// callers must check before converting. Thin wrapper over
+/// `Project::sequence_playhead`.
 pub fn sequence_playhead(project: &Project, id: NodeId) -> Rational {
 	project.sequence_playhead(id)
 }
@@ -154,6 +207,17 @@ pub fn render_manager_shutdown() {
 }
 
 /// Renders one sequence frame at `time` into RGBA F32 bytes.
+///
+/// `viewer` is the sequence (viewer) node, `time` the rational frame time
+/// in sequence seconds, and `width`/`height` the output size in pixels. The
+/// returned frame is tightly packed (`linesize == width * 16`, format code
+/// 4 = F32 RGBA); the SDK's f32 samples are converted to little-endian
+/// bytes here so the PPM writer can consume them.
+///
+/// # Errors
+///
+/// "invalid frame size" for a non-positive dimension and "frame render
+/// failed" when the SDK renderer returns no frame.
 pub fn render_frame(
 	project: &Project,
 	viewer: NodeId,
@@ -190,6 +254,17 @@ pub struct RenderedAudio {
 }
 
 /// Renders `range` of the sequence as 48 kHz stereo.
+///
+/// `viewer` is the sequence (viewer) node and `range` is the rational time
+/// range in sequence seconds. The render runs as a blocking SDK task; the
+/// returned block carries the sample rate and channel count the engine
+/// actually produced, which the CLI uses when writing its WAV output instead
+/// of assuming 48 kHz stereo.
+///
+/// # Errors
+///
+/// "audio render task rejected", "audio render failed" or "audio render
+/// produced no block", depending on the stage that failed.
 pub fn render_audio(
 	project: &Project,
 	viewer: NodeId,
@@ -212,6 +287,22 @@ pub fn render_audio(
 }
 
 /// Exports `sequence` to `out` as H.264 (and AAC when the source has audio).
+///
+/// `out` is the destination media path; `fr_num`/`fr_den` are the export
+/// frame rate numerator/denominator (each floored to 1, so a 0 or negative
+/// rate becomes 1/1); `frames` is the export length in frames (negative
+/// values clamp to 0) and is converted to seconds as
+/// `frames * fr_den / fr_num`. The video size comes from
+/// [`sequence_geometry`]; audio is forced to 48 kHz with the CLI's stereo
+/// layout. The export runs as a blocking SDK task and writes `out`; an
+/// audio-less sequence yields a video-only file.
+///
+/// # Errors
+///
+/// Returns "the sequence has no video parameters" when the geometry is
+/// missing, the task's own error text when it fails (or "export failed"
+/// when the task reports no detail), and "export task rejected" when the
+/// SDK refuses to start it.
 pub fn export_sequence(
 	project: &Project,
 	sequence: NodeId,
@@ -254,7 +345,12 @@ pub fn export_sequence(
 	Ok(())
 }
 
-/// The default video track index for a sequence (0 when it has one).
+/// The default track index for a sequence and track kind.
+///
+/// Scans the sequence's track lists in order and returns `Some(0)` when the
+/// first list of `kind` (video, audio or subtitle) has at least one track;
+/// `None` when the sequence has no non-empty list of that kind. The index is
+/// always 0 — the helper reports only whether a usable list exists.
 pub fn default_track(project: &Project, sequence: NodeId, kind: TrackKind) -> Option<usize> {
 	for list_index in 0..project.sequence_track_list_count(sequence) {
 		let list = project.sequence_track_list_at(sequence, list_index);
@@ -270,7 +366,12 @@ pub fn default_track(project: &Project, sequence: NodeId, kind: TrackKind) -> Op
 	None
 }
 
-/// Joins `dir` and `name` (the CLI's output helper).
+/// Joins `dir` and `name` into the CLI's output path string.
+///
+/// `dir` is the output directory and `name` the file (or relative subpath),
+/// appended with the platform separator; an absolute `name` replaces `dir`
+/// entirely, as [`std::path::Path::join`] does. Non-UTF-8 paths are
+/// converted lossily. Does not touch the filesystem.
 pub fn join(dir: &str, name: &str) -> String {
 	Path::new(dir).join(name).to_string_lossy().into_owned()
 }

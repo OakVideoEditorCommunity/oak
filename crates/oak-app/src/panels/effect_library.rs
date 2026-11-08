@@ -70,6 +70,16 @@ impl<E: AppEngine> EffectLibraryPanel<E> {
 	}
 
 	/// Builds the panel over `engine`'s addable-effect table.
+	///
+	/// `engine` is the shared engine entity (borrowed, not owned); its
+	/// `addable_effects` table drives the list and its selection hint decides
+	/// which row is highlighted, so the panel re-renders on every engine
+	/// notify.
+	/// `window` is needed to create the search box input, and `cx` supplies
+	/// the panel's focus handle. The collapsed-group set is read from the
+	/// config once here (see `COLLAPSED_CONFIG_KEY`), not on every render.
+	/// The engine and search subscriptions are detached, so they live as long
+	/// as the entity.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// Re-read the effect table whenever the engine notifies (the table
 		// itself is static, but the selection hint depends on the target).

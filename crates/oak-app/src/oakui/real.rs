@@ -341,6 +341,17 @@ fn nearest_ready_preview_frame<T>(
 		.map(|(frame, _)| *frame)
 }
 
+/// Whether the playhead move from `previous` to `playhead` breaks the
+/// pre-render window (an explicit seek, or a loop wrap back to the head).
+///
+/// `previous` is the playhead of the last call (`None` before any frame was
+/// shown), `playhead` the current one, `length` the sequence length in frames,
+/// `playing` the transport state and `explicit_seek` whether a seek request
+/// arrived since the last call. Returns `true` for any explicit seek, or while
+/// playing when the playhead jumped backwards near the start (within 2 frames)
+/// from near the end (within 2 frames) — i.e. a loop wrap; a small backward
+/// scrub inside the window returns `false`, since the cached frames remain
+/// valid.
 fn preview_discontinuity(
 	previous: Option<i64>,
 	playhead: i64,
@@ -452,6 +463,11 @@ impl AudioPrefetch {
 
 	/// Insert a rendered chunk; stale arrivals (outside the submitted
 	/// window — a seek raced the render) are dropped.
+	///
+	/// `ts` is the chunk's start sequence frame and `data` the rendered audio.
+	/// A `ts` before `front_ts` or at/after `next_submit` is ignored, as is a
+	/// duplicate timestamp; accepted chunks are kept in `ts` order for
+	/// [`Self::drain_ready`].
 	fn insert(&mut self, ts: i64, data: super::renderops::RenderedAudio) {
 		if ts < self.front_ts || ts >= self.next_submit {
 			return;
@@ -506,6 +522,12 @@ pub(crate) fn audio_dbg_enabled() -> bool {
 	*ENABLED.get_or_init(|| std::env::var_os("OAK_DEBUG_AUDIO").is_some())
 }
 
+/// Prints one timestamped playback-audio diagnostic line to stderr when
+/// `OAK_DEBUG_AUDIO` is set in the environment (see [`audio_dbg_enabled`]).
+///
+/// `msg` is the caller-formatted text; the prefix is milliseconds since the
+/// first call in the process. The enable flag is cached once, so toggling the
+/// variable later has no effect. No-op when diagnostics are disabled.
 pub(crate) fn audio_dbg(msg: &str) {
 	if !audio_dbg_enabled() {
 		return;
@@ -699,6 +721,13 @@ impl MulticamFrameCache {
 	}
 
 	/// Store a freshly rendered frame, evicting the LRU head past the cap.
+	///
+	/// `node`/`source` identify the multicam node and angle — an existing entry
+	/// for the same pair is replaced, so a pair is never cached twice; `playhead`
+	/// is the frame the image was rendered for ([`Self::lookup`] treats any other
+	/// playhead as a miss, while [`Self::last`] ignores it) and `image` is shared
+	/// into the cache. The cap is 24 entries: the oldest insertions are dropped
+	/// once it is exceeded.
 	fn insert(&mut self, node: u64, source: i32, playhead: i64, image: Arc<RenderImage>) {
 		self.frames.retain(|(k, _)| k != &(node, source));
 		self.frames.push(((node, source), (playhead, image)));
@@ -715,6 +744,12 @@ impl MulticamFrameCache {
 // ---------------------------------------------------------------------------
 
 /// Builds an owned viewer image from an SDK frame for a long-lived cache.
+///
+/// Runs the frame's display conversion, registers any GPU display samples under
+/// the new image's id (so the renderer can reuse the uploaded texture), and
+/// returns the image in an `Arc` the caller can retain. Returns `None` when the
+/// conversion yields no image (e.g. a frame with no displayable plane), in
+/// which case nothing is registered.
 fn rendered_to_owned_image(rendered: &super::renderops::RenderedFrame) -> Option<Arc<RenderImage>> {
 	let (image, _scope, samples) = rendered.to_display()?;
 	if let Some(samples) = samples {
@@ -746,6 +781,11 @@ pub struct RealClock {
 
 impl RealClock {
 	/// A stopped clock at frame zero running at `rate`.
+	///
+	/// `rate` is the frame rate every later wall-clock conversion
+	/// ([`Self::tick`]) divides by; the transport starts paused at frame zero
+	/// with no loop range set, and no playing anchor is recorded, so ticks are
+	/// no-ops until [`Self::play`] is called. Never fails.
 	pub fn new(rate: FrameRate) -> Self {
 		Self {
 			transport: TransportState::new(),
@@ -1055,6 +1095,10 @@ fn marker_color(index: i32) -> Hsla {
 }
 
 /// The widget [`TrackKind`] of an SDK domain track kind.
+///
+/// `kind` is the domain (project model) enum; the mapping is one-to-one and
+/// total. Pairs with [`track_type_of`], which converts back, so a round trip in
+/// either direction preserves the value.
 fn track_kind_of(kind: DomainTrackKind) -> TrackKind {
 	match kind {
 		DomainTrackKind::Video => TrackKind::Video,
@@ -1064,6 +1108,10 @@ fn track_kind_of(kind: DomainTrackKind) -> TrackKind {
 }
 
 /// The SDK domain track kind of a widget [`TrackKind`].
+///
+/// `kind` is the timeline widget's enum; the mapping is one-to-one and total.
+/// Pairs with [`track_kind_of`] (the inverse), and is used when a widget edit
+/// must be translated back into a project-model track kind.
 fn track_type_of(kind: TrackKind) -> DomainTrackKind {
 	match kind {
 		TrackKind::Video => DomainTrackKind::Video,
@@ -1425,6 +1473,14 @@ impl RealEngine {
 	}
 
 	/// Builds an engine with no project open.
+	///
+	/// `cx` creates the two playback clock entities (source and program, both
+	/// stopped at 1080p25's rate). The constructor also installs the
+	/// process-global text backend hooks and creates the channels and worker
+	/// that carry rendered audio, full-res frames, thumbnails and multicam
+	/// angles back to the UI. Every cache, selection and the project/session
+	/// itself start empty, so callers must open a project before the timeline
+	/// shows anything. Cannot fail; there is no `Result`.
 	pub fn new(cx: &mut Context<Self>) -> Self {
 		// Text nodes reach their layout/rasterizer through the process-global
 		// hooks of the engine's text backend (it links no font or
@@ -1486,7 +1542,11 @@ impl RealEngine {
 		}
 	}
 
-	/// Resolves the clock entity for a monitor.
+	/// Resolves the playback clock entity for a monitor.
+	///
+	/// `monitor` selects the source clock or the program clock; the two are
+	/// independent, so scrubbing one viewer does not move the other. The
+	/// returned entity is owned by `self` and always present.
 	fn clock(&self, monitor: Monitor) -> &Entity<RealClock> {
 		match monitor {
 			Monitor::Source => &self.source_clock,
@@ -1918,6 +1978,14 @@ impl RealEngine {
 
 	/// Feeds the playback pre-render window through Playback-priority SDK
 	/// tasks. Paused/cold monitors request only the current proxy frame.
+	///
+	/// `monitor` selects the window (program sequence or source footage) and
+	/// `cx` supplies the clock read for the playhead. While playing, frames
+	/// from the playhead up to the `CONFIG_KEY_PREVIEW_WINDOW` lookahead (clamped
+	/// to 8..=1200) are submitted; while paused only the playhead frame is. A
+	/// loop wrap, backward scrub, node change or generation bump cancels the old
+	/// requests and re-seeds the head from the loop cache, so stale frames never
+	/// reach the viewer.
 	fn update_preview_window(&mut self, monitor: Monitor, cx: &mut Context<Self>) {
 		// Playback fills the forward window; a paused/cold viewer requests only
 		// its current proxy frame. Both paths poll SDK tasks without waiting.
@@ -2093,6 +2161,17 @@ impl RealEngine {
 	}
 
 	/// Converts a cached SDK frame into the viewer image and matching scopes.
+	///
+	/// `monitor` selects the program sequence or the source monitor's selected
+	/// footage, and `frame` is the requested timeline frame; the nearest ready
+	/// slot in that monitor's pre-render window is consumed (removed from the
+	/// window) and converted through `RenderedFrame::to_display`. For the
+	/// program monitor, consumed frames inside the first `LOOP_CACHE_FRAMES`
+	/// are also retained in the loop cache.
+	///
+	/// Returns `None` when the monitor has no window, the window belongs to a
+	/// stale sequence or generation, no ready slot is near `frame`, or the
+	/// conversion yields no image.
 	fn preview_slot_frame(
 		&self,
 		monitor: Monitor,
@@ -2398,7 +2477,12 @@ impl RealEngine {
 		quercus_engine_rs::task::proxy_max_concurrent()
 	}
 
-	/// 按并发上限从队列递补启动代理生成（队列去重由入队侧保证）。
+	/// 按并发上限从队列递补启动代理生成，直到队列为空或并发已满。
+	///
+	/// `cx` 原样传给每次启动的 [`Self::proxy_generate`]。队列去重由入队侧
+	/// 保证（[`Self::autostart_proxies`] 入队前查重），所以这里直接 `remove(0)`
+	/// 不会重复启动同一素材；单个素材启动失败只打印日志并继续递补，不中断
+	/// 其余任务。本函数不等待转码完成，完成回调会再次调用它补位。
 	fn pump_proxy_queue(&mut self, cx: &mut Context<Self>) {
 		while self.proxy_runs.len() < Self::proxy_max_concurrent() && !self.proxy_queue.is_empty() {
 			let id = self.proxy_queue.remove(0);
@@ -2956,8 +3040,15 @@ impl RealEngine {
 		}
 	}
 
-	/// Refreshes the cached `Sequence` (name / format / length) from the
-	/// graph.
+	/// Refreshes the cached `Sequence` (name / format / length) from the graph.
+	///
+	/// Reads the current sequence's label, video format and length, with
+	/// 1920x1080\@25 and "Sequence 1" as the fallbacks, then pushes the
+	/// resolution to the render worker pool (its size follows the pixel count,
+	/// so a 4K sequence does not exhaust VRAM) and to the OFX extent fallback.
+	/// Sets `sequence_info` to `None` when no project or sequence is open.
+	/// Called after opening a project, activating a sequence and every
+	/// undo/redo.
 	fn refresh_sequence_info(&mut self) {
 		let (Some(project), Some(seq)) = (self.project.clone(), self.sequence) else {
 			self.sequence_info = None;
@@ -3018,7 +3109,13 @@ impl RealEngine {
 		crate::oakui::ofx::update_viewer_time(time, 0.0, length);
 	}
 
-	/// Rebuilds the timeline snapshot from the graph.
+	/// Rebuilds the timeline snapshot (`self.tracks`) from the graph.
+	///
+	/// Tracks are collected per kind in NLE display order (video/subtitle grow
+	/// upward, audio grows downward) and each is materialized by
+	/// [`Self::snapshot_track`]; afterwards the audio clips' waveforms are
+	/// requested from the shared cache (asynchronously). Leaves `self.tracks`
+	/// empty when no project or sequence is open.
 	fn rebuild_timeline(&mut self) {
 		self.tracks.clear();
 		let (Some(project), Some(seq)) = (self.project_ref(), self.sequence) else {
@@ -3069,6 +3166,15 @@ impl RealEngine {
 	}
 
 	/// Snapshots one track (with its clips) from the SDK project queries.
+	///
+	/// `project` is the open project, `track` the track node, `kind` its domain
+	/// kind (which also picks the display prefix V/A/S), `track_index` its
+	/// zero-based position within that kind (used for the name and the palette
+	/// fallback) and `tb` the sequence time base used to convert clip times to
+	/// frames (`None` maps every timestamp to 0). Clips whose range query fails
+	/// are skipped rather than materialized, and each clip carries its
+	/// transition wedges plus its creation-time color (adjustment layers use a
+	/// fixed color instead of the palette).
 	fn snapshot_track(
 		project: &ProjectRef,
 		track: NodeId,
@@ -3164,7 +3270,14 @@ impl RealEngine {
 		slot.clone()
 	}
 
-	/// Extract (or reuse) the waveform of one audio clip.
+	/// Extracts (or reuses) the waveform of one audio clip.
+	///
+	/// `cache` is the timeline's shared waveform cache and `clip` the audio
+	/// clip; the clip's media filename and its visible frame length select what
+	/// is decoded. The decode runs on a spawned thread (a long clip takes
+	/// seconds) so this returns immediately; the waveform appears once the
+	/// cache's version counter changes. Does nothing when no project is open or
+	/// the clip has no media file.
 	fn refresh_clip_waveform(
 		&self,
 		cache: Arc<crate::oakui::waveform::WaveformCache>,
@@ -7176,6 +7289,16 @@ impl RealEngine {
 	}
 
 	/// Opens a `.ove` / `.ovexml` project through the module serializer.
+	///
+	/// `path` is the file to load and `cx` is notified once the project has been
+	/// adopted. The serializer cannot express every legacy document (e.g. the
+	/// `<olive>`-rooted format skips its nested `<project>` body), so a load
+	/// that yields zero nodes is adopted as an empty project and logged as a
+	/// warning rather than reported as a successful open.
+	///
+	/// # Errors
+	///
+	/// Returns `Err` when the serializer fails to read `path`.
 	fn open_ove(&mut self, path: &PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
 		let project = graphops::load_ove(path)
 			.map_err(|e| format!("failed to load \"{}\": {e}", path.display()))?;
@@ -7195,6 +7318,16 @@ impl RealEngine {
 
 	/// Opens an `.otio` / `.fcpxml` project through the SDK task API and adopts
 	/// the exact loaded Arc through the migration handle.
+	///
+	/// `path` is the file to load (the loader picks OTIO vs. FCPXML from it) and
+	/// `cx` is notified by [`Self::adopt_project`] so the UI rebuilds. The load
+	/// is synchronous and replaces any currently open project on success.
+	///
+	/// # Errors
+	///
+	/// Returns `Err` when the loader task cannot be started, when it fails (its
+	/// error text is included), or when it reports success but yields no
+	/// project.
 	fn open_interchange(&mut self, path: &PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
 		let task = quercus_engine_rs::task::load_otio(&path.to_string_lossy())
 			.ok_or_else(|| "failed to start the interchange load".to_string())?;
@@ -7238,7 +7371,18 @@ impl RealEngine {
 		Ok(())
 	}
 
-	/// Exports as `.otio` / `.fcpxml` through the SDK's unified task API.
+	/// Exports the current project as `.otio` / `.fcpxml` through the SDK's
+	/// unified task API, picking the serializer from `path`'s extension.
+	///
+	/// `path` is the destination file; `_cx` is unused but keeps the uniform
+	/// dialog callback signature. The export runs synchronously (this blocks on
+	/// the task), and on success the project's recorded file path becomes
+	/// `path`.
+	///
+	/// # Errors
+	///
+	/// Returns `Err` when no project is open, when the export task cannot be
+	/// started, or when the task fails (its error text is included).
 	fn export_interchange(
 		&mut self,
 		path: &PathBuf,
@@ -7355,12 +7499,20 @@ pub fn config_save() {
 	Config::global().save().ok();
 }
 
-/// Reads a config string from the store (empty when missing).
+/// Reads a config string from the store.
+///
+/// `key` is the flat config key. Returns an empty string when the key is
+/// missing or holds a non-string value, so callers cannot distinguish "unset"
+/// from "empty"; use [`config_get_int`] / [`config_get_bool`] for typed values.
 pub fn config_get_string(key: &str) -> String {
 	Config::global().get(key).unwrap_or_default()
 }
 
 /// Writes a config string to the store.
+///
+/// `key` is the flat config key and `value` the string to persist (the store
+/// copies it). Write errors are discarded; read it back with
+/// [`config_get_string`] or one of the typed getters.
 pub fn config_set_string(key: &str, value: &str) {
 	let _ = Config::global().set(key, value);
 }
@@ -7372,12 +7524,20 @@ pub fn config_get_int(key: &str, default: i64) -> i64 {
 }
 
 /// Writes a config integer to the store.
+///
+/// `key` is the flat config key and `value` the `i64` to persist; the write
+/// cannot fail observably (the error is discarded). Read it back with
+/// [`config_get_int`], which also supplies the default.
 pub fn config_set_int(key: &str, value: i64) {
 	let _ = Config::global().set_i64(key, value);
 }
 
-/// Reads a config boolean through the string accessor (the store parses
-/// `"true"`/`"false"` for registered bool keys).
+/// Reads a config boolean through the string accessor.
+///
+/// `key` is the config key; the store parses `"true"` / `"false"` for
+/// registered bool keys. Any other stored text — including a missing key or
+/// `"1"`/`"0"` — yields `default`, so callers always get a usable value.
+/// Counterpart of [`config_set_bool`].
 pub fn config_get_bool(key: &str, default: bool) -> bool {
 	match config_get_string(key).as_str() {
 		"true" => true,
@@ -7386,7 +7546,12 @@ pub fn config_get_bool(key: &str, default: bool) -> bool {
 	}
 }
 
-/// Writes a config boolean (see [`config_get_bool`]).
+/// Writes a config boolean, storing the string `"true"` or `"false"`.
+///
+/// `key` is the flat config key and `value` the boolean to persist; the
+/// spellings match what [`config_get_bool`] parses. The store write is
+/// fire-and-forget (an error is discarded), and callers must persist the file
+/// separately with [`config_save`] if the value must survive a crash.
 pub fn config_set_bool(key: &str, value: bool) {
 	config_set_string(key, if value { "true" } else { "false" });
 }
@@ -7408,7 +7573,12 @@ pub fn theme_is_dark() -> bool {
 	config_get_string(CONFIG_KEY_THEME) != "light"
 }
 
-/// Persists the theme choice (applied live by the caller).
+/// Persists the UI theme choice to the config store.
+///
+/// `dark` selects `"dark"` (true) or `"light"` (false) for
+/// [`CONFIG_KEY_THEME`]; applying the theme live is the caller's job, so this
+/// only writes the preference that [`theme_is_dark`] reads back (at startup
+/// and whenever the dialog re-opens).
 pub fn set_theme_dark(dark: bool) {
 	config_set_string(CONFIG_KEY_THEME, if dark { "dark" } else { "light" });
 }

@@ -77,6 +77,18 @@ const TOOLBAR_Y: f32 = 541.0;
 #[cfg(target_os = "macos")]
 const TOOLBAR_BAND: f32 = 44.0;
 
+/// Captures the app shell screenshots: a zh-CN and an en-US window PNG plus
+/// the preferences and project-manager dialogs, all at 2×.
+///
+/// Optional positional arguments are `width` and `height` in logical points
+/// (defaults 1600×900); anything else is ignored. The active UI language is
+/// captured first and restored before returning, so the persisted preference
+/// is untouched.
+///
+/// # Errors
+///
+/// Propagates the screenshot and IO errors from creating the output
+/// directory or writing the PNGs.
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
 	let args: Vec<String> = std::env::args().skip(1).collect();
@@ -127,6 +139,16 @@ fn main() -> Result<()> {
 /// [`settle`]). Returns the typed window handle and the root entity so the
 /// caller can still drive the shell (the manager capture) after the plain
 /// screenshot.
+///
+/// `cx` drives the offscreen window; `width` and `height` are the logical
+/// window size (1600×900 by default, i.e. 3200×1866 pixels at 2×). The shell
+/// is built with the real app's 14px rem size so text metrics match
+/// production.
+///
+/// # Panics
+///
+/// Panics when the offscreen window cannot be opened (e.g. Metal is
+/// unavailable) or when no root entity was produced.
 #[cfg(target_os = "macos")]
 fn open_shell(
 	cx: &mut VisualTestAppContext,
@@ -156,6 +178,15 @@ fn open_shell(
 /// known, the viewers upload their first CPU frame, and the PNG toolbar
 /// icons load through the background executor on the frame after the asset
 /// future resolves.
+///
+/// `cx` is the visual-test context and `handle` the offscreen window to
+/// draw. Two batches of 16 draws are run, each preceded and followed by
+/// `run_until_parked`, so async asset work that needs a frame plus a parked
+/// executor also completes.
+///
+/// # Panics
+///
+/// Panics when the window has been closed, since the draw cannot run.
 #[cfg(target_os = "macos")]
 fn settle(cx: &mut VisualTestAppContext, handle: AnyWindowHandle) {
 	for _ in 0..16 {
@@ -223,6 +254,17 @@ fn capture_manager(
 /// render: the toolbar is the 31px row at the top of the bottom dock panel.
 /// Scan the tool cells for bright glyph pixels, so a broken icon load fails
 /// the capture loudly instead of shipping an empty toolbar.
+///
+/// `image` is the 2× screenshot of the whole window; `language` only tags the
+/// diagnostics and the panic message. Each of the eight tool cells (48px
+/// logical pitch in x) is scanned for pixels brighter than 150 in all
+/// channels within `TOOLBAR_BAND` of `TOOLBAR_Y`, and a cell counts as
+/// rendered once it has more than 20 such pixels.
+///
+/// # Panics
+///
+/// Panics when fewer than 6 of the 8 cells render, so a screenshot run fails
+/// instead of writing a toolbar-less image.
 #[cfg(target_os = "macos")]
 fn assert_toolbar(image: &image::RgbaImage, language: &str) {
 	// The image is 2× the logical size; convert logical → pixel y. TOOLBAR_Y

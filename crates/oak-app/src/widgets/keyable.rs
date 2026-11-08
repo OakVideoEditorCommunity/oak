@@ -34,7 +34,17 @@ pub struct KeyingRequest {
 }
 
 impl KeyingRequest {
-	/// Create a keying request for `control`.
+	/// Creates a keying request pairing a control id with a reported keying
+	/// state.
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable id of the control that owns the diamond; the widget
+	///   uses it to route the request back to its edited value.
+	/// * `state` - The keying state captured when the diamond was painted; the
+	///   host uses it to decide whether to add, remove or inspect the keyframe.
+	///
+	/// The request is plain data — widgets never touch the engine themselves.
 	pub fn new(control: usize, state: KeyingState) -> Self {
 		Self { control, state }
 	}
@@ -82,11 +92,26 @@ pub fn keying_diamond(control: usize, state: KeyingState) -> Stateful<Div> {
 		.id(ElementId::named_usize("gpui-widgets-keying", control))
 }
 
-/// A ready-made [`KeyingRequest`] for this diamond's state.
+/// Convenience constructor for the [`KeyingRequest`] a diamond click should
+/// emit: it pairs the owning control id with the state the diamond was painted
+/// with.
+///
+/// Equivalent to [`KeyingRequest::new`]; click handlers can call it directly,
+/// e.g. `keying_request(control, state)` inside `.on_click(...)`, so the host
+/// can add/remove/inspect the keyframe.
 pub fn keying_request(control: usize, state: KeyingState) -> KeyingRequest {
 	KeyingRequest::new(control, state)
 }
 
+/// Paints the 14 px keying diamond into `bounds` for the given keying state.
+///
+/// The body is filled with the key accent when a key exists and left hollow
+/// (outline only) for [`KeyingState::NoKey`]; an
+/// [`KeyingState::AtCurrentFrame`] key additionally gets a small center dot
+/// painted in the current background color. Colors come from the live theme via
+/// `cx` (the disabled color for the empty outline), so a theme change is picked
+/// up on the next paint. Called as the canvas paint callback of
+/// [`keying_diamond`].
 fn paint_diamond(bounds: Bounds<Pixels>, state: KeyingState, window: &mut Window, cx: &mut App) {
 	use gpui_kit::PathBuilder;
 	let colors = cx.default_colors().clone();

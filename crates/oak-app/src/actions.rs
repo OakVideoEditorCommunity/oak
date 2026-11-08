@@ -554,7 +554,17 @@ pub fn parse_shortcut_file(contents: &str) -> Vec<(String, Vec<String>)> {
 	contents.lines().filter_map(parse_shortcut_line).collect()
 }
 
-/// Serializes override lines back to `id\tkey` (empty key = unbound).
+/// Serializes override lines back to `id\tkey` (empty key = unbound),
+/// joining entries with `\n`; the output is the shortcut-file body parsed
+/// by [`parse_shortcut_file`].
+///
+/// Only the first key of each entry is written, so multi-binding entries
+/// do not round-trip exactly.
+///
+/// # Arguments
+///
+/// * `entries` - `(action id, keys)` pairs in file order; an entry with no
+///   keys is written with the trailing tab and no key (the unbound marker).
 pub fn serialize_shortcut_file(entries: &[(String, Vec<String>)]) -> String {
 	let mut out = String::new();
 	for (index, (id, keys)) in entries.iter().enumerate() {
@@ -787,7 +797,13 @@ impl Tool {
 		}
 	}
 
-	/// The tool an action selects, if it is a tool action.
+	/// The tool selected by `action`, or `None` when `action` is not a tool
+	/// action. This is the inverse of [`Tool::action`] for the tool actions.
+	///
+	/// # Arguments
+	///
+	/// * `action` - the action id to map; only the `*Tool` action ids yield
+	///   `Some`.
 	pub const fn from_action(action: ActionId) -> Option<Tool> {
 		match action {
 			ActionId::PointerTool => Some(Tool::Pointer),

@@ -29,12 +29,29 @@ use quercus_engine_rs::types::Rational;
 use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::fmt;
 
-/// Run `probe`. `mediafile` is the media path from the command line.
+/// Entry point for the `probe` subcommand; returns the process exit code.
+///
+/// Thin wrapper over `run_probe` that keeps the command dispatch signature
+/// uniform (`fn(String) -> i32`). `mediafile` is the media path from the
+/// command line; `EXIT_OK` (0) on success, `EXIT_ERROR` otherwise.
+///
+/// # Arguments
+///
+/// * `mediafile` - media path to probe.
 pub fn run(mediafile: String) -> i32 {
 	run_probe(&mediafile)
 }
 
-/// The probe body.
+/// Implements `oak-cli probe`: probes `mediafile` and prints the decoder,
+/// duration and stream inventory, returning a process exit code.
+///
+/// Fails closed with `EXIT_ERROR` (and an `error:` line on stderr) when the
+/// path does not exist or the SDK codec registry cannot probe it; on success
+/// prints via the `crate::fmt` line formatters and returns `EXIT_OK`.
+///
+/// # Arguments
+///
+/// * `mediafile` - media path exactly as given on the command line.
 fn run_probe(mediafile: &str) -> i32 {
 	if !std::path::Path::new(mediafile).exists() {
 		eprintln!("error: probe: file does not exist: {mediafile}");

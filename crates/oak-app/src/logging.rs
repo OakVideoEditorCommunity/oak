@@ -43,6 +43,13 @@ struct Filter {
 
 impl Filter {
 	/// Parse the `RUST_LOG` value (`None` / empty → warn-only).
+	///
+	/// `spec` is the raw environment value: comma-separated directives, each either
+	/// `target=level` or a bare level. A bare level sets the global filter, a
+	/// `target=level` pair becomes a prefix override, and a directive whose level is
+	/// unknown is ignored. Unset, empty or all-blank specs leave the global filter at
+	/// `warn`, so the logger stays quiet by default; `init` then raises the facade's
+	/// max level to the highest configured one.
 	fn parse(spec: Option<&str>) -> Self {
 		let mut global = LevelFilter::Warn;
 		let mut targets = Vec::new();
@@ -71,6 +78,12 @@ impl Filter {
 	}
 
 	/// The effective level for `target` (longest matching prefix wins).
+	///
+	/// A target override applies when `target.starts_with(prefix)`; among several
+	/// matching prefixes the longest wins (so `wgpu_hal=trace` beats `wgpu=debug`),
+	/// and `global` is the fallback when none match. `target` is the `log` target
+	/// (normally a module path); the test is a plain prefix test, not a module
+	/// boundary test.
 	fn level_for(&self, target: &str) -> LevelFilter {
 		let mut best: Option<(usize, LevelFilter)> = None;
 		for (prefix, level) in &self.targets {
@@ -86,6 +99,11 @@ impl Filter {
 }
 
 /// Map a level name to a [`LevelFilter`].
+///
+/// The match is ASCII case-insensitive (`OFF` works) and does not trim — callers
+/// trim. `off`, `error`, `warn` / `warning`, `info`, `debug` and `trace` map to the
+/// corresponding filters; any other text returns `None`, which `Filter::parse`
+/// treats as "ignore this directive".
 fn parse_level(text: &str) -> Option<LevelFilter> {
 	match text.to_ascii_lowercase().as_str() {
 		"off" => Some(LevelFilter::Off),

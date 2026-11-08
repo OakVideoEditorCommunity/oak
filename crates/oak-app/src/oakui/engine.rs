@@ -462,6 +462,10 @@ pub trait AppEngine:
 	/// target). The app shell forwards `TimelineEvent::SelectionChanged`
 	/// with the view's selection set. Default: no-op (engines without a
 	/// selection-driven stack keep their existing behavior).
+	///
+	/// `clips` is the complete new selection in timeline order; it
+	/// replaces the previous selection (an empty slice clears it) and
+	/// only retargets the inspector/effect stack.
 	fn set_selected_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 
 	/// The node-graph selection mirror: the single node currently selected
@@ -528,6 +532,12 @@ pub trait AppEngine:
 
 	/// Sets an effect parameter (a node input) undoably. Returns a
 	/// user-facing error on failure. Default: unsupported.
+	///
+	/// `effect` is the effect-stack node identity, `input_id` the node
+	/// input identifier and `value` the new typed value in the
+	/// parameter's native unit. One call is one undo entry; a drag
+	/// gesture should be bracketed by [`Self::begin_param_drag`] and
+	/// [`Self::end_param_drag`].
 	fn set_effect_param(
 		&mut self,
 		_effect: EffectId,
@@ -541,6 +551,10 @@ pub trait AppEngine:
 	/// Triggers a push-button parameter of `effect` (the OFX push-button
 	/// press). Returns a user-facing error on failure. Default:
 	/// unsupported.
+	///
+	/// `effect` is the effect-stack node identity and `input_id` the
+	/// push-button input's identifier; the press runs the parameter's
+	/// action once rather than storing a value.
 	fn effect_push_button(
 		&mut self,
 		_effect: EffectId,
@@ -674,6 +688,11 @@ pub trait AppEngine:
 	}
 
 	/// Adds a marker at the program playhead (undoable).
+	///
+	/// The marker has an empty label and lands on the current sequence's
+	/// marker list at the program monitor's playhead frame; one undo
+	/// entry. No-op when no sequence is open. Pairs with
+	/// [`Self::remove_marker_at_playhead`].
 	fn add_marker_at_playhead(&mut self, cx: &mut Context<Self>) {
 		let _ = cx;
 	}
@@ -685,6 +704,11 @@ pub trait AppEngine:
 
 	/// Applies a work-area range **live** (not undoable) — the ruler drag
 	/// preview path (Olive's `set_range` during drag).
+	///
+	/// `start` / `end` are sequence frames marking the half-open
+	/// `[start, end)` render range. The range is stored enabled but
+	/// creates no undo entry, so the drag's final state is committed by
+	/// [`Self::commit_workarea`]. No-op when no sequence is open.
 	fn set_workarea_preview(&mut self, start: Frame, end: Frame, cx: &mut Context<Self>) {
 		let _ = (start, end, cx);
 	}
@@ -702,7 +726,12 @@ pub trait AppEngine:
 		let _ = (old_start, old_end, start, end, cx);
 	}
 
-	/// Clears (disables) the work area (undoable).
+	/// Clears (disables) the work area in one undoable entry.
+	///
+	/// Afterwards [`Self::workarea`] reports `None` again, so export and
+	/// render fall back to the whole sequence; no-op when no sequence is
+	/// open. Pairs with [`Self::set_workarea_preview`] (live drag) and
+	/// [`Self::commit_workarea`] (the undoable commit).
 	fn clear_workarea(&mut self, cx: &mut Context<Self>) {
 		let _ = cx;
 	}
@@ -712,26 +741,60 @@ pub trait AppEngine:
 	fn delete_clip(&mut self, clip: ClipId, ripple: bool, cx: &mut Context<Self>);
 
 	/// Copy the selected clips to the engine clipboard (C++ Copy).
+	///
+	/// `clips` are the timeline clips to copy; the snapshot keeps their
+	/// relative offsets and links so [`Self::clipboard_paste`] can
+	/// rebuild them. Default: no-op (engines without a clipboard).
 	fn clipboard_copy(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Copy then gap-delete the selected clips (C++ Cut).
+	///
+	/// `clips` are the timeline clips to cut. The engine clipboard
+	/// receives a copy first (see [`Self::clipboard_copy`]), then each
+	/// clip is deleted without ripple, so gaps are left behind; ripple
+	/// deletion is a separate action.
 	fn clipboard_cut(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Paste the clipboard at the playhead (C++ Paste), one undoable entry.
 	fn clipboard_paste(&mut self, _cx: &mut Context<Self>) {}
 	/// Paste the clipboard at the playhead, rippling following content
 	/// right (C++ Paste Insert), one undoable entry.
 	fn clipboard_paste_insert(&mut self, _cx: &mut Context<Self>) {}
-	/// Duplicate the clips right after the selection's end (C++ Duplicate).
+	/// Duplicate the clips right after the selection's end (C++
+	/// Duplicate).
+	///
+	/// `clips` are the timeline clips to duplicate; the copies keep their
+	/// relative offsets and links and land immediately after the
+	/// selection's end. Clips on locked tracks are skipped; one undo
+	/// entry.
 	fn duplicate_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Rename the clips (C++ Rename, one undoable entry).
+	///
+	/// `clips` are the selected timeline clips and `name` becomes their
+	/// node label; a blank/whitespace-only name is rejected before the
+	/// edit runs, so the old labels stay. One undo row covers the whole
+	/// selection.
 	fn rename_clips(&mut self, _clips: Vec<ClipId>, _name: String, _cx: &mut Context<Self>) {}
 	/// Toggle the enabled flag of the clips (C++ Enable/Disable).
+	///
+	/// `clips` are the selected timeline clips: the new state is the
+	/// inverse of the first clip's current flag, applied to the whole
+	/// selection in one undo entry. Clips on locked tracks are skipped
+	/// and an empty selection is a no-op.
 	fn toggle_clips_enabled(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
-	/// Nudge the clips (and their linked groups) by `delta` frames
-	/// (C++ Nudge Left/Right).
+	/// Nudge the clips (and their linked groups) by `delta` frames.
+	///
+	/// `clips` are the selected timeline clips and `delta` is a signed
+	/// frame count (negative = left, positive = right). Linked clips move
+	/// together as one undo entry per group; the C++ Nudge Left/Right
+	/// actions drive it.
 	fn nudge_clips(&mut self, _clips: Vec<ClipId>, _delta: i64, _cx: &mut Context<Self>) {}
 	/// Trim the clips' in/out edge to the playhead, rippling the track
 	/// when `ripple` is set (C++ Move In/Out to Playhead /
 	/// Ripple to In/Out).
+	///
+	/// `clips` are the selected timeline clips and `in_edge` picks the
+	/// in-edges (`true`) or out-edges (`false`) to trim. Clips on locked
+	/// tracks are skipped, as are clips where the playhead lies outside
+	/// the clip or on the wrong side of the trimmed edge.
 	fn trim_selection_to_playhead(
 		&mut self,
 		_clips: Vec<ClipId>,
@@ -742,6 +805,11 @@ pub trait AppEngine:
 	}
 	/// Roll the boundary at the clips' in/out edge to the playhead
 	/// (C++ Edit to In/Out).
+	///
+	/// `clips` are the selected timeline clips and `at_in` picks the
+	/// in-edge (`true`) or out-edge (`false`) to move to the program
+	/// playhead. Clips on locked tracks are skipped; a rejected roll
+	/// stops the loop and surfaces the error.
 	fn roll_selection_to_playhead(
 		&mut self,
 		_clips: Vec<ClipId>,
@@ -752,17 +820,35 @@ pub trait AppEngine:
 	/// Delete the workarea's in/out range on every unlocked track,
 	/// rippling the gap closed when `ripple` is set (C++ Delete/Ripple
 	/// Delete In to Out).
+	///
+	/// `ripple` = `true` shifts the later clips left to close the gap,
+	/// `false` leaves the gap. One undo entry; no-op when the workarea
+	/// is disabled or no sequence is open.
 	fn delete_in_to_out(&mut self, _ripple: bool, _cx: &mut Context<Self>) {}
 	/// Set the clips' speed (span unchanged; C++ Speed/Duration).
+	///
+	/// `clips` are timeline clip ids and `speed` is the playback-rate
+	/// multiplier (`1.0` = normal, `2.0` = double, `0.5` = half). The
+	/// value must be finite and non-zero — the edit is rejected
+	/// otherwise - and clips on locked tracks are skipped.
 	fn set_clips_speed(&mut self, _clips: Vec<ClipId>, _speed: f64, _cx: &mut Context<Self>) {}
 	/// Bracket a multi-write parameter gesture (a color-wheel drag) so its
 	/// per-move writes land in ONE undo entry. Default no-ops for engines
 	/// without an undo stack.
+	///
+	/// `name` labels the undo group (the history row's command name).
+	/// Every call must be paired with [`Self::end_param_drag`]; engines
+	/// without undo groups simply ignore it.
 	fn begin_param_drag(&mut self, _name: &str, _cx: &mut Context<Self>) {}
 	/// Close the gesture's undo group (see [`Self::begin_param_drag`]).
 	fn end_param_drag(&mut self, _cx: &mut Context<Self>) {}
 	/// Nest the clips into a new sequence and replace them with one
 	/// nested clip (C++ Nest).
+	///
+	/// `clips` are the timeline clips to move; the nested clip spans
+	/// their combined range and is the only clip left on the timeline
+	/// afterwards. Clips on locked tracks are skipped, and the edit is
+	/// one undo entry.
 	fn nest_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 
 	/// Whether the undo stack has an entry to undo.
@@ -872,6 +958,11 @@ pub trait AppEngine:
 	/// 另存为: saves the OPEN project into the library as a differently-
 	/// named copy and switches the current project to that copy. Default:
 	/// unsupported.
+	///
+	/// `name` is the new copy's library name (trimmed); the original row
+	/// stays untouched and keeps its history. `Err` when the engine has
+	/// no library support (the default) or duplicating/opening the copy
+	/// fails.
 	fn save_project_as(&mut self, name: &str, cx: &mut Context<Self>) -> Result<(), String> {
 		let _ = (name, cx);
 		Err("save-as not supported".into())
@@ -896,8 +987,11 @@ pub trait AppEngine:
 		None
 	}
 
-	/// Import an SRT file as Text clips on the current sequence's top
-	/// video track. Returns the imported cue count.
+	/// Imports an SRT file as Text clips on the current sequence's top
+	/// video track and returns the imported cue count.
+	///
+	/// `path` is the `.srt` source. `Err` when the file cannot be parsed
+	/// or the engine has no subtitle support (the default).
 	fn import_subtitles(
 		&mut self,
 		_path: std::path::PathBuf,
@@ -906,7 +1000,12 @@ pub trait AppEngine:
 		Err("subtitle import not supported".into())
 	}
 
-	/// Export the current sequence's Text clips as an SRT file.
+	/// Exports the current sequence's Text clips as an SRT file and
+	/// returns the number of cues written.
+	///
+	/// `path` is the destination file (overwritten). `Err` when the
+	/// engine has no subtitle support (the default), no sequence is
+	/// open, or the write fails.
 	fn export_subtitles(
 		&mut self,
 		_path: std::path::PathBuf,
@@ -916,6 +1015,11 @@ pub trait AppEngine:
 	}
 
 	/// Reads the subtitle style currently applied to a Text clip.
+	///
+	/// `clip` is a timeline clip id; returns `None` when the engine has
+	/// no subtitle support (the default), no project is open, or the
+	/// clip is not a Text clip. Pairs with
+	/// [`Self::set_subtitle_style`].
 	fn subtitle_style(&self, _clip: u64) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
 		None
 	}
@@ -930,7 +1034,13 @@ pub trait AppEngine:
 		Vec::new()
 	}
 
-	/// Replaces the master-bus limiter (enabled/ceiling/release).
+	/// Replaces the master-bus limiter settings.
+	///
+	/// `enabled` toggles the limiter, `ceiling_db` is the output ceiling
+	/// in dBFS (0 = full scale, negative leaves headroom) and
+	/// `release_ms` the release time in milliseconds. `Err` when the
+	/// engine has no audio-bus support (the default) or no project is
+	/// open.
 	fn set_audio_bus_limiter(
 		&mut self,
 		_enabled: bool,
@@ -941,12 +1051,22 @@ pub trait AppEngine:
 		Err("audio bus is not supported".into())
 	}
 
-	/// Reads a clip's audio mix and effect chain.
+	/// Reads a clip's audio mix (gain, pan, fades) and effect chain.
+	///
+	/// `clip` is a timeline clip id; returns `None` when the engine has
+	/// no clip-audio support (the default), no project is open, or the
+	/// id is not a clip. It is the read side of the `set_clip_audio_*`
+	/// family.
 	fn clip_audio(&self, _clip: u64) -> Option<quercus_engine_rs::editor::ClipAudioState> {
 		None
 	}
 
-	/// Apply a subtitle style to one Text clip.
+	/// Applies a subtitle style to one Text clip.
+	///
+	/// `clip` is the timeline clip id and `style` the style to write —
+	/// the value [`Self::subtitle_style`] reads back. `Err` when the
+	/// engine has no subtitle support (the default), no project is open,
+	/// or the clip is not a Text clip.
 	fn set_subtitle_style(
 		&mut self,
 		_clip: u64,
@@ -956,7 +1076,13 @@ pub trait AppEngine:
 		Err("subtitle styling is not supported".into())
 	}
 
-	/// Set one parameter of a clip's audio effect chain entry.
+	/// Sets one parameter of a clip's audio effect chain entry.
+	///
+	/// `clip` is a timeline clip id, `index` the zero-based chain
+	/// position, `input` the effect input identifier and `value` the new
+	/// numeric value in the parameter's native unit. `Err` when the
+	/// engine has no clip-audio support (the default) or the write is
+	/// rejected.
 	fn set_clip_audio_effect_param(
 		&mut self,
 		_clip: u64,
@@ -968,7 +1094,12 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Set per-clip audio gain (1.0 = unity) on each clip.
+	/// Sets the per-clip audio gain on each clip.
+	///
+	/// `clips` are timeline clip ids and `gain` is a linear multiplier
+	/// (`1.0` = unity, `0.0` = silence), not decibels. `Err` when the
+	/// engine has no clip-audio support (the default) or a clip is
+	/// rejected.
 	fn set_clip_audio_gain(
 		&mut self,
 		_clips: &[u64],
@@ -978,7 +1109,12 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Set per-clip stereo pan (-1..1).
+	/// Sets per-clip stereo pan.
+	///
+	/// `clips` are timeline clip ids and `pan` runs from `-1.0` (hard
+	/// left) through `0.0` (center) to `1.0` (hard right). `Err` when
+	/// the engine has no clip-audio support (the default), no project is
+	/// open, or a clip is rejected.
 	fn set_clip_audio_pan(
 		&mut self,
 		_clips: &[u64],
@@ -988,7 +1124,12 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Set linear fade-in/out durations (seconds) on each clip.
+	/// Sets linear fade-in/out durations (seconds) on each clip.
+	///
+	/// `clips` are timeline clip ids. `fade_in` and `fade_out` are
+	/// `(numerator, denominator)` rationals in seconds; `(0, 1)` means
+	/// "no fade". Clips are written in turn, so a failure leaves the
+	/// earlier clips updated.
 	fn set_clip_audio_fade(
 		&mut self,
 		_clips: &[u64],
@@ -999,7 +1140,12 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Enable/disable one audio effect-chain entry.
+	/// Enables or disables one entry of a clip's audio effect chain.
+	///
+	/// `clip` is a timeline clip id, `index` the zero-based chain
+	/// position and `enabled` the new bypass state (`false` keeps the
+	/// entry in the chain but skips its processing). `Err` as for
+	/// [`Self::remove_clip_audio_effect`].
 	fn set_clip_audio_effect_enabled(
 		&mut self,
 		_clip: u64,
@@ -1010,7 +1156,13 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Remove one audio effect-chain entry.
+	/// Removes one entry from a clip's audio effect chain.
+	///
+	/// `clip` is a timeline clip id and `index` is the zero-based
+	/// position in that clip's chain (as listed by
+	/// [`Self::clip_audio`]). `Err` when the engine has no clip-audio
+	/// support (the default), no project is open, or the entry cannot be
+	/// removed.
 	fn remove_clip_audio_effect(
 		&mut self,
 		_clip: u64,
@@ -1020,7 +1172,12 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Add a Volume/Pan effect to each clip's audio chain.
+	/// Appends a Volume/Pan audio effect to each clip's audio chain.
+	///
+	/// `clips` are timeline clip ids and `type_id` names the effect type
+	/// to instantiate; the effect is appended at the chain end, so
+	/// existing entries keep their order. `Err` when the engine has no
+	/// clip-audio support (the default) or a clip is rejected.
 	fn add_clip_audio_effect(
 		&mut self,
 		_clips: &[u64],
@@ -1030,7 +1187,13 @@ pub trait AppEngine:
 		Err("clip audio is not supported".into())
 	}
 
-	/// Import a media file into the project (M12 P3). Default: no-op.
+	/// Imports a media file into the project and lists it in the project
+	/// explorer as footage.
+	///
+	/// `path` is the media file to probe. Returns `Err` when no project
+	/// is open or the file cannot be imported; when the global proxy
+	/// switch is on, proxy generation for the new footage starts in the
+	/// background. Default: no-op (`Ok(())`).
 	fn import_footage(
 		&mut self,
 		_path: std::path::PathBuf,
@@ -1054,6 +1217,16 @@ pub trait AppEngine:
 	/// such track exists (the facade validates only the track type — video
 	/// or audio, subtitles are rejected — never the media/track pairing).
 	/// Default: no-op.
+	///
+	/// # Arguments
+	///
+	/// * `id` - Project-explorer entry id of the footage (the backend
+	///   resolves it to a footage node).
+	/// * `track_kind` - Kind of the track under the cursor, used by the
+	///   media/track mismatch policy above.
+	/// * `track_index` - Display index of the pointed track in the
+	///   timeline (0 = topmost row).
+	/// * `time` - Sequence frame where the new clip starts (its in-point).
 	fn drop_footage(
 		&mut self,
 		_id: u64,
@@ -1139,6 +1312,10 @@ pub trait AppEngine:
 	/// Toggles the global "Use Proxy Media" switch and invalidates every
 	/// footage's rendered frames (the C++ toggles the config and
 	/// re-renders; the preview path reads the switch on every montage).
+	///
+	/// `enabled` writes the app-wide `UseProxyMedia` config (default
+	/// `true`), not the project, so every open project sees the switch.
+	/// It is preview-only: exports always decode the original media.
 	fn set_use_proxy_media(&mut self, enabled: bool, cx: &mut Context<Self>) {
 		super::settings::set_use_proxy_media(enabled);
 		let _ = cx;
@@ -1172,8 +1349,12 @@ pub trait AppEngine:
 		super::settings::stop_on_last()
 	}
 
-	/// Sets the `StopOnLastFrame` config (the next tick past the end either
-	/// pauses at the last frame or wraps around).
+	/// Sets the `StopOnLastFrame` config (the next tick past the end
+	/// either pauses at the last frame or wraps around).
+	///
+	/// `enabled` = `true` pauses playback on the last frame, `false`
+	/// loops back to the sequence start. App-wide config (default
+	/// `true`), not project data, so every engine shares it.
 	fn set_stop_on_last(&mut self, enabled: bool, cx: &mut Context<Self>) {
 		super::settings::set_stop_on_last(enabled);
 		let _ = cx;
@@ -1186,7 +1367,13 @@ pub trait AppEngine:
 		super::settings::waveform_mode()
 	}
 
-	/// Sets the `ViewerWaveformMode` config value (clamped to `0..=2`).
+	/// Sets the `ViewerWaveformMode` config value (clamped to `0..=2`)
+	/// and stores it in the app-wide config.
+	///
+	/// `mode` is 0 = automatic (on when the sequence has audio), 1 =
+	/// only, 2 = both. The viewer reads it back through
+	/// [`Self::waveform_mode`] on its next paint; not project data, so
+	/// every project sees the same value.
 	fn set_waveform_mode(&mut self, mode: i32, cx: &mut Context<Self>) {
 		super::settings::set_waveform_mode(mode);
 		let _ = cx;
@@ -1245,6 +1432,11 @@ pub trait AppEngine:
 
 	/// Sets the disk-cache location; later cache writes (thumbnails and
 	/// any future per-project caches) land in the new location.
+	///
+	/// `setting` is clamped to `0..=2` (0 = default location, 1 =
+	/// alongside the project file, 2 = custom path); `custom_path` is
+	/// only stored for mode 2 and is trimmed, while other modes clear the
+	/// stored path. Not undoable; no-op when no project is open.
 	fn set_project_cache_location(
 		&mut self,
 		setting: i32,
@@ -1267,6 +1459,12 @@ pub trait AppEngine:
 	/// Applies the project color pipeline settings: stores them in the
 	/// project properties and invalidates every cached frame (they were
 	/// rendered under the old pipeline).
+	///
+	/// `working` is the scene (working) colorspace, `gamut` the output
+	/// primaries and `transfer` the output transfer function — the three
+	/// values [`Self::project_color_settings`] reads back. The change is
+	/// not recorded on the undo stack; the next frame pull re-renders
+	/// under the new pipeline.
 	fn set_project_color_settings(
 		&mut self,
 		working: String,
@@ -1285,6 +1483,11 @@ pub trait AppEngine:
 	// -------------------------------------------------------------------
 
 	/// Whether the project-explorer entry `id` is a sequence node.
+	///
+	/// `id` is the entry identity from the project explorer; returns
+	/// `false` when no project is open, the id is unknown, or the node is
+	/// not a sequence. The explorer uses this to pick the sequence
+	/// context menu; it pairs with [`Self::open_sequence_id`].
 	fn entry_is_sequence(&self, id: u64) -> bool {
 		let _ = id;
 		false
@@ -1305,7 +1508,13 @@ pub trait AppEngine:
 	}
 
 	/// Creates a sequence in the open project with the given parameters
-	/// and opens it. `Err` keeps the new-sequence dialog open.
+	/// and opens it, returning the new sequence's project-entry id.
+	///
+	/// `name` is the sequence label (blank names fall back to a default
+	/// such as `Sequence 1`), `format` carries the frame size and rate,
+	/// and `interlaced` selects two-field timing. The new sequence
+	/// becomes the current one, so the timeline rebuilds against it.
+	/// `Err` keeps the new-sequence dialog open.
 	fn create_sequence_with_params(
 		&mut self,
 		name: String,
@@ -1317,8 +1526,12 @@ pub trait AppEngine:
 		Err("no project open".to_string())
 	}
 
-	/// Creates a folder in the open project. `Err` keeps the caller's
-	/// action from completing.
+	/// Creates a folder in the open project and returns its project-entry
+	/// id.
+	///
+	/// `name` is the folder label; a blank/whitespace-only name is
+	/// replaced by a `Folder N` default. `Err` (for example when no
+	/// project is open) keeps the caller's action from completing.
 	fn create_folder(&mut self, name: String, cx: &mut Context<Self>) -> Result<u64, String> {
 		let _ = (name, cx);
 		Err("no project open".to_string())
@@ -1623,6 +1836,20 @@ pub trait AppEngine:
 	/// multicam node feeding a fresh clip on the CURRENT timeline's top
 	/// video track at the playhead. One undo entry. Returns the sequence
 	/// identity (the app opens it).
+	///
+	/// # Arguments
+	///
+	/// * `selected` - The wizard's angle footage rows in display order:
+	///   index `i` becomes track `i`, so the top track holds `selected[0]`.
+	/// * `offsets` - Per-angle placement offset in seconds, one entry per
+	///   angle (positive means that angle starts later on its track).
+	/// * `name` - Display name of the new sequence, stored verbatim.
+	///
+	/// # Errors
+	///
+	/// Returns `Err` when the engine has no multicam support (the default),
+	/// when no project or host sequence is open, or when the backend's
+	/// create-multicam edit fails.
 	fn multicam_create_sequence(
 		&mut self,
 		_selected: Vec<WizardFootage>,
@@ -1642,6 +1869,12 @@ pub trait AppEngine:
 	}
 
 	/// Whether the program viewer's eyedropper is currently armed.
+	///
+	/// Reads the `EyedropperMailbox` global that
+	/// [`Self::set_eyedropper_armed`] writes; `cx` is only the lookup
+	/// handle, so the call has no side effects. Returns `false` when no
+	/// mailbox was installed yet. The program viewer and the OFX color
+	/// picker poll this to mirror the armed state into their own widgets.
 	fn eyedropper_armed(&self, cx: &App) -> bool {
 		cx.try_global::<EyedropperMailbox>()
 			.is_some_and(|mailbox| mailbox.armed)

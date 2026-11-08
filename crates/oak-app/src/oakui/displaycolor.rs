@@ -325,7 +325,23 @@ fn current_key() -> (DisplayPolicy, String, String, String, String) {
 	(policy, configured_mode(), custom, space, monitor)
 }
 
-/// The cached state, (re)built when the key changed.
+/// Returns the display processor set, (re)building it when the active key
+/// changed.
+///
+/// The key is [`current_key`]: policy, configured mode, custom ICC path,
+/// content space and monitor fingerprint. A cached state with an equal key is
+/// cloned and returned; otherwise the chain is rebuilt and — when a previous
+/// state existed — `GENERATION` is bumped so the engine's frame caches drop
+/// images produced with the stale transform (the first build deliberately does
+/// not bump: nothing can be stale yet). An OS-managed policy or a non-`"icc"`
+/// mode yields an empty state (all processors `None`); the self-managed path
+/// resolves the ICC (custom path first, else the monitor's profile, else the
+/// main display) and builds the sRGB, XYZ and BGRA8 variants.
+///
+/// # Returns
+///
+/// `Some` on every currently reachable branch; a state whose three processors
+/// are all `None` means nothing is applied. Callers treat `None` as inactive.
 fn current() -> Option<State> {
 	let key = current_key();
 	let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -479,8 +495,15 @@ fn content_colorspace() -> gpui_kit::WindowContentColorspace {
 	}
 }
 
-/// Apply the display transform to an F32 RGBA buffer in place (no-op
-/// when inactive).
+/// Applies the display transform to an F32 RGBA buffer in place.
+///
+/// `samples` is `pixels * 4` floats (RGBA, display-referred encoded values in
+/// the project's output space) and `pixels` is the pixel count. For a
+/// non-sRGB project output the samples are first linearized and gamut-mapped
+/// to CIE XYZ (D65, unit luminance) and then run through the ICC
+/// connection-space chain; sRGB output runs the sRGB-named chain directly.
+/// No-op when the transform is inactive (OS-managed, or no ICC processor) —
+/// the caller must then leave the mapping to the OS.
 pub fn apply_f32_rgba(samples: &mut [f32], pixels: i64) {
 	let Some(state) = current() else {
 		return;
@@ -498,8 +521,14 @@ pub fn apply_f32_rgba(samples: &mut [f32], pixels: i64) {
 	}
 }
 
-/// Apply the display transform to a packed BGRA8 buffer in place (no-op
-/// when inactive).
+/// Applies the display transform to a packed BGRA8 buffer in place.
+///
+/// `data` is `pixels * 4` bytes of BGRA (the viewer's 8-bit slot) and
+/// `pixels` is the pixel count. No-op when the transform is inactive
+/// (OS-managed, or no ICC processor). The 8-bit slot always runs the
+/// sRGB-named chain, so a non-sRGB project spec degrades here — its
+/// encoding cannot be honored in 8 bits. The processor's result is ignored:
+/// the mapping is best-effort on a display-side copy.
 pub fn apply_bgra8(data: &mut [u8], pixels: i64) {
 	let Some(state) = current() else {
 		return;

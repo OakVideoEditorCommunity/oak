@@ -34,12 +34,44 @@ use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::engine;
 use crate::fmt;
 
-/// Run `info`. `project` is the .ove path from the command line.
+/// Runs the `info` command for one project file.
+///
+/// This is the CLI entry point: it owns the command-line path and delegates
+/// loading, formatting and exit-code selection to the implementation
+/// below.
+///
+/// # Arguments
+///
+/// * `project` - Path to the `.ove` project file exactly as typed on the
+///   command line; owned by this function.
+///
+/// # Returns
+///
+/// `EXIT_OK` when the project summary was printed, `EXIT_ERROR` when the
+/// project could not be loaded.
 pub fn run(project: String) -> i32 {
 	run_info(&project)
 }
 
-/// The info body.
+/// Loads a project and prints its `info` summary to stdout.
+///
+/// Prints the project name (falling back to the `.ove` file stem when the
+/// stored name is empty or "(untitled)"), the project filename, the
+/// modified flag, then a `Sequences:` count with one block per sequence and
+/// a `Footage:` count with one line per footage item. Footage paths stored
+/// relative to the project are resolved against the project directory before
+/// the online/offline check.
+///
+/// # Arguments
+///
+/// * `project` - `.ove` path (absolute or relative to the current working
+///   directory); a path that cannot be canonicalized is used as-is for the
+///   name/filename fallbacks.
+///
+/// # Returns
+///
+/// `EXIT_OK` on success; `EXIT_ERROR` after printing an `error: info: ...`
+/// message when the project cannot be loaded.
 fn run_info(project: &str) -> i32 {
 	let loaded = match engine::load_project(project) {
 		Ok(p) => p,
@@ -109,8 +141,20 @@ fn run_info(project: &str) -> i32 {
 	EXIT_OK
 }
 
-/// Print one sequence block (`print_sequence` in cli/main.cpp) through the
-/// SDK project queries.
+/// Prints one sequence block of the `info` output.
+///
+/// Emits the line built by [`crate::fmt::sequence`] from the sequence name,
+/// length (both as seconds and as a `num/den` rational), frame rate, video/
+/// audio/subtitle track counts, and the playhead converted to a frame
+/// timestamp in the sequence timebase (round-half-up). A zero denominator in
+/// the stored length, rate or playhead is treated as zero.
+///
+/// # Arguments
+///
+/// * `project` - Loaded project the sequence belongs to.
+/// * `seq_id` - Sequence node id to query.
+/// * `index` - Zero-based position in the sequence list, printed as the
+///   block's ordinal.
 fn print_sequence(project: &engine::ProjectRef, seq_id: quercus_engine_rs::node::NodeId, index: i64) {
 	let name = engine::node_label(project, seq_id);
 	let length = engine::sequence_length(project, seq_id);

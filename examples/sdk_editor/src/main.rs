@@ -9,6 +9,17 @@
 //! Headless SDK workflow by default; `--gui` opens the dependency-free
 //! terminal shell driving the same SDK session.
 
+/// Runs the `sdk_editor` example, either the headless workflow or the
+/// terminal GUI.
+///
+/// The first non-flag argument is the work directory; when it is absent a
+/// per-process temp directory (`oak-sdk-editor-<pid>`) is used. `--gui`
+/// runs the dependency-free terminal shell instead of the headless run.
+///
+/// # Errors
+///
+/// Startup or SDK errors are printed to stderr and the process exits with
+/// status 1; the headless success path prints the run summary to stdout.
 fn main() {
 	let args: Vec<String> = std::env::args().skip(1).collect();
 	let gui = args.iter().any(|arg| arg == "--gui");

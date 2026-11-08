@@ -36,19 +36,32 @@ pub struct FileDialogContent {
 }
 
 impl FileDialogContent {
-	/// Builds the content over a fresh input state.
+	/// Builds the content view over a fresh, empty input state.
+	///
+	/// `window`/`cx` create the `InputState`, which supplies IME, selection and
+	/// undo handling from gpui-kit. Prefill it afterwards with
+	/// [`FileDialogContent::set_path`].
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		Self {
 			editor: cx.new(|cx| InputState::new(window, cx)),
 		}
 	}
 
-	/// The path currently entered.
+	/// The path currently entered in the field.
+	///
+	/// `app` reads the input state's value as a [`SharedString`] (empty when the
+	/// field is empty). The host reads it on the OK click and owns the decision
+	/// whether the path is acceptable.
 	pub fn path(&self, app: &App) -> SharedString {
 		self.editor.read(app).value()
 	}
 
-	/// Set the path shown in the field.
+	/// Sets the path shown in the field.
+	///
+	/// `path` replaces the whole input value (selection and cursor move to the
+	/// end, via `InputState::set_value`), `window` is forwarded to the input
+	/// state and `cx` is notified so the dialog repaints. Used to prefill the
+	/// dialog, e.g. with the last used directory.
 	pub fn set_path(
 		&mut self,
 		path: impl Into<SharedString>,
@@ -82,8 +95,17 @@ impl Render for FileDialogContent {
 	}
 }
 
-/// Build a file dialog. OK is button index `0`, Cancel is index `1`. The host
-/// reads the chosen path from [`FileDialogContent::path`] when OK is clicked.
+/// Builds a file dialog: a modal with a path field and OK/Cancel buttons.
+///
+/// `control` is the host-assigned stable id carried by every
+/// [`super::ModalEvent`] from this dialog, so one handler can tell dialogs
+/// apart; `title` is the modal title; `window`/`cx` create the views. The
+/// buttons are `DialogButton::primary("Open")` at index `0` and
+/// `DialogButton::cancel("Cancel")` at index `1`. The host reads the chosen
+/// path from [`FileDialogContent::path`] when the OK button is clicked.
+///
+/// Returns the modal entity and its content, so the host can prefill or
+/// inspect the field.
 pub fn file_dialog(
 	control: usize,
 	title: impl Into<SharedString>,

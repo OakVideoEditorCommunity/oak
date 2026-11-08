@@ -45,6 +45,11 @@ pub fn id_of(identity: u64) -> Option<NodeId> {
 	id.is_valid().then_some(id)
 }
 
+/// Every node id in `p` whose node kind is `kind`, in arena order.
+///
+/// Shared implementation of [`sequence_ids`], [`footage_ids`] and
+/// [`folder_ids`]; the kind is compared exactly, so other node kinds are
+/// excluded.
 fn ids_of_kind(p: &ProjectRef, kind: NodeKind) -> Vec<NodeId> {
 	p.node_ids()
 		.into_iter()
@@ -72,6 +77,15 @@ pub fn load_ove(path: &Path) -> Result<ProjectRef, String> {
 }
 
 /// Write the project to `path` through the OVE serializer.
+///
+/// Obtains the SDK session backing `project` and saves the whole graph as a
+/// plain `.ove` XML file (the legacy compression flag is ignored). `path` is
+/// used verbatim; parent directories are not created.
+///
+/// # Errors
+///
+/// Returns an error when no session exists for `project` or when the
+/// serializer fails; the message includes the display path.
 pub fn save_ove(project: &ProjectRef, path: &Path) -> Result<(), String> {
 	let session = super::real::editor_session_for_project(project)?;
 	session
@@ -89,16 +103,22 @@ pub fn project_name(p: &ProjectRef) -> String {
 // ---------------------------------------------------------------------------
 
 /// Every sequence node in the graph, in arena order.
+///
+/// Arena order is node-storage order (creation order), not sorted by name.
 pub fn sequence_ids(p: &ProjectRef) -> Vec<NodeId> {
 	ids_of_kind(p, NodeKind::Sequence)
 }
 
 /// Every footage node in the graph, in arena order.
+///
+/// Arena order is node-storage order (creation order), not sorted by name.
 pub fn footage_ids(p: &ProjectRef) -> Vec<NodeId> {
 	ids_of_kind(p, NodeKind::Footage)
 }
 
 /// Every folder node in the graph, in arena order.
+///
+/// Arena order is node-storage order (creation order), not sorted by name.
 pub fn folder_ids(p: &ProjectRef) -> Vec<NodeId> {
 	ids_of_kind(p, NodeKind::Folder)
 }
@@ -109,6 +129,17 @@ pub fn create_sequence(project: &ProjectRef, name: &str) -> NodeId {
 }
 
 /// Create a sequence with an explicit first-video-stream format.
+///
+/// `name` is the new sequence's label. `params` is
+/// `Some((width, height, rate, interlaced))` to override the default format,
+/// or `None` to use the SDK defaults; `rate` is the frame rate rational.
+/// Returns the created sequence node.
+///
+/// # Panics
+///
+/// Panics when no SDK session can be obtained for `project`, or when the
+/// create command fails or returns no node (call sites treat this as an
+/// invariant violation).
 pub fn create_sequence_with_params(
 	project: &ProjectRef,
 	name: &str,
@@ -155,6 +186,10 @@ pub fn create_text_footage_node(project: &ProjectRef) -> Result<NodeId, String> 
 }
 
 /// Attach every orphaned sequence to the root folder.
+///
+/// Runs the SDK's mount-repair command on `project`'s session, walking the
+/// graph for sequence nodes that have no folder parent. Failures (for
+/// example no session for the project) are ignored.
 pub fn ensure_sequences_mounted(project: &ProjectRef) {
 	if let Ok(session) = super::real::editor_session_for_project(project) {
 		let _ = session.execute(quercus_engine_rs::edit::EditCommand::EnsureSequencesMounted);
@@ -194,11 +229,17 @@ pub fn set_sequence_parameters(
 }
 
 /// The label of a node (empty when the id is stale).
+///
+/// The label is the user-visible name every node kind carries; empty when
+/// the node is unknown.
 pub fn node_label(p: &ProjectRef, id: NodeId) -> String {
 	p.node_label(id)
 }
 
 /// The type id of a node (empty when the id is stale).
+///
+/// The type id is the factory string, e.g.
+/// `org.olivevideoeditor.Olive.text3`; empty when the node is unknown.
 pub fn node_type_id(p: &ProjectRef, id: NodeId) -> String {
 	p.node_type_id(id).unwrap_or_default()
 }
@@ -215,6 +256,9 @@ pub fn multicam_nodes(p: &ProjectRef) -> Vec<NodeId> {
 }
 
 /// The sequence's video format `(width, height, rate)`.
+///
+/// `seq` identifies the sequence node; `None` when no geometry is set or the
+/// frame rate is invalid (non-positive numerator or denominator).
 pub fn sequence_video_params(p: &ProjectRef, seq: NodeId) -> Option<(i32, i32, Rational)> {
 	let (width, height) = p.sequence_geometry(seq)?;
 	let rate = p.sequence_frame_rate(seq);
@@ -222,6 +266,10 @@ pub fn sequence_video_params(p: &ProjectRef, seq: NodeId) -> Option<(i32, i32, R
 }
 
 /// The sequence's frame duration as a `(num, den)` timebase pair.
+///
+/// `seq` identifies the sequence node; the pair is derived from the frame
+/// rate as `(den, num)`, i.e. seconds per frame (see [`ts_to_rational`]).
+/// `None` when the sequence has no valid video format.
 pub fn sequence_time_base(p: &ProjectRef, seq: NodeId) -> Option<(i64, i64)> {
 	let (_, _, rate) = sequence_video_params(p, seq)?;
 	let num = i64::from(rate.num);
@@ -233,16 +281,27 @@ pub fn sequence_time_base(p: &ProjectRef, seq: NodeId) -> Option<(i64, i64)> {
 }
 
 /// The sequence content length (rational seconds).
+///
+/// `seq` identifies the sequence node. This is the computed content length,
+/// falling back to the last known length when the content is empty; `0/0`
+/// (the null rational) when `seq` is stale or not a sequence.
 pub fn sequence_length(p: &ProjectRef, seq: NodeId) -> Rational {
 	p.sequence_length(seq)
 }
 
 /// The sequence's playhead position (rational seconds).
+///
+/// `seq` identifies the sequence node; returns the stored playhead, or `0/0`
+/// (the null rational) when `seq` is stale or not a sequence.
 pub fn sequence_playhead(p: &ProjectRef, seq: NodeId) -> Rational {
 	p.sequence_playhead(seq)
 }
 
 /// Move the sequence's playhead (undoable "Set Playhead").
+///
+/// `seq` is a sequence node and `time` the new position in rational seconds.
+/// Failure to obtain the session or to execute the command is ignored, so
+/// the call cannot report that the move was rejected.
 pub fn sequence_set_playhead(p: &ProjectRef, seq: NodeId, time: Rational) {
 	let Ok(session) = super::real::editor_session_for_project(p) else {
 		return;
@@ -257,6 +316,10 @@ pub fn sequence_set_playhead(p: &ProjectRef, seq: NodeId, time: Rational) {
 // Timebase helpers
 // ---------------------------------------------------------------------------
 
+/// Greatest common divisor of `a` and `b`, using absolute values.
+///
+/// Returns at least `1`, so `gcd(0, 0)` is `1` (callers use it as a divisor
+/// without a zero check). Used by [`ts_to_rational`] to reduce fractions.
 fn gcd(a: i64, b: i64) -> i64 {
 	let (mut a, mut b) = (a.abs(), b.abs());
 	while b != 0 {
@@ -268,6 +331,10 @@ fn gcd(a: i64, b: i64) -> i64 {
 }
 
 /// Rational seconds → integer frame timestamp on timebase `(num, den)`.
+///
+/// `r` is a time in seconds and `tb` the frame duration as `(num, den)`;
+/// the division truncates toward zero. A zero denominator (after combining
+/// `r` and `tb`) yields `0`.
 pub fn rational_to_ts(r: Rational, tb: (i64, i64)) -> i64 {
 	let num = i128::from(r.num) * i128::from(tb.1);
 	let den = i128::from(r.den) * i128::from(tb.0);
@@ -278,6 +345,10 @@ pub fn rational_to_ts(r: Rational, tb: (i64, i64)) -> i64 {
 }
 
 /// Integer frame timestamp → rational seconds on timebase `(num, den)`.
+///
+/// `ts` is a frame count and `tb` the frame duration as `(num, den)` seconds
+/// (see [`sequence_time_base`]). The fraction is reduced by the greatest
+/// common divisor; an invalid timebase (`num` or `den` <= 0) yields `0/1`.
 pub fn ts_to_rational(ts: i64, tb: (i64, i64)) -> Rational {
 	if tb.0 <= 0 || tb.1 <= 0 {
 		return Rational::new(0, 1);
@@ -302,6 +373,9 @@ fn track_kind_of(raw: i32) -> Option<TrackKind> {
 }
 
 /// The sequence's track list of `kind`, if present.
+///
+/// Scans `seq`'s track lists and returns the first whose kind matches;
+/// `None` when the sequence has no list of `kind` (or `seq` is stale).
 pub fn track_list_of(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Option<NodeId> {
 	for index in 0..p.sequence_track_list_count(seq) {
 		let list = p.sequence_track_list_at(seq, index);
@@ -313,6 +387,9 @@ pub fn track_list_of(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Option<Nod
 }
 
 /// The tracks of the sequence's list of `kind`, in list order.
+///
+/// `seq` is a sequence node and `kind` picks the video/audio/subtitle list;
+/// returns an empty vector when the sequence has no list of that kind.
 pub fn track_ids(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Vec<NodeId> {
 	let Some(list) = track_list_of(p, seq, kind) else {
 		return Vec::new();
@@ -322,6 +399,11 @@ pub fn track_ids(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Vec<NodeId> {
 		.collect()
 }
 
+/// Whether `node` is a timeline block the clip queries treat as a clip.
+///
+/// True for clip and adjustment-layer nodes, false for gaps, transitions,
+/// tracks and other node kinds; [`clip_ids`] and [`clip_transition_widths`]
+/// use it to skip non-clip blocks.
 fn is_timeline_clip(p: &ProjectRef, node: NodeId) -> bool {
 	matches!(
 		p.node_kind(node),
@@ -339,6 +421,10 @@ pub fn clip_ids(p: &ProjectRef, track: NodeId) -> Vec<NodeId> {
 }
 
 /// A block's timeline range and media in-point (rational seconds).
+///
+/// Returns `(in, out, media_in)`: `in`/`out` are the timeline boundaries and
+/// `media_in` is the source in-point. `None` when `clip` is not a node (a
+/// stale id).
 pub fn clip_range(p: &ProjectRef, clip: NodeId) -> Option<(Rational, Rational, Rational)> {
 	if p.node_kind(clip).is_none() {
 		return None;
@@ -347,11 +433,19 @@ pub fn clip_range(p: &ProjectRef, clip: NodeId) -> Option<(Rational, Rational, R
 }
 
 /// The block's owning track.
+///
+/// Returns `None` when `clip` is not a block or is not currently placed on a
+/// track (for example after an undo detached it). Pair with [`clip_range`]
+/// and [`clip_media_filename`], which also take a block id.
 pub fn clip_track(p: &ProjectRef, clip: NodeId) -> Option<NodeId> {
 	p.block_track(clip)
 }
 
 /// The first footage node feeding `id`.
+///
+/// Follows the block's input wiring (through an effect chain when present);
+/// returns `None` when `id` is not a block or nothing footage-like is
+/// connected upstream.
 pub fn find_input_footage(p: &ProjectRef, id: NodeId) -> Option<NodeId> {
 	p.block_footage(id)
 }
@@ -392,6 +486,10 @@ pub fn clip_media_filename(p: &ProjectRef, clip: NodeId) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// The footage's probed duration in seconds (`None` when unprobed).
+///
+/// `id` is a footage node; the stored rational duration is converted to
+/// `f64`. Also returns `None` for a zero denominator or a non-positive
+/// numerator (never probed or empty media).
 pub fn footage_duration_seconds(p: &ProjectRef, id: NodeId) -> Option<f64> {
 	let duration = p.footage_duration(id);
 	if duration.den == 0 || duration.num <= 0 {
@@ -401,6 +499,11 @@ pub fn footage_duration_seconds(p: &ProjectRef, id: NodeId) -> Option<f64> {
 }
 
 /// Reprobe footage whose stream metadata is missing.
+///
+/// Runs the SDK's reprobe command on `project`'s session, which re-reads
+/// stream info for footage nodes that have no probe result yet. Failures
+/// (for example no session for the project) are ignored, so the call cannot
+/// report whether anything was reprobed.
 pub fn reprobe_unprobed_footage(project: &ProjectRef) {
 	if let Ok(session) = super::real::editor_session_for_project(project) {
 		let _ = session.execute(quercus_engine_rs::edit::EditCommand::ReprobeUnprobedFootage);
@@ -431,6 +534,10 @@ pub fn markers(session: &EditorSession) -> Vec<(Rational, String, i32)> {
 		.collect()
 }
 
+/// Whether the session has a marker exactly at `time` (rational seconds).
+///
+/// Used by [`marker_add`] / [`marker_remove`] to reject duplicates and
+/// missing targets; times are compared for exact equality.
 fn marker_at(session: &EditorSession, time: Rational) -> bool {
 	session
 		.markers()
@@ -459,6 +566,14 @@ pub fn marker_add(
 }
 
 /// Undoable marker remove ("Remove Marker").
+///
+/// `time` must equal an existing marker's time exactly; the removal becomes
+/// one undo row.
+///
+/// # Errors
+///
+/// Returns an error when no marker sits at `time` or when the session's
+/// command fails.
 pub fn marker_remove(session: &EditorSession, time: Rational) -> Result<(), String> {
 	if !marker_at(session, time) {
 		return Err("no marker at that time".to_string());
@@ -471,11 +586,18 @@ pub fn marker_remove(session: &EditorSession, time: Rational) -> Result<(), Stri
 }
 
 /// The session's work area as `(enabled, range)`.
+///
+/// `enabled` is the flag the timeline's work-area toggle shows; `range` is
+/// the in/out span in rational seconds.
 pub fn workarea_state(session: &EditorSession) -> (bool, TimeRange) {
 	session.workarea_state()
 }
 
 /// Live (non-undoable) workarea write: enable flag plus range.
+///
+/// Writes the session's work-area state directly (no undo row), so the
+/// timeline can follow a drag; use [`workarea_set_undoable`] for a committed
+/// change. `range` is in rational seconds; command errors are ignored.
 pub fn workarea_set(session: &EditorSession, enabled: bool, range: TimeRange) {
 	let _ = session.execute(quercus_engine_rs::edit::EditCommand::WorkareaSet {
 		enabled,
@@ -538,6 +660,15 @@ fn library_or_error() -> Result<ProjectLibrary, String> {
 }
 
 /// Create a blank project row named `name`; returns its uuid.
+///
+/// The row is created through the configured project library and the
+/// returned string is the manager's row id (not a [`NodeId`]); `name` is
+/// passed to storage unchanged.
+///
+/// # Errors
+///
+/// Returns an error when the project library is not configured (storage
+/// disabled) or when the create call fails.
 pub fn library_create(name: &str) -> Result<String, String> {
 	library_or_error()?.create(name).map_err(|e| e.to_string())
 }
@@ -552,6 +683,13 @@ pub fn library_delete(uuid: &str) -> Result<(), String> {
 }
 
 /// Rename the library row `uuid` (the manager's list name).
+///
+/// `name` is trimmed before it is stored; `uuid` must be non-empty.
+///
+/// # Errors
+///
+/// Returns an error for an empty `uuid` or a blank `name`, when the project
+/// library is not configured, or when the storage rename fails.
 pub fn library_rename(uuid: &str, name: &str) -> Result<(), String> {
 	if uuid.is_empty() || name.trim().is_empty() {
 		return Err("invalid uuid or name".to_string());
@@ -592,6 +730,14 @@ pub fn library_export(uuid: &str, path: &Path) -> Result<(), String> {
 }
 
 /// Load the library row `uuid` as a fresh project.
+///
+/// Opens a new SDK session from the stored row and returns its project
+/// handle; `uuid` is the manager's row id and must be non-empty.
+///
+/// # Errors
+///
+/// Returns an error for an empty `uuid`, when the project library is not
+/// configured (storage disabled), or when the row cannot be opened.
 pub fn library_open(uuid: &str) -> Result<ProjectRef, String> {
 	if uuid.is_empty() {
 		return Err("invalid uuid".to_string());
@@ -615,6 +761,16 @@ pub fn library_open(uuid: &str) -> Result<ProjectRef, String> {
 // pushes exactly one undo row (composite edits assemble a multi command).
 // ---------------------------------------------------------------------------
 
+/// Run one SDK edit command against `p`'s session and discard the result
+/// payload.
+///
+/// Every command pushes its own undo row, so this helper exists only to
+/// share the session plumbing between the edit wrappers below.
+///
+/// # Errors
+///
+/// Returns an error when no SDK session can be obtained for `p` or when the
+/// command itself fails.
 fn execute(p: &ProjectRef, command: quercus_engine_rs::edit::EditCommand) -> Result<(), String> {
 	super::real::editor_session_for_project(p)?
 		.execute(command)
@@ -691,7 +847,10 @@ pub fn track_muted(p: &ProjectRef, track: NodeId) -> Option<bool> {
 	(p.node_kind(track) == Some(NodeKind::Track)).then(|| p.track_muted(track))
 }
 
-/// A track's locked flag (`None` when the id is stale).
+/// A track's locked flag (`None` when the id is stale or is not a track).
+///
+/// A locked track rejects clip edits in the app layer (trim/move/split/
+/// delete); pair with [`set_track_locked`] to change the flag.
 pub fn track_locked(p: &ProjectRef, track: NodeId) -> Option<bool> {
 	(p.node_kind(track) == Some(NodeKind::Track)).then(|| p.track_locked(track))
 }
@@ -815,6 +974,17 @@ pub fn create_adjustment_layer(
 
 /// Create a transition at the seam between two contiguous clips and push
 /// it as one "Add Transition" undo row (the timeline's wedge drag path).
+///
+/// `prev` and `next` are clip blocks that touch exactly (the seam is their
+/// shared boundary); `half` is half the transition length, so the wedge
+/// spans `half` on either side of the seam in rational seconds. Returns the
+/// new transition node.
+///
+/// # Errors
+///
+/// Propagates the SDK command's error when the seam cannot take a
+/// transition (for example clips that do not touch) or when no session can
+/// be obtained for `p`.
 pub fn add_transition_at_seam(
 	p: &ProjectRef,
 	prev: NodeId,
@@ -920,6 +1090,21 @@ pub fn set_transition_length(
 /// The clip reads the sequence's output during playback; the sequence's
 /// own tracks stay in the source sequence (a frame, not a folder of
 /// tracks, on the host timeline).
+///
+/// # Arguments
+///
+/// * `p` - Project whose session executes the edit (one "Add Clip" undo row).
+/// * `host_seq` - Sequence receiving the clip; also becomes the session's
+///   current sequence.
+/// * `source_seq` - Sequence node rendered into the clip (the nested content).
+/// * `track_index` - 0-based index into the host sequence's video track list.
+/// * `in_ts` / `out_ts` - Clip range in host frame timestamps, `out_ts >
+///   in_ts >= 0`.
+///
+/// # Errors
+///
+/// Returns an error for an invalid range (`in_ts < 0` or `out_ts <= in_ts`)
+/// or when no session can be obtained or the place command fails.
 pub fn place_nested_sequence_clip(
 	p: &ProjectRef,
 	host_seq: NodeId,
@@ -1230,6 +1415,20 @@ pub fn move_clip_with_links(
 /// every link among them. The undo restores the exact prior topology among
 /// the set (links to nodes OUTSIDE the set are untouched, like the C++
 /// command's).
+///
+/// # Arguments
+///
+/// * `p` - Project whose session executes the edit and owns the undo row.
+/// * `blocks` - Clip block ids in the set; only links between members are
+///   rewritten, so a block linked to something outside the set keeps that
+///   link.
+/// * `linked` - `true` connects every pair of the set (a full clique);
+///   `false` clears every link among them.
+///
+/// # Errors
+///
+/// Propagates the SDK command's error when no session can be obtained for
+/// `p` or when the command rejects the set.
 pub fn set_clips_linked(p: &ProjectRef, blocks: &[NodeId], linked: bool) -> Result<(), String> {
 	execute(
 		p,
@@ -1399,6 +1598,16 @@ pub fn set_clips_speed(p: &ProjectRef, clips: &[NodeId], speed: f64) -> Result<(
 }
 
 /// Rename blocks (set the node label; undoable "Rename").
+///
+/// Every id in `blocks` receives `name` as its node label in one undo row;
+/// `p` supplies the project whose session executes the edit. `name` is stored
+/// as given, but a blank or whitespace-only name is rejected before the
+/// command runs.
+///
+/// # Errors
+///
+/// Returns an error when `name` is empty/whitespace-only, when no session can
+/// be obtained for `p`, or when the rename command fails.
 pub fn rename_blocks(p: &ProjectRef, blocks: &[NodeId], name: &str) -> Result<(), String> {
 	if name.trim().is_empty() {
 		return Err("empty name".to_string());
@@ -1435,6 +1644,22 @@ pub fn duplicate_clips(
 /// Paste with ripple (undoable "Paste Insert"): every unlocked block
 /// starting at or after the playhead shifts right by the pasted span,
 /// then the clipboard lands at the playhead — all in ONE undo entry.
+///
+/// # Arguments
+///
+/// * `p` - Project whose session executes the edit and owns the undo row.
+/// * `seq` - Host sequence; currently unused, kept for signature parity with
+///   [`paste_clips`] (the command targets the session's current sequence).
+/// * `items` - Clipboard entries to paste; currently unused because
+///   `EditCommand::PasteClipsInsert` reads the session-owned clipboard filled
+///   by [`copy_clips`].
+/// * `playhead_ts` - Frame timestamp (sequence timebase) where the pasted
+///   group starts.
+///
+/// # Errors
+///
+/// Propagates the SDK command's error when no session can be obtained for
+/// `p` or when the insert-paste cannot be applied.
 pub fn paste_clips_insert(
 	p: &ProjectRef,
 	seq: NodeId,

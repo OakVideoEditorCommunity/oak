@@ -36,7 +36,12 @@ pub struct DialogButton {
 }
 
 impl DialogButton {
-	/// Create a button.
+	/// Create a button with `label` and `role`.
+	///
+	/// `label` is the visible text (converted into a [`SharedString`]);
+	/// `role` selects the styling and the `enter`-key behaviour. Prefer
+	/// [`DialogButton::primary`]/[`DialogButton::cancel`] for the common
+	/// roles; this constructor also builds secondary buttons.
 	pub fn new(label: impl Into<SharedString>, role: DialogButtonRole) -> Self {
 		Self {
 			label: label.into(),
@@ -44,12 +49,22 @@ impl DialogButton {
 		}
 	}
 
-	/// A primary button.
+	/// A primary button (the [`DialogButtonRole::Primary`] role).
+	///
+	/// `label` is shown as-is. The first primary button in the row is the
+	/// one `enter` activates (through the shared emit path) and gets the
+	/// accent styling; a dialog usually has exactly one.
 	pub fn primary(label: impl Into<SharedString>) -> Self {
 		Self::new(label, DialogButtonRole::Primary)
 	}
 
-	/// A cancel button.
+	/// A cancel button (the [`DialogButtonRole::Cancel`] role).
+	///
+	/// `label` is shown as-is (no localization here); the role marks the
+	/// button as the dismiss-style action for host styling and event
+	/// handling. It does not dismiss by itself — the host decides on
+	/// [`ModalEvent::ButtonClicked`]. Escape already emits
+	/// [`ModalEvent::Dismissed`] directly.
 	pub fn cancel(label: impl Into<SharedString>) -> Self {
 		Self::new(label, DialogButtonRole::Cancel)
 	}
@@ -71,7 +86,13 @@ pub struct ModalOptions {
 }
 
 impl ModalOptions {
-	/// Create options.
+	/// Create empty options for a dialog of `width`.
+	///
+	/// `title` is shown in the card header and `width` is the card's pixel
+	/// width. The button row starts empty ([`ModalOptions::with_button`]
+	/// adds the first one) and backdrop dismissal starts disabled
+	/// ([`ModalOptions::with_dismiss_on_mask`] opts in), so form dialogs keep
+	/// their accidental-click protection by default.
 	pub fn new(title: impl Into<SharedString>, width: gpui_kit::Pixels) -> Self {
 		Self {
 			title: title.into(),
@@ -81,7 +102,12 @@ impl ModalOptions {
 		}
 	}
 
-	/// Add a button.
+	/// Append a button to the footer row (builder form).
+	///
+	/// Consumes and returns `self`; buttons appear left to right in call
+	/// order, and a button's position is the `button` index reported by
+	/// [`ModalEvent::ButtonClicked`]. The first [`DialogButtonRole::Primary`]
+	/// button becomes the target of the `enter` key.
 	pub fn with_button(mut self, button: DialogButton) -> Self {
 		self.buttons.push(button);
 		self
@@ -122,6 +148,14 @@ pub struct Modal {
 
 impl Modal {
 	/// Create a modal with `options` (no content yet).
+	///
+	/// `control` is the host-assigned stable id carried by every
+	/// [`ModalEvent`] from this dialog; `options` supplies the title, width,
+	/// button row and mask-dismiss flag; `_window` is accepted for the gpui
+	/// constructor shape and unused; `cx` provides the focus handle the
+	/// modal tracks while open. The content slot starts empty — attach it
+	/// with [`Modal::with_content`] or [`Modal::set_content`] before
+	/// rendering if the dialog needs a body.
 	pub fn new(
 		control: usize,
 		options: ModalOptions,
@@ -136,18 +170,34 @@ impl Modal {
 		}
 	}
 
-	/// Attach the dialog's content view.
+	/// Attach the dialog's content view (builder form).
+	///
+	/// Consumes and returns `self` with the content slot set to `content`;
+	/// later calls to [`Modal::set_content`] replace it. The content is
+	/// rendered inside the card's padded body, above the button row.
 	pub fn with_content(mut self, content: impl Into<AnyView>) -> Self {
 		self.content = Some(content.into());
 		self
 	}
 
-	/// Replace the content view.
+	/// Replace the content view and re-render the dialog.
+	///
+	/// `content` is converted into an [`AnyView`] and replaces whatever the
+	/// slot held (including `None`); `cx` is notified so the new view paints
+	/// on the next frame. Use this to swap content on an existing modal, or
+	/// [`Modal::with_content`] to build one with content already attached.
 	pub fn set_content(&mut self, content: impl Into<AnyView>, cx: &mut Context<Self>) {
 		self.content = Some(content.into());
 		cx.notify();
 	}
 
+	/// Emit the click request for the button at `index` and re-render.
+	///
+	/// `index` is the button's position in [`ModalOptions::buttons`] (the
+	/// same index carried by [`ModalEvent::ButtonClicked`]); `cx` receives
+	/// the event and the notify. Used by the button row and by the `enter`
+	/// shortcut, so keyboard activation and pointer clicks share one path.
+	/// The dialog does not close itself — the host reacts to the event.
 	fn emit_button(&mut self, index: usize, cx: &mut Context<Self>) {
 		cx.emit(ModalEvent::ButtonClicked {
 			control: self.control,

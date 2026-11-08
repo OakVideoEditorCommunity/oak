@@ -137,7 +137,10 @@ pub struct MockClock {
 }
 
 impl MockClock {
-	/// A stopped clock at frame zero running at `rate`.
+	/// A stopped clock at frame zero with frame rate `rate`.
+	///
+	/// The transport starts paused and no wall-clock anchor is set
+	/// (`started = None`), so [`MockClock::tick`] is a no-op until `play`.
 	pub fn new(rate: FrameRate) -> Self {
 		Self {
 			transport: TransportState::new(),
@@ -662,6 +665,15 @@ impl MockEngine {
 		self.effect_param_ok = ok;
 	}
 
+	/// Build the demo project state used by the app shell and its UI tests.
+	///
+	/// Creates project `第一稿` with the 1080p25 sequence, four tracks
+	/// (V2/V1/A1/A2) and their clips, the effect-stack cards, the seven-node
+	/// demo graph (two sources → transform/blur → mixer → output, plus the
+	/// virtual input/output endpoints) and its edges, the demo library, two
+	/// stopped clocks and empty import/undo/proxy/marker state, then derives
+	/// every port's connectivity. `cx` is used only to create the clock
+	/// entities; returns the populated mock engine.
 	pub fn demo(cx: &mut Context<Self>) -> Self {
 		let rate = VideoFormat::hd_1080p25().rate;
 		let clip =
@@ -987,7 +999,11 @@ impl MockEngine {
 		self.sequence.length
 	}
 
-	/// Resolves the clock entity for a monitor.
+	/// The clock entity for `monitor` (`Source` or `Program`).
+	///
+	/// Both clocks are created in [`demo`] and share the sequence frame rate.
+	/// Returned by reference so callers can read the transport without cloning
+	/// the entity handle.
 	fn clock(&self, monitor: Monitor) -> &Entity<MockClock> {
 		match monitor {
 			Monitor::Source => &self.source_clock,
@@ -995,7 +1011,14 @@ impl MockEngine {
 		}
 	}
 
-	/// Applies an edit request from the effect stack to the model.
+	/// Apply one effect-stack request to the demo model, then notify the UI.
+	///
+	/// Handles enable/expand toggles, removal (only removable cards), reorder
+	/// (an insertion index in the post-removal list), insert and
+	/// insert-by-type (new ids come from `next_effect_id`), and card selection
+	/// (selects the same-titled graph node). Parameter changes and context
+	/// menu requests are ignored, as the app owns them. `cx` is notified once
+	/// at the end.
 	pub fn apply_effect_event(&mut self, event: &EffectStackEvent, cx: &mut Context<Self>) {
 		match event {
 			EffectStackEvent::EnableToggled { effect, enabled } => {
@@ -1073,8 +1096,14 @@ impl MockEngine {
 		cx.notify();
 	}
 
-	/// Applies a node-editor request to the mock graph (the "edits are
-	/// requests" loop: the view emits, the engine applies and notifies).
+	/// Apply one node-editor request to the mock graph, then notify the UI.
+	///
+	/// Handles the mutating requests — node move, connect (validated by
+	/// `can_connect`), disconnect, delete (nodes plus their edges, clearing the
+	/// selection), and selection change (auto-expanding the matching effect
+	/// card) — and ignores preview/view/context-menu/background clicks. Port
+	/// connectivity flags are re-derived after every structural edit. `cx` is
+	/// notified once; the mock records no undo command.
 	pub fn apply_node_graph_event(&mut self, event: &NodeGraphEvent, cx: &mut Context<Self>) {
 		match event {
 			NodeGraphEvent::NodeMovePreview { .. }
@@ -1176,7 +1205,11 @@ impl MockEngine {
 		self.nodes.iter().find(|n| n.id() == id)
 	}
 
-	/// Looks up a port by its globally unique id.
+	/// Borrow the port with globally unique id `id`, or `None` when unknown.
+	///
+	/// Searches every node's inputs then outputs and returns the stored
+	/// [`MockPort`], so callers can read its kind, label and data type without
+	/// knowing its owner.
 	fn port(&self, id: PortId) -> Option<&MockPort> {
 		self.nodes
 			.iter()
@@ -1184,14 +1217,20 @@ impl MockEngine {
 			.find(|p| p.id() == id)
 	}
 
-	/// Returns the node that owns `port`.
+	/// The node that owns port `port`, or `None` when no node declares it.
+	///
+	/// A port id is globally unique and may be an input or an output; the
+	/// first matching node in `nodes` order wins.
 	fn node_with_port(&self, port: PortId) -> Option<&MockNode> {
 		self.nodes.iter().find(|n| {
 			n.inputs.iter().any(|p| p.id() == port) || n.outputs.iter().any(|p| p.id() == port)
 		})
 	}
 
-	/// Whether an edge with the same endpoints already exists.
+	/// Whether an edge from port `from` to port `to` already exists.
+	///
+	/// Compares the port pair only (edge ids and other endpoints are ignored);
+	/// used to reject duplicate connections before adding one.
 	fn edge_exists(&self, from: PortId, to: PortId) -> bool {
 		self.edges
 			.iter()
@@ -1235,7 +1274,11 @@ impl MockEngine {
 		}
 	}
 
-	/// Sets the row height of every timeline track (demo toolbar).
+	/// Set every track's row height to `height` (logical pixels) and notify
+	/// the UI.
+	///
+	/// Applies uniformly — per-track heights are overwritten, not clamped —
+	/// and `cx` is notified once.
 	pub fn set_track_height(&mut self, height: Pixels, cx: &mut Context<Self>) {
 		for track in &mut self.tracks {
 			track.height = height;
@@ -1243,7 +1286,13 @@ impl MockEngine {
 		cx.notify();
 	}
 
-	/// Adds a new empty track of the given kind (demo "序列" menu).
+	/// Append an empty track of `kind` and notify the UI.
+	///
+	/// The name follows the demo numbering (`V{n} 视频轨道{i}`,
+	/// `A{n} 音频轨道{i}`, `S{n} 字幕轨道`) and the default row height is
+	/// `64 px` (video), `48 px` (audio) or `32 px` (subtitle). The new track is
+	/// unlocked, unmuted, not soloed, visible and has no clips; `kind` selects
+	/// video, audio or subtitle.
 	pub fn add_track(&mut self, kind: TrackKind, cx: &mut Context<Self>) {
 		let index = self.tracks.len();
 		let (name, height) = match kind {
@@ -1264,7 +1313,11 @@ impl MockEngine {
 		cx.notify();
 	}
 
-	/// Finds the (track, clip) position of `clip` in the display list.
+	/// Position of `clip` in the display list as `(track_index, clip_index)`,
+	/// or `None` when the clip is on no track.
+	///
+	/// Indices are positions in `tracks` and `tracks[track].clips` (display
+	/// order, not stable ids); used by the clip move/sync/split helpers.
 	fn mock_clip_position(&self, clip: ClipId) -> Option<(usize, usize)> {
 		self.tracks
 			.iter()
@@ -1318,8 +1371,10 @@ impl MockEngine {
 			.unwrap_or(1)
 	}
 
-	/// Whether two demo clips are linked (the 链接/重新链接 toggle's state;
-	/// the app tests assert through this).
+	/// Whether demo clips `a` and `b` are linked by the 链接/重新链接 toggle.
+	///
+	/// The pair is stored unordered (`clip_links` holds `(min, max)`), so the
+	/// argument order does not matter; the app tests assert through this.
 	pub fn clips_linked(&self, a: u64, b: u64) -> bool {
 		let pair = if a < b { (a, b) } else { (b, a) };
 		self.clip_links.contains(&pair)
@@ -3496,7 +3551,12 @@ impl MockEngine {
 		&self.text_footages
 	}
 
-	/// The display name of the project-explorer entry with `id`, if any.
+	/// Display name of the project-explorer entry `id`, or `None` when it is
+	/// not in the demo tree.
+	///
+	/// Searches the roots first, then each root's direct children (the mock
+	/// tree has no deeper levels); used for labels where only an entry id is
+	/// available.
 	fn footage_entry_name(&self, id: u64) -> Option<String> {
 		for entry in self.roots() {
 			if entry.id == id {
@@ -3533,13 +3593,22 @@ impl MockEngine {
 		self.selected_item
 	}
 
-	/// Selects a material-bin entry (demo "open" action).
+	/// Select `id` in the material bin and notify the UI.
+	///
+	/// `id` is a material-bin entry id (the demo "open" action); the previous
+	/// selection is replaced. `cx` is only notified — the engine never mutates
+	/// it.
 	pub fn select_item(&mut self, id: u64, cx: &mut Context<Self>) {
 		self.selected_item = Some(id);
 		cx.notify();
 	}
 
-	/// Reads the current frame of a monitor's clock.
+	/// Current frame of `monitor`'s transport clock.
+	///
+	/// `monitor` selects the source or program clock; `cx` is only borrowed to
+	/// read the clock entity, so the result is the playhead at call time (a
+	/// playing clock advances between calls, see [`MockClock::tick`]). Used by
+	/// the CPU-frame cache and the viewer widgets.
 	pub fn clock_frame(&self, monitor: Monitor, cx: &App) -> Frame {
 		self.clock(monitor).read(cx).transport.frame()
 	}

@@ -58,6 +58,18 @@ pub struct InspectorPanel<E: AppEngine> {
 
 impl<E: AppEngine> InspectorPanel<E> {
 	/// Builds the stack over `engine`'s effect model.
+	///
+	/// `engine` is the engine entity the panel forwards every edit request to
+	/// (it is cloned into the stack's params renderer, which creates one
+	/// [`OfxParamsView`] per effect card); `window` is needed to build the
+	/// context menu and the child entities; `cx` is the panel's context and
+	/// owns the subscriptions. Subscribes the stack's [`EffectStackEvent`]s:
+	/// `AddRequested` only records the insertion index in `pending_add` (the
+	/// user then picks an effect from the panel's add menu), `AddTypeRequested`
+	/// (library drop) inserts immediately via `AppEngine::add_effect`, and
+	/// everything else is forwarded to `AppEngine::apply_effect_event`. Also
+	/// observes the engine so the panel repaints on external changes. The panel
+	/// starts with no pending add and no context-menu target.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let stack = cx.new(|cx| {
 			let engine_for_params = engine.clone();
@@ -117,6 +129,14 @@ impl<E: AppEngine> InspectorPanel<E> {
 
 	/// Handles the inspector's local (non-registry) context-menu items:
 	/// they drive the same [`EffectStackEvent`]s the card widgets emit.
+	///
+	/// `item` is one of the panel's `LOCAL_*` ids and `cx` is the panel
+	/// context. Returns immediately (doing nothing) when no effect is targeted
+	/// (`context_effect == None`, i.e. the menu was opened over empty space).
+	/// `LOCAL_ENABLE` toggles the effect's enabled flag, `LOCAL_REMOVE` asks the
+	/// engine to drop it, and `LOCAL_RENAME` / `LOCAL_PROPERTIES` are not
+	/// implemented yet — they only log. Unknown ids are logged too, so a stale
+	/// menu cannot silently mutate the stack.
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		let Some((effect, enabled, _)) = self.context_effect else {
 			return;

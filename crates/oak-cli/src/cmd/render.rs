@@ -45,7 +45,12 @@ use crate::engine;
 use crate::ppm;
 use crate::wav;
 
-/// Run `render` with the validated (or rejected) seconds arguments.
+/// Validate the CLI seconds arguments and dispatch to [`run_render`].
+///
+/// `project` is the project file path; `start_seconds`/`end_seconds` are the
+/// raw CLI strings parsed as `f64` seconds; `out_dir` is the output directory.
+/// Prints an error and returns [`EXIT_USAGE`] when either value is not a number
+/// or `end <= start`; otherwise returns the exit code from [`run_render`].
 pub fn run(project: String, start_seconds: &str, end_seconds: &str, out_dir: &str) -> i32 {
 	let start: f64 = match start_seconds.parse() {
 		Ok(v) => v,
@@ -69,7 +74,16 @@ pub fn run(project: String, start_seconds: &str, end_seconds: &str, out_dir: &st
 	run_render(&project, start, end, out_dir)
 }
 
-/// The render body.
+/// Render the first sequence of a project to PPM frames plus a WAV file.
+///
+/// `project` is the project path (made absolute; the process chdirs to its
+/// parent so relative footage paths resolve); `start`/`end` are timeline
+/// seconds; `out_dir` is created if missing and receives `frame_%05d.ppm` plus
+/// the audio WAV. Returns an exit code: [`EXIT_OK`] on success, [`EXIT_ERROR`]
+/// for a bad project, path, geometry or frame write, and
+/// [`EXIT_RENDER_UNAVAILABLE`] when the render manager, a frame, or the audio
+/// render is unavailable. The render manager is always shut down before
+/// returning.
 fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	// Absolute project path first — the C++ CLI chdirs into the project
 	// directory so relative footage paths resolve during rendering.

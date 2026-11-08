@@ -146,8 +146,23 @@ pub struct PreferencesContent {
 }
 
 impl PreferencesContent {
-	/// Builds the content: reads the current config values and seeds every
-	/// widget.
+	/// Builds the general preferences form, seeding every widget from config.
+	///
+	/// Creates the rendering (backend, on-screen bit depth), general (language,
+	/// theme, startup update check), cache (directory, pre-render window), proxy
+	/// (enable, divider, hardware decoding), colour (display ICC enable and custom
+	/// profile path), project (snapshot interval, default transition length),
+	/// audio (output / input device) and storage (SQLite/PostgreSQL backend plus
+	/// connection string) controls. Each control reads its current value through
+	/// the config helpers and installs a subscription that writes changes back
+	/// immediately — except the three free-text fields (cache directory, custom
+	/// ICC path, PostgreSQL URL), whose text is committed on dialog close through
+	/// `commit_cache_dir`, `commit_display_icc_path` and `commit_storage_pg_url`.
+	/// Missing or unparsable values fall back to the defaults documented on the
+	/// constants, and a stale device name falls back to "system default".
+	///
+	/// `window` is required by the input widgets; `cx` creates the entities and
+	/// subscriptions.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// --- 渲染 Rendering: the renderer backend --------------------------
 		let backends = renderer_backends();
@@ -601,7 +616,14 @@ impl PreferencesContent {
 		config_set_string(CONFIG_KEY_PG_URL, &url);
 	}
 
-	/// Opens the platform file picker for a custom ICC profile.
+	/// Opens the platform file picker to choose a custom display ICC profile.
+	///
+	/// The picker accepts one existing file and is titled with the localized
+	/// "browse" text. The chosen path is written into the custom-profile field;
+	/// it reaches the config store only through `commit_display_icc_path` when the
+	/// dialog closes. Cancelling or picking nothing leaves the field unchanged.
+	/// The prompt resolves asynchronously, so the field update happens in a
+	/// spawned task and `cx` is notified when it lands.
 	fn browse_display_icc(&mut self, cx: &mut Context<Self>) {
 		let receiver = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
 			files: true,
@@ -626,7 +648,11 @@ impl PreferencesContent {
 		.detach();
 	}
 
-	/// The cache directory currently entered.
+	/// Returns the disk-cache directory currently shown in its field.
+	///
+	/// A [`SharedString`] snapshot of the path text. It is not yet persisted —
+	/// [`Self::commit_cache_dir`] writes it to the config store when the dialog
+	/// closes, so a typed-but-unbrowsed path still lands.
 	pub fn cache_dir(&self, cx: &App) -> SharedString {
 		self.cache_dir.read(cx).path(cx)
 	}
@@ -708,7 +734,11 @@ fn device_combo(
 	(combo, devices)
 }
 
-/// A display label for a renderer backend id.
+/// Maps a renderer backend id from the config store to a display label.
+///
+/// Known ids become `"OpenGL"`, `"Metal"`, `"Vulkan"` or `"None (off)"`; any
+/// other id is returned unchanged as an owned `String`, so an unrecognized or
+/// plugin backend still appears in the dropdown instead of being dropped.
 fn backend_label(name: &str) -> String {
 	match name {
 		"opengl" => "OpenGL",
@@ -720,7 +750,12 @@ fn backend_label(name: &str) -> String {
 	.to_string()
 }
 
-/// A labeled form row: a small caption above the widget.
+/// Builds a labeled form row: a small caption above its widget.
+///
+/// `label` is the caption text and `widget` is any element; they are stacked in a
+/// one-column flex layout, caption first, with `colors` supplying the caption
+/// color. The dialogs in this module use it so rows share spacing and alignment.
+/// The returned [`gpui_kit::Div`] is not attached to a parent.
 fn form_row(
 	colors: &gpui_kit::colors::Colors,
 	label: SharedString,
@@ -734,7 +769,11 @@ fn form_row(
 		.child(widget)
 }
 
-/// A group header separating the preference sections.
+/// Builds a group header that separates the preference sections.
+///
+/// `label` is the section title, rendered in the theme's disabled text color at
+/// small size with a little top padding; `colors` supplies that color. Purely
+/// presentational: it holds no state and adds no element id.
 fn section_header(colors: &gpui_kit::colors::Colors, label: SharedString) -> gpui_kit::Div {
 	div()
 		.pt_2()
@@ -963,12 +1002,21 @@ pub struct PathField {
 }
 
 impl PathField {
-	/// The path currently entered.
+	/// Returns the path text currently held by the field.
+	///
+	/// A [`SharedString`] snapshot of the inner editor's value, i.e. what the user
+	/// typed or what [`Self::set_path`] last wrote. `app` is only used to read the
+	/// entity; the value is not validated or normalized here.
 	pub fn path(&self, app: &App) -> SharedString {
 		self.editor.read(app).value()
 	}
 
-	/// Replaces the path shown in the field.
+	/// Replaces the path text shown in the field.
+	///
+	/// `path` is converted into a [`SharedString`] and written into the field's
+	/// own editor, so the caller does not have to retype it; `window` is required
+	/// by the editor's setter and `cx` is notified so the field repaints. This is
+	/// a programmatic change, so it emits no input event.
 	pub fn set_path(
 		&mut self,
 		path: impl Into<SharedString>,
@@ -982,8 +1030,12 @@ impl PathField {
 		cx.notify();
 	}
 
-	/// Whether the field accepts input (disabled fields are read-only and
-	/// render dimmed).
+	/// Enables or disables input in the field.
+	///
+	/// With `enabled == false` the render path drops the text-input handler and
+	/// lowers the field's opacity, making it read-only; `true` restores editing.
+	/// Setting the value the field already has is a no-op, so no repaint is
+	/// scheduled; otherwise `cx` is notified.
 	pub fn set_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
 		if self.enabled == enabled {
 			return;
@@ -1044,11 +1096,22 @@ pub struct ExportDialogContent {
 }
 
 impl ExportDialogContent {
-	/// Builds the content: the format list comes from the oakcodec encoding
-	/// enumeration (MP4 default), the codec lists follow the container's
-	/// compatible tables (switching container rebuilds them — an
-	/// unsupported codec is never offered), the color defaults to SDR
-	/// Rec.709 8-bit, the range to the whole sequence.
+	/// Builds the export dialog from the engine's format and codec tables.
+	///
+	/// The format list comes from the engine's encoding-format enumeration
+	/// (entries with an empty extension are dropped) and starts on MP4. The
+	/// video / audio codec combos are seeded from the MP4-compatible tables, the
+	/// color combo defaults to SDR (Rec.709, 8-bit output) and the range combo to
+	/// the whole sequence. Resolution, frame rate and bitrate start at `0`, which
+	/// the engine reads as "keep the sequence's / codec's default". The path field
+	/// and the sequence picker start empty; the host fills the picker through
+	/// [`Self::set_sequences`], and while it is empty OK stays disabled.
+	///
+	/// Note: the format-change subscription is created and dropped in the same
+	/// statement (deliberately kept to preserve behavior), so in the current
+	/// implementation switching the container does not call
+	/// [`Self::apply_format`]. `window` is required by the widgets and `cx`
+	/// creates the entities.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let formats: Vec<(i32, String, String)> = encoding_formats()
 			.into_iter()
@@ -1243,7 +1306,15 @@ impl ExportDialogContent {
 			.and_then(|index| self.sequences.get(index).map(|(id, _)| *id))
 	}
 
-	/// Rebuilds the codec lists for `fmt` and re-selects the first entry.
+	/// Rebuilds the codec lists for container `fmt` and selects the first entry.
+	///
+	/// `fmt` is a [`quercus_engine_rs::codec::Format`] id. Both lists come from
+	/// the container's compatibility tables, so a codec the container cannot carry
+	/// is never offered; a codec id missing from the label table falls back to
+	/// H.264 for video and AAC for audio. Also records `fmt` as the active format
+	/// reported by [`Self::settings`]. Callers: [`Self::new`] wires it to the
+	/// format combo (though that subscription is currently dropped, so only direct
+	/// calls take effect) and tests; `cx` is used to update the two combos.
 	fn apply_format(&mut self, fmt: i32, cx: &mut Context<Self>) {
 		let video_codes = compatible_video_codecs(fmt);
 		let audio_codes = compatible_audio_codecs(fmt);
@@ -1282,7 +1353,12 @@ impl ExportDialogContent {
 		self.active_format = fmt;
 	}
 
-	/// The selected format id.
+	/// Returns the container-format id currently shown in the combo.
+	///
+	/// With no selection, or an index outside the format table, it falls back to
+	/// [`EXPORT_FORMAT_MP4`]. This is the id the user picked, which may differ
+	/// from the active format used by [`Self::settings`] when the container combo
+	/// is switched (see [`Self::new`]).
 	pub fn format(&self, cx: &App) -> i32 {
 		let Some(selected) = self.format.read(cx).selected() else {
 			return EXPORT_FORMAT_MP4;
@@ -1293,7 +1369,12 @@ impl ExportDialogContent {
 			.unwrap_or(EXPORT_FORMAT_MP4)
 	}
 
-	/// The selected format's file extension (without the dot).
+	/// Returns the selected format's file extension, without the leading dot.
+	///
+	/// Taken from the format table entry (for example `"mp4"`); with no selection,
+	/// or an index outside the table, it falls back to `"mp4"`. The host appends
+	/// it to the suggested file name in the platform save dialog so the output
+	/// always carries the container's extension.
 	pub fn extension(&self, cx: &App) -> String {
 		let Some(selected) = self.format.read(cx).selected() else {
 			return "mp4".to_string();
@@ -1304,12 +1385,22 @@ impl ExportDialogContent {
 			.unwrap_or_else(|| "mp4".to_string())
 	}
 
-	/// The output path currently entered.
+	/// Returns the output path currently typed into the field.
+	///
+	/// A [`SharedString`] snapshot of the text. It may be empty: the field starts
+	/// empty and the host normally pre-fills it with [`Self::set_path`]. Nothing
+	/// is validated here — an unusable path surfaces as an engine error when the
+	/// export starts.
 	pub fn path(&self, cx: &App) -> SharedString {
 		self.path.read(cx).path(cx)
 	}
 
-	/// Pre-fills the output path.
+	/// Pre-fills the output path field.
+	///
+	/// `path` is converted into a [`SharedString`] and written into the nested
+	/// [`PathField`]; `window` is required by that field's editor and `cx` is
+	/// notified so the dialog repaints. The host calls this with a suggested name
+	/// derived from the sequence and the selected format.
 	pub fn set_path(
 		&mut self,
 		path: impl Into<SharedString>,
@@ -1372,7 +1463,13 @@ pub fn compatible_video_codecs(format: i32) -> Vec<i32> {
 		.collect()
 }
 
-/// The audio codecs the container `format` accepts.
+/// Returns the audio codec ids the container `format` accepts.
+///
+/// `format` is a [`quercus_engine_rs::codec::Format`] id; the result is that
+/// container's audio-codec table in the engine's order, which is exactly what the
+/// export dialog offers, so an incompatible codec cannot be picked. An unknown
+/// container id yields the single-element fallback `[12]` (AAC) instead of
+/// returning an error or an empty list.
 pub fn compatible_audio_codecs(format: i32) -> Vec<i32> {
 	let Some(container) = quercus_engine_rs::codec::Format::from_i32(format) else {
 		return vec![12]; // AAC fallback
@@ -1497,8 +1594,18 @@ pub struct ProxyDialogContent<E: crate::oakui::engine::AppEngine> {
 }
 
 impl<E: crate::oakui::engine::AppEngine> ProxyDialogContent<E> {
-	/// Builds the content seeded from the global config params (the C++
-	/// `oakengine_proxy_params_from_config` defaults).
+	/// Builds the proxy settings dialog seeded from the persisted config.
+	///
+	/// Reads the global generation defaults through `proxy_params_from_config`
+	/// (width, height, divider, CRF, preset, include-audio) and seeds the matching
+	/// widgets. A divider or preset that is not one of the offered options falls
+	/// back to the first divider (1 = custom size) and to the `veryfast` preset.
+	/// The max-concurrent spinner reads `ProxyMaxConcurrent`, clamped to `1..=16`
+	/// (default `1`); the ffmpeg field reads `CONFIG_KEY_FFMPEG_PATH`; and the
+	/// custom-params checkbox starts checked when any listed footage already has
+	/// custom params. `engine` supplies the footage rows via `proxy_rows()` and is
+	/// stored for the later generate / delete / accept actions; `window` is needed
+	/// for the widgets and `cx` creates the entities.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let params = proxy_params_from_config();
 
@@ -1769,7 +1876,11 @@ fn divider_label(divider: i32) -> String {
 	}
 }
 
-/// The display string of a proxy lifecycle state.
+/// Returns the localized display label for a proxy lifecycle state.
+///
+/// Maps a [`crate::oakui::engine::ProxyMediaState`] to its `proxydialog.state.*`
+/// translation: missing, generating, ready or failed. The match is exhaustive, so
+/// every state has a label and the function cannot fail.
 fn proxy_state_label(state: crate::oakui::engine::ProxyMediaState) -> String {
 	use crate::oakui::engine::ProxyMediaState;
 	match state {
@@ -1937,7 +2048,18 @@ pub struct ProjectPropertiesContent<E: crate::oakui::engine::AppEngine> {
 }
 
 impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
-	/// Builds the content seeded from the engine's current project state.
+	/// Builds the project-properties dialog seeded from the engine's project.
+	///
+	/// Reads `project_ocio_config`, `project_cache_location` (which yields the
+	/// setting `0`/`1`/`2` plus the stored custom path) and
+	/// `project_color_settings` from `engine` and seeds the matching fields. The
+	/// custom-cache path field starts enabled only when the cache setting is `2`.
+	/// The color combos are seeded by mapping the engine's canonical strings back
+	/// to indices; an unknown string falls back to the first entry (ACEScg / sRGB
+	/// / sRGB). A subscription on the cache combo keeps [`Self::cache_setting`]
+	/// and the custom field's enabled state in sync with the selection. `window`
+	/// is needed for the input widgets and `cx` to create the entities; the error
+	/// slot starts empty.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let ocio_config = cx.new(|cx| {
 			let editor = cx.new(|cx| InputState::new(window, cx));
@@ -2046,12 +2168,21 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		}
 	}
 
-	/// The OCIO config path currently entered.
+	/// Returns the OCIO config path currently shown in its field.
+	///
+	/// This is the per-project override the dialog edits; an empty string means
+	/// "use the application-wide default". [`Self::commit`] forwards the value to
+	/// the engine, which validates it.
 	pub fn ocio_config_path(&self, cx: &App) -> SharedString {
 		self.ocio_config.read(cx).path(cx)
 	}
 
-	/// Replaces the OCIO config path (the 浏览… picker and tests).
+	/// Replaces the text of the OCIO config path field.
+	///
+	/// `path` is converted into a [`SharedString`] and written into the field;
+	/// `window` is required by the text editor and `cx` is notified so the row
+	/// repaints. The 浏览… picker handler and tests call this. It only edits the
+	/// widget — nothing is applied until [`Self::commit`] runs.
 	pub fn set_ocio_config_path(
 		&mut self,
 		path: impl Into<SharedString>,
@@ -2064,12 +2195,20 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		cx.notify();
 	}
 
-	/// The custom disk-cache path currently entered.
+	/// Returns the custom disk-cache path currently entered.
+	///
+	/// Only meaningful when the cache location setting is `2` (custom); for the
+	/// other settings [`Self::commit`] ignores the text and stores an empty path.
 	pub fn custom_cache_path(&self, cx: &App) -> SharedString {
 		self.custom_cache_path.read(cx).path(cx)
 	}
 
-	/// Replaces the custom disk-cache path.
+	/// Replaces the text of the custom disk-cache path field.
+	///
+	/// `path` is converted into a [`SharedString`] and written into the field;
+	/// `window` is required by the editor and `cx` is notified so the row
+	/// repaints. Whether the value is persisted depends on the cache location
+	/// selection at [`Self::commit`] time.
 	pub fn set_custom_cache_path(
 		&mut self,
 		path: impl Into<SharedString>,
@@ -2082,9 +2221,14 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		cx.notify();
 	}
 
-	/// Selects the cache location option (0 = default, 1 = alongside,
-	/// 2 = custom) and enables the custom-path field accordingly — the
-	/// combo's own event path, exposed for tests.
+	/// Selects a disk-cache location option and updates the custom-path field.
+	///
+	/// `setting` is clamped to `0..=2`, where `0` = the default location, `1` =
+	/// alongside the project, and `2` = a custom path. The combo selection and
+	/// [`Self::cache_setting`] follow the clamped value, and the custom path
+	/// becomes editable only for `2`. `cx` is notified so the form repaints. This
+	/// mirrors the combo's own selection handler and is exposed for tests; nothing
+	/// is applied until [`Self::commit`] runs.
 	pub fn select_cache_setting(&mut self, setting: i32, cx: &mut Context<Self>) {
 		let setting = setting.clamp(0, 2);
 		self.cache_setting = setting;
@@ -2120,8 +2264,15 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		Ok(())
 	}
 
-	/// The color pipeline settings currently selected in the combos, as
-	/// the canonical persisted strings.
+	/// Reads the three color-pipeline combos as canonical persisted strings.
+	///
+	/// Returns `(working, gamut, transfer)`: working is `"acescg"` (index 0) or
+	/// `"srgb_legacy"` (index 1); gamut is `"srgb"`, `"displayp3"` or
+	/// `"bt2020"`; transfer is `"srgb"`, `"gamma22"`, `"pq"` or `"hlg"`. An
+	/// index outside those ranges, or no selection at all, falls back to the
+	/// first entry (`"acescg"` / `"srgb"` / `"srgb"`), so the result is always a
+	/// string the engine accepts. [`Self::commit`] passes the triple to
+	/// `set_project_color_settings`; `cx` is only used to read the combos.
 	fn color_settings(&self, cx: &App) -> (String, String, String) {
 		let working = self
 			.working_space
@@ -2156,7 +2307,12 @@ impl<E: crate::oakui::engine::AppEngine> ProjectPropertiesContent<E> {
 		(working, gamut, transfer)
 	}
 
-	/// The error shown under the OCIO row after a rejected commit.
+	/// Sets or clears the error shown under the OCIO config row.
+	///
+	/// `msg` renders in red beneath that row while it is `Some`; `None` removes
+	/// it, which is what a successful [`Self::commit`] does. `cx` is notified so
+	/// the dialog repaints. The host passes the engine's validation message for an
+	/// invalid config, keeping the dialog open.
 	pub fn set_error(&mut self, msg: Option<String>, cx: &mut Context<Self>) {
 		self.error = msg;
 		cx.notify();
@@ -2312,8 +2468,15 @@ pub struct PreferencesDialogContent {
 impl EventEmitter<PreferencesEvent> for PreferencesDialogContent {}
 
 impl PreferencesDialogContent {
-	/// Builds both tabs (the general tab keeps its existing behavior; the
-	/// keyboard tab lists the current menu-bar actions).
+	/// Builds the tabbed preferences dialog with both tabs.
+	///
+	/// Creates the general tab ([`PreferencesContent::new`]) and the keyboard tab
+	/// ([`KeyboardTabContent::new`]), then forwards their events so the shell can
+	/// watch this single entity: theme / language / display-color changes from the
+	/// general tab are re-emitted unchanged, and [`KeyboardEvent::Changed`] from
+	/// the keyboard tab becomes [`PreferencesEvent::ShortcutsChanged`]. The general
+	/// tab is active initially. `window` is passed through to both tab
+	/// constructors; `cx` creates the entities and registers the subscriptions.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let general = cx.new(|cx| PreferencesContent::new(window, cx));
 		let keyboard = cx.new(|cx| KeyboardTabContent::new(window, cx));
@@ -2354,7 +2517,11 @@ impl PreferencesDialogContent {
 		general.commit_storage_pg_url(cx);
 	}
 
-	/// The keyboard tab's action-row count (tests).
+	/// Returns how many action rows the keyboard tab lists (tests).
+	///
+	/// The count is the number of menu-bar actions enumerated when the tab was
+	/// built and does not follow the current search filter, so it stays constant
+	/// while the user types; the host uses it to assert the tab was populated.
 	pub fn keyboard_tab_row_count(&self, cx: &App) -> usize {
 		self.keyboard.read(cx).row_count()
 	}
@@ -2393,7 +2560,15 @@ impl Render for PreferencesDialogContent {
 	}
 }
 
-/// One tab switcher button of the preferences dialog.
+/// Renders one tab switcher button of the preferences dialog.
+///
+/// `tab` is both the tab the button selects and the source of its localized
+/// label, and `active` is the tab currently shown — the button is highlighted
+/// only when the two match. `colors` supplies the theme colors for the
+/// selected, normal and hover backgrounds. Clicking sets the dialog's active tab
+/// and notifies. The returned element carries the stable id
+/// `prefs-tab-general` / `prefs-tab-keyboard` (also its debug selector) for
+/// tests, and `cx` is the dialog's context for the click listener.
 fn tab_button(
 	tab: PreferencesTab,
 	active: PreferencesTab,
@@ -2535,8 +2710,17 @@ pub struct KeyboardTabContent {
 }
 
 impl KeyboardTabContent {
-	/// Builds the tab, seeding one row per menu-bar action (the C++
-	/// `setup_kbd_shortcuts` enumeration).
+	/// Builds the keyboard tab with one row per menu-bar action.
+	///
+	/// Rows come from [`crate::app::menu_action_paths`] in that order; each keeps
+	/// its localized section (the first `" > "` segment of the path) and its full
+	/// path, and starts with no captured key and no selection. A subscription on
+	/// the search field re-applies the filter and clears the selection on every
+	/// change. A keystroke interceptor is installed too: it forwards keys to
+	/// [`Self::handle_capture_key`] only while a row is capturing, and it lives as
+	/// long as the returned content (dropping it unregisters the interceptor).
+	/// `window` is needed to build the search input and `cx` to create the
+	/// entities.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let query = cx.new(|cx| InputState::new(window, cx));
 		cx.subscribe(&query, |this, _query, event: &InputEvent, cx| {
@@ -2604,14 +2788,30 @@ impl KeyboardTabContent {
 		cx.notify();
 	}
 
-	/// Leaves capture mode.
+	/// Leaves capture mode without changing any binding.
+	///
+	/// Clears the capturing row index and notifies so that field stops showing the
+	/// "press a key" label. Escape and every completed assign/clear path call
+	/// this; the current row selection is left untouched.
 	fn end_capture(&mut self, cx: &mut Context<Self>) {
 		self.capturing = None;
 		cx.notify();
 	}
 
-	/// Handles one captured key (called from the keystroke interceptor, so it
-	/// runs for every key while a row is capturing).
+	/// Applies one keystroke to the row currently being captured.
+	///
+	/// Called from the keystroke interceptor (which runs before the shell's global
+	/// bindings) for every key while a row is capturing; it returns immediately
+	/// when no row is capturing. [`capture_decision`] classifies the key:
+	/// modifier-only keys (a bare Shift/Ctrl/…) are ignored, Escape cancels,
+	/// Backspace/Delete clears the action's override, and any other key becomes
+	/// the new single binding after [`crate::actions::steal_shortcut_for`] removes
+	/// it from whichever action held it (the status line then names the displaced
+	/// action). Every non-ignored key ends the capture, persists the overrides,
+	/// emits [`KeyboardEvent::Changed`], and stops propagation so the key cannot
+	/// also trigger an app action or reach the modal (Escape must cancel, not
+	/// close the dialog). A failed save is ignored; the in-memory map stays
+	/// updated either way.
 	fn handle_capture_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
 		let Some(index) = self.capturing else {
 			return;
@@ -2717,7 +2917,14 @@ impl KeyboardTabContent {
 		.detach();
 	}
 
-	/// Export: write the current override diff to a picked file.
+	/// Exports the custom shortcut overrides to a user-picked file.
+	///
+	/// Opens the platform save dialog with the suggested name `shortcuts`
+	/// (starting at `.`), then writes the current override diff there through
+	/// [`crate::actions::save_custom_shortcuts_to`]. Cancelling the dialog does
+	/// nothing. The outcome is reported in the tab's status line (localized
+	/// "exported" / "export failed"); the I/O runs in a spawned task, and `cx` is
+	/// notified when the status text is updated.
 	fn export_shortcuts(&mut self, cx: &mut Context<Self>) {
 		let receiver = cx.prompt_for_new_path(&std::path::PathBuf::from("."), Some("shortcuts"));
 		cx.spawn(async move |this, cx| {
@@ -3051,6 +3258,13 @@ impl ActionSearchContent {
 	/// the search field; every other keystroke passes through untouched (in
 	/// the real app the IME delivers text to the focused input independently
 	/// of the key map, so typing keeps working).
+	///
+	/// `window` is required to build the search field and to install the
+	/// interceptor, and `cx` creates the entities and registers the subscription.
+	/// The item list comes from [`crate::app::menu_action_paths`]; the filter
+	/// starts empty and nothing is selected until the first keystroke or arrow
+	/// press. The returned content owns the interceptor; dropping it removes the
+	/// interceptor.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let query = cx.new(|cx| InputState::new(window, cx));
 		cx.subscribe(&query, |this, _query, event: &InputEvent, cx| {
@@ -3121,6 +3335,14 @@ impl ActionSearchContent {
 		self.query.read(cx).focus_handle(cx)
 	}
 
+	/// Moves the selection by `delta` visible rows, wrapping around.
+	///
+	/// Recomputes the visible (filter-matching) item indices and advances the
+	/// selection through [`selection_step`]: positive `delta` moves down, negative
+	/// up, and the position wraps modulo the number of visible rows. With no
+	/// current selection a positive `delta` selects the first row and a negative
+	/// one the last. When the filter matches nothing the selection is cleared.
+	/// `cx` is notified so the list repaints; the Up/Down interceptor calls this.
 	fn move_selection(&mut self, delta: i32, cx: &mut Context<Self>) {
 		let visible: Vec<usize> = self
 			.items
@@ -3321,7 +3543,13 @@ pub struct UpdateDialogContent {
 }
 
 impl UpdateDialogContent {
-	/// Builds the content from one latest-release response.
+	/// Builds the update prompt from one latest-release response.
+	///
+	/// `version` is the remote version string, copied verbatim and shown in the
+	/// "update available" line. `notes` is the release-notes Markdown sent by the
+	/// API; it is trimmed, and if nothing remains it is replaced with the
+	/// localized `update.no_notes` text so the dialog always has a body. The notes
+	/// are stored and rendered as plain text — Markdown is not parsed.
 	pub fn new(version: &str, notes: &str) -> Self {
 		let notes = notes.trim();
 		let notes = if notes.is_empty() {
@@ -3465,12 +3693,21 @@ pub struct TextValue {
 }
 
 impl TextValue {
-	/// The name currently entered.
+	/// Returns the text currently held by the field.
+	///
+	/// A [`SharedString`] snapshot of the inner editor's value, i.e. whatever was
+	/// last typed or set by [`Self::set_value`]. `app` is only needed to read the
+	/// entity; no validation is applied.
 	pub fn value(&self, app: &App) -> SharedString {
 		self.editor.read(app).value()
 	}
 
-	/// Replaces the name shown in the field.
+	/// Replaces the text shown in the field.
+	///
+	/// `value` is converted into a [`SharedString`] and pushed into the field's
+	/// own editor, so the caller does not have to retype or rebuild the widget;
+	/// `window` is required by the editor's setter and `cx` is notified so the row
+	/// repaints. This is a programmatic change, so no input event is emitted.
 	pub fn set_value(
 		&mut self,
 		value: impl Into<SharedString>,
@@ -3576,7 +3813,20 @@ pub struct SequenceFormatFields {
 }
 
 impl SequenceFormatFields {
-	/// Builds the fields and wires the preset / field cross-updates.
+	/// Builds the format fields from `seed` and wires their cross-updates.
+	///
+	/// `seed` supplies the initial preset index (0 = custom), the width and
+	/// height shown in the spin boxes (pixels, integer `16.0..=8192.0`, step
+	/// `2.0`), the frame-rate combo selection (`None` = no selection) and the
+	/// interlaced flag. `window` is required for the widgets and `cx` for the new
+	/// entities.
+	///
+	/// The subscriptions make the controls consistent: choosing a non-custom
+	/// preset overwrites width/height (and the rate when the preset's rate is one
+	/// of the common options), while editing width, height or the rate snaps the
+	/// preset back to *custom*. The interlaced checkbox follows the standard
+	/// request-only pattern and accepts each toggle. The programmatic setters used
+	/// here emit no events, so these subscriptions cannot loop.
 	pub fn build(seed: SequenceFormatSeed, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let preset = cx.new(|cx| ComboBox::new(40, sequence_preset_options(), window, cx));
 		preset.update(cx, |combo, cx| combo.set_selected(Some(seed.preset), cx));
@@ -3684,7 +3934,13 @@ impl SequenceFormatFields {
 		}
 	}
 
-	/// The video format currently selected in the fields.
+	/// Returns the video format described by the current field values.
+	///
+	/// Width and height are read from the spin boxes and clamped to at least 1
+	/// pixel (the widgets themselves allow `16..=8192`). The frame rate comes from
+	/// the rate combo index mapped through the common rate list; with nothing
+	/// selected, or an out-of-range index, it falls back to 25/1. The result is
+	/// therefore always a usable [`crate::oakui::engine::VideoFormat`].
 	pub fn format(&self, cx: &App) -> crate::oakui::engine::VideoFormat {
 		let width = self.width.read(cx).value().to_f64().max(1.0) as u32;
 		let height = self.height.read(cx).value().to_f64().max(1.0) as u32;
@@ -3702,12 +3958,22 @@ impl SequenceFormatFields {
 		}
 	}
 
-	/// Whether the interlaced checkbox is checked.
+	/// Returns whether the interlaced checkbox is currently checked.
+	///
+	/// Unchecked means progressive. The checkbox is seeded from the
+	/// [`SequenceFormatSeed`] and is request-only, so [`Self::build`] installs a
+	/// subscription that accepts each toggle; read the state here afterwards.
 	pub fn interlaced(&self, cx: &App) -> bool {
 		self.interlaced.read(cx).state() == CheckState::Checked
 	}
 
-	/// The labeled form rows (preset, width/height, frame rate, interlaced).
+	/// Returns the labeled rows for the format controls.
+	///
+	/// Builds a column containing the preset combo, a width + height row side by
+	/// side, the frame-rate combo and the interlaced checkbox, each wrapped by
+	/// [`form_row`] with a localized caption. `colors` supplies the theme colors
+	/// that `form_row` uses for those captions. The returned [`gpui_kit::Div`] is
+	/// not attached to any parent; callers add it to their own layout.
 	pub fn rows(&self, colors: &gpui_kit::colors::Colors) -> gpui_kit::Div {
 		let size_row = div()
 			.flex()
@@ -3758,8 +4024,14 @@ pub struct NewSequenceContent<E: crate::oakui::engine::AppEngine> {
 }
 
 impl<E: crate::oakui::engine::AppEngine> NewSequenceContent<E> {
-	/// Builds the content seeded with the default name and the HD 1080p25
-	/// preset.
+	/// Builds the new-sequence dialog with the localized default name and the
+	/// HD 1080p25 format seed.
+	///
+	/// `engine` is stored for [`Self::commit`] to create the sequence, `window`
+	/// is required for the input widgets, and `cx` creates the entities. This is
+	/// a thin wrapper over [`Self::new_seeded`] with
+	/// [`SequenceFormatSeed::hd_1080p25`] (1920×1080, 25 fps, progressive); use
+	/// `new_seeded` directly to start from probed footage parameters.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		Self::new_seeded(engine, SequenceFormatSeed::hd_1080p25(), window, cx)
 	}
@@ -3791,17 +4063,29 @@ impl<E: crate::oakui::engine::AppEngine> NewSequenceContent<E> {
 		}
 	}
 
-	/// The name currently entered.
+	/// Returns the sequence name currently typed into the field.
+	///
+	/// A [`SharedString`] snapshot of the text, seeded with the localized
+	/// `seqprops.default_name` at construction. The host reads it on OK and hands
+	/// it to the engine when creating the sequence.
 	pub fn name(&self, cx: &App) -> SharedString {
 		self.name.read(cx).value(cx)
 	}
 
-	/// The format currently selected.
+	/// Returns the video format currently shown by the format fields.
+	///
+	/// Width and height come from the spin boxes (in pixels) and the frame rate
+	/// from the rate combo, so the value tracks the user's edits and the last
+	/// applied preset. See [`SequenceFormatFields::format`] for the fallbacks.
 	pub fn format(&self, cx: &App) -> crate::oakui::engine::VideoFormat {
 		self.format.read(cx).format(cx)
 	}
 
-	/// Whether the interlaced checkbox is checked.
+	/// Returns whether interlaced scanning is currently selected.
+	///
+	/// Reads the format fields' checkbox; `false` means progressive. The host
+	/// combines it with [`Self::name`] and [`Self::format`] when creating the
+	/// sequence.
 	pub fn interlaced(&self, cx: &App) -> bool {
 		self.format.read(cx).interlaced(cx)
 	}
@@ -3819,7 +4103,12 @@ impl<E: crate::oakui::engine::AppEngine> NewSequenceContent<E> {
 		Ok(())
 	}
 
-	/// The error shown under the form after a rejected commit.
+	/// Sets or clears the error shown under the new-sequence form.
+	///
+	/// `msg` renders in red below the fields while it is `Some`; `None` removes
+	/// the row, which is what a successful [`Self::commit`] does. `cx` is notified
+	/// so the dialog repaints. The host passes the engine's message when creating
+	/// the sequence fails, leaving the dialog open.
 	pub fn set_error(&mut self, msg: Option<String>, cx: &mut Context<Self>) {
 		self.error = msg;
 		cx.notify();
@@ -3871,9 +4160,22 @@ pub struct SequencePropertiesContent<E: crate::oakui::engine::AppEngine> {
 }
 
 impl<E: crate::oakui::engine::AppEngine> SequencePropertiesContent<E> {
-	/// Builds the content seeded from the sequence's current parameters (the
-	/// C++ `SequencePropertiesDialog` initializers); a missing sequence
-	/// falls back to the HD 1080p25 defaults with a blank name.
+	/// Builds the sequence-properties dialog seeded from the sequence's current
+	/// parameters.
+	///
+	/// `engine` is queried through `sequence_parameters(sequence_id)` and the
+	/// result seeds the name field, the preset (the first preset whose exact
+	/// width/height/rate matches, otherwise the custom entry), the width/height
+	/// spin boxes, the rate combo (selected only when the rate is one of the
+	/// common options) and the interlaced checkbox. `sequence_id` is the
+	/// project-entry id of the sequence being edited; it is kept so
+	/// [`Self::commit`] updates that same sequence. When it is unknown the name is
+	/// blank and the fields fall back to 1920×1080 at 25 fps progressive, but the
+	/// preset combo shows *custom* rather than HD 1080p25 and the rate combo has
+	/// no selection.
+	///
+	/// `window` is needed for the input widgets and `cx` to create the entities;
+	/// the error slot starts empty.
 	pub fn new(
 		engine: Entity<E>,
 		sequence_id: u64,
@@ -3932,17 +4234,29 @@ impl<E: crate::oakui::engine::AppEngine> SequencePropertiesContent<E> {
 		}
 	}
 
-	/// The name currently entered.
+	/// Returns the sequence name currently typed into the field.
+	///
+	/// A [`SharedString`] snapshot of the text, seeded from the sequence's
+	/// current name (empty when the sequence is missing). The host reads it on
+	/// OK and passes it to the engine's update call.
 	pub fn name(&self, cx: &App) -> SharedString {
 		self.name.read(cx).value(cx)
 	}
 
-	/// The format currently selected.
+	/// Returns the video format currently shown by the format fields.
+	///
+	/// Width and height come from the spin boxes (in pixels) and the frame rate
+	/// from the rate combo, so the value tracks the user's edits and the last
+	/// applied preset. See [`SequenceFormatFields::format`] for the fallbacks.
 	pub fn format(&self, cx: &App) -> crate::oakui::engine::VideoFormat {
 		self.format.read(cx).format(cx)
 	}
 
-	/// Whether the interlaced checkbox is checked.
+	/// Returns whether interlaced scanning is currently selected.
+	///
+	/// Reads the format fields' checkbox; `false` means progressive. The host
+	/// combines it with [`Self::name`] and [`Self::format`] when applying the
+	/// edits.
 	pub fn interlaced(&self, cx: &App) -> bool {
 		self.format.read(cx).interlaced(cx)
 	}
@@ -3960,7 +4274,12 @@ impl<E: crate::oakui::engine::AppEngine> SequencePropertiesContent<E> {
 		Ok(())
 	}
 
-	/// The error shown under the form after a rejected commit.
+	/// Sets or clears the error shown under the sequence-properties form.
+	///
+	/// `msg` renders in red below the fields while it is `Some`; `None` removes
+	/// the row, which is what a successful [`Self::commit`] does. `cx` is notified
+	/// so the dialog repaints. The host passes the engine's message when applying
+	/// the edits fails, leaving the dialog open.
 	pub fn set_error(&mut self, msg: Option<String>, cx: &mut Context<Self>) {
 		self.error = msg;
 		cx.notify();
@@ -4097,7 +4416,16 @@ const WIZARD_SYNC_MODES: &[&str] = &[
 ];
 
 impl<E: crate::oakui::engine::AppEngine> MulticamWizardContent<E> {
-	/// Builds the content seeded with the engine's wizard footage.
+	/// Builds the multicam wizard seeded with the engine's wizard footage.
+	///
+	/// `engine` is stored for the host's later sync/create calls and is read once
+	/// here through `multicam_wizard_footage()`; an error or `None` yields an
+	/// empty angle list, in which case the dialog shows the "no footage" hint and
+	/// the host refuses to create. The name field is seeded with the
+	/// `multicam.wizard.default_name` translation, the sync combo lists the three
+	/// localized modes with selection `0` (audio correlation), and every footage
+	/// row starts unchecked. `window` is needed for the widgets and `cx` to
+	/// create the entities.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let name = cx.new(|cx| {
 			let editor = cx.new(|cx| InputState::new(window, cx));
@@ -4130,7 +4458,12 @@ impl<E: crate::oakui::engine::AppEngine> MulticamWizardContent<E> {
 		}
 	}
 
-	/// Toggles the checked state of row `index`.
+	/// Flips the checked state of the angle row at `index`.
+	///
+	/// `index` is a position in the wizard's footage list; an out-of-range index
+	/// is ignored silently (no panic and no notify). On a successful toggle `cx`
+	/// is notified so the row's check mark repaints. Rendered rows call this from
+	/// their click handler, including clicks on the row's padding.
 	pub fn toggle_row(&mut self, index: usize, cx: &mut Context<Self>) {
 		if let Some(row) = self.rows.get_mut(index) {
 			row.1 = !row.1;
@@ -4147,12 +4480,21 @@ impl<E: crate::oakui::engine::AppEngine> MulticamWizardContent<E> {
 			.collect()
 	}
 
-	/// The selected sync mode (0 = audio, 1 = timecode, 2 = none).
+	/// Returns the selected sync mode as a combo index.
+	///
+	/// `0` = sync by audio-waveform correlation, `1` = by source timecode, `2` =
+	/// no alignment. The combo defaults to `0`, and an unset selection also
+	/// reports `0`. The host switches on this value when it commits the wizard.
 	pub fn sync_mode(&self, cx: &App) -> usize {
 		self.sync.read(cx).selected().unwrap_or(0)
 	}
 
-	/// The sequence name entered.
+	/// Returns the multicam sequence name currently typed into the field.
+	///
+	/// A [`SharedString`] snapshot of the text, pre-filled with the localized
+	/// `multicam.wizard.default_name` ("Multi-Cam") at construction. The host
+	/// reads it when the wizard is accepted; an empty name is possible and is not
+	/// validated here.
 	pub fn name(&self, cx: &App) -> SharedString {
 		self.name.read(cx).value(cx)
 	}
@@ -4273,7 +4615,12 @@ pub struct RenameContent {
 }
 
 impl RenameContent {
-	/// Builds the dialog seeded with the current name.
+	/// Builds the rename dialog with the name field pre-filled from `current`.
+	///
+	/// `current` is the entry's existing name and is moved into the field;
+	/// `window` is needed for the input state and `cx` to create the entities.
+	/// The field is seeded before returning, so [`Self::value`] can be read
+	/// immediately.
 	pub fn new(current: SharedString, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let field = cx.new(|cx| {
 			let editor = cx.new(|cx| InputState::new(window, cx));
@@ -4283,7 +4630,11 @@ impl RenameContent {
 		Self { field }
 	}
 
-	/// The name to apply.
+	/// Returns the name currently typed into the field.
+	///
+	/// A [`SharedString`] snapshot of the text, which the host passes to the
+	/// engine's `rename_entry` on OK. The name may be empty if the user cleared
+	/// the pre-filled value; this function performs no validation.
 	pub fn value(&self, cx: &App) -> SharedString {
 		self.field.read(cx).value(cx)
 	}
@@ -4316,9 +4667,13 @@ pub const PROJECT_FORMAT_OVE: i32 = 1;
 pub const PROJECT_FORMAT_FCPXML: i32 = 2;
 
 impl ExportProjectDialogContent {
-	/// Builds the dialog (OTIO default). The output path is NOT entered
-	/// here: OK hands off to the platform save dialog (the suggested name
-	/// carries the chosen format's extension).
+	/// Builds the project export dialog, defaulting to OTIO.
+	///
+	/// `window` is required to build the format combo and `cx` to create it. The
+	/// combo lists OTIO / OVE / FCPXML with display names, and the selection
+	/// starts on [`PROJECT_FORMAT_OTIO`]. The output path is deliberately not
+	/// part of this dialog: on OK the host opens the platform save dialog and
+	/// suggests a name carrying [`Self::extension`].
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let formats: Vec<(i32, String)> = vec![
 			(PROJECT_FORMAT_OTIO, "OpenTimelineIO (.otio)".to_string()),
@@ -4343,7 +4698,12 @@ impl ExportProjectDialogContent {
 		Self { format, formats }
 	}
 
-	/// The selected project format id.
+	/// Returns the selected project-file format id.
+	///
+	/// One of [`PROJECT_FORMAT_OTIO`], [`PROJECT_FORMAT_OVE`],
+	/// [`PROJECT_FORMAT_FCPXML`], in dropdown order. When the combo has no
+	/// selection, or its stored index is out of range, this falls back to
+	/// [`PROJECT_FORMAT_OTIO`] so callers always receive a valid id.
 	pub fn format(&self, cx: &App) -> i32 {
 		let Some(selected) = self.format.read(cx).selected() else {
 			return PROJECT_FORMAT_OTIO;
@@ -4354,7 +4714,11 @@ impl ExportProjectDialogContent {
 			.unwrap_or(PROJECT_FORMAT_OTIO)
 	}
 
-	/// The format's file extension (no dot).
+	/// Returns the selected project format's file extension, without the dot.
+	///
+	/// `"otio"`, `"ove"` or `"fcpxml"` according to [`Self::format`]; an
+	/// unrecognized id falls back to `"otio"`. The host appends it to the
+	/// suggested file name it hands to the platform save dialog.
 	pub fn extension(&self, cx: &App) -> &'static str {
 		match self.format(cx) {
 			PROJECT_FORMAT_OVE => "ove",
@@ -4385,7 +4749,13 @@ pub struct NewProjectContent {
 }
 
 impl NewProjectContent {
-	/// Builds the dialog (default name, HD 1080p25).
+	/// Builds the new-project dialog with a localized default name and the
+	/// HD 1080p25 format preset.
+	///
+	/// `window` is required to create the input widgets and `cx` to create the
+	/// entities. The name field is seeded with the `manager.new.default_name`
+	/// translation, and the format fields are built from
+	/// [`SequenceFormatSeed::hd_1080p25`] (1920×1080, 25 fps, progressive).
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let name = cx.new(|cx| {
 			let editor = cx.new(|cx| InputState::new(window, cx));
@@ -4399,17 +4769,30 @@ impl NewProjectContent {
 		Self { name, format }
 	}
 
-	/// The project name entered.
+	/// Returns the project name currently typed into the name field.
+	///
+	/// The value is a [`SharedString`] snapshot of the field text. It is empty
+	/// only if the user cleared the localized default the dialog was seeded
+	/// with; this function performs no validation. Read by the host on OK.
 	pub fn name(&self, cx: &App) -> SharedString {
 		self.name.read(cx).value(cx)
 	}
 
-	/// The format selected.
+	/// Returns the video format currently selected in the format fields.
+	///
+	/// The [`crate::oakui::engine::VideoFormat`] holds width and height in
+	/// pixels plus a rational frame rate; it reflects whatever preset or custom
+	/// width/height/rate combination the fields currently show, so it changes as
+	/// the user edits them. Read by the host on OK.
 	pub fn format(&self, cx: &App) -> crate::oakui::engine::VideoFormat {
 		self.format.read(cx).format(cx)
 	}
 
-	/// The interlaced flag.
+	/// Returns whether interlaced scanning is selected for the new project.
+	///
+	/// Reads the interlaced checkbox inside the embedded
+	/// [`SequenceFormatFields`]; `false` means progressive. The host combines it
+	/// with [`Self::format`] when creating the project and its first sequence.
 	pub fn interlaced(&self, cx: &App) -> bool {
 		self.format.read(cx).interlaced(cx)
 	}
@@ -7185,7 +7568,15 @@ pub struct SubtitleStyleContent {
 }
 
 impl SubtitleStyleContent {
-	/// Builds the editor seeded with `style`.
+	/// Builds the subtitle style editor seeded from `style`.
+	///
+	/// `style` supplies the initial values: font family (text field), font size
+	/// in points (spin box `1.0..=400.0`, step `1.0`), fill color, outline
+	/// enable flag, outline width in points (spin box `0.0..=40.0`, step
+	/// `0.5`), and outline color. `window` is required to build the input
+	/// widgets and `cx` to create the entities. The outline checkbox is
+	/// subscribed via [`subscribe_checkbox`] so clicks take effect immediately;
+	/// the error slot starts empty.
 	pub fn new(
 		style: &quercus_engine_rs::editor::SubtitleStyle,
 		window: &mut Window,
@@ -7245,7 +7636,18 @@ impl SubtitleStyleContent {
 		}
 	}
 
-	/// The style currently entered.
+	/// Reads the form back into a [`quercus_engine_rs::editor::SubtitleStyle`].
+	///
+	/// The editable values are taken from the widgets: font family string, font
+	/// size in points (`1.0..=400.0`), fill and outline colors from the color
+	/// pickers' committed colors, the outline enable flag, and the outline width
+	/// in points (`0.0..=40.0`). The remaining fields are not exposed in this
+	/// dialog and are fixed here: `align = 1`, `margin_h = 0.0`,
+	/// `margin_v = 0.0`, `line_spacing = 1.0`. The host passes the result to
+	/// the SDK's `set_subtitle_style`; `cx` is only used to read the widgets.
+	///
+	/// Currently always returns `Ok`; the `Result` is kept so input validation
+	/// can be added later without changing callers.
 	pub fn style(&self, cx: &App) -> Result<quercus_engine_rs::editor::SubtitleStyle, String> {
 		let color = color_from_rgba(self.color.read(cx).committed());
 		let outline_color = color_from_rgba(self.outline_color.read(cx).committed());
@@ -7263,7 +7665,12 @@ impl SubtitleStyleContent {
 		})
 	}
 
-	/// The validation error shown under the form.
+	/// Sets or clears the validation error shown under the subtitle form.
+	///
+	/// `error` renders in red below the fields while it is `Some`; `None`
+	/// removes the row. `cx` is notified so the dialog repaints. The host calls
+	/// this with the engine's message when the style cannot be applied, leaving
+	/// the dialog open.
 	pub fn set_error(&mut self, error: Option<String>, cx: &mut Context<Self>) {
 		self.error = error;
 		cx.notify();
@@ -7359,7 +7766,26 @@ pub struct AudioPropertiesContent {
 }
 
 impl AudioPropertiesContent {
-	/// Builds the editor seeded with `audio`.
+	/// Builds the audio properties editor seeded from `audio` and `bus`.
+	///
+	/// `audio` is the clip's current audio state: `gain` (`0.0..=4.0`, `1.0` =
+	/// unity), `pan` (`-1.0..=1.0`), `fade_in`/`fade_out` (seconds, shown in a
+	/// `0.0..=10.0` spin box) seed the mix row, and `audio.effects` drives the
+	/// effect sections — a section is checked exactly when an effect with that
+	/// type id is present, and each parameter falls back to the documented
+	/// slider default when the effect or parameter is missing (Volume `1.0`,
+	/// Pan `0.0`, EQ gains `0.0`, compressor threshold `-24.0`/ratio `4.0`/
+	/// attack `10.0`/release `100.0`/makeup `0.0`, limiter ceiling `-1.0`/
+	/// release `50.0`, gate threshold `-40.0`/attack `5.0`/release `100.0`/
+	/// hold `20.0`, ducking threshold `-30.0`/amount `-12.0`/attack `50.0`/
+	/// release `300.0`).
+	///
+	/// `bus` is the master-bus effect chain; only its limiter entry is read
+	/// (ceiling `-1.0`, release `50.0` as fallbacks). `window` is needed for the
+	/// input widgets and `cx` for the new entities, and every checkbox is
+	/// subscribed with [`subscribe_checkbox`]. The incoming effect list is
+	/// cloned into [`Self::initial_effects`] so the host can diff it against the
+	/// edited state, and the loudness row and error start empty.
 	pub fn new(
 		audio: &quercus_engine_rs::editor::ClipAudioState,
 		bus: &[quercus_engine_rs::editor::AudioBusEffect],
@@ -7723,7 +8149,14 @@ impl AudioPropertiesContent {
 		}
 	}
 
+	/// Returns the per-clip mix controls as
 	/// `(gain, pan, fade_in_seconds, fade_out_seconds)`.
+	///
+	/// `gain` is linear (`0.0..=4.0`, `1.0` = unity), `pan` runs `-1.0` (hard
+	/// left) to `1.0` (hard right), and the fade lengths are in seconds
+	/// (`0.0..=10.0`). The host multiplies the two fades by 1000 before passing
+	/// them to the engine, which expects milliseconds. `cx` is only used to read
+	/// the widgets.
 	pub fn mix(&self, cx: &App) -> (f64, f64, f64, f64) {
 		(
 			self.gain.read(cx).value().to_f64(),
@@ -7733,7 +8166,20 @@ impl AudioPropertiesContent {
 		)
 	}
 
-	/// `Some(value)` for each enabled effect, in chain order (Volume first).
+	/// Collects the enabled clip audio effects for the commit.
+	///
+	/// Returns one `(effect_type_id, params)` pair per checked effect section,
+	/// in the dialog's fixed chain order: Volume, Pan, EQ, Compressor, Limiter,
+	/// Gate, Ducking. Unchecked sections are omitted entirely. `params` holds
+	/// `(input_id, value)` pairs in that effect's own order — Volume sends
+	/// `volume_in`, Pan `panning_in`, EQ `low_gain_db`/`mid_gain_db`/
+	/// `high_gain_db`, the compressor threshold/ratio/attack/release/makeup, the
+	/// limiter ceiling/release, the gate threshold/attack/release/hold, and
+	/// ducking threshold/amount/attack/release. Values are raw slider values in
+	/// their natural units (dB for gains and thresholds, ms for times, `1.0` =
+	/// unity volume). The host diffs the result against
+	/// [`Self::initial_effects`] to derive updates, additions and removals; `cx`
+	/// is only used to read the widgets.
 	pub fn effects(&self, cx: &App) -> Vec<(String, Vec<(String, f64)>)> {
 		let mut effects = Vec::new();
 		if self.volume_enabled.read(cx).state() == CheckState::Checked {
@@ -7810,7 +8256,14 @@ impl AudioPropertiesContent {
 		effects
 	}
 
-	/// `(enabled, ceiling_db, release_ms)` for the master limiter.
+	/// Returns the master (bus) limiter controls as
+	/// `(enabled, ceiling_db, release_ms)`.
+	///
+	/// `enabled` is the bus-limiter checkbox state, `ceiling_db` the ceiling in
+	/// dBFS (widget range `-24.0..=0.0`, default `-1.0`) and `release_ms` the
+	/// release time in milliseconds (range `1.0..=1000.0`, default `50.0`).
+	/// The host forwards the triple to the engine's `set_audio_bus_limiter` when
+	/// committing the dialog; `cx` is only used to read the widgets.
 	pub fn bus_limiter(&self, cx: &App) -> (bool, f64, f64) {
 		(
 			self.bus_limiter_enabled.read(cx).state() == CheckState::Checked,
@@ -7819,7 +8272,13 @@ impl AudioPropertiesContent {
 		)
 	}
 
-	/// Displays an integrated-LUFS/peak measurement under the form.
+	/// Shows an integrated-LUFS / peak measurement under the audio form.
+	///
+	/// `loudness` is the measurement to display (`None` hides the row); `cx` is
+	/// notified so the dialog repaints. The text is formatted as
+	/// "N.N LUFS / N.N dBFS". This is display-only: the value is not read by
+	/// [`Self::mix`], [`Self::effects`] or [`Self::bus_limiter`], so it never
+	/// feeds back into the commit.
 	pub fn set_loudness(
 		&mut self,
 		loudness: Option<quercus_engine_rs::editor::LoudnessMeasurement>,
@@ -7834,7 +8293,12 @@ impl AudioPropertiesContent {
 		&self.initial_effects
 	}
 
-	/// The validation error shown under the form.
+	/// Sets or clears the validation error shown under the audio form.
+	///
+	/// `error` is rendered in red below the fields while it is `Some`; passing
+	/// `None` removes the row. `cx` is notified so the dialog repaints. The host
+	/// calls this with the engine's message when the commit is rejected, and the
+	/// dialog stays open so the user can correct the values.
 	pub fn set_error(&mut self, error: Option<String>, cx: &mut Context<Self>) {
 		self.error = error;
 		cx.notify();
@@ -7932,6 +8396,14 @@ impl Render for AudioPropertiesContent {
 	}
 }
 
+/// Creates a single-line text field already holding `value`.
+///
+/// `value` is moved into a new [`TextValue`] that wraps a fresh [`InputState`]
+/// built against `window`; `cx` is the caller's context and is used both to
+/// create the nested input entity and to seed the text. `T` is only the caller's
+/// view type, it is not stored anywhere. The returned entity is readable
+/// immediately, so callers can inspect the seeded text without another update;
+/// an empty `value` yields an empty field.
 fn text_field<T: 'static>(
 	value: String,
 	window: &mut Window,
@@ -7945,6 +8417,16 @@ fn text_field<T: 'static>(
 	field
 }
 
+/// Keeps a dialog checkbox in sync with its own toggle events.
+///
+/// A [`CheckBox`] is request-only: it emits [`CheckBoxEvent::Toggled`] carrying
+/// the state it *would* move to, and leaves changing itself to its owner. This
+/// subscribes to `check` on `cx` and accepts every toggle by writing the
+/// proposed state back through [`CheckBox::set_state`], which is how the
+/// dialogs in this module react to checkbox clicks without a separate model.
+/// The subscription is detached, so it lives as long as `cx` (the owning view);
+/// `check` must stay alive at least that long. `T` is the subscribing view type
+/// and is not stored.
 fn subscribe_checkbox<T: 'static>(check: &Entity<CheckBox>, cx: &mut Context<T>) {
 	cx.subscribe(check, |_this, check, event: &CheckBoxEvent, cx| {
 		let CheckBoxEvent::Toggled { state, .. } = event;

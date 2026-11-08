@@ -89,8 +89,12 @@ pub fn format_fps(rate: FrameRate) -> String {
 	}
 }
 
-/// Formats a resolution as `WIDTH×HEIGHT` (U+00D7 multiplication sign),
-/// matching the design's "1920×1080" chips.
+/// Formats a resolution as `WIDTH×HEIGHT` using U+00D7 (`×`), e.g. `1920×1080`.
+///
+/// `width`/`height` are pixel dimensions and are formatted verbatim — no rounding,
+/// validation, or unit suffix — so callers pass already display-ready values. Used
+/// for the viewer and status-bar resolution chips; pairs with [`format_fps`] in the
+/// same overlays.
 pub fn format_resolution(width: u32, height: u32) -> String {
 	format!("{width}×{height}")
 }

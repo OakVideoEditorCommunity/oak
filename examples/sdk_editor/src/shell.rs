@@ -26,6 +26,26 @@ const ROWS: u32 = 22;
 
 const RAMP: &[u8] = b" .:-=+*#%@";
 
+/// Runs the dependency-free terminal shell over the example's exported
+/// project.
+///
+/// First runs the headless workflow (`super::run`) to produce and export
+/// a demo project, prints its summary, then reopens the saved `.ove`
+/// project and renders program frames as an ANSI luminance
+/// "framebuffer" in the terminal. `work_dir` is the directory the
+/// workflow writes into; the shell reads the `.ove` file next to the
+/// export path from it.
+///
+/// The shell owns the frame loop until stdin reaches EOF or the user
+/// types `q`. Commands are printed at startup: `p` play, `+`/`-` step one
+/// frame, `s <seconds>` seek, `l` print the next 100 ms audio peak, `q`
+/// quit.
+///
+/// # Errors
+///
+/// Returns `Err` when the headless workflow fails, the reopened project
+/// has no sequence, the program preview cannot be created, or a frame
+/// seek/render/read fails; the message is meant for the CLI wrapper.
 pub fn run(work_dir: &Path) -> Result<(), String> {
 	let report = super::run(work_dir)?;
 	println!("{}", super::summary(&report));
@@ -111,6 +131,18 @@ pub fn run(work_dir: &Path) -> Result<(), String> {
 	Ok(())
 }
 
+/// Renders one program frame at `time` and paints it to stdout as ASCII.
+///
+/// Seeks `program` to `time`, requests a frame, waits for it, then maps
+/// each pixel's Rec.709 luma (`0.2126 R + 0.7152 G + 0.0722 B`) onto the
+/// `RAMP` character scale. The terminal is cleared first and a status line
+/// with the time follows; the image is `COLS`×`ROWS` characters.
+///
+/// # Errors
+///
+/// Returns `Err` when the seek fails, the preview rejects the request,
+/// the render fails or produces no frame, or the frame buffer is smaller
+/// than `COLS * ROWS * 4` floats.
 fn render(program: &mut PreviewSession, time: Rational) -> Result<(), String> {
 	program
 		.seek(time)
