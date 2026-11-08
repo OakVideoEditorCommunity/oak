@@ -1,0 +1,50 @@
+[package]
+name = "oak-ai-mcp"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "T5 thin MCP (stdio, JSON-RPC 2.0 / NDJSON) server over the oak-ai-tools execution layer"
+license = "GPL-3.0-or-later"
+
+# Standalone workspace root on purpose, same reasoning as
+# `../oak-ai-tools/Cargo.toml`: the repository root workspace only lists
+# `crates/*` and `examples/*`, so without this empty table cargo would
+# refuse to build the package ("believes it's in a workspace"). `ai/*`
+# stays out of the upstream build entirely.
+[workspace]
+
+[[bin]]
+name = "oak-ai-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# The T1 execution layer (registry, schema validation, transaction
+# wrapping, backends). No engine is linked with the default features:
+# `oak-ai-tools` gates `oak-engine-rust-sdk` behind its own `sdk` feature.
+oak-ai-tools = { path = "../oak-ai-tools" }
+# JSON-RPC 2.0 framing and the frozen schema passthrough. Already a
+# dependency of `oak-ai-tools`, so this adds no new third-party crate to
+# the tree (see README "依赖").
+serde_json = "1"
+
+[dev-dependencies]
+# The zero-drift and protocol tests compare the MCP tool face against
+# `dispatch::tool_names()` / `ai/schema/tools/*.json` and drive the mock
+# backend in-process. Same path dependency, no new third-party crate.
+oak-ai-tools = { path = "../oak-ai-tools" }
+
+[features]
+default = []
+# `--backend sdk` requires this feature; it links the real engine through
+# `oak-ai-tools/sdk`. Without it the binary refuses `--backend sdk`
+# explicitly instead of silently degrading to the mock backend.
+sdk = ["oak-ai-tools/sdk"]
+
+# Same reason as in `../oak-ai-tools/Cargo.toml`: a standalone workspace
+# does not inherit the repository root's `[patch.crates-io]`, so with the
+# `sdk` feature the engine would pull the crates.io `ocio-rs` release,
+# whose vendored yaml-cpp does not build on modern GCC. Mirror the root
+# patch (same fork, same rev) so both workspaces build the engine from
+# identical sources.
+[patch.crates-io]
+ocio-rs = { git = "https://github.com/Mike-Solar/ocio-rs.git", rev = "30338c6a169bbbada862fb3ac256e79b656159cf" }

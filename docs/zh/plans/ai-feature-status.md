@@ -20,7 +20,7 @@
 | T2 取证预筛 | 已知切点检出率达标 + 峰值表 golden 比对 | `prescan.py` 双通道独立进程；**32 项**测试全过（首轮 27 + 静态素材修复新增 5，含 golden 比对、2/2 已知切点）；静态素材产出空切点表 | **已完成** |
 | T3 agent 核 + 记忆 | `pi --print` 无头冒烟、跨会话召回、密钥不落盘 | `ai/agent/` 不存在；仓根 `agent/` 为 git 排除的本地探索件；`AGENTS.md` 是悬空符号链接；memlite CLI 可用 | **未开始** |
 | T4 适配层 hooks | 三档确认门行为测试 + 失败回喂闭环 | `src/hooks.rs` + `tests/hooks_{policy,readback,replan}.rs`（11/7/4）；ProposalOnly 零副作用（Spy 15/15 全部变更方法）、分级表 fail-closed 双向守（删条目 + 改长度 → 恰 2 项红）、`execute()` 签名向后兼容；全量 **90/0/0** 独立复跑（task-13 `/tmp/oak-reviews/t4-hooks.md`） | **已完成（已入仓，§10.3）** |
-| T5 MCP 封装 | 同一 schema 的 MCP server，零漂移 | `ai/oak-ai-mcp` **已落地**（默认 `--backend mock`：lib 20 + protocol 6 + zero_drift 3 = 29 项全绿，工具名双向集合相等）；`--backend sdk` 接线未完成、未实测；尚未独立验收。`agent/mcp-oak` 仍是早期 Python 原型（不计入交付） | **部分**（待独立验收） |
+| T5 MCP 封装 | 同一 schema 的 MCP server，零漂移 | `ai/oak-ai-mcp` **已入仓（§10.4）**：stdio NDJSON JSON-RPC 2.0，22 工具零漂移三方一致；协议级 **30/0/0**（含版本回声断言）独立复跑；`--backend sdk` 接线实测 7 passed（接线冒烟≠引擎功能可用）；验收 task-12 `/tmp/oak-reviews/mcp.md` + task-16 `/tmp/oak-reviews/t5-delta.md` 均 pass。`agent/mcp-oak` 仍是早期 Python 原型（不计入交付） | **已完成（已入仓，§10.4）** |
 | T6 无头 CI | Mock LLM 录制回放 + 黄金帧 + 会话回放日志进 CI | `.github/workflows/ci.yml` 无任何 `ai/` 引用；`ai/` 未入仓 | **未开始** |
 
 ### 0.1 核验记录（独立验收）
@@ -96,7 +96,7 @@
 
 缺口：无阻断。风险提示：golden 与 ffmpeg 版本强绑定（`README.md`/`test_prescan.py:31-33` 已写"算法或 ffmpeg 变更后重新生成"）——进 CI（T6）前需固定 ffmpeg 版本，否则换机即红。已知边界（随修复写入 README「Known limitations」）：① faststart 截断素材在 `-f null` 下 ffmpeg 可能 rc=0，已解出部分帧时仍按正常素材出表（旧版同样如此，非本次引入）；② 若出现「零分数且 rc=0」的坏文件，会被当作静态素材（空切点表）——回归验收未构造出可复现反例，记为残留项，后续如需保护可在 `scan()` 加 `phash_samples == 0` 判断。
 
-## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T4 已入仓 §10.3，T3、T5 已过独立验收但尚未入仓，T6 未开始）
+## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T4 已入仓 §10.3、T5 已入仓 §10.4，T3 已过独立验收但尚未入仓，T6 未开始）
 
 **T3 agent 核 + 记忆**
 
@@ -237,19 +237,38 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 
 ### 10.3 第三次提交：T1 SDK 后端 + T4 执行层 hooks 入仓（2026-11-09 00:31）
 
-- commit：`<提交后回填>`，标题 `feat(ai): land the T1 SDK backend and T4 execution-layer hooks`（作者 `fslong`）。
+- commit：`18c1bffda064a7b5fc918624269ba282cc655f6a`，标题 `feat(ai): land the T1 SDK backend and T4 execution-layer hooks`（作者 `fslong`），`34 files changed, 16324 insertions(+), 9 deletions(-)`。
 - 范围：`ai/oak-ai-tools/**` 33 文件（`Cargo.toml`、`Cargo.lock`、`README.md`、`src/{dispatch,txn,backend,mock,render,error,hooks,lib,schema,timecode,util}.rs`、`src/tools/{common,edit,export,media,mod,node,project,render_tools,timeline}.rs`、`src/sdk/{mod,backend,gaps}.rs`、`tests/{hooks_policy,hooks_readback,hooks_replan,mock_e2e,registry_drift,schema_samples,sdk_e2e}.rs`）+ 本台账；不含 `target/`（根 `.gitignore:119` `**/target/`）、`ai/oak-ai-mcp/`、`ai/agent/`、`node_modules`。
 - 验收依据（四项门全过）：
   - task-13（T4 抽查）`/tmp/oak-reviews/t4-hooks.md` **pass**：全量 `cargo test --offline` 90/0/0；ProposalOnly 零副作用主测有效（Spy 15/15）；分级表 fail-closed 反向实验恰好 2 项变红 + 运行时探针拒 `UNCLASSIFIED_TOOL`；README「Hooks」节与实现逐项吻合。
   - task-14（T1 独立验收）`/tmp/oak-reviews/t1.md` **pass**：默认 90/0、`--features sdk` 96/0（`sdk_e2e` 2/2 真机，libx264 实编码日志佐证）；`duration` 兜底消融 → 精确红在 `tests/sdk_e2e.rs:182`；22/22 方法覆盖由编译器背书。
   - 整改：D1（README 计数行口径）、O1（ripple 矩阵行只写首步）已改；D2（测试改名 `unknown_tool_fails_closed_without_touching_the_backend`，`tests/hooks_policy.rs:515`）已完成，改后 90/0/0。
 - 状态改写：§0 表 T1「部分」、T4「未开始」→ **已完成（已入仓）**；§2、§4 标题加 2026-11-09 修订注记。
+- `git show --stat HEAD` 尾部原文：
+
+  ```
+   ai/oak-ai-tools/tests/sdk_e2e.rs          |  525 +++
+   docs/zh/plans/ai-feature-status.md        |   45 +-
+   34 files changed, 16324 insertions(+), 9 deletions(-)
+  ```
+
+- 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。提交说明正文把第 6 个 gap 写成了 `GAP_AUDIO_LEVELS`，源码常量实为 `GAP_RENDER_AUDIO_SAMPLES`，且 `gaps.rs` 另有 `GAP_CLIP_SOURCE_QUERY`（共 7 个常量）；代码未改，不 amend。
+
+### 10.4 第四次提交：T5 MCP 薄封装入仓（2026-11-09 00:3x）
+
+- commit：`<提交后回填>`，标题 `feat(ai): add the T5 MCP thin wrapper with zero schema drift`（作者 `fslong`）。
+- 范围：`ai/oak-ai-mcp/**` 11 文件（`Cargo.toml`、`Cargo.lock`、`.gitignore`、`README.md`、`src/{backend_select,lib,main,rpc,server}.rs`、`tests/{protocol,zero_drift}.rs`）+ 本台账；不含 `target/`（`ai/oak-ai-mcp/.gitignore:1` `/target/`）、`ai/agent/`、`docs/zh/plans/resolve21-oak-applicability.md`。
+- 验收依据（两项门全过）：
+  - task-12 独立验收 `/tmp/oak-reviews/mcp.md` **pass**：默认 features 干净构建 lib 20 + protocol 6 + zero_drift 3 = 29 全绿；协议链（initialize → tools/list → tools/call → 非法参数 → 未知工具）实测；删 `structuredContent` 消融 → 3 项红；`--backend sdk` 未构建时明确拒绝（exit 2，不静默降级）。
+  - task-16 增量抽查 `/tmp/oak-reviews/t5-delta.md` **pass**：全量 **30/0/0**（回声断言加入后）；删版本回声 → 恰 `protocol_version_is_echoed_or_baselined` 红（protocol.rs:443）；O1 schema 目录缺失 → `tools/list` panic exit 101，README 段落逐字复现。
+  - README 整改：F1（sdk 计数 6→双口径 6/7）与 F2（测试清单）已改；`/tmp/oak-mcp-sdk-verify2.log` 实测 sdk 配置 **7 passed exit 0**（含 `protocol_version_is_echoed_or_baselined` ok）。
+- 状态改写：§0 表 T5「部分（待独立验收）」→ **已完成（已入仓，§10.4）**。
 - `git show --stat HEAD`：**提交后回填**（随下一批提交入库）。
 
-### 10.4 待办：剩余里程碑提交（逐个等独立验收 pass）
+### 10.5 待办：剩余里程碑提交（逐个等独立验收 pass）
 
-- T5（`ai/oak-ai-mcp/`，验收 `/tmp/oak-reviews/mcp.md` pass）、T3（`ai/agent/`，验收 `/tmp/oak-reviews/t3-agent.md` pass）各自完成后单独提交；T6 未开始。
-- 口径：§10.2 与 §10.3 的哈希/统计回填发生在提交之后，属工作树改动，随下一批提交入库。
+- T3（`ai/agent/`，验收 `/tmp/oak-reviews/t3-agent.md` pass）单独提交；T6 未开始。
+- 口径：§10.2、§10.3、§10.4 的哈希/统计回填发生在提交之后，属工作树改动，随下一批提交入库。
 
 ---
 
