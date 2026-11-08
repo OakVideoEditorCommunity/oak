@@ -6,9 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
   schedule:
-    # 02:23 UTC (10:23 CST): daily nightly build, off the top-of-hour
+    # 00:00 UTC (08:00 CST): daily nightly build, off the top-of-hour
     # peak when scheduled workflows get delayed for tens of minutes.
-    - cron: '23 2 * * *'
+    - cron: '0 0 * * *'
 
 permissions:
   contents: write
@@ -112,6 +112,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       # Defender's real-time scanning slows the MSVC build down
       # badly; disable it for the job and keep exclusions as the fallback
