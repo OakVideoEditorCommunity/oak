@@ -378,6 +378,10 @@ pub struct ViewerWidget<C: PlaybackClock> {
 	/// click samples the pixel under it instead of forwarding an interact
 	/// pointer event.
 	eyedropper_armed: bool,
+	video_fullscreen: bool,
+	controls_visible: bool,
+	previous_zoom: Option<ViewerZoom>,
+	last_pointer_move: Option<std::time::Instant>,
 }
 
 impl<C: PlaybackClock> ViewerWidget<C> {
@@ -421,7 +425,29 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 			fps: FpsCounter::new(),
 			picture_bounds: Rc::new(Cell::new(None)),
 			eyedropper_armed: false,
+			video_fullscreen: false,
+			controls_visible: true,
+			previous_zoom: None,
+			last_pointer_move: None,
 		}
+	}
+
+	pub fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
+		if self.video_fullscreen == fullscreen {
+			return;
+		}
+		self.video_fullscreen = fullscreen;
+		if fullscreen {
+			self.previous_zoom = Some(self.zoom);
+			self.zoom = ViewerZoom::Level(4);
+			self.controls_visible = true;
+			self.last_pointer_move = Some(std::time::Instant::now());
+		} else {
+			self.zoom = self.previous_zoom.take().unwrap_or(ViewerZoom::Fit);
+			self.controls_visible = true;
+			self.last_pointer_move = None;
+		}
+		cx.notify();
 	}
 
 	/// The current transport state.
@@ -596,6 +622,14 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		let clock = self.clock.read(cx);
 		let frame = clock.current_frame();
 		let playing = clock.is_playing();
+		if self.video_fullscreen
+			&& self
+				.last_pointer_move
+				.is_some_and(|last| last.elapsed().as_secs() >= 2)
+		{
+			self.controls_visible = false;
+			cx.notify();
+		}
 		if frame != self.transport.frame || playing != self.transport.playing {
 			self.fps.record(std::time::Instant::now());
 			self.transport.frame = frame;
@@ -691,6 +725,11 @@ impl<C: PlaybackClock> Render for ViewerWidget<C> {
 			// picture (the panel decides what an active interact consumes).
 			.focusable()
 			.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+				if this.video_fullscreen {
+					this.controls_visible = true;
+					this.last_pointer_move = Some(std::time::Instant::now());
+					cx.notify();
+				}
 				// While armed the pointer is a crosshair; the eyedropper
 				// only reacts to a click, so moves are swallowed.
 				if this.eyedropper_armed {
@@ -1037,14 +1076,31 @@ impl<C: PlaybackClock> Render for ViewerWidget<C> {
 				}),
 			));
 
-		div()
+		let root = div()
 			.size_full()
 			.flex()
 			.flex_col()
 			.min_w_0()
 			.overflow_hidden()
-			.child(picture)
-			.child(transport_bar)
+			.child(picture);
+		if !self.video_fullscreen || self.controls_visible {
+			if self.video_fullscreen {
+				root
+					.child(
+						div()
+							.absolute()
+							.left_0()
+							.right_0()
+							.bottom_0()
+							.child(transport_bar),
+					)
+					.into_any_element()
+			} else {
+				root.child(transport_bar).into_any_element()
+			}
+		} else {
+			root.into_any_element()
+		}
 	}
 }
 

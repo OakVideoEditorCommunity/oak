@@ -42,14 +42,15 @@ use std::time::Duration;
 use crate::oakui::component::menu::{self, Menu, MenuBar, MenuBarEntry, MenuBarEvent, MenuItem};
 use crate::oakui::component::text_input::install_text_input_bindings;
 use gpui_kit::component::dock::{
-	DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, PanelId as DockPanelId,
-	panel_handle,
+	DockArea, DockEvent, DockLayout, DockPlacement, DockSkin, DragPanel, PanelId as DockPanelId,
+	PanelStyle, panel_handle,
 };
 use crate::panels::PanelId;
 use crate::widgets::timeline::{ClipData, ClipId, Frame, FrameRange, TimelineEvent, TimelineView, TrackData};
 use gpui_kit::{
     colors::DefaultColors, div, prelude::*, px, size, App, AsyncWindowContext, Bounds, Context,
-    Entity, PathPromptOptions, Render, SharedString, Window, WindowBounds, WindowOptions,
+    AnyView, Entity, PathPromptOptions, Render, SharedString, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowId, WindowOptions,
 };
 use crate::widgets::audio_meter::{AudioLevelMeter, MeterOrientation};
 use crate::widgets::dialog::progress::{progress_dialog, ProgressContent};
@@ -399,6 +400,22 @@ pub struct OakApp<E: AppEngine> {
 	/// The transport the startup update check fetches through (tests inject
 	/// a scripted one; production uses the real HTTPS client).
 	update_transport: Arc<dyn crate::update::UpdateTransport>,
+	floating_panels: std::collections::HashMap<PanelId, FloatingWindow>,
+}
+
+struct FloatingPanel {
+	view: AnyView,
+}
+
+impl Render for FloatingPanel {
+	fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+		self.view.clone()
+	}
+}
+
+struct FloatingWindow {
+	window_id: WindowId,
+	_subscription: Subscription,
 }
 
 /// The dock panels the shell builds up front, kept for focused-panel command
@@ -435,6 +452,37 @@ impl<E: AppEngine> Clone for ShellPanels<E> {
 }
 
 impl<E: AppEngine> ShellPanels<E> {
+	fn id_of_raw(&self, raw: u64) -> Option<PanelId> {
+		let panels = [
+			(PROJECT, self.project.entity_id().as_u64()),
+			(SOURCE_VIEWER, self.source_viewer.entity_id().as_u64()),
+			(PROGRAM_VIEWER, self.program_viewer.entity_id().as_u64()),
+			(NODE_EDITOR, self.node_editor.entity_id().as_u64()),
+			(INSPECTOR, self.inspector.entity_id().as_u64()),
+			(HISTORY, self.history.entity_id().as_u64()),
+			(TIMELINE, self.timeline.entity_id().as_u64()),
+			(EFFECT_LIBRARY, self.effect_library.entity_id().as_u64()),
+			(MULTICAM, self.multicam.entity_id().as_u64()),
+		];
+		panels
+			.into_iter()
+			.find_map(|(id, entity)| (entity == raw).then_some(id))
+	}
+
+	fn floating_view(&self, id: PanelId) -> Option<AnyView> {
+		Some(match id {
+			PROJECT => panel_handle(self.project.clone()).view(),
+			SOURCE_VIEWER => panel_handle(self.source_viewer.clone()).view(),
+			PROGRAM_VIEWER => panel_handle(self.program_viewer.clone()).view(),
+			NODE_EDITOR => panel_handle(self.node_editor.clone()).view(),
+			INSPECTOR => panel_handle(self.inspector.clone()).view(),
+			HISTORY => panel_handle(self.history.clone()).view(),
+			EFFECT_LIBRARY => panel_handle(self.effect_library.clone()).view(),
+			MULTICAM => panel_handle(self.multicam.clone()).view(),
+			_ => return None,
+		})
+	}
+
 	/// The entity id of a panel, for dock presence checks
 	/// ([`DockArea::panel`] keys by it).
 	fn entity_id(&self, id: PanelId) -> Option<gpui_kit::EntityId> {
@@ -535,6 +583,7 @@ impl<E: AppEngine> OakApp<E> {
 		// (the fork's registry was wired but never saved — when layout
 		// persistence lands, it goes through `DockArea::dump`/`load`).
 		let (dock, dock_skin) = DockSkin::dock_area("oak-main", Some(1), window, cx);
+		dock_skin.set_panel_style(PanelStyle::TabBar, cx);
 		// Tabs carry their close (✕) button (the fork dock's parity).
 		dock_skin.set_close_button_visible(true, cx);
 
@@ -700,14 +749,14 @@ impl<E: AppEngine> OakApp<E> {
 		cx.subscribe(
 			&panels.source_viewer,
 			|this, _panel, event: &menu::ViewerPanelEvent, cx| {
-				this.apply_viewer_panel_event(*event, cx);
+				this.apply_viewer_panel_event(Monitor::Source, *event, cx);
 			},
 		)
 		.detach();
 		cx.subscribe(
 			&panels.program_viewer,
 			|this, _panel, event: &menu::ViewerPanelEvent, cx| {
-				this.apply_viewer_panel_event(*event, cx);
+				this.apply_viewer_panel_event(Monitor::Program, *event, cx);
 			},
 		)
 		.detach();
@@ -831,6 +880,7 @@ impl<E: AppEngine> OakApp<E> {
 			full_screen: false,
 			pending_update: None,
 			update_transport: Arc::new(crate::update::HttpTransport),
+			floating_panels: std::collections::HashMap::new(),
 		};
 
 		// Open the CLI-provided project once the shell is up.
@@ -1581,11 +1631,94 @@ impl<E: AppEngine> OakApp<E> {
 		});
 	}
 
+	fn open_floating_panel(&mut self, id: PanelId, cx: &mut Context<Self>) {
+		if self.floating_panels.contains_key(id) {
+			return;
+		}
+		let Some(view) = self.panels.floating_view(id) else {
+			return;
+		};
+		self.toggle_panel(id, cx);
+		let Ok(handle) = cx.open_window(
+			WindowOptions {
+				window_bounds: Some(WindowBounds::Windowed(Bounds {
+					origin: gpui_kit::point(px(120.0), px(120.0)),
+					size: size(px(960.0), px(640.0)),
+				})),
+				titlebar: Some(TitlebarOptions {
+					title: Some(id.into()),
+					appears_transparent: false,
+					traffic_light_position: None,
+				}),
+				focus: true,
+				show: true,
+				..Default::default()
+			},
+			move |_window, cx| cx.new(|_| FloatingPanel { view }),
+		) else {
+			return;
+		};
+		let window_id = gpui_kit::AnyWindowHandle::from(handle).window_id();
+		let this = cx.weak_entity();
+		let subscription = cx.on_window_closed(move |cx, closed_id| {
+			if closed_id != window_id {
+				return;
+			}
+			let this = this.clone();
+			cx.defer(move |cx| {
+				let _ = this.update(cx, |this, cx| {
+					this.floating_panels.remove(&id);
+					match id {
+						SOURCE_VIEWER => this.panels.source_viewer.update(cx, |panel, cx| {
+							panel.set_video_fullscreen(false, cx);
+						}),
+						PROGRAM_VIEWER => this.panels.program_viewer.update(cx, |panel, cx| {
+							panel.set_video_fullscreen(false, cx);
+						}),
+						_ => {}
+					}
+					this.toggle_panel(id, cx);
+				});
+			});
+		});
+		self.floating_panels.insert(
+			id,
+			FloatingWindow {
+				window_id,
+				_subscription: subscription,
+			},
+		);
+		self.rebuild_menu_bar(cx);
+	}
+
+	fn close_floating_panel(&mut self, id: PanelId, cx: &mut Context<Self>) {
+		let Some(floating) = self.floating_panels.remove(&id) else {
+			return;
+		};
+		let _ = gpui_kit::WindowHandle::<FloatingPanel>::new(floating.window_id).update(
+			cx,
+			|_, window, _| {
+			window.remove_window();
+			},
+		);
+	}
+
+	fn close_all_floating_panels(&mut self, cx: &mut Context<Self>) {
+		let ids: Vec<PanelId> = self.floating_panels.keys().copied().collect();
+		for id in ids {
+			self.close_floating_panel(id, cx);
+		}
+	}
+
 	/// 窗口 → Focus X: toggles the panel open/closed. A closed panel
 	/// reopens at its design placement; the panel entity (and its state)
 	/// survives the round trip. gpui-kit's dock has no floating panels, so
 	/// the fork's tear-off handling is gone.
 	fn toggle_panel(&mut self, id: PanelId, cx: &mut Context<Self>) {
+		if self.floating_panels.contains_key(id) {
+			self.close_floating_panel(id, cx);
+			return;
+		}
 		// The timeline is shell-owned (the full-width strip), not docked.
 		if id == TIMELINE {
 			self.timeline_visible = !self.timeline_visible;
@@ -1630,6 +1763,7 @@ impl<E: AppEngine> OakApp<E> {
 	/// 窗口 → 重置布局: clears the dock and re-seeds every panel at its
 	/// design position.
 	fn reset_default_layout(&mut self, cx: &mut Context<Self>) {
+		self.close_all_floating_panels(cx);
 		let panels = self.panels.clone();
 		self.update_dock(cx, move |dock, window, cx| {
 			macro_rules! remove {
@@ -1769,9 +1903,38 @@ impl<E: AppEngine> OakApp<E> {
 	/// Applies a viewer panel's shell-level request: full-screen toggles the
 	/// window, and the loop-range requests move the shared program workarea
 	/// (both monitors act on it through the same undoable path as the menu).
-	fn apply_viewer_panel_event(&mut self, event: menu::ViewerPanelEvent, cx: &mut Context<Self>) {
+	fn toggle_viewer_fullscreen(&mut self, monitor: Monitor, cx: &mut Context<Self>) {
+		let id = match monitor {
+			Monitor::Source => SOURCE_VIEWER,
+			Monitor::Program => PROGRAM_VIEWER,
+		};
+		self.open_floating_panel(id, cx);
+		let Some(floating) = self.floating_panels.get(&id) else {
+			return;
+		};
+		let window_id = floating.window_id;
+		let was_fullscreen = gpui_kit::WindowHandle::<FloatingPanel>::new(window_id)
+			.update(cx, |_, window, _| window.is_fullscreen())
+			.unwrap_or(false);
+		match monitor {
+			Monitor::Source => self.panels.source_viewer.update(cx, |panel, cx| {
+				panel.set_video_fullscreen(!was_fullscreen, cx);
+			}),
+			Monitor::Program => self.panels.program_viewer.update(cx, |panel, cx| {
+				panel.set_video_fullscreen(!was_fullscreen, cx);
+			}),
+		}
+		let _ = gpui_kit::WindowHandle::<FloatingPanel>::new(window_id).update(
+			cx,
+			|_, window, _| {
+				window.toggle_fullscreen();
+			},
+		);
+	}
+
+	fn apply_viewer_panel_event(&mut self, monitor: Monitor, event: menu::ViewerPanelEvent, cx: &mut Context<Self>) {
 		match event {
-			menu::ViewerPanelEvent::FullScreenRequested => self.toggle_full_screen(cx),
+			menu::ViewerPanelEvent::FullScreenRequested => self.toggle_viewer_fullscreen(monitor, cx),
 			menu::ViewerPanelEvent::SetInPoint => self.set_point_at_playhead(true, cx),
 			menu::ViewerPanelEvent::SetOutPoint => self.set_point_at_playhead(false, cx),
 			menu::ViewerPanelEvent::ClearRange => {
@@ -3581,6 +3744,14 @@ impl<E: AppEngine> Render for OakApp<E> {
 				}),
 			);
 		}
+		root = root.on_drop(cx.listener(
+			|this, drag: &DragPanel, _window, cx| {
+				if let Some(id) = this.panels.id_of_raw(drag.panel().as_u64()) {
+					this.open_floating_panel(id, cx);
+					cx.stop_propagation();
+				}
+			},
+		));
 		let mut root = root
 			.child(self.menu_bar.clone())
 			.child(div().flex_1().min_h_0().child(self.dock.clone()))
@@ -4636,6 +4807,43 @@ mod tests {
 				panel
 			);
 		}
+	}
+
+	#[gpui_kit::test]
+	async fn closing_a_floating_panel_restores_it_to_the_dock(cx: &mut TestAppContext) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let window = cx.open_window(size(px(1200.0), px(800.0)), |window, cx| {
+			OakApp::<MockEngine>::new(window, None, cx)
+		});
+		let root = window.root(cx).expect("app root");
+		root.update(cx, |app, cx| app.open_floating_panel(PROGRAM_VIEWER, cx));
+		assert_eq!(cx.read(|cx| root.read(cx).floating_panels.len()), 1);
+		let entity = cx.read(|cx| root.read(cx).panels.program_viewer.clone());
+		assert!(
+			cx.read(|cx| {
+				root.read(cx)
+					.dock
+					.read(cx)
+					.panel(DockPanelId::from(entity.entity_id()))
+					.is_none()
+			})
+		);
+
+		root.update(cx, |app, cx| app.close_floating_panel(PROGRAM_VIEWER, cx));
+		cx.run_until_parked();
+		assert!(cx.read(|cx| root.read(cx).floating_panels.is_empty()));
+		assert!(
+			cx.read(|cx| {
+				root.read(cx)
+					.dock
+					.read(cx)
+					.panel(DockPanelId::from(entity.entity_id()))
+					.is_some()
+			})
+		);
 	}
 
 	/// Closing a panel via its tab ✕ — the dock's own close flow — also

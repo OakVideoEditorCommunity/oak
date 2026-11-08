@@ -54,6 +54,12 @@ pub struct SourceViewerPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> SourceViewerPanel<E> {
+	pub(crate) fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
+		self.viewer.update(cx, |viewer, cx| {
+			viewer.set_video_fullscreen(fullscreen, cx)
+		});
+	}
+
 	/// Builds a viewer over `clock` (the source monitor's clock).
 	pub fn new(
 		engine: Entity<E>,
@@ -254,6 +260,7 @@ impl<E: AppEngine> Render for SourceViewerPanel<E> {
 					};
 					this.context_menu
 						.show(event.position, menu::viewer_menu(&state), cx);
+					cx.stop_propagation();
 				})
 			})
 			.child(

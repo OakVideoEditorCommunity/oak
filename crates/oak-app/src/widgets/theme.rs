@@ -147,6 +147,9 @@ pub fn apply_theme(cx: &mut App, theme: &OakTheme) {
 		colors.caret = theme.text.into();
 		colors.selection = theme.accent.into();
 		colors.input = theme.base.into();
+		colors.tab_foreground = theme.text.into();
+		colors.tab_active_foreground = theme.text.into();
+		colors.tab_active = theme.window.into();
 	});
 }
 
