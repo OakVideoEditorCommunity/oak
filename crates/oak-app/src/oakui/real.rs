@@ -7730,6 +7730,7 @@ mod session_smoke_tests {
 	/// marker → work-area round trip through the real engine.
 	#[gpui_kit::test]
 	async fn real_engine_edits_undo_and_auxiliary_state(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -7774,6 +7775,7 @@ mod session_smoke_tests {
 
 	#[gpui_kit::test]
 	async fn real_engine_node_graph_contains_the_selected_clip(cx: &mut TestAppContext) {
+		let _lock = crate::oakui::graphops::test_lock();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();

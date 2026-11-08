@@ -599,6 +599,7 @@ impl<E: AppEngine> OakApp<E> {
 	/// Does not panic for user data; a malformed saved layout is treated as
 	/// "no layout" and the persisted config values are read with defaults.
 	pub fn new(window: &mut Window, initial_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+		let restore_workspace = !cfg!(test);
 		// The persisted theme (config `Theme`) wins; the app defaults to dark.
 		let dark = crate::oakui::real::theme_is_dark();
 		if dark {
@@ -856,10 +857,14 @@ impl<E: AppEngine> OakApp<E> {
 		.detach();
 
 		panels.register_for_layout_restore(cx);
-		let saved_layout = serde_json::from_str::<DockAreaState>(
-			&crate::oakui::real::config_get_string(CONFIG_KEY_DOCK_LAYOUT),
-		)
-		.ok();
+		let saved_layout = restore_workspace
+			.then(|| {
+				serde_json::from_str::<DockAreaState>(
+					&crate::oakui::real::config_get_string(CONFIG_KEY_DOCK_LAYOUT),
+				)
+				.ok()
+			})
+			.flatten();
 		dock.update(cx, |dock, cx| {
 			let restored = saved_layout
 				.map(|state| dock.load(state, window, cx).is_ok())
@@ -971,9 +976,17 @@ impl<E: AppEngine> OakApp<E> {
 			plugin_progress_open: false,
 			plugin_progress_rx: Mutex::new(plugin_progress_rx),
 			focused_panel: None,
-			timeline_visible: crate::oakui::real::config_get_bool(CONFIG_KEY_TIMELINE_VISIBLE, true),
-			timeline_height: (crate::oakui::real::config_get_int(CONFIG_KEY_TIMELINE_HEIGHT, 320) as f32)
-				.clamp(120.0, 800.0),
+			timeline_visible: if restore_workspace {
+				crate::oakui::real::config_get_bool(CONFIG_KEY_TIMELINE_VISIBLE, true)
+			} else {
+				true
+			},
+			timeline_height: if restore_workspace {
+				(crate::oakui::real::config_get_int(CONFIG_KEY_TIMELINE_HEIGHT, 320) as f32)
+					.clamp(120.0, 800.0)
+			} else {
+				320.0
+			},
 			panels,
 			active_tool: Tool::Pointer,
 			last_timeline_tool: crate::widgets::timeline::TimelineTool::Select,
@@ -999,6 +1012,9 @@ impl<E: AppEngine> OakApp<E> {
 	}
 
 	fn persist_workspace(&mut self, cx: &App) {
+		if cfg!(test) {
+			return;
+		}
 		crate::oakui::real::config_set_bool(CONFIG_KEY_TIMELINE_VISIBLE, self.timeline_visible);
 		crate::oakui::real::config_set_int(
 			CONFIG_KEY_TIMELINE_HEIGHT,
