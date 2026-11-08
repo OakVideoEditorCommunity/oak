@@ -64,7 +64,7 @@ use crate::widgets::timeline::{
 	ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
 	TrackData, TrackHeaderEvent, TrackKind, TrimEdge,
 };
-use gpui_kit::{prelude::*, px, App, Context, Entity, Hsla, Pixels, RenderImage, SharedString};
+use gpui_kit::{prelude::*, px, App, Context, Entity, Hsla, Pixels, Point, RenderImage, SharedString};
 use crate::widgets::audio_meter::AudioMeterDataSource;
 use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::viewer::PlaybackClock;
@@ -3674,10 +3674,10 @@ impl NodeGraphDataSource for RealEngine {
 	}
 
 	fn can_connect(&self, from: crate::widgets::node_graph::PortId, to: crate::widgets::node_graph::PortId) -> bool {
-		let Some(project) = self.project_ref() else {
+		let (Some(project), Some(sequence)) = (self.project_ref(), self.sequence) else {
 			return false;
 		};
-		crate::oakui::nodegraph::can_connect(project, from, to)
+		crate::oakui::nodegraph::can_connect(project, sequence, from, to)
 	}
 }
 
@@ -4216,6 +4216,30 @@ impl AppEngine for RealEngine {
 		super::nodegraph::node_library()
 	}
 
+	fn add_node_at(
+		&mut self,
+		type_id: &str,
+		position: Point<Pixels>,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		let Some(session) = self.editor_session() else {
+			return Err("no project open".into());
+		};
+		let Some(sequence) = self.sequence else {
+			return Err("no sequence open".into());
+		};
+		let result = session
+			.execute(EditCommand::CreateNode {
+				context: quercus_engine_rs::node::NodeId::from_raw(sequence.raw()),
+				type_id: type_id.to_string(),
+				x: position.x.as_f32() as f64,
+				y: position.y.as_f32() as f64,
+			})
+			.map(|_| ());
+		self.apply_edit(result.clone(), "add node", cx);
+		result
+	}
+
 	fn apply_node_graph_event(&mut self, event: &NodeGraphEvent, cx: &mut Context<Self>) {
 		match event {
 			// Preview events never persist: the widget draws dragged nodes at
@@ -4259,9 +4283,7 @@ impl AppEngine for RealEngine {
 						self.selected_clip.map(|clip| clip.0),
 						event,
 					);
-					if let Err(e) = result {
-						println!("[real engine] node-graph request rejected: {e}");
-					}
+					self.apply_edit(result, "edit node graph", cx);
 				}
 			}
 		}
@@ -7505,6 +7527,8 @@ pub fn library_list() -> Result<Vec<LibraryProject>, String> {
 mod session_smoke_tests {
 	use super::*;
 	use crate::oakui::engine::AppEngine;
+	use crate::widgets::node_graph::NodeGraphDataSource;
+	use crate::widgets::project_explorer::ProjectDataSource;
 	use crate::widgets::timeline::{Frame, TimelineDataSource};
 	use gpui_kit::TestAppContext;
 
@@ -7575,6 +7599,71 @@ mod session_smoke_tests {
 				engine.commit_workarea(Frame(2), Frame(5), Frame(2), Frame(5), cx);
 				assert_eq!(engine.workarea(), Some((Frame(2), Frame(5))));
 			});
+		});
+	}
+
+	#[gpui_kit::test]
+	async fn real_engine_node_graph_contains_the_selected_clip(cx: &mut TestAppContext) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let engine = cx.update(|cx| cx.new(RealEngine::create));
+		cx.update(|app| {
+			engine.update(app, |engine, cx| engine.new_project(cx));
+			engine
+				.update(app, |engine, cx| engine.import_footage(test_media(), cx))
+				.expect("import the demo footage");
+			let footage = engine
+				.read(app)
+				.roots()
+				.into_iter()
+				.find(|entry| !entry.is_dir)
+				.expect("imported footage entry")
+				.id;
+			engine.update(app, |engine, cx| {
+				engine.drop_footage(footage, crate::widgets::timeline::TrackKind::Video, 0, Frame::ZERO, cx)
+			});
+			let clip = engine
+				.read(app)
+				.track(0)
+				.and_then(|track| track.clips().first().map(|clip| clip.id()))
+				.expect("placed clip");
+			engine.update(app, |engine, cx| engine.set_selected_clips(vec![clip], cx));
+			assert!(!engine.read(app).nodes().is_empty());
+
+			engine.update(app, |engine, cx| engine.set_selected_clips(Vec::new(), cx));
+			engine
+				.update(app, |engine, cx| {
+					engine.add_node_at(
+						"org.olivevideoeditor.Olive.merge",
+						gpui_kit::point(gpui_kit::px(320.0), gpui_kit::px(160.0)),
+						cx,
+					)
+				})
+				.expect("create merge node");
+			let (from, base, blend, merge) = {
+				let engine = engine.read(app);
+				let nodes = engine.nodes();
+				let footage = nodes.iter().find(|node| node.id.0 == footage).expect("footage card");
+				let merge_node = nodes.iter().find(|node| node.title == "Merge").expect("merge card");
+				(
+					footage.outputs[0].id,
+					merge_node.inputs[0].id,
+					merge_node.inputs[1].id,
+					merge_node.id,
+				)
+			};
+			assert!(engine.read(app).can_connect(from, base));
+			engine.update(app, |engine, cx| {
+				engine.apply_node_graph_event(&NodeGraphEvent::ConnectionRequested { from, to: base }, cx)
+			});
+			assert!(engine.read(app).can_connect(from, blend));
+			engine.update(app, |engine, cx| {
+				engine.apply_node_graph_event(&NodeGraphEvent::ConnectionRequested { from, to: blend }, cx)
+			});
+			let edges = engine.read(app).edges();
+			assert_eq!(edges.iter().filter(|edge| edge.to_node == merge).count(), 2);
 		});
 	}
 }

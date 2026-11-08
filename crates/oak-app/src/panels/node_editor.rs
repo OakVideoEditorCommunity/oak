@@ -75,6 +75,9 @@ pub struct NodeEditorPanel<E: AppEngine> {
 	/// the widget when the engine's authoritative selection changes, so a
 	/// marquee or click selection inside the graph is never overwritten.
 	last_graph_selection: Option<u64>,
+	/// Node identities in the last fitted graph. Opening a project or changing
+	/// the selected clip can replace the whole canvas after the initial fit.
+	last_graph_nodes: BTreeSet<u64>,
 }
 
 impl<E: AppEngine> NodeEditorPanel<E> {
@@ -122,7 +125,7 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 		// selected clip's block node) and an inspector card click both land
 		// in `selected_graph_node`, and this pushes it into the widget.
 		cx.observe(&engine, |this, _engine, cx| {
-			this.sync_graph_selection(cx);
+			this.sync_graph_state(cx);
 		})
 		.detach();
 
@@ -138,11 +141,12 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 			add_node_position: None,
 			add_menu_ids: Vec::new(),
 			last_graph_selection: None,
+			last_graph_nodes: BTreeSet::new(),
 		};
 		// If a clip (or graph node) is already selected when the panel is
 		// built, push the highlight immediately (the observe only fires on
 		// the next engine notify).
-		panel.sync_graph_selection(cx);
+		panel.sync_graph_state(cx);
 		panel
 	}
 
@@ -199,7 +203,13 @@ impl<E: AppEngine> NodeEditorPanel<E> {
 	/// card click highlights the effect's node. `None` is never pushed —
 	/// the widget keeps its live selection (e.g. a marquee) until the
 	/// engine names a new authoritative node.
-	fn sync_graph_selection(&mut self, cx: &mut Context<Self>) {
+	fn sync_graph_state(&mut self, cx: &mut Context<Self>) {
+		let nodes = self.engine.read(cx).nodes();
+		let identities: BTreeSet<u64> = nodes.into_iter().map(|node| node.id().0).collect();
+		if identities != self.last_graph_nodes {
+			self.last_graph_nodes = identities;
+			self.fitted = false;
+		}
 		let node = self.engine.read(cx).selected_graph_node();
 		if node == self.last_graph_selection {
 			return;

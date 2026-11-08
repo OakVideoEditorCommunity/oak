@@ -661,7 +661,7 @@ fn fallback_base_in(
 /// exist and be free. The sequence node's inputs are connectable like any
 /// other (its `tex_in` starts unconnected; a user wire replaces the
 /// synthesized one once the graph grows real edges).
-pub fn can_connect(project: &ProjectRef, from: PortId, to: PortId) -> bool {
+pub fn can_connect(project: &ProjectRef, sequence: DomainNodeId, from: PortId, to: PortId) -> bool {
 	let (from_node, from_kind, _) = unpack_port(from);
 	let (to_node, to_kind, to_index) = unpack_port(to);
 	if from_kind != PortKind::Output || to_kind != PortKind::Input {
@@ -673,9 +673,6 @@ pub fn can_connect(project: &ProjectRef, from: PortId, to: PortId) -> bool {
 	let Ok(session) = session_for_graph(project) else {
 		return false;
 	};
-	let Some(sequence) = session.snapshot().current_sequence else {
-		return false;
-	};
 	let Some(snapshot) = session.graph_snapshot(sequence, None) else {
 		return false;
 	};
@@ -683,7 +680,11 @@ pub fn can_connect(project: &ProjectRef, from: PortId, to: PortId) -> bool {
 		.nodes
 		.iter()
 		.find(|node| node.id.raw() == to_node)
-		.and_then(|node| node.inputs.get(to_index as usize))
+		.and_then(|node| {
+			node.inputs
+				.iter()
+				.find(|input| input.declaration_index == to_index as usize)
+		})
 		.map(|input| input.id.clone())
 	else {
 		return false;
@@ -729,13 +730,9 @@ pub fn apply_edit_in_view(
 				return Err("connection endpoints must be output → input".into());
 			}
 			let session = session_for_graph(project)?;
-			let sequence = session
-				.snapshot()
-				.current_sequence
-				.ok_or_else(|| "no sequence open".to_string())?;
 			let snapshot = session
 				.graph_snapshot(
-					sequence,
+					quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 					clip.map(quercus_engine_rs::node::NodeId::from_raw),
 				)
 				.ok_or_else(|| "node graph unavailable".to_string())?;
@@ -743,7 +740,11 @@ pub fn apply_edit_in_view(
 				.nodes
 				.iter()
 				.find(|node| node.id.raw() == to_node)
-				.and_then(|node| node.inputs.get(to_index as usize))
+				.and_then(|node| {
+					node.inputs
+						.iter()
+						.find(|input| input.declaration_index == to_index as usize)
+				})
 				.map(|input| input.id.clone())
 				.filter(|id| !id.is_empty());
 			let Some(id_str) = id_str else {
@@ -763,13 +764,9 @@ pub fn apply_edit_in_view(
 				return Ok(());
 			}
 			let session = session_for_graph(project)?;
-			let sequence = session
-				.snapshot()
-				.current_sequence
-				.ok_or_else(|| "no sequence open".to_string())?;
 			let snapshot = session
 				.graph_snapshot(
-					sequence,
+					quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 					clip.map(quercus_engine_rs::node::NodeId::from_raw),
 				)
 				.ok_or_else(|| "node graph unavailable".to_string())?;
