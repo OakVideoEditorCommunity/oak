@@ -987,7 +987,7 @@ pub trait AppEngine:
 	/// viewer `Stop on Last` toggle / `StopOnLastFrame` config).
 	fn stop_on_last(&self) -> bool {
 		oak_core::configstore::ConfigStore::instance()
-			.get_bool(None, "StopOnLastFrame", 0)
+			.get_bool(None, "StopOnLastFrame", 1)
 			!= 0
 	}
 

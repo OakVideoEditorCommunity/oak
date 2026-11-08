@@ -556,8 +556,22 @@ impl<D: TimelineDataSource> TimelineView<D> {
 		let seq_len = self.sequence_length(cx);
 		let old = self.state.playhead;
 		self.state.set_playhead(frame, seq_len);
+		let old_scroll = self.state.scroll_offset.x;
+		if self.clip_area_width > 0.0 {
+			let margin = 24.0_f32.min(self.clip_area_width * 0.1);
+			let playhead_x = self.state.point_at_frame(self.state.playhead).as_f32();
+			let content_x = self.state.playhead.0 as f32 * self.state.zoom;
+			if playhead_x < margin {
+				self.state.scroll_offset.x = px((content_x - margin).max(0.0));
+			} else if playhead_x > self.clip_area_width - margin {
+				self.state.scroll_offset.x =
+					px((content_x - (self.clip_area_width - margin)).max(0.0));
+			}
+		}
 		if self.state.playhead != old {
 			cx.emit(TimelineEvent::PlayheadChanged(self.state.playhead));
+		}
+		if self.state.playhead != old || self.state.scroll_offset.x != old_scroll {
 			cx.notify();
 		}
 	}
@@ -2644,6 +2658,42 @@ mod tests {
 	/// Clicking a track header's toggle glyph emits a
 	/// `TrackToggleRequested` edit request (and does NOT toggle the header's
 	/// track selection).
+	#[test]
+	fn seek_scrolls_only_when_the_playhead_leaves_the_viewport() {
+		use gpui_kit::{TestAppContext, VisualTestContext, size};
+		use std::ops::Deref;
+
+		let mut test_app = TestAppContext::single();
+		test_app.update(|cx| cx.init_colors());
+		let window = test_app.open_window(size(px(800.), px(200.)), |window, cx| {
+			let source = cx.new(|_cx| OneTrackSource);
+			let timeline = cx.new(|cx| TimelineView::new(source, window, cx));
+			Host {
+				events: Vec::new(),
+				timeline,
+			}
+		});
+		let any_window = *window.deref();
+		let host = window.root(&mut test_app).expect("host root");
+		let cx = VisualTestContext::from_window(any_window, &test_app).into_mut();
+		let timeline = cx.read(|app| host.read(app).timeline.clone());
+		cx.update(|_window, cx| {
+			timeline.update(cx, |timeline, cx| {
+				timeline.clip_area_width = 100.0;
+				timeline.seek(Frame(50), cx);
+				assert_eq!(timeline.state.scroll_offset.x, px(0.0));
+				timeline.seek(Frame(95), cx);
+				assert_eq!(timeline.state.scroll_offset.x, px(5.0));
+				timeline.seek(Frame(70), cx);
+				assert_eq!(timeline.state.scroll_offset.x, px(5.0));
+				timeline.seek(Frame(0), cx);
+				assert_eq!(timeline.state.scroll_offset.x, px(0.0));
+				timeline.seek(Frame(500), cx);
+				assert_eq!(timeline.state.scroll_offset.x, px(410.0));
+			});
+		});
+	}
+
 	#[test]
 	fn track_toggle_click_emits_request() {
 		use gpui_kit::{size, Modifiers, TestAppContext, VisualTestContext};

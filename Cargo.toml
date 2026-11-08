@@ -52,6 +52,12 @@ panic = "unwind"
 [profile.dev.package."*"]
 opt-level = 1
 
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+force-frame-pointers = true
+
 # The gpui crates dominate frame time; keep them optimized even in dev
 # builds (they build slowly, but a debug gpui is unusably slow at
 # runtime).
