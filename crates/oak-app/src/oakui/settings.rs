@@ -34,7 +34,7 @@ pub fn set_playback_divider(divider: i64) {
 }
 
 pub fn stop_on_last() -> bool {
-	Config::global().get_bool("StopOnLastFrame", false)
+	Config::global().get_bool("StopOnLastFrame", true)
 }
 
 pub fn set_stop_on_last(enabled: bool) {
