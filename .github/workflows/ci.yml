@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       # Taste the disk before the toolchains land: Defender scans every
       # file the cargo/FFmpeg builds touch (tens of thousands of small
