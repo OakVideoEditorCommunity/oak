@@ -1,0 +1,10 @@
+# T6 session replay: recorded tool-call chain against the execution layer.
+# Format: one JSON object per line; `#` lines ignored.
+# The token OAK_CI_MEDIA is replaced at replay time with a per-run temp
+# media path (same bytes, same path → deterministic mock frame colours).
+{"call": "project.open", "args": {"name": "ci-replay", "fps": 30}}
+{"call": "media.import_footage", "args": {"paths": ["OAK_CI_MEDIA"]}}
+{"call": "timeline.add_track", "args": {"type": "video"}}
+{"call": "timeline.place_clip", "args": {"track": "track-1", "footage": "footage-1", "in": 0}}
+{"call": "render.get_frame", "args": {"sequence": "sequence-1", "time": {"num": 0, "den": 1}, "format": "png", "max_size": {"width": 16, "height": 16}}}
+{"call": "project.get_overview", "args": {}}

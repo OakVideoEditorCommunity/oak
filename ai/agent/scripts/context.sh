@@ -26,6 +26,10 @@ agent_dir="$(oak_agent_dir)"
 ctx_dir="$agent_dir/context"
 task_file="${OAK_AI_TASK_FILE:-$ctx_dir/30-task.md}"
 out="$agent_dir/AGENTS.md"
+# pi 只沿 cwd 向上找 AGENTS.md（resource-loader.js loadProjectContextFiles），
+# 所以生成物必须落在 pi 会话的 cwd 链上；OAK_AI_CWD 覆盖（缺省仍出在
+# ai/agent/AGENTS.md，与 ai/agent 的会话 cwd 一致）。
+out_cwd="${OAK_AI_CWD:-$agent_dir}"
 print_only=0
 with_memory=1
 for a in "$@"; do
@@ -91,4 +95,11 @@ else
 	emit >"$out.tmp"
 	mv "$out.tmp" "$out"
 	echo "context: 已生成 $out" >&2
+	# 同一份链也放到 pi 会话 cwd（pi 只沿 cwd 向上找 AGENTS.md）；cwd 恰好
+	# 是 agent_dir 时不重复写。
+	if [ "$out_cwd" != "$agent_dir" ]; then
+		mkdir -p "$out_cwd"
+		cp "$out" "$out_cwd/AGENTS.md"
+		echo "context: 已复制到 $out_cwd/AGENTS.md（pi cwd 链）" >&2
+	fi
 fi

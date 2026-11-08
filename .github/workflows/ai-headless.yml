@@ -1,0 +1,78 @@
+# T6 无头 CI：ai/ 全链一条命令，无引擎、无 key、无网络。
+#
+# 默认 job 只跑 mock 后端 + 默认 features（不构建引擎）；引擎（--features sdk）
+# 的构建/测试留在主 CI（ci.yml 的 build-test），本 workflow 不碰。
+#
+# workflow 语法：本地用 actionlint 静态检查（没有则退化为 PyYAML 解析 + 结构断言，
+# 见 run.sh 的 workflow-lint 段）；首次推到 GitHub 后以 Actions 运行结果为准。
+name: AI headless CI
+
+on:
+  push:
+    paths:
+      - 'ai/**'
+      - '.github/workflows/ai-headless.yml'
+  pull_request:
+    paths:
+      - 'ai/**'
+      - '.github/workflows/ai-headless.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ai-headless-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: ai/ one command (no engine, no key)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Rust toolchain (default features only)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo (ai/ crates)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ai/oak-ai-tools
+            ai/oak-ai-mcp
+            ai/ci
+
+      - name: Node 24 (pi + stub model)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ai/agent/package-lock.json
+
+      - name: System deps (ffmpeg for prescan tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: pi dependencies (offline reproducible install)
+        run: npm ci --offline --no-audit --no-fund
+        working-directory: ai/agent
+
+      - name: Build MCP binary (default features, no engine)
+        run: bash ai/agent/scripts/build-mcp.sh
+
+      - name: Run the whole ai/ chain
+        run: bash ai/ci/run.sh
+
+      - name: Upload replay artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-ci-replay-logs
+          path: |
+            ai/ci/target/agent-replay-*/events.jsonl
+            ai/ci/target/agent-replay-*/stub-requests.jsonl
+            ai/ci/target/*.ndjson
+          if-no-files-found: ignore
+          retention-days: 7

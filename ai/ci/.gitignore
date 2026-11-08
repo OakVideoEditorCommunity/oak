@@ -1,0 +1,10 @@
+# pi 依赖：package.json 入库（可复现），依赖树不入库（复用 ai/agent 的 node_modules）
+node_modules/
+
+# 生成的上下文链：由 ai/agent/scripts/context.sh 复制到会话 cwd，勿入库
+AGENTS.md
+
+# cargo 产物
+target/
+
+npm-debug.log*

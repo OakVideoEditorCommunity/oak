@@ -21,7 +21,7 @@
 | T3 agent 核 + 记忆 | `pi --print` 无头冒烟、跨会话召回、密钥不落盘 | `ai/agent/` **已入仓（§10.5）**：pi 1.0.3 + 三层上下文链 + memlite 两档；stub 回放无头冒烟（未用真实 LLM）exit 0、live_tool_count=22；跨会话两进程召回复现；密钥 grep 零命中；消融 D 红吻合。验收 task-15 `/tmp/oak-reviews/t3-agent.md` pass | **已完成（已入仓，§10.5）** |
 | T4 适配层 hooks | 三档确认门行为测试 + 失败回喂闭环 | `src/hooks.rs` + `tests/hooks_{policy,readback,replan}.rs`（11/7/4）；ProposalOnly 零副作用（Spy 15/15 全部变更方法）、分级表 fail-closed 双向守（删条目 + 改长度 → 恰 2 项红）、`execute()` 签名向后兼容；全量 **90/0/0** 独立复跑（task-13 `/tmp/oak-reviews/t4-hooks.md`） | **已完成（已入仓，§10.3）** |
 | T5 MCP 封装 | 同一 schema 的 MCP server，零漂移 | `ai/oak-ai-mcp` **已入仓（§10.4）**：stdio NDJSON JSON-RPC 2.0，22 工具零漂移三方一致；协议级 **30/0/0**（含版本回声断言）独立复跑；`--backend sdk` 接线实测 7 passed（接线冒烟≠引擎功能可用）；验收 task-12 `/tmp/oak-reviews/mcp.md` + task-16 `/tmp/oak-reviews/t5-delta.md` 均 pass。`agent/mcp-oak` 仍是早期 Python 原型（不计入交付） | **已完成（已入仓，§10.4）** |
-| T6 无头 CI | Mock LLM 录制回放 + 黄金帧 + 会话回放日志进 CI | `.github/workflows/ci.yml` 无任何 `ai/` 引用；`ai/` 未入仓 | **未开始** |
+| T6 无头 CI | Mock LLM 录制回放 + 黄金帧 + 会话回放日志进 CI | `ai/ci/` + `.github/workflows/ai-headless.yml` **已入仓（§10.6）**：`run.sh` 一条命令七段；回放日志两次逐字节复现（帧 sha256 钉住）；消融坏链路 EXIT=101；黄金帧为运行时不变式、不入大图；workflow 默认不构建引擎。验收 task-17 `/tmp/oak-reviews/t6-ci.md` pass（七段实测 524/32/90/30/4+1ignored/6 工具 0 错/lint） | **已完成（已入仓，§10.6）** |
 
 ### 0.1 核验记录（独立验收）
 
@@ -96,7 +96,7 @@
 
 缺口：无阻断。风险提示：golden 与 ffmpeg 版本强绑定（`README.md`/`test_prescan.py:31-33` 已写"算法或 ffmpeg 变更后重新生成"）——进 CI（T6）前需固定 ffmpeg 版本，否则换机即红。已知边界（随修复写入 README「Known limitations」）：① faststart 截断素材在 `-f null` 下 ffmpeg 可能 rc=0，已解出部分帧时仍按正常素材出表（旧版同样如此，非本次引入）；② 若出现「零分数且 rc=0」的坏文件，会被当作静态素材（空切点表）——回归验收未构造出可复现反例，记为残留项，后续如需保护可在 `scan()` 加 `phash_samples == 0` 判断。
 
-## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T3、T4、T5 均已入仓 §10.3–§10.5，T6 未开始）
+## 4. T3 / T4 / T5 / T6（2026-11-05 快照；2026-11-09 修订：T0–T6 全部入仓 §10.1–§10.6）
 
 **T3 agent 核 + 记忆**
 
@@ -274,19 +274,37 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 
 - 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。
 
-### 10.5 第五次提交：T3 agent 核 + 两档记忆入仓（2026-11-09 00:3x）
+### 10.5 第五次提交：T3 agent 核 + 两档记忆入仓（2026-11-09 00:38）
 
-- commit：`<提交后回填>`，标题 `feat(ai): add the agent core with the three-layer context chain and memlite memory`（作者 `fslong`）。
+- commit：`b8401b75bbb7d89511c4baf6292d2d6cb65d9ffe`，标题 `feat(ai): add the agent core with the three-layer context chain and memlite memory`（作者 `fslong`），`21 files changed, 3420 insertions(+), 7 deletions(-)`。
 - 范围：`ai/agent/**` 20 文件（`.gitignore`、`.pi/mcp.json`、`README.md`、`package.json`、`package-lock.json`、`context/{10-repo,20-project,task.example}.md`、`scripts/{build-mcp,context,lib,mcp-serve,oak-mem,smoke,start}.sh`、`tests/{stub-model-server.mjs,test.sh}`、`tests/fixtures/{memory-recall,memory-write,smoke}.json`）+ 本台账；**不含**被 `ai/agent/.gitignore` 挡下的生成物 `AGENTS.md`、`context/30-task.md`、`node_modules/`、`.agentdir/`，不含 `runs/` 产物，不含 `docs/zh/plans/resolve21-oak-applicability.md`。
 - 验收依据：task-15 独立验收 `/tmp/oak-reviews/t3-agent.md` **pass**（八项必查全绿）：smoke exit 0（51 events / 3 tool_calls / live 22 / fails=[]）；`tests/test.sh` 9 通过 0 失败；隔离三进程记忆复现（写 `4de460d66a43` → 新进程同 id 召回 → layer 4 注入）；密钥 grep 零命中；`~/.memlite/config.json` sha 六时点不变；消融摘记忆层 → 恰 D 红 8/1。
 - 整改：F1（`context/20-project.md` 枚举 22 工具改为「举例，不保证穷尽」）、F2（`README.md:142` 工具表字符数改实测 39634/42726）已完成。
 - 状态改写：§0 表 T3「未开始」→ **已完成（已入仓，§10.5）**。
-- `git show --stat HEAD`：**提交后回填**（随下一批提交入库）。
+- `git show --stat HEAD` 尾部原文：
 
-### 10.6 待办：剩余里程碑提交（逐个等独立验收 pass）
+  ```
+   ai/agent/tests/stub-model-server.mjs     |  254 ++++
+   ai/agent/tests/test.sh                   |  206 ++++
+   docs/zh/plans/ai-feature-status.md       |   32 +-
+   21 files changed, 3420 insertions(+), 7 deletions(-)
+  ```
 
-- T6 未开始；`docs/zh/plans/resolve21-oak-applicability.md` 另行处理。
-- 口径：§10.2–§10.5 的哈希/统计回填发生在提交之后，属工作树改动，随下一批提交入库。
+- 口径：本条哈希与 stat 回填发生在提交之后，属工作树改动，随下一批提交入库。
+
+### 10.6 第六次提交：T6 无头 CI 入仓（2026-11-09 02:0x）
+
+- commit：`<提交后回填>`，标题 `feat(ai): add the headless CI with mock-LLM replay and golden-frame invariants`（作者 `fslong`）。
+- 范围（四块）：`ai/ci/**` 15 文件（`.gitignore`、`.pi/mcp.json`、`Cargo.toml`、`Cargo.lock`、`README.md`、`package.json`、`run.sh`、`fixtures/{agent-replay,bad_black,edit_chain}.ndjson`、`fixtures/task.example.md`、`scripts/{agent-replay,lint-workflows}.sh`、`src/lib.rs`、`tests/replay.rs`）+ `.github/workflows/ai-headless.yml` + `ai/agent/scripts/context.sh`（`OAK_AI_CWD` 增量 +11 行）+ 本台账；**不含** `ai/ci/AGENTS.md`、`ai/ci/target/`、`node_modules/`（`ai/ci/.gitignore` 挡下）、不含 `crates/**`/`examples/**` 格式化改动（首辅调查中的外部事件）。
+- 验收依据：task-17 独立验收 `/tmp/oak-reviews/t6-ci.md` **pass / T6 可入仓**：`bash ai/ci/run.sh` 两次独立复跑七段全 PASS exit 0（schema 524/0、prescan 32 OK、oak-ai-tools 90/0、oak-ai-mcp 30/0、ci-replay 4/0/1ignored、agent-replay `tool_call_count=6, tool_errors=0`、workflow lint OK）；回放 session log 两次 diff=0、帧 sha256 前缀吻合；消融 `OAK_CI_BAD_FIXTURE=1` EXIT=101（坏链路守卫 `replay.rs:444`）+ 正向对照 0；`context.sh` 跨范围增量 9/9 不回归、缺省 md5 等价；密钥与本机绝对路径入库零命中。
+- README 整改（T6 线落盘，翰林三查复核通过）：D1 对账段（`:24-29` 三段合计 124 passed / 0 failed / 1 ignored，与 run1 九行求和 90+30+4 一致）；D2 措辞改「坏链路必须红」并注明 `tests/replay.rs:444` 守卫；删除 `5f5c1487`（记忆层 ID，非 git 对象，不得入仓）。
+- 状态改写：§0 表 T6「未开始」→ **已完成（已入仓，§10.6）**；§4 注记改为 T0–T6 全部入仓。
+- `git show --stat HEAD`：**提交后回填**（本条为最后一个里程碑提交，回填后不再有后续里程碑提交，留作工作树注记）。
+
+### 10.7 口径注记
+
+- §10.2–§10.6 的哈希/统计回填发生在提交之后，属工作树改动；T6 之后无里程碑提交承接，回填行保留在工作树中由用户决定是否提交。
+- `ai/ci/README.md` 的 `fmt` 门禁未加（实测 130/17/0）为已知限制，见该 README「已知限制」节。
 
 ---
 
