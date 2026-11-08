@@ -129,6 +129,12 @@ pub struct ProgramViewerPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> ProgramViewerPanel<E> {
+	pub(crate) fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
+		self.viewer.update(cx, |viewer, cx| {
+			viewer.set_video_fullscreen(fullscreen, cx)
+		});
+	}
+
 	/// Builds a viewer over `clock` (the program monitor's clock) with the
 	/// level meter `meter` (updated on the app's tick timer).
 	pub fn new(
@@ -369,7 +375,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 
 		// The scopes follow the *base* frame (the overlay is not part of the
 		// analysed picture).
-		if self
+		if self.tab == ProgramViewTab::Scopes
+			&& self
 			.scope_frame
 			.as_ref()
 			.is_none_or(|last| !std::sync::Arc::ptr_eq(last, &frame))
@@ -690,6 +697,7 @@ impl<E: AppEngine> Render for ProgramViewerPanel<E> {
 					};
 					this.context_menu
 						.show(event.position, menu::viewer_menu(&state), cx);
+					cx.stop_propagation();
 				})
 			})
 			.child(
