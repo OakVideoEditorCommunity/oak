@@ -61,6 +61,8 @@ thiserror = "2"
 # blocking, bounded HTTPS GET (rustls) plus JSON response parsing. The
 # fetch runs on the gpui background executor, never on the UI thread.
 ureq = "3"
+# T8.1: the frozen 22-tool face (schemas, dispatch, hooks gate, mock).
+oak-ai-tools = { path = "../../ai/oak-ai-tools" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The gpui/wgpu stack logs through the `log` facade; the app installs the

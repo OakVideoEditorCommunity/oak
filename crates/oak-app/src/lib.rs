@@ -58,6 +58,7 @@
 //! `mock-engine` cargo feature.
 
 pub mod actions;
+pub mod ai;
 pub mod app;
 pub mod dialogs;
 pub mod i18n;

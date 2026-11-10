@@ -1,0 +1,512 @@
+//! The agent tool loop (T8.1).
+//!
+//! One turn = system + history + frozen tools → LLM → `tool_calls` →
+//! [`oak_ai_tools::dispatch::execute_with`] (the hooks transaction gate,
+//! unchanged) → results appended as `tool` messages → repeat until the
+//! model stops asking for tools or the round cap is hit.
+//!
+//! Nothing here talks to the network ([`crate::ai::llm::LlmClient`] is the
+//! seam) and nothing here knows which engine backs the tools
+//! ([`oak_ai_tools::backend::EngineBackend`] is the seam), so the whole
+//! loop runs under test with a scripted model and a mock engine.
+
+use serde_json::{json, Value};
+
+use oak_ai_tools::backend::EngineBackend;
+use oak_ai_tools::dispatch;
+use oak_ai_tools::hooks::{GatedOutcome, Hooks, NoHooks, Policy};
+
+use super::llm::{openai_tools, ChatMessage, ChatRequest, LlmClient};
+
+/// Loop bounds and gate policy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentConfig {
+	/// Maximum LLM turns per `run`. The cap exists so a model that keeps
+	/// asking for tools cannot spin forever.
+	pub max_rounds: usize,
+	/// Hooks policy for every tool call (see `oak_ai_tools::hooks`).
+	pub policy: Policy,
+	/// Model name sent on each request (from `OAK_AI_MODEL`).
+	pub model: String,
+}
+
+impl Default for AgentConfig {
+	fn default() -> Self {
+		Self {
+			max_rounds: 8,
+			policy: Policy::Auto,
+			model: super::config::DEFAULT_MODEL.to_string(),
+		}
+	}
+}
+
+/// One executed tool call, for the chat panel / logs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolLogEntry {
+	pub round: usize,
+	pub tool: String,
+	/// `applied` / `proposed` / `rejected` / `failed`.
+	pub outcome: &'static str,
+	/// Short model-facing summary (the same JSON handed back to the model).
+	pub detail: String,
+}
+
+/// What a `run` did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AgentReport {
+	/// LLM turns consumed.
+	pub rounds: usize,
+	/// True when the model answered without asking for tools.
+	pub converged: bool,
+	/// Its final text (only set when converged).
+	pub final_text: Option<String>,
+	/// Every tool call executed, in order.
+	pub tools: Vec<ToolLogEntry>,
+}
+
+/// Loop failure. Both variants are structured (`code()`), never a panic.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentError {
+	/// Configuration missing (e.g. no `OAK_AI_API_KEY`).
+	Config(super::config::ConfigError),
+	/// The model call failed.
+	Llm(super::llm::LlmError),
+}
+
+impl AgentError {
+	pub fn code(&self) -> &'static str {
+		match self {
+			Self::Config(e) => e.code(),
+			Self::Llm(e) => e.code(),
+		}
+	}
+}
+
+impl std::fmt::Display for AgentError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Config(e) => write!(f, "{e}"),
+			Self::Llm(e) => write!(f, "{e}"),
+		}
+	}
+}
+
+impl std::error::Error for AgentError {}
+
+impl From<super::config::ConfigError> for AgentError {
+	fn from(e: super::config::ConfigError) -> Self {
+		Self::Config(e)
+	}
+}
+
+impl From<super::llm::LlmError> for AgentError {
+	fn from(e: super::llm::LlmError) -> Self {
+		Self::Llm(e)
+	}
+}
+
+/// The loop: a model, an engine backend, a configuration, and the running
+/// conversation.
+pub struct Agent<L, B> {
+	llm: L,
+	backend: B,
+	config: AgentConfig,
+	messages: Vec<ChatMessage>,
+	/// Openai tools array built once from the frozen registry.
+	tools: Vec<Value>,
+}
+
+impl<L: LlmClient, B: EngineBackend> Agent<L, B> {
+	pub fn new(llm: L, backend: B, config: AgentConfig) -> Self {
+		let tools = openai_tools(dispatch::default_schemas());
+		let messages = vec![ChatMessage::system(
+			"You are Oak's video-editing agent. Use the provided tools to inspect \
+			 and change the project; answer briefly when done.",
+		)];
+		Self {
+			llm,
+			backend,
+			config,
+			messages,
+			tools,
+		}
+	}
+
+	/// The backend, for tests and for the panel that renders engine state.
+	pub fn backend(&self) -> &B {
+		&self.backend
+	}
+
+	pub fn backend_mut(&mut self) -> &mut B {
+		&mut self.backend
+	}
+
+	/// The conversation so far (system + every message exchanged).
+	pub fn messages(&self) -> &[ChatMessage] {
+		&self.messages
+	}
+
+	/// One user turn with the default gate policy ([`NoHooks`]).
+	pub fn run(&mut self, user: &str) -> Result<AgentReport, AgentError> {
+		self.run_with(user, &mut NoHooks)
+	}
+
+	/// One user turn through the hooks transaction gate.
+	///
+	/// The gate itself is `oak-ai-tools`' business: this loop only routes
+	/// the outcome back to the model (`ok` / `rejected` / `failed`) and
+	/// records it in the report.
+	pub fn run_with(
+		&mut self,
+		user: &str,
+		hooks: &mut dyn Hooks,
+	) -> Result<AgentReport, AgentError> {
+		self.messages.push(ChatMessage::user(user));
+		let mut report = AgentReport::default();
+
+		for round in 1..=self.config.max_rounds.max(1) {
+			let response = self.llm.complete(&ChatRequest {
+				model: &self.config.model,
+				messages: &self.messages,
+				tools: &self.tools,
+			})?;
+			report.rounds = round;
+
+			if response.tool_calls.is_empty() {
+				// No tools asked → the turn is over (protocol's normal end).
+				report.converged = true;
+				report.final_text = response.content;
+				return Ok(report);
+			}
+
+			self.messages
+				.push(ChatMessage::assistant(response.content, response.tool_calls.clone()));
+
+			for call in &response.tool_calls {
+				let outcome = dispatch::execute_with(
+					&mut self.backend,
+					&call.name,
+					call.arguments.clone(),
+					self.config.policy,
+					hooks,
+				);
+				let (payload, label) = outcome_payload(outcome);
+				self.messages
+					.push(ChatMessage::tool_result(&call.id, &payload));
+				report.tools.push(ToolLogEntry {
+					round,
+					tool: call.name.clone(),
+					outcome: label,
+					detail: payload.to_string(),
+				});
+			}
+		}
+
+		// Round cap reached with the model still asking for tools: report
+		// honestly instead of looping on.
+		Ok(report)
+	}
+}
+
+/// Turns a gated outcome into the JSON the model reads, plus the log label.
+fn outcome_payload(outcome: GatedOutcome) -> (Value, &'static str) {
+	match outcome {
+		GatedOutcome::Applied { result } => (json!({ "ok": true, "result": result }), "applied"),
+		GatedOutcome::Proposed { proposal } => (
+			json!({
+				"ok": true,
+				"proposed": true,
+				"tool": proposal.tool,
+				"note": "not applied; awaiting confirmation",
+			}),
+			"proposed",
+		),
+		GatedOutcome::Rejected { reason, error } => (
+			json!({
+				"ok": false,
+				"code": error.code,
+				"message": reason,
+				"note": "the confirmation gate refused this call",
+			}),
+			"rejected",
+		),
+		GatedOutcome::Failed { error, feedback } => (
+			json!({
+				"ok": false,
+				"code": error.code,
+				"message": error.message,
+				"retryable": feedback.retryable,
+				"hint": feedback.hint,
+			}),
+			"failed",
+		),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::ai::config::{AiConfig, ConfigError};
+	use crate::ai::llm::{ChatResponse, LlmError};
+	use oak_ai_tools::hooks::{
+		Decision, FailureEvent, Feedback, ReadbackVerdict, RenderDoneEvent,
+	};
+	use oak_ai_tools::mock::MockBackend;
+	use std::cell::RefCell;
+	use std::collections::VecDeque;
+
+	/// A model whose next answers are scripted; the loop's conversation is
+	/// asserted through `agent.messages()`.
+	struct ScriptedLlm {
+		script: RefCell<VecDeque<ChatResponse>>,
+	}
+
+	impl ScriptedLlm {
+		fn new(script: Vec<ChatResponse>) -> Self {
+			Self {
+				script: RefCell::new(script.into()),
+			}
+		}
+
+		fn tool_call(name: &str, args: Value) -> ChatResponse {
+			ChatResponse {
+				content: None,
+				tool_calls: vec![crate::ai::llm::ToolCall {
+					id: format!("call_{}", name.replace('.', "_")),
+					name: name.to_string(),
+					arguments: args,
+				}],
+				finish_reason: Some("tool_calls".into()),
+			}
+		}
+
+		fn say(text: &str) -> ChatResponse {
+			ChatResponse {
+				content: Some(text.into()),
+				tool_calls: Vec::new(),
+				finish_reason: Some("stop".into()),
+			}
+		}
+	}
+
+	impl LlmClient for ScriptedLlm {
+		fn complete(
+			&self,
+			_request: &ChatRequest<'_>,
+		) -> Result<ChatResponse, LlmError> {
+			self.script
+				.borrow_mut()
+				.pop_front()
+				.ok_or_else(|| LlmError::Parse("script exhausted".into()))
+		}
+	}
+
+	/// Hooks that refuse every mutating commit (the fail-closed path a
+	/// confirm-gate user would hit).
+	struct DenyHooks;
+
+	impl BeforeCommit for DenyHooks {
+		fn before_commit(
+			&mut self,
+			_pending: &oak_ai_tools::hooks::PendingEdit<'_>,
+		) -> Decision {
+			Decision::Reject {
+				reason: "user declined this edit".into(),
+			}
+		}
+	}
+	impl RenderDone for DenyHooks {
+		fn render_done(&mut self, _event: &RenderDoneEvent<'_>) -> ReadbackVerdict {
+			ReadbackVerdict::Pass
+		}
+	}
+	impl EditFailed for DenyHooks {
+		fn edit_failed(&mut self, event: &FailureEvent<'_>) -> Feedback {
+			Feedback {
+				error: event.error.clone(),
+				retryable: false,
+				hint: "gate denied".into(),
+			}
+		}
+	}
+	// No `impl Hooks for DenyHooks`: the crate provides
+	// `impl<T: BeforeCommit + RenderDone + EditFailed> Hooks for T`, so the
+	// three impls above already make it a `Hooks`.
+	use oak_ai_tools::hooks::{BeforeCommit, EditFailed, RenderDone};
+
+	fn timeline_track_count(backend: &MockBackend) -> usize {
+		backend
+			.serialize_timeline()
+			.get("tracks")
+			.and_then(Value::as_array)
+			.map(Vec::len)
+			.unwrap_or(0)
+	}
+
+	fn agent(script: Vec<ChatResponse>, max_rounds: usize) -> Agent<ScriptedLlm, MockBackend> {
+		Agent::new(
+			ScriptedLlm::new(script),
+			MockBackend::new(),
+			AgentConfig {
+				max_rounds,
+				policy: Policy::Auto,
+				model: "test-model".into(),
+			},
+		)
+	}
+
+	/// ① One tool call in round one, convergence in round two.
+	#[test]
+	fn single_tool_round_completes_and_converges() {
+		let mut agent = agent(
+			vec![
+				ScriptedLlm::tool_call("node.list_types", json!({})),
+				ScriptedLlm::say("there are 30+ node types"),
+			],
+			8,
+		);
+		let report = agent.run("what nodes exist?").expect("run");
+		assert!(report.converged, "must converge: {report:?}");
+		assert_eq!(report.rounds, 2, "one tool turn + one answer turn");
+		assert_eq!(report.tools.len(), 1);
+		assert_eq!(report.tools[0].tool, "node.list_types");
+		assert_eq!(report.tools[0].outcome, "applied", "{}", report.tools[0].detail);
+		assert!(report.final_text.is_some());
+	}
+
+	/// ② Two dependent rounds: open a project, then read its overview —
+	/// the second call only succeeds because the first one ran.
+	#[test]
+	fn multi_round_dependency_open_then_overview() {
+		let mut agent = agent(
+			vec![
+				ScriptedLlm::tool_call("project.open", json!({ "name": "demo" })),
+				ScriptedLlm::tool_call("project.get_overview", json!({})),
+				ScriptedLlm::say("opened demo"),
+			],
+			8,
+		);
+		let report = agent.run("open demo and summarize it").expect("run");
+		assert!(report.converged);
+		assert_eq!(report.tools.len(), 2, "{report:?}");
+		assert!(report.tools.iter().all(|t| t.outcome == "applied"), "{report:?}");
+		// The overview result (a `tool` message) must describe the project
+		// the first call created.
+		let tool_msgs: Vec<&ChatMessage> = agent
+			.messages()
+			.iter()
+			.filter(|m| m.role == "tool")
+			.collect();
+		assert_eq!(tool_msgs.len(), 2);
+		let overview = tool_msgs[1].content.as_deref().unwrap_or_default();
+		assert!(overview.contains("demo"), "overview lost the dependency: {overview}");
+	}
+
+	/// ③ A plain answer with no tool calls ends the loop immediately.
+	#[test]
+	fn no_tool_call_converges_in_one_round() {
+		let mut agent = agent(vec![ScriptedLlm::say("just an answer")], 8);
+		let report = agent.run("hello").expect("run");
+		assert!(report.converged);
+		assert_eq!(report.rounds, 1);
+		assert!(report.tools.is_empty());
+		assert_eq!(report.final_text.as_deref(), Some("just an answer"));
+	}
+
+	/// ④ A model that never stops asking is cut off at the cap — and the
+	/// report says so instead of pretending it converged.
+	#[test]
+	fn round_cap_stops_a_looping_model() {
+		let mut agent = agent(
+			vec![
+				ScriptedLlm::tool_call("node.list_types", json!({})),
+				ScriptedLlm::tool_call("node.list_types", json!({})),
+				ScriptedLlm::tool_call("node.list_types", json!({})),
+				ScriptedLlm::tool_call("node.list_types", json!({})),
+			],
+			3,
+		);
+		let report = agent.run("loop forever").expect("run");
+		assert!(!report.converged, "cap must not look like convergence");
+		assert_eq!(report.rounds, 3);
+		assert_eq!(report.tools.len(), 3);
+		assert!(report.final_text.is_none());
+	}
+
+	/// ⑤ Missing key → structured `AI_NOT_CONFIGURED`, no panic, and the
+	/// error travels through `AgentError` intact.
+	#[test]
+	fn missing_key_is_a_structured_agent_error() {
+		let err = AiConfig::load(|_| None).expect_err("no key");
+		assert_eq!(err, ConfigError::MissingApiKey);
+		let agent_err = AgentError::from(err);
+		assert_eq!(agent_err.code(), "AI_NOT_CONFIGURED");
+		assert!(agent_err.to_string().contains("OAK_AI_API_KEY"));
+	}
+
+	/// ⑥ The confirm gate refuses a mutating call: the loop records the
+	/// rejection, hands the model the reason, and the engine is untouched.
+	///
+	/// Two runs: the first opens a project under the default `Auto` policy
+	/// (a `Confirm` gate would also block that call, and the mock backend
+	/// rejects `timeline.add_track` with `STATE_ERROR` when no project is
+	/// open — that failure never reaches the gate). The second run applies
+	/// `Confirm` + the denying gate to the track call itself.
+	#[test]
+	fn hooks_gate_rejection_reaches_the_model_and_leaves_engine_clean() {
+		let mut agent = agent(
+			vec![
+				ScriptedLlm::tool_call("project.open", json!({ "name": "gate-test" })),
+				ScriptedLlm::say("project opened"),
+				ScriptedLlm::tool_call("timeline.add_track", json!({ "type": "video" })),
+				ScriptedLlm::say("understood, not applied"),
+			],
+			8,
+		);
+		// Run 1: Auto + NoHooks → the project really opens.
+		let first = agent.run("open the project").expect("first run");
+		assert_eq!(first.tools[0].outcome, "applied", "{}", first.tools[0].detail);
+
+		// The first run legitimately left its own undo group / sequence;
+		// the rejection must not be judged against a zero baseline.
+		let depth_after_open = agent.backend().undo_depth();
+		let tracks_after_open = timeline_track_count(agent.backend());
+
+		// Run 2: Confirm + DenyHooks → the track call hits the gate.
+		let mut gate = DenyHooks;
+		agent.config.policy = Policy::Confirm;
+		let report = agent.run_with("add a video track", &mut gate).expect("run");
+
+		assert!(report.converged);
+		assert_eq!(report.tools.len(), 1, "{report:?}");
+		assert_eq!(report.tools[0].outcome, "rejected", "{}", report.tools[0].detail);
+		let detail = &report.tools[0].detail;
+		assert!(detail.contains("USER_REJECTED"), "missing rejection code: {detail}");
+		assert!(detail.contains("user declined this edit"), "reason lost: {detail}");
+
+		// Nothing was applied: the rejection added no undo group and no
+		// track on top of what run 1 established.
+		let backend = agent.backend();
+		assert_eq!(
+			backend.undo_depth(),
+			depth_after_open,
+			"a rejected edit added an undo group"
+		);
+		assert_eq!(
+			timeline_track_count(backend),
+			tracks_after_open,
+			"rejected track landed"
+		);
+
+		// The model saw the refusal as its tool result — the LAST tool
+		// message (earlier runs appended their own).
+		let tool_msg = agent
+			.messages()
+			.iter()
+			.filter(|m| m.role == "tool")
+			.last()
+			.expect("tool message");
+		let content = tool_msg.content.as_deref().unwrap_or_default();
+		assert!(content.contains("\"ok\":false") || content.contains("\"ok\": false"), "{content}");
+	}
+}

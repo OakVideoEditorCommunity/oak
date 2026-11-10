@@ -22,7 +22,7 @@
 # crates/oakengine.bk is the legacy C++-era backup; not a package.
 [workspace]
 members = ["crates/*", "examples/*"]
-exclude = ["crates/oakengine.bk"]
+exclude = ["crates/oakengine.bk", "ai/oak-ai-tools"]  # T8.1: oak-app path-depends on the standalone ai/ root (lead-approved, one line)
 # NOTE: oak-storage is a workspace member but NOT a default member (it
 # stays out of the default-members test matrix to keep `cargo test` at
 # the root fast; the app links it as a normal path dependency, so it
