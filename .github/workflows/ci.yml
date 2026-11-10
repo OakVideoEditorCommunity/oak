@@ -281,12 +281,12 @@ jobs:
           restore-keys: |
             ocio-bundled-${{ runner.os }}-${{ matrix.arch }}-${{ steps.configure-env-windows.outputs.ocio_rev }}-
 
-      # A freshly built FFmpeg must not keep linking the archives the
-      # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
-      # track them); drop just that package so the link picks up the new
-      # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
-      - name: Refresh the FFmpeg binding
-        run: cargo clean -p ffmpeg-sys-next
+#      # A freshly built FFmpeg must not keep linking the archives the
+#      # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
+#      # track them); drop just that package so the link picks up the new
+#      # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
+#      - name: Refresh the FFmpeg binding
+#        run: cargo clean -p ffmpeg-sys-next
 
       # Drop the ocio-sys build unit whenever its recorded library is not
       # on disk: a restored cargo unit whose build script output predates
