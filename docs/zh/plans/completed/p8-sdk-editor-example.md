@@ -3,9 +3,9 @@
 > 对应 [app-pure-sdk-and-engine-facade.md](app-pure-sdk-and-engine-facade.md) 的 P8。
 > 状态：已完成。示例、C 头文件、SDK 文档与发布元数据均已落地。
 
-## 1. 独立消费者：`examples/sdk_editor`
+## 1. 独立消费者：`../../../../examples/sdk_editor`
 
-`examples/sdk_editor/Cargo.toml` 的 Oak 依赖只有 `oak-engine-rust-sdk`，
+`../../../../examples/sdk_editor/Cargo.toml` 的 Oak 依赖只有 `oak-engine-rust-sdk`，
 不依赖 `oak-app` 或任何内部 crate。
 
 headless 主流程（`src/lib.rs::run`）逐步覆盖 P8 验收：
@@ -57,7 +57,7 @@ cargo run -p sdk_editor -- --gui /tmp/oak-sdk-demo
 - `crates/oak-engine-rust-sdk/README.md`：生命周期、线程、错误、所有权、
   任务/事件、C ABI 与发布顺序；并作为 crate 文档嵌入。
 - `crates/oak-engine/README.md`：引擎分层、C ABI 规则、链接方式。
-- `docs/zh/sdk-guide.md`：给新前端的完整 SDK + C ABI 指南。
+- `../../sdk-guide.md`：给新前端的完整 SDK + C ABI 指南。
 - 元数据：两个 crate 均带 license/repository/readme/keywords/categories/
   `docs.rs` 配置；内部 path 依赖同时带 `version = "=0.5.2"`。
 - 发布顺序（依赖拓扑）：

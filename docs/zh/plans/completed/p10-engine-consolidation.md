@@ -73,7 +73,7 @@ oak-core -> oak-ffmpeg-link -> oak-undo -> oak-codec -> oak-node
   不需要为“解环”做额外设计。
 
 没有外部 crate 依赖这些内部 crate：`oak-app` / `oak-cli` / `oak-worker` /
-`examples/sdk_editor` 已全部只依赖 SDK（`tooling/check_sdk_consumers.py`
+`../../../../examples/sdk_editor` 已全部只依赖 SDK（`tooling/check_sdk_consumers.py`
 守卫）。因此合并不会破坏任何第一方消费者。
 
 ### 2.3 外部依赖
@@ -221,7 +221,7 @@ FFmpeg/OFX 崩溃会污染整个测试进程。
   engine 包自己的测试二进制生效，迁移后的 `tests/` 正好覆盖。
 - `links` 值不能与 `ffmpeg-sys-next` 的 `links = "ffmpeg"` 冲突
   （`oak_ffmpeg_static_deps` 唯一，保持）。
-- `Cargo.toml` 需要 `build = "build.rs"`、`cc` build-dependency，
+- `../../../../Cargo.toml` 需要 `build = "build.rs"`、`cc` build-dependency，
   并把 `cbits/`、`ofx/` 加进 `include`。
 - 三平台验证：macOS frameworks、Linux lld、Windows 静态 FFmpeg/DLL。
 
@@ -271,11 +271,11 @@ FFmpeg/OFX 崩溃会污染整个测试进程。
 ### P10.4 删除旧 crate 与发布收口（0.5 天）
 
 - 从 workspace `members`/`default-members` 删除 11 个 crate 目录
-  （`oak-ofx-plugin` 等），删除各自的 `Cargo.lock`/`COVERAGE.md`/README
+  （`oak-ofx-plugin` 等），删除各自的 `../../../../Cargo.lock`/`COVERAGE.md`/README
   （内容归档到 engine 文档）。
 - `tooling/publish_workspace.sh` 缩减为 `oak-engine` + `oak-engine-rust-sdk`。
 - 更新 CI（测试目标、coverage、边界守卫、examples）、文档、
-  `docs/zh/sdk-guide.md` 发布顺序。
+  `../../sdk-guide.md` 发布顺序。
 - `oak-engine/Cargo.toml` 去掉全部内部 path deps；SDK 仍只依赖 engine。
 
 **出口**：workspace 只剩 app/cli/worker/engine/sdk/extensions/examples；
@@ -330,8 +330,8 @@ python3 tooling/check_app_engine_boundary.py
 
 - [ ] `oak-engine` 不再依赖任何 Oak 内部 crate（Cargo 与源码均无）。
 - [ ] 原 2,516 个内部测试全部迁入并通过（或明确记录等价替代）。
-- [ ] `oak-app`/`oak-cli`/`oak-worker`/`examples/sdk_editor` 行为不变，
-      测试全绿。
+- [ ] `oak-app`/`oak-cli`/`oak-worker`/`../../../../examples/sdk_editor` 行为不变，
+  测试全绿。
 - [ ] `cargo package -p oak-engine --list` 只含 engine 源码/资源；
       `cargo package -p oak-engine-rust-sdk --list` 只含 SDK。
 - [ ] 三平台构建/链接/冒烟通过。

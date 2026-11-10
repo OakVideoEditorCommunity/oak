@@ -30,7 +30,7 @@
 
 ## 3. 消费者守卫
 
-新增 `tooling/check_sdk_consumers.py`：扫描 `oak-app`、`oak-cli`、
+新增 `../../../../tooling/check_sdk_consumers.py`：扫描 `oak-app`、`oak-cli`、
 `oak-worker`、`examples/sdk_editor` 的 Cargo 依赖与源码，内部 Oak crate
 或 `oak_*::` 引用一律失败；CI 已接入。
 
@@ -43,7 +43,7 @@
   `EditCommand` 等核心枚举使用语义化说明，其余镜像类型使用字段级说明。
 - `cargo doc -p oak-engine-rust-sdk --no-deps` 不再产生 SDK 自身警告；
   docs.rs 元数据（`all-features`）已就绪。
-- `docs/zh/sdk-guide.md` 面向新前端，覆盖 Rust/C 两条入口。
+- `../../sdk-guide.md` 面向新前端，覆盖 Rust/C 两条入口。
 
 ## 5. 验证
 

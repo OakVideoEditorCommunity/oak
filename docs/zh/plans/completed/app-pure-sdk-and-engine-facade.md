@@ -291,7 +291,7 @@ engine/SDK 能力，P3D 完成独立消费者验收和 app 的节点/效果/参�
 
 ### P8：用独立新消费者证明“可重建”（已完成）
 
-新增 `examples/sdk_editor`（可使用任意 UI 工具包，但 Oak 依赖只有
+新增 `../../../../examples/sdk_editor`（可使用任意 UI 工具包，但 Oak 依赖只有
 `oak-engine-rust-sdk`），禁止依赖 `oak-app`。至少完成：
 
 1. 初始化引擎、色彩、文本、音频和插件能力；
@@ -364,12 +364,12 @@ app 和独立消费者不得未定义引用内部模块符号，所有 Oak 引�
 
 ## 7. 完成定义
 
-只有以下条件全部满足，本计划才可归档到 `completed/`：
+只有以下条件全部满足，本计划才可归档到 ``：
 
 - [x] `oak-app` 普通及开发依赖中的 Oak 引擎项只剩 `oak-engine-rust-sdk`。
 - [x] app 源码/测试无内部 crate 引用、私有 FFI、动态符号绕行和领域实现副本。
 - [x] P1–P6 的每类能力都有 engine 实现、C ABI 测试和 SDK 集成测试。
 - [x] 现有 UI、编辑、历史、预览、音频、导出及工程兼容性测试无回归。
-- [x] `examples/sdk_editor` 不依赖 `oak-app` 或其他 Oak 内部 crate，完整工作流通过。
+- [x] `../../../../examples/sdk_editor` 不依赖 `oak-app` 或其他 Oak 内部 crate，完整工作流通过。
 - [x] SDK 有面向新前端的生命周期、线程、错误、所有权和任务/事件使用文档。
 - [ ] 三平台 CI 构建、链接和冒烟通过，依赖与源码守卫持续启用。

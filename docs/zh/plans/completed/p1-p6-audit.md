@@ -181,7 +181,7 @@ graphops.rs:139 / graphops.rs:150
    owned 转移入口；P7 删除 app 侧桥接后应一并移除，否则 app 会传递链接 `oak-undo` rlib。
 6. **“独立消费者”口径偏弱**：P3/P5 的独立验收实为 SDK crate 内 unit test，且使用了
    `crate::test_support` 与 `crate::node::UNDO_SERIAL`；真正的外部消费者
-   `examples/sdk_editor` 属 P8，尚未创建。
+   `../../../../examples/sdk_editor` 属 P8，尚未创建。
 
 ## 6. P7 剩余工作清单
 

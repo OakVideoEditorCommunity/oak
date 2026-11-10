@@ -60,4 +60,4 @@
   旧的图内遍历；P8 前可按 profiling 增加批量时间线快照/查询。
 - `StorageProjectHandle` / `adopt_storage_project_handle` 仍作为 SDK 的迁移期公共 API
   保留，app 已无调用者；可在后续清理或明确标注为兼容入口。
-- P8 的 `examples/sdk_editor` 尚未创建；三平台 CI 冒烟与 SDK 使用文档仍待补齐。
+- P8 的 `../../../../examples/sdk_editor` 尚未创建；三平台 CI 冒烟与 SDK 使用文档仍待补齐。
