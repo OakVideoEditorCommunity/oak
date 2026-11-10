@@ -206,6 +206,13 @@ jobs:
           $inner = Get-ChildItem "$root\ffmpeg-extract" -Directory | Select-Object -First 1
           Move-Item $inner.FullName "$root\ffmpeg"
 
+      - name: Install pkg-config (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-pkgconf
+          "PKG_CONFIG=C:\msys64\ucrt64\bin\pkgconf.exe" >> $env:GITHUB_ENV
+
       # ------------------------------------------------------------------
       # FFmpeg — built from source, every codec library included
       # statically (Linux/macOS), or the prebuilt archive (Windows);

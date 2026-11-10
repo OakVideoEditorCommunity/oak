@@ -220,6 +220,12 @@ meson_build() {
 
 # --- Subtitle / text stack -----------------------------------------------------
 
+# xz/liblzma is part of FFmpeg's static closure. In particular, openKylin's
+# system liblzma.a is not PIC and cannot be linked into libquercus_engine.so;
+# the shared configure_build flags above compile this private copy with -fPIC.
+configure_build xz \
+	https://github.com/tukaani-project/xz/releases/download/v5.8.2/xz-5.8.2.tar.gz
+
 # freetype WITHOUT its optional integrations: each of zlib/bzip2/png/
 # brotli/harfbuzz would leak into freetype2.pc's Libs.private and onto
 # the final link line as a system library.

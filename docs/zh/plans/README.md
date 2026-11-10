@@ -7,6 +7,7 @@
 
 | 文档 | 内容 | 启动前提 |
 |---|---|---|
+| [`ofx-animation-completion.md`](ofx-animation-completion.md) | **OFX 动态参数与动画补全**：复用现有关键帧内核，打通动画快照、worker 协议、OFX Suite、撤销事务、Inspector 曲线 UX，后续扩展循环与音频驱动 | 待评审；M0–M3 先形成最小可用闭环 |
 | [`ai-agent-design.md`](ai-agent-design.md) | **AI Agent 插件设计**（已按 OPP/1 重写）：多模态 LLM 作为外部插件经策展工具面自动剪辑，`render.*` 取帧回喂形成"编辑→看图→再编辑"视觉闭环；事务化编辑、双层确认、声明式 AI 面板、Mock LLM/回放夹具测试、A1–A5 里程碑 | external-plugin-system P1–P3 完成（面板需 P4） |
 | [`completed/external-plugin-system.md`](completed/external-plugin-system.md) | **外部功能插件系统**：插件=独立进程（非库加载），JSON-RPC over stdio 控制面 + shm 数据面（泛化 M15 render-worker 传输）；策展宿主 API（事务化可撤销编辑、取帧回喂 AI）、声明式/像素面双 UI 路径、能力位与确认模式；含与 ai-agent-design.md 的关系与 P1–P6 里程碑 | 已解锁（RIIR + M15 完成），随时启动 |
 | [`completed/external-plugin-protocol.md`](completed/external-plugin-protocol.md) | **插件协议规范 OPP/1**：NDJSON 分帧 + JSON-RPC 2.0 双向信封、握手/心跳/关闭、全量方法/事件/错误码、编辑事务协议、shm 数据面（无头部无锁）、声明式与像素面 UI 协议、限流配额、版本演进规则、AI 粗剪报文示例 | 随 external-plugin-system 启动 |
