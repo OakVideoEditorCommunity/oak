@@ -3479,6 +3479,10 @@ impl RealEngine {
 	fn drop_project(&mut self) {
 		*self.renderer.lock().unwrap() = RendererSlot::Untried;
 		*self.source_renderer.lock().unwrap() = RendererSlot::Untried;
+		self.last_display
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clear();
 		oak_undo::global::clear().ok();
 		if let Some(m) = RenderManager::global() {
 			m.clear_graph_snapshot();
@@ -4569,6 +4573,10 @@ impl AppEngine for RealEngine {
 			self.cpu_frame_cache
 				.lock()
 				.unwrap()
+				.remove(&Monitor::Source);
+			self.last_display
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
 				.remove(&Monitor::Source);
 			self.full_res_generation = self.full_res_generation.wrapping_add(1);
 			self.cancel_preview_window(Monitor::Source);
