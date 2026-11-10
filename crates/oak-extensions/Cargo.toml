@@ -3,4 +3,19 @@ name = "oak-extensions"
 edition = "2024"
 version.workspace = true
 
+[lib]
+name = "oak_extensions"
+path = "src/lib.rs"
+
+# No-GUI acceptance entry point (T7.1): drives one plugin through the
+# lifecycle and prints every state transition. Declared explicitly so the
+# crate stays usable as a library.
+[[bin]]
+name = "opp-smoke"
+path = "src/main.rs"
+
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+libc = "0.2"
