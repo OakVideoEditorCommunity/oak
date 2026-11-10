@@ -131,7 +131,7 @@ impl ProxyTask {
 			)
 		} else {
 			format!(
-				"scale=w={}:h={}:force_original_aspect_ratio=decrease",
+				"scale=w={}:h={}:force_original_aspect_ratio=decrease:force_divisible_by=2",
 				params.width, params.height
 			)
 		};
@@ -741,6 +741,48 @@ mod tests {
 		}
 		// 并发为 1 时独占一半核。
 		assert_eq!(ProxyTask::transcode_thread_budget(1), half.clamp(1, 8));
+	}
+
+	/// 代理绝对宽高分支必须带 `force_divisible_by=2`：`force_original_aspect_ratio=decrease`
+	/// 按比例算出的一半边可能是奇数（实测 1886×750 素材算得高度 509），与
+	/// `-pix_fmt yuv420p` 的偶数约束冲突，ffmpeg 报 `AVERROR_EXTERNAL`
+	/// （`Could not open encoder before EOF`）。divider 分支自带
+	/// `trunc(iw/d/2)*2` 保护，故只需钉住绝对分支。
+	#[test]
+	fn scale_filter_absolute_branch_forces_even_dimensions() {
+		// 复现 bug 的参数组合：1 的分母（绝对分支），1280×720 的目标框，
+		// 素材 1886×750 在其中按比例缩放时高度为奇数。
+		let args = ProxyTask::build_arguments(
+			"/src-1886x750.mov",
+			0,
+			&params(),
+			"/dst.mp4",
+		);
+		let filter = args
+			.windows(2)
+			.find(|w| w[0] == "-vf")
+			.map(|w| w[1].clone())
+			.expect("-vf is always present");
+		assert!(
+			filter.contains("force_original_aspect_ratio=decrease"),
+			"the absolute branch still shrinks preserving the aspect: {filter}"
+		);
+		assert!(
+			filter.contains("force_divisible_by=2"),
+			"the absolute branch must round to even dimensions for yuv420p: {filter}"
+		);
+
+		// divider 分支沿用 trunc(.../2)*2，不应被改成 force_divisible_by。
+		let mut divided = params();
+		divided.divider = 2;
+		let args = ProxyTask::build_arguments("/src.mov", 0, &divided, "/dst.mp4");
+		let filter = args
+			.windows(2)
+			.find(|w| w[0] == "-vf")
+			.map(|w| w[1].clone())
+			.unwrap();
+		assert!(filter.contains("trunc(iw/2/2)*2"), "{filter}");
+		assert!(!filter.contains("force_divisible_by"), "{filter}");
 	}
 
 	/// End-to-end: transcode a real 4K H.265 4:2:2 10-bit file (the
