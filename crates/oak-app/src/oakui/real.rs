@@ -8953,8 +8953,12 @@ mod tests {
 			batch_size: 2,
 			..Default::default()
 		};
-		RenderManager::init_with_backend(RenderBackendChoice::Processes(config))
-			.expect("process backend init");
+		if let Err(error) = RenderManager::init_with_backend(RenderBackendChoice::Processes(config)) {
+			assert!(
+				RenderManager::global().is_some(),
+				"process backend init: {error}"
+			);
+		}
 
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Zero Copy");
