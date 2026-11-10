@@ -64,6 +64,7 @@ pub mod i18n;
 pub mod logging;
 pub mod manager;
 pub mod oakui;
+pub mod opp;
 pub mod panels;
 pub mod update;
 pub mod widgets;

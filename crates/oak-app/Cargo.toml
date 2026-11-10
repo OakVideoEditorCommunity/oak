@@ -79,6 +79,11 @@ oak-storage = { path = "../oak-storage" }
 oak-task = { path = "../oak-task" }
 oak-timeline = { path = "../oak-timeline" }
 oak-undo = { path = "../oak-undo" }
+# OPP/1 host services (T7.2 P1.2): the app-side `HostServices`
+# implementation routes plugin calls into the engine through this crate's
+# trait and protocol types. One-way dependency — `oak-extensions` never
+# depends on `oak-app` (notes §2).
+oak-extensions = { path = "../oak-extensions" }
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by
