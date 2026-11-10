@@ -8,6 +8,7 @@
 | 文档 | 内容 | 启动前提 |
 |---|---|---|
 | [`audio-ffmpeg-removal.md`](audio-ffmpeg-removal.md) | **音频链路完全脱离 FFmpeg**：独立音频后端，逐格式替换解封装、编解码、重采样、变速与 mux；保留播放/同步 ABI，含 A0–A7 阶段、格式矩阵和依赖守卫 | 待评审；A0 基线与 A1 PCM/WAV/FLAC 先行 |
+| [`ofx-animation-completion.md`](ofx-animation-completion.md) | **OFX 动态参数与动画补全**：复用现有关键帧内核，打通动画快照、worker 协议、OFX Suite、撤销事务、Inspector 曲线 UX，后续扩展循环与音频驱动 | 待评审；M0–M3 先形成最小可用闭环 |
 | [`ai-agent-design.md`](ai-agent-design.md) | **AI Agent 插件设计**（已按 OPP/1 重写）：多模态 LLM 作为外部插件经策展工具面自动剪辑，`render.*` 取帧回喂形成"编辑→看图→再编辑"视觉闭环；事务化编辑、双层确认、声明式 AI 面板、Mock LLM/回放夹具测试、A1–A5 里程碑 | external-plugin-system P1–P3 完成（面板需 P4） |
 | [`completed/app-pure-sdk-and-engine-facade.md`](completed/app-pure-sdk-and-engine-facade.md) | **oak-app 纯 SDK 化与引擎门面补全**：领域逻辑迁入 oak-engine，Rust SDK 提供完整安全封装；分阶段清除 app 对内部 crate 的直调，并以独立 sdk_editor 重建完整剪辑工作流验收 | 已解锁，按 P0–P8 推进 |
 | [`completed/p0-app-engine-call-ledger.md`](completed/p0-app-engine-call-ledger.md) | **P0 调用台账与行为基线**：AppEngine 全方法映射、剩余直调文件归属、DTO/Mock 边界清理、冻结测试与只减不增的 CI 守卫 | 已完成，作为 P1–P7 迁移对照 |

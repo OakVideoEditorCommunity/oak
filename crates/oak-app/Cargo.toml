@@ -38,6 +38,9 @@ name = "oak-editor"
 path = "src/main.rs"
 
 [dependencies]
+# Keep the gpui-fast platform/renderer family at 0.1.7 in Cargo.lock: 0.1.11
+# pulls wgpu 30 while Oak and Quercus use wgpu 29, and that mixed graph crashes
+# the Windows UI tests. Revisit only when the whole workspace moves to wgpu 30.
 # gpui-kit: the GPU-accelerated UI framework (registry: gpui-pre +
 # gpui-base + gpui-component). The fork's custom widget modules live in
 # oak-widgets (folding into this crate as `crate::widgets` when the
