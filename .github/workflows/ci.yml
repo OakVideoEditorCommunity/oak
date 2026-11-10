@@ -378,6 +378,9 @@ jobs:
         if: matrix.platform == 'macos'
         timeout-minutes: 40
         run: |
+          # Build the test binaries outside the watchdog: a cold LTO link can
+          # exceed 900 s and must not be mistaken for a hung test process.
+          cargo test --workspace --locked --no-run
           # Retry once (same policy as the other platforms). A hang trips
           # the in-script watchdog, which samples the test processes (the
           # offending test's native stack lands in the log) before killing
