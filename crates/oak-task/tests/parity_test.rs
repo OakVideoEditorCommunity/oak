@@ -110,6 +110,26 @@ fn proxy_build_arguments_matches_cpp() {
 	assert_eq!(args, expected);
 }
 
+#[test]
+fn proxy_custom_size_forces_even_dimensions() {
+	let params = ProxyParams {
+		width: 1280,
+		height: 720,
+		divider: 1,
+		version: 0,
+		crf: 18,
+		include_audio: false,
+		extension: String::new(),
+		preset: String::new(),
+	};
+	let args = ProxyTask::build_arguments("/odd-height.mov", 0, &params, "/dst.mov");
+	let filter_index = args.iter().position(|arg| arg == "-vf").unwrap();
+	assert_eq!(
+		args[filter_index + 1],
+		"scale=w=1280:h=720:force_original_aspect_ratio=decrease:force_divisible_by=2"
+	);
+}
+
 /// Given a line reporting 50% of a 10-second duration, parse_progress
 /// returns 0.5; malformed lines return None.
 #[test]

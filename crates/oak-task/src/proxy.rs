@@ -131,7 +131,7 @@ impl ProxyTask {
 			)
 		} else {
 			format!(
-				"scale=w={}:h={}:force_original_aspect_ratio=decrease",
+				"scale=w={}:h={}:force_original_aspect_ratio=decrease:force_divisible_by=2",
 				params.width, params.height
 			)
 		};
