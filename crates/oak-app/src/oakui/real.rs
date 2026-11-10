@@ -1327,8 +1327,6 @@ pub struct RealEngine {
 	audio_tx: Mutex<mpsc::Sender<(i64, super::renderops::RenderedAudio)>>,
 	/// The audio prefetch buffer (see [`AudioPrefetch`]).
 	audio_prefetch: Mutex<AudioPrefetch>,
-	/// One persistent worker for playback-audio chunk completion.
-	audio_worker: Arc<super::renderops::AudioRenderWorker>,
 	/// Audio-mastered playback anchor `(playhead_frame, output_clock_secs)`
 	/// recorded at the first chunk push of a play run (M12 P1a). While set,
 	/// the tick loop re-anchors the program playhead onto the frame the
@@ -1735,7 +1733,6 @@ impl RealEngine {
 			audio_rx: Mutex::new(audio_rx),
 			audio_tx: Mutex::new(audio_tx),
 			audio_prefetch: Mutex::new(AudioPrefetch::new()),
-			audio_worker: Arc::new(super::renderops::AudioRenderWorker::new()),
 			audio_playback: None,
 			last_audio_resync: None,
 			pending_snapshot: None,
