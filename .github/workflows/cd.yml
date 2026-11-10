@@ -55,14 +55,14 @@ jobs:
             triplet: x64-linux
             artifact: linux-fedora
             container: '{"image":"fedora:43","options":"--shm-size=8g"}'
-          - name: Arch
-            platform: linux
-            distro: arch
-            arch: x64
-            runner: ubuntu-24.04
-            triplet: x64-linux
-            artifact: linux-arch
-            container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
+          # - name: Arch
+          #   platform: linux
+          #   distro: arch
+          #   arch: x64
+          #   runner: ubuntu-24.04
+          #   triplet: x64-linux
+          #   artifact: linux-arch
+          #   container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
           - name: openKylin x64
             platform: linux
             distro: openkylin
