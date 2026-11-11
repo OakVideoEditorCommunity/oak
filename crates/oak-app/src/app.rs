@@ -7681,57 +7681,73 @@ mod tests {
 		};
 
 		// Preferences and the action search build through the deferred path.
+		eprintln!("modal test: preferences");
 		run(cx, |app, cx| app.open_preferences(cx));
 		assert!(has_modal(cx), "preferences modal");
 		close(cx);
 
+		eprintln!("modal test: action search");
 		run(cx, |app, cx| app.open_action_search(cx));
 		assert!(has_modal(cx), "action search modal");
 		close(cx);
 
 		// File menu:
+		eprintln!("modal test: new project");
 		run(cx, |app, cx| app.open_new_project(cx));
 		assert!(has_modal(cx), "new project modal");
 		close(cx);
+		eprintln!("modal test: new sequence");
 		run(cx, |app, cx| app.open_new_sequence(cx));
 		assert!(has_modal(cx), "new sequence modal");
 		close(cx);
+		eprintln!("modal test: export project");
 		run(cx, |app, cx| app.open_export_project_dfd(cx));
 		assert!(has_modal(cx), "export project modal");
 		close(cx);
+		eprintln!("modal test: save as");
 		run(cx, |app, cx| app.open_save_as(cx));
 		assert!(has_modal(cx), "save-as modal");
 		close(cx);
+		eprintln!("modal test: entry rename");
 		run(cx, |app, cx| app.open_entry_rename(3, cx));
 		assert!(has_modal(cx), "entry rename modal");
 		close(cx);
+		eprintln!("modal test: sequence properties");
 		run(cx, |app, cx| app.open_sequence_properties(4, cx));
 		assert!(has_modal(cx), "sequence properties modal");
 		close(cx);
+		eprintln!("modal test: export dialog");
 		run(cx, |app, cx| app.open_export_dialog(None, cx));
 		assert!(has_modal(cx), "export dialog");
 		close(cx);
+		eprintln!("modal test: project properties");
 		run(cx, |app, cx| app.open_project_properties(cx));
 		assert!(has_modal(cx), "project properties modal");
 		close(cx);
 
 		// Tools / Help:
+		eprintln!("modal test: proxy dialog");
 		run(cx, |app, cx| app.open_proxy_dialog(cx));
 		assert!(has_modal(cx), "proxy modal");
 		close(cx);
+		eprintln!("modal test: multicam wizard");
 		run(cx, |app, cx| app.open_multicam_wizard(cx));
 		assert!(has_modal(cx), "multicam wizard modal");
 		close(cx);
+		eprintln!("modal test: about");
 		run(cx, |app, cx| app.open_about(cx));
 		assert!(has_modal(cx), "about modal");
 		close(cx);
 
 		// Project manager and its sub-dialogs.
+		eprintln!("modal test: project manager");
 		run(cx, |app, cx| app.show_project_manager(cx));
 		assert!(has_modal(cx), "manager modal");
+		eprintln!("modal test: manager rename");
 		run(cx, |app, cx| app.open_manager_rename("mock-1".into(), cx));
 		assert!(has_modal(cx), "manager rename modal");
 		close(cx);
+		eprintln!("modal test: manager delete");
 		run(cx, |app, cx| app.open_manager_delete("mock-1".into(), cx));
 		assert!(has_modal(cx), "manager delete modal");
 		close(cx);
