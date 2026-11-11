@@ -16,7 +16,7 @@ use oak_ai_tools::backend::{EngineBackend, EngineExt};
 use oak_ai_tools::dispatch;
 use oak_ai_tools::hooks::{GatedOutcome, Hooks, NoHooks, Policy};
 
-use super::llm::{openai_tools, ChatMessage, ChatRequest, LlmClient};
+use super::llm::{openai_tools, ChatMessage, ChatRequest, LlmClient, ToolCall};
 
 /// Loop bounds and gate policy.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +62,13 @@ pub struct AgentReport {
 	pub final_text: Option<String>,
 	/// Every tool call executed, in order.
 	pub tools: Vec<ToolLogEntry>,
+	/// Tool calls that came from the **text fallback** (the model wrote a
+	/// `<tool_call>` block instead of using the function-calling channel).
+	pub text_fallback_calls: usize,
+	/// Responses that looked like text-form calls but could not be parsed.
+	pub unparsed_text_calls: usize,
+	/// The offending raw markup of the last unparsed response, for `detail`.
+	pub unparsed_text: Option<String>,
 	/// Set when the loop stopped early because the same tool kept failing
 	/// with the same error code: what it was stuck on, for the user.
 	pub stalled: Option<StallStop>,
@@ -155,7 +162,8 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		tools.extend(oak_ai_tools::schema_v2::v2_openai_tools());
 		let messages = vec![ChatMessage::system(
 			"You are Oak's video-editing agent. Use the provided tools to inspect \
-			 and change the project; answer briefly when done.",
+			 and change the project; answer briefly when done. Call tools through the \
+			 function-calling channel, never as XML or text markup in your reply.",
 		)];
 		Self {
 			llm,
@@ -212,6 +220,40 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 			report.rounds = round;
 
 			if response.tool_calls.is_empty() {
+				// Some models write the call as text instead of using the
+				// function-calling channel; execute that through the very same
+				// path rather than showing markup to the user.
+				let scan = super::tool_text::scan(response.content.as_deref().unwrap_or_default());
+				if !scan.calls.is_empty() {
+					let calls: Vec<ToolCall> = scan
+						.calls
+						.into_iter()
+						.enumerate()
+						.map(|(index, mut call)| {
+							call.id = format!("text_{round}_{index}");
+							call
+						})
+						.collect();
+					report.text_fallback_calls += calls.len();
+					// History gets the **prose only**: feeding the raw markup
+					// back would teach the model that this format works.
+					self.messages
+						.push(ChatMessage::assistant(Some(scan.prose.clone()), calls.clone()));
+					for call in &calls {
+						self.execute_call(call, round, hooks, &mut report, &mut streak)?;
+					}
+					continue;
+				}
+				if let Some(raw) = scan.unparsed {
+					// Unparseable markup is a failure to report, not an answer
+					// to display: stop here, keep the raw text for `detail`.
+					report.unparsed_text_calls += 1;
+					report.unparsed_text = Some(raw);
+					report.final_text = None;
+					report.converged = false;
+					report.rounds = round;
+					return Ok(report);
+				}
 				// No tools asked → the turn is over (protocol's normal end).
 				report.converged = true;
 				report.final_text = response.content;
@@ -222,64 +264,8 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 				.push(ChatMessage::assistant(response.content, response.tool_calls.clone()));
 
 			for call in &response.tool_calls {
-				// Two faces, one loop: a v2 name goes to the extension
-				// dispatcher, everything else keeps the frozen 22 path.
-				let outcome = if oak_ai_tools::schema_v2::is_v2_tool(&call.name) {
-					dispatch::execute_v2_with(
-						&mut self.backend,
-						&call.name,
-						call.arguments.clone(),
-						self.config.policy,
-						hooks,
-					)
-				} else {
-					dispatch::execute_with(
-						&mut self.backend,
-						&call.name,
-						call.arguments.clone(),
-						self.config.policy,
-						hooks,
-					)
-				};
-				let (payload, label) = outcome_payload(outcome);
-				self.messages
-					.push(ChatMessage::tool_result(&call.id, &payload));
-				report.tools.push(ToolLogEntry {
-					round,
-					tool: call.name.clone(),
-					outcome: label,
-					detail: payload.to_string(),
-				});
-
-				// Track the failing streak. Only structured refusals count:
-				// an applied edit is progress even if an earlier one failed.
-				if let Some(code) = payload.get("code").and_then(Value::as_str) {
-					let message = payload
-						.get("message")
-						.and_then(Value::as_str)
-						.unwrap_or_default()
-						.to_string();
-					let repeat = match &streak {
-						Some((tool, prev, count)) if tool == &call.name && prev == code => count + 1,
-						_ => 1,
-					};
-					if repeat >= MAX_IDENTICAL_FAILURES {
-						report.stalled = Some(StallStop {
-							tool: call.name.clone(),
-							code: code.to_string(),
-							repeats: repeat,
-							message,
-						});
-						// `round` is this turn's 1-based index, so the turns
-						// consumed are exactly `round` (not round + 1).
-						report.rounds = round;
-						return Ok(report);
-					}
-					let _ = message;
-					streak = Some((call.name.clone(), code.to_string(), repeat));
-				} else {
-					// Anything that is not a structured failure resets it.
-					streak = None;
+				if self.execute_call(call, round, hooks, &mut report, &mut streak)? {
+					return Ok(report);
 				}
 			}
 		}
@@ -287,6 +273,80 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		// Round cap reached with the model still asking for tools: report
 		// honestly instead of looping on.
 		Ok(report)
+	}
+	/// Executes one tool call through the same gate the structured path uses.
+	///
+	/// Returns `true` when the loop must stop (the identical-failure streak
+	/// tripped). Shared by the structured path and the text fallback, so the
+	/// two can never diverge in semantics.
+	fn execute_call(
+		&mut self,
+		call: &ToolCall,
+		round: usize,
+		hooks: &mut dyn Hooks,
+		report: &mut AgentReport,
+		streak: &mut Option<(String, String, usize)>,
+	) -> Result<bool, AgentError> {
+			// Two faces, one loop: a v2 name goes to the extension
+			// dispatcher, everything else keeps the frozen 22 path.
+			let outcome = if oak_ai_tools::schema_v2::is_v2_tool(&call.name) {
+				dispatch::execute_v2_with(
+					&mut self.backend,
+					&call.name,
+					call.arguments.clone(),
+					self.config.policy,
+					hooks,
+				)
+			} else {
+				dispatch::execute_with(
+					&mut self.backend,
+					&call.name,
+					call.arguments.clone(),
+					self.config.policy,
+					hooks,
+				)
+			};
+			let (payload, label) = outcome_payload(outcome);
+			self.messages
+				.push(ChatMessage::tool_result(&call.id, &payload));
+			report.tools.push(ToolLogEntry {
+				round,
+				tool: call.name.clone(),
+				outcome: label,
+				detail: payload.to_string(),
+			});
+
+			// Track the failing streak. Only structured refusals count:
+			// an applied edit is progress even if an earlier one failed.
+			if let Some(code) = payload.get("code").and_then(Value::as_str) {
+				let message = payload
+					.get("message")
+					.and_then(Value::as_str)
+					.unwrap_or_default()
+					.to_string();
+				let repeat = match &streak {
+					Some((tool, prev, count)) if tool == &call.name && prev == code => count + 1,
+					_ => 1,
+				};
+				if repeat >= MAX_IDENTICAL_FAILURES {
+					report.stalled = Some(StallStop {
+						tool: call.name.clone(),
+						code: code.to_string(),
+						repeats: repeat,
+						message,
+					});
+					// `round` is this turn's 1-based index, so the turns
+					// consumed are exactly `round` (not round + 1).
+					report.rounds = round;
+					return Ok(true);
+				}
+				let _ = message;
+				*streak = Some((call.name.clone(), code.to_string(), repeat));
+			} else {
+				// Anything that is not a structured failure resets it.
+				*streak = None;
+			}
+		Ok(false)
 	}
 }
 
@@ -448,6 +508,197 @@ mod tests {
 			report.stalled.is_none(),
 			"interleaved failures must not stall: {report:?}"
 		);
+	}
+
+	/// The model's field output, verbatim (T9.4): a text-form call with a
+	/// missing `</parameter>` before `</tool_call>`.
+	const TEXT_CALL_FIELD: &str = "<tool_call>\n<function=sequence.set_format>\n<parameter=sequence>3\n<parameter=fps>60</tool_call>";
+
+	/// A text-form call is executed through the same path as a structured
+	/// one — not shown to the user as an answer.
+	#[test]
+	fn a_text_form_call_is_executed_not_displayed() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let llm = ScriptedLlm::new(vec![
+			ChatResponse {
+				content: Some(TEXT_CALL_FIELD.to_string()),
+				tool_calls: Vec::new(),
+				finish_reason: Some("stop".into()),
+			},
+			ScriptedLlm::say("done"),
+		]);
+		let mut backend = MockBackend::new();
+		use oak_ai_tools::backend::EngineBackend;
+		EngineBackend::project_open(&mut backend, &json!({ "name": "Text Call" })).expect("open");
+		let mut agent = Agent::new(llm, backend, AgentConfig::default());
+		let report = agent.run("把帧率改成60").expect("run");
+
+		assert_eq!(report.text_fallback_calls, 1, "the fallback counted it");
+		assert_eq!(report.tools.len(), 1, "one tool ran: {:?}", report.tools);
+		assert_eq!(report.tools[0].tool, "sequence.set_format");
+		// The field sample names sequence `3`, which is the *real* engine's
+		// id; the mock's is `sequence-1`. So the call must reach the backend
+		// and fail on that id — which is exactly the proof that the parsed
+		// arguments (not the markup) went down the normal path.
+		assert_eq!(report.tools[0].outcome, "failed", "{:?}", report.tools[0]);
+		assert!(
+			report.tools[0].detail.contains("no sequence '3'"),
+			"the parsed id reached the engine: {}",
+			report.tools[0].detail
+		);
+		assert!(
+			report.final_text.as_deref().unwrap_or_default().contains("done"),
+			"the loop continued to the final answer: {:?}",
+			report.final_text
+		);
+	}
+
+	/// The same text form with the mock's own id really applies the edit.
+	#[test]
+	fn a_text_form_call_applies_against_the_mock_state() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let content = "<tool_call><function=sequence.set_format>\n<parameter=sequence>sequence-1\n<parameter=fps>60</tool_call>";
+		let llm = ScriptedLlm::new(vec![
+			ChatResponse {
+				content: Some(content.to_string()),
+				tool_calls: Vec::new(),
+				finish_reason: Some("stop".into()),
+			},
+			ScriptedLlm::say("done"),
+		]);
+		let mut backend = MockBackend::new();
+		use oak_ai_tools::backend::EngineBackend;
+		EngineBackend::project_open(&mut backend, &json!({ "name": "Text Apply" })).expect("open");
+		let mut agent = Agent::new(llm, backend, AgentConfig::default());
+		let report = agent.run("set the rate to 60").expect("run");
+
+		assert_eq!(report.text_fallback_calls, 1);
+		assert_eq!(report.tools[0].outcome, "applied", "{:?}", report.tools[0]);
+		assert!(
+			report.tools[0].detail.contains("\"num\":60"),
+			"the rate really changed: {}",
+			report.tools[0].detail
+		);
+	}
+
+	/// **History fidelity**: the next request must carry the prose, never the
+	/// raw markup — feeding it back would teach the model this format works.
+	#[test]
+	fn the_history_never_carries_the_raw_markup() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let content = format!("Setting it now.\n{TEXT_CALL_FIELD}");
+		let llm = ScriptedLlm::new(vec![
+			ChatResponse {
+				content: Some(content),
+				tool_calls: Vec::new(),
+				finish_reason: Some("stop".into()),
+			},
+			ScriptedLlm::say("done"),
+		]);
+		let mut backend = MockBackend::new();
+		use oak_ai_tools::backend::EngineBackend;
+		EngineBackend::project_open(&mut backend, &json!({ "name": "History" })).expect("open");
+		let mut agent = Agent::new(llm, backend, AgentConfig::default());
+		let report = agent.run("set the rate").expect("run");
+		assert_eq!(report.text_fallback_calls, 1);
+
+		let history = agent.messages();
+		let assistant_turns: Vec<&str> = history
+			.iter()
+			.filter_map(|m| (m.role == "assistant").then(|| m.content.as_deref().unwrap_or_default()))
+			.collect();
+		assert!(!assistant_turns.is_empty(), "the assistant turn is in history");
+		for turn in &assistant_turns {
+			assert!(
+				!turn.contains("<tool_call") && !turn.contains("<parameter="),
+				"raw markup leaked into history: {turn}"
+			);
+		}
+		assert!(
+			assistant_turns.iter().any(|t| t.contains("Setting it now")),
+			"the prose is kept: {assistant_turns:?}"
+		);
+		// tool_call ids and their results stay paired.
+		let call_ids: Vec<&str> = history
+			.iter()
+			.filter_map(|m| m.tool_call_id.as_deref())
+			.collect();
+		assert_eq!(call_ids.len(), 1, "one tool result: {history:?}");
+		assert!(call_ids[0].starts_with("text_"), "synthetic id: {:?}", call_ids[0]);
+	}
+
+	/// **Never double-execute**: a structured call must not also be read from
+	/// the text (the same call would run twice).
+	#[test]
+	fn a_structured_call_is_not_also_executed_from_text() {
+		use oak_ai_tools::mock::MockBackend;
+
+		// Both channels carry the same request.
+		let response = ChatResponse {
+			content: Some(TEXT_CALL_FIELD.to_string()),
+			tool_calls: vec![ToolCall {
+				id: "structured-1".to_string(),
+				name: "sequence.set_format".to_string(),
+				arguments: json!({ "sequence": 3, "fps": 60 }),
+			}],
+			finish_reason: Some("tool_calls".into()),
+		};
+		let llm = ScriptedLlm::new(vec![response, ScriptedLlm::say("done")]);
+		let mut backend = MockBackend::new();
+		use oak_ai_tools::backend::EngineBackend;
+		EngineBackend::project_open(&mut backend, &json!({ "name": "No Double" })).expect("open");
+		let mut agent = Agent::new(llm, backend, AgentConfig::default());
+		let report = agent.run("set the rate").expect("run");
+
+		assert_eq!(report.text_fallback_calls, 0, "the fallback must not fire");
+		assert_eq!(
+			report.tools.len(),
+			1,
+			"exactly one execution: {:?}",
+			report.tools
+		);
+	}
+
+	/// Unparseable markup stops the turn with a report, never with the XML
+	/// shown as the answer.
+	#[test]
+	fn unparseable_markup_is_reported_not_displayed() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let llm = ScriptedLlm::new(vec![ChatResponse {
+			content: Some("<tool_call><parameter=fps>60</tool_call>".to_string()),
+			tool_calls: Vec::new(),
+			finish_reason: Some("stop".into()),
+		}]);
+		let mut agent = Agent::new(llm, MockBackend::new(), AgentConfig::default());
+		let report = agent.run("set the rate").expect("run");
+
+		assert_eq!(report.unparsed_text_calls, 1);
+		assert!(report.unparsed_text.is_some(), "the raw markup is kept");
+		assert!(!report.converged, "the turn did not complete normally");
+		assert!(
+			report.final_text.is_none(),
+			"the XML must never become the answer: {:?}",
+			report.final_text
+		);
+		assert!(report.tools.is_empty(), "nothing was executed");
+	}
+
+	/// Ordinary prose with a `<` is still a normal answer.
+	#[test]
+	fn prose_with_a_less_than_sign_is_still_an_answer() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let llm = ScriptedLlm::new(vec![ScriptedLlm::say("如果 width < 100 就裁掉边缘。")]);
+		let mut agent = Agent::new(llm, MockBackend::new(), AgentConfig::default());
+		let report = agent.run("advice").expect("run");
+		assert!(report.converged);
+		assert_eq!(report.unparsed_text_calls, 0, "no false positive");
+		assert_eq!(report.text_fallback_calls, 0);
+		assert!(report.final_text.unwrap_or_default().contains("width < 100"));
 	}
 
 	impl LlmClient for ScriptedLlm {

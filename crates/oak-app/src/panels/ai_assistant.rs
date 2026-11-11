@@ -91,6 +91,7 @@ pub fn outcome_i18n_key(outcome: &str) -> &'static str {
 		"proposed" => "ai.outcome.proposed",
 		"rejected" => "ai.outcome.rejected",
 		"failed" => "ai.outcome.failed",
+		"unparsed" => "ai.outcome.unparsed",
 		_ => "ai.error.unknown",
 	}
 }
@@ -265,6 +266,20 @@ fn strip_inline(line: &str) -> String {
 /// order), then the final answer — or the round-cap notice when the loop
 /// ran out of rounds.
 pub fn append_report(bubbles: &mut Vec<Bubble>, report: &AgentReport) {
+	// Unparseable text-form markup is reported, never shown as an answer:
+	// the raw text lands in the tool bubble's detail for diagnosis.
+	if report.unparsed_text_calls > 0 {
+		bubbles.push(Bubble::System(
+			crate::i18n::tr("ai.notice.unparsed_tool_call").to_owned(),
+		));
+		if let Some(raw) = &report.unparsed_text {
+			bubbles.push(Bubble::Tool {
+				name: "text_tool_call".to_string(),
+				outcome: "unparsed",
+				detail: raw.clone(),
+			});
+		}
+	}
 	// A stall is reported before the answer: the user must know the run
 	// stopped on a repeated failure rather than silently hitting the cap.
 	if let Some(stall) = &report.stalled {
@@ -1122,6 +1137,9 @@ mod tests {
 				repeats: 3,
 				message: "`fps` must be a number".to_string(),
 			}),
+			text_fallback_calls: 0,
+			unparsed_text_calls: 0,
+			unparsed_text: None,
 		};
 		append_report(&mut bubbles, &report);
 
@@ -1145,6 +1163,50 @@ mod tests {
 		);
 	}
 
+	/// Unparseable text-form markup reaches the user as a notice plus the raw
+	/// text in a detail bubble — never as the answer.
+	#[test]
+	fn append_report_reports_unparsed_text_markup() {
+		let raw = "<tool_call><parameter=fps>60</tool_call>";
+		let mut bubbles = Vec::new();
+		let report = AgentReport {
+			rounds: 1,
+			converged: false,
+			final_text: None,
+			tools: Vec::new(),
+			stalled: None,
+			text_fallback_calls: 0,
+			unparsed_text_calls: 1,
+			unparsed_text: Some(raw.to_string()),
+		};
+		append_report(&mut bubbles, &report);
+
+		let notice = bubbles
+			.iter()
+			.find_map(|b| match b {
+				Bubble::System(text) => Some(text.clone()),
+				_ => None,
+			})
+			.expect("a notice is pushed");
+		assert!(
+			notice.contains(crate::i18n::tr("ai.notice.unparsed_tool_call")),
+			"the notice must use the translated wording: {notice}"
+		);
+		let detail = bubbles
+			.iter()
+			.find_map(|b| match b {
+				Bubble::Tool { detail, .. } => Some(detail.clone()),
+				_ => None,
+			})
+			.expect("the raw text is kept for diagnosis");
+		assert!(detail.contains("</tool_call>"), "raw markup kept: {detail}");
+		// Nothing may present the markup as the answer.
+		assert!(
+			!bubbles.iter().any(|b| matches!(b, Bubble::Assistant(_))),
+			"no assistant bubble: {bubbles:?}"
+		);
+	}
+
 	fn append_report_orders_tools_then_answer() {
 		let tool = |name: &str, outcome: &'static str| ToolLogEntry {
 			round: 1,
@@ -1159,6 +1221,9 @@ mod tests {
 			final_text: Some("done".to_owned()),
 			tools: vec![tool("project.open", "applied"), tool("node.set_param", "failed")],
 			stalled: None,
+			text_fallback_calls: 0,
+			unparsed_text_calls: 0,
+			unparsed_text: None,
 		};
 		append_report(&mut bubbles, &report);
 		assert_eq!(
@@ -1190,6 +1255,9 @@ mod tests {
 			final_text: None,
 			tools: Vec::new(),
 			stalled: None,
+			text_fallback_calls: 0,
+			unparsed_text_calls: 0,
+			unparsed_text: None,
 		};
 		append_report(&mut bubbles, &report);
 		assert_eq!(
@@ -1274,7 +1342,7 @@ mod tests {
 			("ru", include_str!("../../../../assets/i18n/ru.yaml")),
 			("ja", include_str!("../../../../assets/i18n/ja.yaml")),
 		];
-		const KEYS: [&str; 21] = [
+		const KEYS: [&str; 23] = [
 			"menu.window.ai_assistant",
 			"panel.ai_assistant",
 			"ai.placeholder",
@@ -1286,6 +1354,8 @@ mod tests {
 			"ai.not_configured",
 			"ai.notice.limit",
 			"ai.notice.stalled",
+			"ai.notice.unparsed_tool_call",
+			"ai.outcome.unparsed",
 			"ai.error.not_configured",
 			"ai.error.http",
 			"ai.error.api",

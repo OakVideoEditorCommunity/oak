@@ -21,6 +21,7 @@ pub mod agent;
 pub mod backend;
 pub mod config;
 pub mod llm;
+pub mod tool_text;
 
 pub use agent::{Agent, AgentConfig, AgentError, AgentReport, ToolLogEntry};
 pub use backend::{EngineBackend, MockBackend};
