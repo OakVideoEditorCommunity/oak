@@ -8808,17 +8808,42 @@ mod tests {
 		let worker_bin = crate::oakui::renderops::test_worker_bin().expect(
 			"a real oak-worker binary (build it with `cargo build -p oak-worker` or set OAK_WORKER_BIN)",
 		);
-		let config = DispatcherConfig {
-			worker_bin: Some(worker_bin),
-			workers: 1,
-			slots_per_worker: 2,
-			width: 64,
-			height: 64,
-			batch_size: 2,
-			..Default::default()
-		};
-		RenderManager::init_with_backend(RenderBackendChoice::Processes(config))
-			.expect("process backend init");
+		// `RenderManager` is a process-wide singleton: `init_with_backend`
+		// returns `Error::State` while any manager is installed, and other
+		// tests' asynchronous render tails may legitimately re-install one
+		// between our `shutdown()` and this claim. Measured over the full
+		// suite: every observed failure of this test was exactly that
+		// `State` at the claim (never the copy-counter assertions below), so
+		// the claim is a bounded quiesce-and-retry instead of a single shot.
+		// Nothing about the zero-copy assertions is relaxed: the retry only
+		// establishes the precondition they need.
+		let mut claim_err = None;
+		for _ in 0..200 {
+			RenderManager::shutdown();
+			let config = DispatcherConfig {
+				worker_bin: Some(worker_bin.clone()),
+				workers: 1,
+				slots_per_worker: 2,
+				width: 64,
+				height: 64,
+				batch_size: 2,
+				..Default::default()
+			};
+			match RenderManager::init_with_backend(RenderBackendChoice::Processes(config)) {
+				Ok(()) => {
+					claim_err = None;
+					break;
+				}
+				Err(e) => {
+					claim_err = Some(e);
+					std::thread::sleep(std::time::Duration::from_millis(5));
+				}
+			}
+		}
+		assert!(
+			claim_err.is_none(),
+			"process backend init after bounded retry: {claim_err:?}"
+		);
 
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Zero Copy");
