@@ -222,7 +222,20 @@ fn a_conflicting_placement_is_fed_back_and_the_retry_succeeds() {
 		other => panic!("expected a conflict, got {other:?}"),
 	};
 	assert!(feedback.retryable);
-	assert!(feedback.hint.contains("overview"), "{}", feedback.hint);
+	// `INVALID_PARAMS` carries two meanings and the hint serves both (T9.3):
+	// a shape error wants one field fixed, a placement conflict wants the
+	// timeline re-read and this item re-derived. This test is the *conflict*
+	// case, so both paths must be present — and specifically the re-read.
+	assert!(
+		feedback.hint.contains("message"),
+		"the hint must point at the concrete cause: {}",
+		feedback.hint
+	);
+	assert!(
+		feedback.hint.contains("overview"),
+		"a placement conflict must still lead to re-reading the timeline: {}",
+		feedback.hint
+	);
 	assert_eq!(backend.undo_depth(), depth);
 
 	// Re-read, find the first free second after the existing clip.

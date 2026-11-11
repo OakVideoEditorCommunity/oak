@@ -400,6 +400,11 @@ pub fn execute_v2_with(
 		return GatedOutcome::failure(hooks, tool, None, error);
 	};
 
+	// Runtime schema gate, the same position the frozen face's `validate`
+	// takes: before the transaction opens and before any backend call.
+	if let Err(error) = crate::schema_v2::validate(tool, &args) {
+		return GatedOutcome::failure(hooks, tool, Some(class), error.with_tool(tool));
+	}
 	let call = ToolCall {
 		tool,
 		args: &args,

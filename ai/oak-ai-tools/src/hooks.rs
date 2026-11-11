@@ -478,8 +478,9 @@ impl Feedback {
 		let (retryable, hint) = match error.code.as_str() {
 			CODE_SCHEMA_VALIDATION => (
 				true,
-				"the arguments do not match the frozen schema; fix the shape/types \
-				 before re-planning (do not re-send the same call)",
+				"the arguments do not match this tool's schema; read the `message` \
+				 (it names the offending key and path), fix the shape/types, then \
+				 re-plan — do not re-send the same call",
 			),
 			CODE_TIMECODE => (
 				true,
@@ -493,16 +494,23 @@ impl Feedback {
 			),
 			CODE_INVALID_PARAMS => (
 				true,
-				"the edit conflicts with the current timeline (overlap / out of range); \
-				 re-read the overview and recompute the placement",
+				"the arguments were refused; `message` names the offending field, key \
+				 or value. If it is a type / shape problem, fix only that field and \
+				 retry. If `message` says the placement overlaps or is out of range, \
+				 call project.get_overview to re-read the current timeline and \
+				 recompute this one item's position against it — do not move the \
+				 other items",
 			),
 			CODE_STATE => (
 				true,
-				"the backend is not in the required state; open/create the project first",
+				"the backend is not in the required state: check the `message` — it may \
+				 mean no project is open, the project has no sequence, or no clip/node \
+				 is selected; fix that precondition, then retry",
 			),
 			CODE_UNKNOWN_TOOL => (
 				false,
-				"the name is not in the frozen 22-tool face; pick a registered tool",
+				"the name is not in the registered tool face (the frozen 22 plus the \
+				 v2 `sequence.*` tools); pick a name that appears in the tool list",
 			),
 			CODE_UNSUPPORTED => (
 				false,
@@ -516,8 +524,11 @@ impl Feedback {
 			),
 			CODE_BACKEND => (
 				true,
-				"the backend failed while executing a valid call; inspect the message, \
-				 adjust one input, retry at most once",
+				"the backend refused this call; the concrete cause is in `message`. \
+				 If it mentions a transaction (`already held` / `not in transaction`), \
+				 that is internal sequencing — retry once. If it mentions a capability \
+				 or a limit, do NOT retry: explain the limitation to the user instead \
+				 of changing the arguments",
 			),
 			CODE_IO => (true, "a file could not be read or written; check the path and retry"),
 			CODE_REJECTED => (

@@ -655,3 +655,276 @@ fn unimplemented_v2_tools_report_a_structured_unsupported_gap() {
 	// Fail-closed also means "no side effect": the defaults touched nothing.
 	assert_eq!(spy.edits, 0, "a refused v2 call must not mutate anything");
 }
+
+// ---------------------------------------------------------------------------
+// Hint correctness (T9.3): the field bug's root cause was a hint that named
+// the wrong cause, so the hints themselves are now asserted.
+// ---------------------------------------------------------------------------
+
+/// `INVALID_PARAMS` carries **two** meanings (shape error / content
+/// conflict) and one code serves both, so the hint must carry both paths:
+/// "fix that field" for a shape error and "re-read the timeline and
+/// re-derive this item" for a conflict. Dropping either path turns one of
+/// the two families into a dead end — the field bug was the shape half of
+/// this, and deleting the re-read half would break the conflict half.
+#[test]
+fn invalid_params_hint_covers_both_meanings() {
+	use oak_ai_tools::error::CODE_INVALID_PARAMS;
+	use oak_ai_tools::hooks::Feedback;
+
+	let hint = Feedback::from_error(ToolError::new(CODE_INVALID_PARAMS, "x")).hint;
+	let lowered = hint.to_lowercase();
+	assert!(
+		lowered.contains("message"),
+		"it must point at the concrete cause first: {hint}"
+	);
+	assert!(
+		lowered.contains("field"),
+		"the shape path must say to fix the offending field: {hint}"
+	);
+	assert!(
+		lowered.contains("overview"),
+		"the conflict path must still say to re-read the timeline: {hint}"
+	);
+	assert!(
+		lowered.contains("overlaps") || lowered.contains("out of range"),
+		"it must name the conflict symptoms to branch on: {hint}"
+	);
+}
+
+/// The shape half has its own test: a wrong *type* must not be answered with
+/// timeline advice. (The conflict half owns the re-read; see
+/// `hooks_replan::a_conflicting_placement_is_fed_back_and_the_retry_succeeds`.)
+#[test]
+fn a_shape_error_is_answered_with_the_field_path() {
+	use oak_ai_tools::error::CODE_INVALID_PARAMS;
+	use oak_ai_tools::hooks::Feedback;
+
+	// The exact shape that burned six rounds in the field.
+	let hint = Feedback::from_error(ToolError::new(
+		CODE_INVALID_PARAMS,
+		"`fps` must be a number, a numeric string, or a {\"num\",\"den\"} object, got \"abc\"",
+	))
+	.hint;
+	let lowered = hint.to_lowercase();
+	// The branch the model must take for a shape error.
+	assert!(
+		lowered.contains("field") && (lowered.contains("type") || lowered.contains("shape")),
+		"the shape branch must be present: {hint}"
+	);
+	// And it must be *conditional*, not a blanket instruction to re-read.
+	assert!(
+		lowered.contains("if "),
+		"the two paths must be conditional, not both mandatory: {hint}"
+	);
+}
+
+/// The backend fallback carries several host causes; it must not assume one.
+#[test]
+fn backend_hint_is_neutral_about_the_cause() {
+	use oak_ai_tools::error::CODE_BACKEND;
+	use oak_ai_tools::hooks::Feedback;
+
+	let hint = Feedback::from_error(ToolError::new(CODE_BACKEND, "transaction already held")).hint;
+	let lowered = hint.to_lowercase();
+	assert!(
+		lowered.contains("message"),
+		"it must point at the message for the concrete cause: {hint}"
+	);
+	assert!(
+		lowered.contains("transaction") && lowered.contains("capability"),
+		"it must branch on the two cause families: {hint}"
+	);
+	assert!(
+		!lowered.contains("adjust one input"),
+		"the old one-size advice must be gone: {hint}"
+	);
+}
+
+/// The stale wordings: the tool face is no longer "the frozen 22" only, and
+/// a schema failure is about *that tool's* schema.
+#[test]
+fn stale_face_wordings_are_gone() {
+	use oak_ai_tools::error::{CODE_SCHEMA_VALIDATION, CODE_STATE, CODE_UNKNOWN_TOOL};
+	use oak_ai_tools::hooks::Feedback;
+
+	let unknown = Feedback::from_error(ToolError::new(CODE_UNKNOWN_TOOL, "x")).hint;
+	assert!(
+		unknown.contains("frozen 22") && unknown.to_lowercase().contains("v2"),
+		"the unknown-tool hint must name both faces: {unknown}"
+	);
+	let schema = Feedback::from_error(ToolError::new(CODE_SCHEMA_VALIDATION, "x")).hint;
+	assert!(
+		!schema.to_lowercase().contains("frozen"),
+		"a schema failure is about this tool's schema: {schema}"
+	);
+	let state = Feedback::from_error(ToolError::new(CODE_STATE, "x")).hint;
+	assert!(
+		state.to_lowercase().contains("sequence") && state.to_lowercase().contains("select"),
+		"the state hint must list the other precondition families: {state}"
+	);
+}
+
+// ---------------------------------------------------------------------------
+// v2 runtime schema gate (T9.3): `additionalProperties: false` must bite.
+// ---------------------------------------------------------------------------
+
+/// A misspelled key must be refused **at the gate**, before the transaction
+/// opens, and the error must name the offending key so one turn is enough.
+#[test]
+fn v2_gate_rejects_unknown_keys_and_names_them() {
+	use oak_ai_tools::dispatch::execute_v2_with;
+	use oak_ai_tools::error::CODE_SCHEMA_VALIDATION;
+	use oak_ai_tools::hooks::{GatedOutcome, NoHooks, Policy};
+
+	let mut backend = MockBackend::new();
+	EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "Gate" }))
+		.expect("open");
+
+	let outcome = execute_v2_with(
+		&mut backend,
+		"sequence.set_format",
+		serde_json::json!({ "frameRate": 60 }),
+		Policy::Auto,
+		&mut NoHooks,
+	);
+	let GatedOutcome::Failed { error, .. } = outcome else {
+		panic!("an unknown key must be refused, got {outcome:?}");
+	};
+	assert_eq!(error.code, CODE_SCHEMA_VALIDATION);
+	assert!(
+		error.message.contains("frameRate"),
+		"the error must name the rejected key: {}",
+		error.message
+	);
+	// No project edit landed: the refusal happened before the backend call.
+	let overview = EngineBackend::project_get_overview(&mut backend, &serde_json::Value::Null)
+		.expect("overview");
+	assert_eq!(overview["sequences"][0]["name"], "Gate", "nothing changed");
+}
+
+/// **D2**: the gate must not be stricter than the parser. A numeric string
+/// is judged by the parser (which answers `INVALID_PARAMS` with the field
+/// path); the schema only checks that it *is* a string. Anything the parser
+/// accepts — including `"60 "`, `"1e2"`, `"+60"` — passes the gate, and the
+/// one authority for numeric validity is the parser.
+#[test]
+fn numeric_strings_are_judged_by_the_parser_not_the_gate() {
+	use oak_ai_tools::dispatch::execute_v2_with;
+	use oak_ai_tools::error::{CODE_INVALID_PARAMS, CODE_SCHEMA_VALIDATION};
+	use oak_ai_tools::hooks::{GatedOutcome, NoHooks, Policy};
+
+	for text in ["60", "60 ", "1e2", "+60", "29.97", "abc"] {
+		let mut backend = MockBackend::new();
+		EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "D2" }))
+			.expect("open");
+		let outcome = execute_v2_with(
+			&mut backend,
+			"sequence.set_format",
+			serde_json::json!({ "fps": text }),
+			Policy::Auto,
+			&mut NoHooks,
+		);
+		if let GatedOutcome::Failed { error, .. } = outcome {
+			assert_ne!(
+				error.code, CODE_SCHEMA_VALIDATION,
+				"the gate must not judge the number `{text}`: {}",
+				error.message
+			);
+			assert_eq!(
+				error.code, CODE_INVALID_PARAMS,
+				"an unusable number is a parameter error for `{text}`"
+			);
+		}
+	}
+}
+
+/// **O1**: the read/write round trip is the boundary. `get_settings`'s own
+/// keys (`rate`, `id`, `duration`, `backend`, `undoable`) are accepted or
+/// ignored, so writing a reading straight back works; a misspelled writable
+/// key is still refused and named.
+#[test]
+fn the_read_only_echo_is_ignored_but_a_misspelled_writable_key_is_named() {
+	use oak_ai_tools::backend::EngineExt;
+	use oak_ai_tools::dispatch::execute_v2_with;
+	use oak_ai_tools::error::CODE_SCHEMA_VALIDATION;
+	use oak_ai_tools::hooks::{GatedOutcome, NoHooks, Policy};
+
+	// A real `get_settings` payload, written straight back.
+	let mut backend = MockBackend::new();
+	EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "Echo" }))
+		.expect("open");
+	let settings = EngineExt::sequence_get_settings(&backend, serde_json::json!({}))
+		.expect("settings");
+	let mut write_back = settings.clone();
+	if let Some(obj) = write_back.as_object_mut() {
+		obj.insert("fps".to_string(), serde_json::json!(24));
+	}
+	let outcome = execute_v2_with(
+		&mut backend,
+		"sequence.set_format",
+		write_back,
+		Policy::Auto,
+		&mut NoHooks,
+	);
+	assert!(
+		matches!(outcome, GatedOutcome::Applied { .. }),
+		"the read-only echo must not block a write-back: {outcome:?}"
+	);
+
+	// The same payload with a misspelled writable key is still refused.
+	let mut bad = settings;
+	if let Some(obj) = bad.as_object_mut() {
+		obj.insert("frameRate".to_string(), serde_json::json!(30));
+	}
+	let outcome = execute_v2_with(
+		&mut backend,
+		"sequence.set_format",
+		bad,
+		Policy::Auto,
+		&mut NoHooks,
+	);
+	let GatedOutcome::Failed { error, .. } = outcome else {
+		panic!("a misspelled writable key must be refused, got {outcome:?}");
+	};
+	assert_eq!(error.code, CODE_SCHEMA_VALIDATION);
+	assert!(
+		error.message.contains("frameRate"),
+		"the misspelled key must be named: {}",
+		error.message
+	);
+}
+
+/// The tolerated spellings the parser accepts must also pass the schema —
+/// otherwise the gate would reject what the parser was taught to read.
+#[test]
+fn v2_gate_accepts_the_tolerated_spellings() {
+	use oak_ai_tools::dispatch::execute_v2_with;
+	use oak_ai_tools::error::CODE_SCHEMA_VALIDATION;
+	use oak_ai_tools::hooks::{NoHooks, Policy};
+
+	for args in [
+		serde_json::json!({ "fps": 60 }),
+		serde_json::json!({ "fps": "60" }),
+		serde_json::json!({ "fps": { "num": 60 } }),
+		serde_json::json!({ "sequence": 3, "fps": 60 }),
+	] {
+		let mut backend = MockBackend::new();
+		EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "Gate" }))
+		.expect("open");
+		let outcome = execute_v2_with(
+			&mut backend,
+			"sequence.set_format",
+			args.clone(),
+			Policy::Auto,
+			&mut NoHooks,
+		);
+		if let oak_ai_tools::hooks::GatedOutcome::Failed { error, .. } = &outcome {
+			assert_ne!(
+				error.code, CODE_SCHEMA_VALIDATION,
+				"the schema must accept {args}: {}",
+				error.message
+			);
+		}
+	}
+}
