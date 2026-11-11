@@ -161,6 +161,7 @@
 "ai.error.api": "服务返回错误"
 "ai.error.bad_response": "无法解析服务响应"
 "ai.error.unknown": "发生未知错误"
+"ai.error.engine_unsupported": "当前引擎不支持 agent 工具执行"
 "ai.outcome.applied": "已执行"
 "ai.outcome.proposed": "待确认"
 "ai.outcome.rejected": "已拒绝"

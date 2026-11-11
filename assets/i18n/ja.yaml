@@ -161,6 +161,7 @@
 "ai.error.api": "サービスがエラーを返しました"
 "ai.error.bad_response": "応答を解析できませんでした"
 "ai.error.unknown": "不明なエラーが発生しました"
+"ai.error.engine_unsupported": "現在のエンジンはエージェントのツール実行をサポートしていません"
 "ai.outcome.applied": "実行済み"
 "ai.outcome.proposed": "提案済み"
 "ai.outcome.rejected": "拒否されました"

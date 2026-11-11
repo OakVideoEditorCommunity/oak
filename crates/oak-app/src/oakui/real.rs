@@ -4248,6 +4248,14 @@ impl AppEngine for RealEngine {
 		Self::new(cx)
 	}
 
+	/// The live project handle for the agent tool layer. Deliberately not
+	/// `self.project_ref().cloned()`: that inherent helper has the same
+	/// name and returning through it would read like recursion — the
+	/// field is the source of truth either way.
+	fn project_ref(&self) -> Option<ProjectRef> {
+		self.project.as_ref().cloned()
+	}
+
 	fn source_clock(&self) -> &Entity<Self::Clock> {
 		&self.source_clock
 	}

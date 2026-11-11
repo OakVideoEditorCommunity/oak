@@ -311,6 +311,17 @@ pub trait AppEngine:
 	/// the mock).
 	fn create(cx: &mut Context<Self>) -> Self;
 
+	/// The project handle the agent tool layer executes against, when the
+	/// engine keeps one the tool layer can share (`None` otherwise).
+	///
+	/// The default is `None`: an engine whose project is a plain value
+	/// (the mock's demo project) cannot hand out a shared handle, and the
+	/// AI panel reports that honestly instead of pretending. Only the real
+	/// engine, which stores `Option<ProjectRef>`, overrides this.
+	fn project_ref(&self) -> Option<crate::oakui::graphops::ProjectRef> {
+		None
+	}
+
 	/// The source monitor's clock entity.
 	fn source_clock(&self) -> &Entity<Self::Clock>;
 

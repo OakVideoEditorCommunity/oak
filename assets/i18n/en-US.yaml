@@ -161,6 +161,7 @@
 "ai.error.api": "The service returned an error"
 "ai.error.bad_response": "Could not parse the response"
 "ai.error.unknown": "An unknown error occurred"
+"ai.error.engine_unsupported": "Agent tool execution is not supported by the current engine"
 "ai.outcome.applied": "Applied"
 "ai.outcome.proposed": "Proposed"
 "ai.outcome.rejected": "Rejected"

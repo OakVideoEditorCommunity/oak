@@ -161,6 +161,7 @@
 "ai.error.api": "Сервис вернул ошибку"
 "ai.error.bad_response": "Не удалось разобрать ответ"
 "ai.error.unknown": "Произошла неизвестная ошибка"
+"ai.error.engine_unsupported": "Текущий движок не поддерживает выполнение инструментов агента"
 "ai.outcome.applied": "Применено"
 "ai.outcome.proposed": "Предложено"
 "ai.outcome.rejected": "Отклонено"

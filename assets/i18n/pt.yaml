@@ -161,6 +161,7 @@
 "ai.error.api": "O serviço retornou um erro"
 "ai.error.bad_response": "Não foi possível interpretar a resposta"
 "ai.error.unknown": "Ocorreu um erro desconhecido"
+"ai.error.engine_unsupported": "A engine atual não suporta a execução de ferramentas do agente"
 "ai.outcome.applied": "Aplicado"
 "ai.outcome.proposed": "Proposto"
 "ai.outcome.rejected": "Rejeitado"
