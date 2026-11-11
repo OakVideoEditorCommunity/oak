@@ -1898,6 +1898,119 @@ fn transition_commands(
 	Ok((block, vec![insert, from, to]))
 }
 
+/// The clip **immediately after** `clip` on the same track, when the two are
+/// strictly contiguous (`next.in == clip.out`). `None` when the clip is last
+/// on its track, has a gap after it, or is not on a track at all.
+///
+/// This is the deterministic seam test: the schema's `side` cannot name a
+/// seam, so a tail transition falls back to the seam path only when the cut
+/// is provably there (no guessing).
+pub fn next_contiguous_clip(g: &Graph, clip: NodeId) -> Option<NodeId> {
+	let track = clip_track(g, clip)?;
+	let blocks = track_behavior(g, track)?.blocks.clone();
+	let index = blocks.iter().position(|&b| b == clip)?;
+	let next = *blocks.get(index + 1)?;
+	let out = block_core_of(g, clip)?.out();
+	let inn = block_core_of(g, next)?.in_();
+	(inn == out).then_some(next)
+}
+
+/// The combo index of a transition shader id (`crossdissolve` = 0 …), or
+/// `None` when the id is not one of the four frozen ids.
+pub fn transition_kind_index(kind: &str) -> Option<i64> {
+	oak_node::nodes::transitions::SHADER_IDS
+		.iter()
+		.position(|id| *id == kind)
+		.map(|i| i as i64)
+}
+
+/// A **non-pushing** command that sets a node input's standard value, so it
+/// can join an existing multi row instead of opening a second one.
+fn set_standard_value_command(
+	p: &ProjectRef,
+	node: NodeId,
+	input_id: &str,
+	value: oak_node::value::NodeValue,
+) -> Result<oak_undo::undocommand::UndoCommand, String> {
+	let old = {
+		let g = lock(p);
+		let entry = g
+			.graph
+			.get(node)
+			.ok_or_else(|| "set input: node not found".to_string())?;
+		if entry.core.get_input(input_id).is_none() {
+			return Err(format!("set input: unknown input \"{input_id}\""));
+		}
+		entry.core.standard_value(input_id, -1)
+	};
+	let (p1, p2) = (p.clone(), p.clone());
+	let (redo_input, undo_input) = (input_id.to_string(), input_id.to_string());
+	let (redo_value, undo_old) = (value.clone(), old.clone());
+	Ok(oak_undo::undocommand::UndoCommand::from_closures(
+		move || {
+			if let Some(e) = lock(&p1).graph.get_mut(node) {
+				e.core
+					.set_standard_value(&redo_input, -1, redo_value.clone());
+			}
+		},
+		move || {
+			if let Some(e) = lock(&p2).graph.get_mut(node) {
+				e.core
+					.set_standard_value(&undo_input, -1, undo_old.clone());
+			}
+		},
+	))
+}
+
+/// Sets the transition block's shader combo. The block is created by
+/// [`transition_commands`] with `type_in` = 0 (cross dissolve), so a
+/// non-default kind needs one extra command — appended to the **same** multi
+/// row, never pushed separately (that would be the T9.2 double-row trap).
+fn transition_kind_command(
+	p: &ProjectRef,
+	block: NodeId,
+	kind_index: i64,
+) -> Result<oak_undo::undocommand::UndoCommand, String> {
+	set_standard_value_command(
+		p,
+		block,
+		oak_node::block::transition_input::TYPE_INPUT,
+		oak_node::value::NodeValue::Combo(kind_index),
+	)
+}
+
+/// [`add_transition_at_seam`] plus the shader kind, still **one** undo row.
+pub fn add_transition_at_seam_typed(
+	p: &ProjectRef,
+	prev: NodeId,
+	next: NodeId,
+	half: Rational,
+	kind_index: Option<i64>,
+) -> Result<NodeId, String> {
+	let (block, mut commands) = transition_commands(p, prev, next, half)?;
+	if let Some(index) = kind_index {
+		commands.push(transition_kind_command(p, block, index)?);
+	}
+	push_multi(commands, "Add Transition")?;
+	Ok(block)
+}
+
+/// [`add_transition_at_edge`] plus the shader kind, still **one** undo row.
+pub fn add_transition_at_edge_typed(
+	p: &ProjectRef,
+	clip: NodeId,
+	start_edge: bool,
+	length: Rational,
+	kind_index: Option<i64>,
+) -> Result<NodeId, String> {
+	let (block, mut commands) = edge_transition_commands(p, clip, start_edge, length)?;
+	if let Some(index) = kind_index {
+		commands.push(transition_kind_command(p, block, index)?);
+	}
+	push_multi(commands, "Add Transition")?;
+	Ok(block)
+}
+
 /// Create a transition at the seam between two contiguous clips and push
 /// it as one "Add Transition" undo row (the timeline's wedge drag path).
 pub fn add_transition_at_seam(

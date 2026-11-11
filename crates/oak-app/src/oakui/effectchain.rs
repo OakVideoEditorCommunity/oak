@@ -292,6 +292,39 @@ pub fn addable_effects() -> Vec<super::engine::EffectEntry> {
 	out
 }
 
+/// The effect types addable to `host`, filtered by the host's own media kind.
+///
+/// [`addable_effects`] lists every built-in video effect; handing that list to
+/// a model that is editing an audio clip invites a guaranteed failure. This
+/// filters with the same predicate [`insert`] enforces, so the list a caller
+/// gets is exactly the set that would be accepted.
+pub fn addable_effects_for(g: &Graph, host: NodeId) -> Vec<super::engine::EffectEntry> {
+	// A host with no effect input accepts nothing, so it must be offered
+	// nothing: an empty list is the honest answer (never a panic).
+	if effect_input_of(g, host).is_none() {
+		return Vec::new();
+	}
+	let media = host_media_of(g, host);
+	let mut out = Vec::new();
+	for entry in addable_effects() {
+		let Some((core, _behavior)) = oak_node::factory::Factory::global().create_any(&entry.type_id)
+		else {
+			continue;
+		};
+		if core.effect_input.is_empty() {
+			continue;
+		}
+		if let Some(host_media) = media {
+			if effect_media_of(&core) != host_media {
+				continue;
+			}
+		}
+		out.push(entry);
+	}
+	out
+}
+
+
 /// The presentation rank of a built-in group key, or `None` for a key
 /// outside [`GROUP_KEYS`] (an OpenFX sub-category, which the sort orders
 /// after every built-in group).
@@ -570,6 +603,29 @@ impl Drop for GroupGuard {
 /// error.
 fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 	oak_undo::global::group_begin(name).map_err(|e| e.to_string())?;
+	run_group(f)
+}
+
+/// Like [`grouped`], but **joins** an enclosing group when one is already open
+/// instead of failing.
+///
+/// `oak_undo` keeps a single process-wide group slot, so a nested
+/// `group_begin` answers `Error::State`. That is exactly the situation inside
+/// an OPP transaction, which opens a group of its own and turns the whole
+/// transaction into one undo row: the insert commands then join that group.
+/// Opening a second row would break the "one edit, one row" contract just as
+/// badly as having none.
+fn grouped_or_joined<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+	match oak_undo::global::group_begin(name) {
+		Ok(()) => run_group(f),
+		// A group is already open (an enclosing transaction): it owns the row.
+		Err(_) => f(),
+	}
+}
+
+/// Runs `f` while the group opened by the caller is current, closing it as one
+/// row (`group_end`) or unwinding it (`group_abort`) on failure.
+fn run_group<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 	// `oak_undo`'s open group is one process-wide slot with no unwind
 	// guard, so a panic inside `f` (a failed `unwrap` in a caller, an
 	// assertion in a test) would leave the group open and make *every*
@@ -692,11 +748,19 @@ fn neighbors(g: &Graph, host: NodeId, chain: &[NodeId], pos: usize) -> (Option<N
 	}
 }
 
-/// Undoable insertion of a new effect of `type_id` at chain position
-/// `index` (0 = closest to the source, `len` = closest to the host;
-/// out-of-range indices clamp to the ends). The node is created from the
-/// factory, added to the host's project, and wired into the chain — one
-/// undo row for the whole edit ("Add Effect"). Returns the new node's id.
+/// Undoable insertion of a new effect of `type_id` at **engine chain position**
+/// `index` (`len` = closest to the host; out-of-range indices clamp to the
+/// ends). The node is created from the factory, added to the host's project,
+/// and wired into the chain — one undo row for the whole edit ("Add Effect").
+/// Returns the new node's id.
+///
+/// **`index` is an engine position, not an effect index.** [`chain`] includes
+/// the node feeding the first effect — the source (footage / generator) — and
+/// that node has **no effect input**, so `index == 0` addresses it and the
+/// insert fails with `connect: no input ""`. A real clip is always connected to
+/// its footage, so this hits on the very first "insert at index 0".
+/// Tool / UI callers want: [`insert_at_effect_index`], which does the
+/// translation (`n + 1` when the chain starts with a source) in one place.
 pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Result<NodeId, String> {
 	let (chain_vec, new_entry, new_input) = {
 		let g = lock(p);
@@ -745,7 +809,7 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 		effect_input_of(&g.graph, downstream).unwrap_or_default()
 	};
 
-	grouped("Add Effect", || {
+	grouped_or_joined("Add Effect", || {
 		// 1. Add the node to the project (the eager redo runs now; the
 		//    rewiring commands below address the live id).
 		let (add, state) = add_node_command(p, new_entry);
@@ -768,6 +832,43 @@ pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Resu
 		}
 		Ok(fresh)
 	})
+}
+
+/// Inserts a new effect at **effect index** `index` (0 = the first effect,
+/// closest to the source; `None` = append, closest to the host).
+///
+/// [`insert`] takes an *engine* chain position, and [`chain`] includes the node
+/// feeding the first effect — the source (footage / a generator), which has no
+/// effect input of its own. Engine position 0 therefore addresses that source,
+/// and passing it makes `insert` fail with `connect: no input ""`. That is a
+/// real trap: it is exactly what a caller means by "insert at index 0".
+///
+/// This wrapper does the translation once, in one place: when the chain starts
+/// with a node that has no effect input (the source), effect index `n` becomes
+/// engine position `n + 1`. Appending is `chain.len()` either way.
+pub fn insert_at_effect_index(
+	p: &ProjectRef,
+	host: NodeId,
+	index: Option<usize>,
+	type_id: &str,
+) -> Result<NodeId, String> {
+	let (len, source_offset) = {
+		let g = lock(p);
+		if effect_input_of(&g.graph, host).is_none() {
+			return Err("node cannot host effects (no effect input)".to_string());
+		}
+		let ch = chain(&g.graph, host);
+		let offset = match ch.first() {
+			Some(&first) if effect_input_of(&g.graph, first).is_none() => 1,
+			_ => 0,
+		};
+		(ch.len(), offset)
+	};
+	let engine_index = match index {
+		Some(i) => i + source_offset,
+		None => len,
+	};
+	insert(p, host, engine_index, type_id)
 }
 
 /// Undoable removal of `effect` (a node in `host`'s chain): unhook both

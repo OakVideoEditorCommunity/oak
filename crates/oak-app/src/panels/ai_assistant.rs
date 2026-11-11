@@ -1393,6 +1393,346 @@ mod tests {
 	/// the in-process engine fixture every real-tool test runs against.
 	/// Returns `(adapter, project, sequence-id)`; the undo stack is reset
 	/// first so `count()` deltas measure only this test.
+	/// **T10A ⑦ — the design change has two paths and both must be one row.**
+	///
+	/// The OPP path always runs inside an undo group (`edit_begin` opens one),
+	/// so `insert` must *join* it; a direct UI-style call has no group, so
+	/// `insert` must *open* one. Either way the edit is exactly one row — the
+	/// failure modes this guards against are "joined nothing" (zero rows) and
+	/// "opened a second group" (two rows).
+	#[test]
+	fn real_insert_is_one_row_with_and_without_an_enclosing_group() {
+		use crate::oakui::{effectchain, graphops};
+		let _g = graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
+		let types = adapter.host().node_addable_effects(&clip).expect("list");
+		let type_id = types[0].type_id.clone();
+		let host = graphops::id_of(clip.parse().expect("numeric id")).expect("id");
+
+		// (a) Direct path: no enclosing group. It must go through the same
+		// effect-index mapping — a raw `insert(…, 0, …)` targets the source
+		// node (the chain includes it) and fails with `connect: no input ""`.
+		let before = oak_undo::global::count().expect("count");
+		let direct = effectchain::insert_at_effect_index(&project, host, None, &type_id)
+			.expect("direct insert");
+		assert_eq!(
+			oak_undo::global::count().expect("count"),
+			before + 1,
+			"a direct insert opens and closes its own row"
+		);
+		// The chain starts with the node feeding the first effect (footage).
+		assert_eq!(
+			real_chain(&project, &clip).last().map(String::as_str),
+			Some(direct.identity().to_string().as_str()),
+			"the direct insert really wired the chain: {:?}",
+			real_chain(&project, &clip)
+		);
+
+		// (b) OPP path: an enclosing transaction group is already open.
+		let before = oak_undo::global::count().expect("count");
+		let id = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
+			ops.node_add_effect(&json!({"clip": clip, "effect": type_id}))
+		})
+		.expect("opp insert");
+		assert_eq!(
+			oak_undo::global::count().expect("count"),
+			before + 1,
+			"joining the transaction group still yields exactly one row"
+		);
+		assert!(
+			real_chain(&project, &clip).contains(&id.as_str().unwrap_or_default().to_string()),
+			"the joined insert really wired the chain: {:?}",
+			real_chain(&project, &clip)
+		);
+	}
+
+	/// **T10A ⑧**: a node that cannot host effects is offered **no** types —
+	/// an empty list, never a panic and never the full catalogue.
+	#[test]
+	fn real_addable_effects_is_empty_for_a_node_that_cannot_host() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (adapter, _project, seq, _clip, _other) = real_clip_pair();
+
+		let listed = adapter
+			.host()
+			.node_addable_effects(&seq)
+			.expect("listing must not fail");
+		assert!(
+			listed.is_empty(),
+			"a sequence hosts no effects, so it is offered none: {listed:?}"
+		);
+	}
+
+	/// A real project with one video track carrying two **strictly
+	/// contiguous** clips (a.out == b.in), which is the seam case the
+	/// transition router has to recognise. Returns `(adapter, project,
+	/// seq_id, clip_a, clip_b)` with the clip ids already stringified.
+	fn real_clip_pair() -> (
+		HostAdapter<OppHost>,
+		crate::oakui::graphops::ProjectRef,
+		String,
+		String,
+		String,
+	) {
+		use crate::oakui::graphops;
+		let project = graphops::create_project();
+		let seq = graphops::create_sequence(&project, "Clips");
+		let media = std::env::temp_dir().join(format!("oak_t10a_{}.mp4", std::process::id()));
+		oak_codec::testmedia::write_test_clip(&media, 64, 64, 20, 10).expect("generate media");
+		let footage = graphops::import_footage(&project, &media).expect("import");
+		let a = graphops::place_footage_clip(&project, seq, footage, oak_node::track::TrackType::Video, 0, 0, 10, 0)
+			.expect("place first");
+		let b = graphops::place_footage_clip(&project, seq, footage, oak_node::track::TrackType::Video, 0, 10, 20, 0)
+			.expect("place second");
+		let host = OppHost::new();
+		host.attach_project(project.clone());
+		(
+			HostAdapter::new(host),
+			project,
+			seq.identity().to_string(),
+			a.identity().to_string(),
+			b.identity().to_string(),
+		)
+	}
+
+	/// The effect chain of a node, as identity strings (empty when the node
+	/// cannot host effects).
+	fn real_chain(project: &crate::oakui::graphops::ProjectRef, node: &str) -> Vec<String> {
+		use crate::oakui::{effectchain, graphops};
+		let id = graphops::id_of(node.parse().expect("numeric id")).expect("id");
+		let g = project.lock().unwrap_or_else(|e| e.into_inner());
+		effectchain::chain(&g.graph, id)
+			.into_iter()
+			.map(|n| n.identity().to_string())
+			.collect()
+	}
+
+	/// **T10A ①**: `node.add_effect` reaches the real engine, the node is in
+	/// the chain afterwards, the edit is **exactly one** undo row, and the
+	/// undo really detaches it.
+	#[test]
+	fn real_node_add_effect_applies_and_is_one_undo_row() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
+
+		let types = adapter.host().node_addable_effects(&clip).expect("list");
+		assert!(!types.is_empty(), "the factory must offer effect types");
+		let type_id = types[0].type_id.clone();
+
+		let before = oak_undo::global::count().expect("count");
+		let before_index = oak_undo::global::index().expect("index");
+		// `txn::run` is the production wrapper: begin → call → commit on
+		// success, begin → call → **abort** on failure. Using it here means a
+		// failing assertion can never leave an undo group open and poison the
+		// rest of the test process.
+		let result = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
+			ops.node_add_effect(&json!({"clip": clip, "effect": type_id}))
+		});
+		let id = result.expect("add_effect executes");
+
+		let new_id = id.as_str().expect("id is a string").to_string();
+		assert!(
+			real_chain(&project, &clip).contains(&new_id),
+			"the effect is really in the chain: {:?}",
+			real_chain(&project, &clip)
+		);
+		assert_eq!(
+			oak_undo::global::count().expect("count"),
+			before + 1,
+			"exactly one undo row"
+		);
+		assert_eq!(
+			oak_undo::global::index().expect("index"),
+			before_index + 1,
+			"the row is on top of the stack"
+		);
+
+		oak_undo::global::undo().expect("undo");
+		assert!(
+			!real_chain(&project, &clip).contains(&new_id),
+			"the undo really detaches the effect: {:?}",
+			real_chain(&project, &clip)
+		);
+	}
+
+	/// **T10A ②**: `index` picks the position, and omitting it appends.
+	#[test]
+	fn real_node_add_effect_honours_the_index() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
+		let types = adapter.host().node_addable_effects(&clip).expect("list");
+		let first_type = types[0].type_id.clone();
+		let second_type = types
+			.get(1)
+			.map(|t| t.type_id.clone())
+			.unwrap_or_else(|| first_type.clone());
+
+		let appended = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
+			ops.node_add_effect(&json!({"clip": clip, "effect": first_type}))
+		})
+		.expect("append");
+		let at_zero = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
+			ops.node_add_effect(&json!({"clip": clip, "effect": second_type, "index": 0}))
+		})
+		.expect("insert at 0");
+
+		let chain = real_chain(&project, &clip);
+		// `chain()` includes the node feeding the first effect (the footage),
+		// so effect index 0 is the **second** entry: `[source, first, …]`.
+		assert_eq!(
+			chain.get(1).map(String::as_str),
+			at_zero.as_str(),
+			"effect index 0 sits right after the source: {chain:?}"
+		);
+		let appended_id = appended.as_str().unwrap_or_default().to_string();
+		assert!(
+			chain.iter().any(|c| c == &appended_id),
+			"the appended one is still there: {chain:?}"
+		);
+	}
+
+	/// **T10A ③**: `side:"in"` always takes the edge path, and says so.
+	#[test]
+	fn real_add_transition_in_takes_the_edge_path() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, _seq, clip, _other) = real_clip_pair();
+
+		let before = oak_undo::global::count().expect("count");
+		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
+			ops.timeline_add_transition(&json!({
+				"clip": clip,
+				"side": "in",
+				"type": "crossdissolve",
+				"duration": {"num": 1, "den": 1},
+			}))
+		})
+		.expect("add_transition executes");
+
+		assert_eq!(
+			placed.get("placement").and_then(Value::as_str),
+			Some("edge"),
+			"the head of a clip is an edge transition: {placed}"
+		);
+		assert!(placed.get("id").is_some(), "it reports the new block: {placed}");
+		assert_eq!(
+			oak_undo::global::count().expect("count") - before,
+			1,
+			"the transition and its shader kind are one row"
+		);
+	}
+
+	/// **T10A ④**: `side:"out"` on a clip whose tail **strictly meets** the
+	/// next clip's head takes the seam path, splits the duration in half and
+	/// reports the half it actually used.
+	#[test]
+	fn real_add_transition_out_at_a_cut_takes_the_seam_path() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, _seq, clip, _other) = real_clip_pair();
+
+		let before = oak_undo::global::count().expect("count");
+		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
+			ops.timeline_add_transition(&json!({
+				"clip": clip,
+				"side": "out",
+				"type": "fade",
+				"duration": {"num": 1, "den": 1},
+			}))
+		})
+		.expect("add_transition executes");
+
+		assert_eq!(
+			placed.get("placement").and_then(Value::as_str),
+			Some("seam"),
+			"a cut is a seam: {placed}"
+		);
+		let half = placed.get("half").expect("the half is reported");
+		assert!(
+			half.get("num").and_then(Value::as_i64).is_some(),
+			"the half is a rational frame count, not the requested total: {half}"
+		);
+		assert_eq!(
+			oak_undo::global::count().expect("count") - before,
+			1,
+			"one undo row for the seam transition"
+		);
+	}
+
+	/// **T10A ⑤**: `side:"out"` on the **last** clip has no cut after it, so
+	/// it falls back to the edge path.
+	#[test]
+	fn real_add_transition_out_without_a_cut_takes_the_edge_path() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, _seq, _clip, last) = real_clip_pair();
+
+		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
+			ops.timeline_add_transition(&json!({
+				"clip": last,
+				"side": "out",
+				"type": "wipe",
+				"duration": {"num": 1, "den": 1},
+			}))
+		})
+		.expect("add_transition executes");
+
+		assert_eq!(
+			placed.get("placement").and_then(Value::as_str),
+			Some("edge"),
+			"nothing follows the last clip: {placed}"
+		);
+		// `null` rather than absent: the JSON keeps the key so a caller can
+		// tell "no split" apart from "field missing by accident".
+		assert!(
+			placed.get("half").is_some_and(Value::is_null),
+			"no split happened: {placed}"
+		);
+	}
+
+	/// **T10A ⑥**: the three refusals are actionable (they name the cause and
+	/// list the types the clip accepts), and none of them touches the project.
+	#[test]
+	fn real_effect_errors_are_actionable_and_leave_the_project_untouched() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, project, seq, clip, _other) = real_clip_pair();
+
+		let cases = [
+			// Unknown type id.
+			json!({"clip": clip, "effect": "no.such.effect"}),
+			// A node that is not a clip cannot host an effect at all.
+			json!({"clip": seq, "effect": "oak.solid_color"}),
+		];
+		for args in cases {
+			let before = oak_undo::global::count().expect("count");
+			let chain_before = real_chain(&project, &clip);
+			let err = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
+				ops.node_add_effect(&args)
+			})
+			.expect_err("this call must be refused");
+			let message = format!("{err}");
+			assert!(
+				message.contains("accepts") || message.contains("cannot host"),
+				"the error must be actionable: {message}"
+			);
+			assert_eq!(
+				oak_undo::global::count().expect("count"),
+				before,
+				"a refused call must not add an undo row"
+			);
+			assert_eq!(
+				real_chain(&project, &clip),
+				chain_before,
+				"a refused call must not touch the chain"
+			);
+		}
+	}
+
 	fn real_tool_fixture() -> (HostAdapter<OppHost>, crate::oakui::graphops::ProjectRef, String) {
 		let project = crate::oakui::graphops::create_project();
 		let seq = crate::oakui::graphops::create_sequence(&project, "Seq");

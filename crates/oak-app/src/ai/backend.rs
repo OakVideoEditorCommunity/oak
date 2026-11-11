@@ -36,8 +36,9 @@ pub use oak_ai_tools::mock::MockBackend;
 use oak_ai_tools::timecode::{Rat, TimeContext};
 use oak_ai_tools::txn::TxnOps;
 use oak_extensions::host_services::{
-	AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionReq, HostError, HostServices,
-	PlaceClipReq, SetParamReq, SplitClipReq, TrimClipReq, MoveClipReq,
+	AddEffectAtReq, AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionPlacedReq,
+	AddTransitionReq, HostError, HostServices, MoveClipReq, PlaceClipReq, SetParamReq,
+	SplitClipReq, TransitionSide, TrimClipReq,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -345,17 +346,35 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 	}
 
 	fn timeline_add_transition(&mut self, args: &Value) -> Result<Value, ToolError> {
-		let req = AddTransitionReq {
-			clip: arg(args, "clip")?.to_string(),
-			// schema `type` → host `kind`; `side` is not on the signature.
-			kind: arg(args, "type")?.to_string(),
-			duration: rat_arg(args, "duration")?,
+		let side = match arg(args, "side")? {
+			"in" => TransitionSide::In,
+			"out" => TransitionSide::Out,
+			other => {
+				return Err(ToolError::invalid_params(format!(
+					"side must be 'in' or 'out', got '{other}'"
+				)))
+			}
 		};
-		let id = self
+		let req = AddTransitionPlacedReq {
+			clip: arg(args, "clip")?.to_string(),
+			// schema `type` → host `kind` (the engine shader id).
+			kind: arg(args, "type")?.to_string(),
+			// The schema's duration is the **total**; the host splits it for a
+			// seam placement and reports the half it actually used.
+			duration: rat_arg(args, "duration")?,
+			side,
+		};
+		let placed = self
 			.host
-			.timeline_add_transition(req, self.txn.as_deref())
+			.timeline_add_transition_placed(req, self.txn.as_deref())
 			.map_err(map_host)?;
-		Ok(json!(id))
+		// Report where it landed: an edge and a seam transition are not the
+		// same edit, and the caller must never have to guess which it got.
+		Ok(json!({
+			"id": placed.id,
+			"placement": placed.placement,
+			"half": placed.half,
+		}))
 	}
 
 	fn timeline_add_marker(&mut self, args: &Value) -> Result<Value, ToolError> {
@@ -373,15 +392,22 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 	// --- nodes ---------------------------------------------------------
 
 	fn node_add_effect(&mut self, args: &Value) -> Result<Value, ToolError> {
-		let req = AddEffectReq {
+		let index = match args.get("index") {
+			None | Some(Value::Null) => None,
+			Some(v) => Some(v.as_u64().ok_or_else(|| {
+				ToolError::invalid_params("field 'index' must be an integer >= 0")
+			})? as usize),
+		};
+		let req = AddEffectAtReq {
 			target: arg(args, "clip")?.to_string(),
-			// schema `effect` → host `type_id`; `index` not on signature.
+			// schema `effect` → host `type_id`.
 			type_id: arg(args, "effect")?.to_string(),
+			index,
 			params: args.get("params").cloned().unwrap_or(Value::Null),
 		};
 		let id = self
 			.host
-			.node_add_effect(req, self.txn.as_deref())
+			.node_add_effect_at(req, self.txn.as_deref())
 			.map_err(map_host)?;
 		Ok(json!(id))
 	}

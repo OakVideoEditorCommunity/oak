@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
 use oak_extensions::host_services::{
-	AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionReq, AudioLevelsRequest,
+	AddEffectAtReq, AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionPlacedReq,
+	AddTransitionReq, AudioLevelsRequest, EffectTypeInfo, TransitionPlaced, TransitionSide,
 	AudioLevelsResult, ClipInfo, DeleteClipReq, EntityId, ExportJob, ExportRequest, FootageInfo,
 	FrameRequest, FrameResult, HostError, HostServices, MediaProbe, MoveClipReq, NodeTypeInfo,
 	ParamInfo, PlaceClipReq, ProjectInfo, Rational, SequenceInfo, SequenceSettings,
@@ -114,6 +115,52 @@ impl OppHost {
 
 	/// The open transaction's token, or the protocol error for a missing /
 	/// foreign token (protocol §7.2: `NOT_IN_TRANSACTION` / `TRANSACTION_CONFLICT`).
+	/// Turns `effectchain::insert`'s refusal into an actionable error: the
+	/// model does not know the type catalogue, so a bare "unknown type" would
+	/// make it guess again next round. Every branch carries the addable list,
+	/// already filtered by the clip's media kind.
+	fn effect_error(
+		&self,
+		p: &ProjectRef,
+		host: NodeId,
+		type_id: &str,
+		reason: &str,
+	) -> HostError {
+		let available = {
+			let g = p.lock().unwrap_or_else(|e| e.into_inner());
+			let mut ids: Vec<String> = effectchain::addable_effects_for(&g.graph, host)
+				.into_iter()
+				.map(|e| e.type_id)
+				.collect();
+			let total = ids.len();
+			ids.truncate(24);
+			if total > ids.len() {
+				ids.push(format!("… ({total} total)"));
+			}
+			ids.join(", ")
+		};
+		let lower = reason.to_lowercase();
+		let message = if lower.contains("unknown node type") {
+			format!(
+				"unknown effect type \"{type_id}\". Types this clip accepts: {available}. \
+				 Pass one of those as `effect`."
+			)
+		} else if lower.contains("cannot host") || lower.contains("no effect input") {
+			format!(
+				"this node cannot host effects (it has no effect input); add the effect to a \
+				 clip instead. Types a clip accepts: {available}"
+			)
+		} else if lower.contains("media") || lower.contains("kind") {
+			format!(
+				"this effect does not match the clip's media kind (a video effect cannot \
+				 chain onto an audio clip, and vice versa). Types this clip accepts: {available}"
+			)
+		} else {
+			format!("the engine refused the effect: {reason}. Types this clip accepts: {available}")
+		};
+		HostError::new(INVALID_PARAMS, message)
+	}
+
 	fn require_txn(&self, txn: Option<&str>) -> Result<(), HostError> {
 		let t = self.txn.lock().unwrap_or_else(|e| e.into_inner());
 		match (txn, t.holder.as_deref()) {
@@ -933,6 +980,126 @@ impl HostServices for OppHost {
 		let p = self.project()?;
 		let seq = self.sequence_of(&p, &sequence.cloned())?;
 		self.settings_of(&p, seq)
+	}
+
+	// ---- effect/transition edits (T10A; added after the frozen 22) ------
+
+	fn node_addable_effects(&self, clip: &EntityId) -> Result<Vec<EffectTypeInfo>, HostError> {
+		let p = self.project()?;
+		let host = parse_id(clip)?;
+		let g = p.lock().unwrap_or_else(|e| e.into_inner());
+		if g.graph.get(host).is_none() {
+			return Err(HostError::entity_not_found(clip));
+		}
+		// Filtered by the host's own media kind: the list a caller gets is
+		// exactly the set `insert` would accept.
+		Ok(effectchain::addable_effects_for(&g.graph, host)
+			.into_iter()
+			.map(|e| EffectTypeInfo {
+				type_id: e.type_id,
+				name: e.name,
+			})
+			.collect())
+	}
+
+	fn node_add_effect_at(&self, req: AddEffectAtReq, txn: Option<&str>) -> Result<EntityId, HostError> {
+		self.require_txn(txn)?;
+		let p = self.project()?;
+		let host = parse_id(&req.target)?;
+		// `effectchain::insert` owns the whole edit: it validates the host,
+		// the type and the media kind, and wraps its commands in one
+		// `grouped("Add Effect")` row. The caller must NOT push anything,
+		// must not pre-apply, and must not wrap it — that is the T9.2
+		// double-row trap in reverse.
+		match effectchain::insert_at_effect_index(&p, host, req.index, &req.type_id) {
+			Ok(id) => Ok(id.identity().to_string()),
+			Err(reason) => Err(self.effect_error(&p, host, &req.type_id, &reason)),
+		}
+	}
+
+	fn timeline_add_transition_placed(
+		&self,
+		req: AddTransitionPlacedReq,
+		txn: Option<&str>,
+	) -> Result<TransitionPlaced, HostError> {
+		self.require_txn(txn)?;
+		let p = self.project()?;
+		let clip = parse_id(&req.clip)?;
+		let seq = self.first_sequence(&p)?;
+		let tb = self.timebase(&p, seq)?;
+		let total = to_ts(&req.duration, tb)?;
+		if total <= 0 {
+			return Err(HostError::new(
+				INVALID_PARAMS,
+				"duration must be positive; give the transition's total length, e.g. {\"num\":1,\"den\":1} for one second",
+			));
+		}
+		let kind_index = graphops::transition_kind_index(&req.kind).ok_or_else(|| {
+			HostError::new(
+				INVALID_PARAMS,
+				format!(
+					"unknown transition type '{}' (expected crossdissolve|fade|wipe|slide)",
+					req.kind
+				),
+			)
+		})?;
+
+		// The router: `in` is always the clip's own head; `out` becomes a seam
+		// transition only when the next clip on the same track starts exactly
+		// where this one ends (no guessing — the test is strict equality).
+		let seam_next = match req.side {
+			TransitionSide::In => None,
+			TransitionSide::Out => {
+				let g = p.lock().unwrap_or_else(|e| e.into_inner());
+				graphops::next_contiguous_clip(&g.graph, clip)
+			}
+		};
+
+		match (req.side, seam_next) {
+			(TransitionSide::Out, Some(next)) => {
+				let half_frames = total / 2;
+				if half_frames <= 0 {
+					return Err(HostError::new(
+						INVALID_PARAMS,
+						"a seam transition needs at least two frames of total duration \
+						 (the duration is split over both sides)",
+					));
+				}
+				let half = graphops::ts_to_rational(half_frames, tb);
+				let id = graphops::add_transition_at_seam_typed(
+					&p,
+					clip,
+					next,
+					half,
+					Some(kind_index),
+				)
+				.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
+				Ok(TransitionPlaced {
+					id: id.identity().to_string(),
+					placement: "seam".to_string(),
+					// An odd frame count cannot split; the value reported is
+					// the one the engine actually used, never the requested one.
+					half: Some(host_rational(&half)),
+				})
+			}
+			(side, _) => {
+				let start_edge = matches!(side, TransitionSide::In);
+				let length = graphops::ts_to_rational(total, tb);
+				let id = graphops::add_transition_at_edge_typed(
+					&p,
+					clip,
+					start_edge,
+					length,
+					Some(kind_index),
+				)
+				.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
+				Ok(TransitionPlaced {
+					id: id.identity().to_string(),
+					placement: "edge".to_string(),
+					half: None,
+				})
+			}
+		}
 	}
 
 	fn sequence_set_format(

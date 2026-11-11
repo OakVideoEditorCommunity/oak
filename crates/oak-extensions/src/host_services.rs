@@ -196,6 +196,72 @@ pub struct AddEffectReq {
 	pub params: Value,
 }
 
+/// Which edge of a clip a transition was requested for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TransitionSide {
+	/// The clip's head.
+	In,
+	/// The clip's tail.
+	Out,
+}
+
+/// Where a transition actually landed. Reported back so the caller never has
+/// to guess (a seam transition and an edge transition look different on the
+/// timeline, and only a seam one consumes half the duration per side).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransitionPlaced {
+	/// The transition block's id.
+	pub id: EntityId,
+	/// `"edge"` or `"seam"`.
+	pub placement: String,
+	/// For a seam placement: the per-side half actually used (the total is
+	/// `2 × half`, which is `duration` rounded down to an even frame count
+	/// when the frame rate cannot split it exactly).
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub half: Option<Rational>,
+}
+
+/// `timeline.add_transition`, with the side and the total duration the
+/// frozen schema carries (`kind` is the engine shader id: `crossdissolve`,
+/// `fade`, `wipe`, `slide`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AddTransitionPlacedReq {
+	/// Clip the transition is requested on.
+	pub clip: EntityId,
+	/// Engine shader id.
+	pub kind: String,
+	/// **Total** duration on the sequence timeline.
+	pub duration: Rational,
+	/// Which edge the request names.
+	pub side: TransitionSide,
+}
+
+/// `node.add_effect`, with the chain position the frozen schema carries
+/// (`None` = append).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AddEffectAtReq {
+	/// The host clip.
+	pub target: EntityId,
+	/// Node type id (or OpenFX identifier).
+	pub type_id: String,
+	/// Chain position; `None` appends.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub index: Option<usize>,
+	/// Unused by the frozen schema today; carried for parity.
+	#[serde(default)]
+	pub params: Value,
+}
+
+/// One addable effect type, for actionable errors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EffectTypeInfo {
+	/// The id to pass as `effect`.
+	pub type_id: String,
+	/// Display name.
+	pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetParamReq {
 	pub node: EntityId,
@@ -458,6 +524,25 @@ pub trait HostServices: Send + Sync {
 		req: SetSequenceFormatReq,
 		txn: Option<&str>,
 	) -> Result<SequenceSettings, HostError>;
+
+	// ---- effect/transition edits (T10A; added after the frozen 22) -----
+	/// Adds an effect to a clip's chain and reports where it landed (the
+	/// edit is one undo row; `index` `None` appends, out-of-range clamps).
+	fn node_add_effect_at(&self, req: AddEffectAtReq, txn: Option<&str>)
+	-> Result<EntityId, HostError>;
+	/// Adds a transition and reports **where** it landed: `side:"in"` and a
+	/// non-contiguous `side:"out"` take the edge path; a `side:"out"` whose
+	/// clip is strictly adjacent to the next clip on the same track takes
+	/// the seam path, because that is what a user asking for a dissolve at a
+	/// cut means (the frozen schema cannot name a seam). One undo row.
+	fn timeline_add_transition_placed(
+		&self,
+		req: AddTransitionPlacedReq,
+		txn: Option<&str>,
+	) -> Result<TransitionPlaced, HostError>;
+	/// The effect type ids addable to `clip`, already filtered by the clip's
+	/// media kind (a video effect cannot chain onto an audio clip).
+	fn node_addable_effects(&self, clip: &EntityId) -> Result<Vec<EffectTypeInfo>, HostError>;
 
 	// ---- events.* (event-source subscription) ----
 	/// Returns the granted subset (§7.2: events need read-class caps).
