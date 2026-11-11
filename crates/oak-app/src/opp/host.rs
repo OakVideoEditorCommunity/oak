@@ -1128,7 +1128,13 @@ mod tests {
 		let err2 = host.edit_commit("not-my-token").unwrap_err();
 		assert_eq!(err2.code, oak_extensions::protocol::TRANSACTION_CONFLICT);
 		host.edit_commit(&a).unwrap();
-		// After release a fresh begin works.
-		let _b = host.edit_begin("b").unwrap();
+		// After release a fresh begin works. Close it again before the test
+		// ends: the token opens oakundo's *process-wide* group slot, so
+		// leaving it open would make every later `group_begin` in this test
+		// process fail with `undo: call not valid in current state`
+		// (measured: this was the deterministic leak behind the undo failures
+		// in `panels::ai_assistant` and `panels::history`).
+		let b = host.edit_begin("b").unwrap();
+		host.edit_abort(&b).unwrap();
 	}
 }

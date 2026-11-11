@@ -528,6 +528,41 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 // Chain edits (each is ONE undo row)
 // ---------------------------------------------------------------------------
 
+/// Aborts an undo group if the closure unwinds before it was closed.
+///
+/// The open group lives in one process-wide slot (`oak_undo`) with no
+/// unwind guard: a panic between begin and end/abort leaves it filled and
+/// breaks every later `group_begin` in the process. This guard is that
+/// missing unwind safety for the [`grouped`] funnel.
+///
+/// Who guarantees what (measured, see the acceptance note):
+/// * **Correctness of the committed path** rests on `group_end()`, which
+///   takes the process-wide slot *first* (`g.take()`) and only then pushes
+///   the row — so after a successful commit an extra abort can only find an
+///   empty slot and returns `Error::State`, which is swallowed here.
+/// * **Disarming is therefore defensive, not load-bearing**: the mutation is
+///   only an early-out that keeps a committed edit from taking the
+///   error-swallowing path at all.
+struct GroupGuard {
+	armed: bool,
+}
+
+impl Drop for GroupGuard {
+	fn drop(&mut self) {
+		if self.armed {
+			// Drop must never unwind: a panic escaping here would be a
+			// double panic and abort the process, losing the user's
+			// unsaved work — strictly worse than the leak this guard
+			// prevents. `group_abort` replays the group's child commands
+			// through `undo_now`, which is not proven panic-free, so the
+			// call is contained rather than trusted.
+			let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+				let _ = oak_undo::global::group_abort();
+			}));
+		}
+	}
+}
+
 /// Run `f` inside an undo group: every push redoes eagerly (so a later
 /// child's construction and validation see the post-edit graph — the
 /// facade's `oakengine_undo_group_begin` flow), and the group closes as
@@ -535,13 +570,22 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 /// error.
 fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 	oak_undo::global::group_begin(name).map_err(|e| e.to_string())?;
+	// `oak_undo`'s open group is one process-wide slot with no unwind
+	// guard, so a panic inside `f` (a failed `unwrap` in a caller, an
+	// assertion in a test) would leave the group open and make *every*
+	// later `group_begin` in the process fail with `Error::State`. The
+	// guard aborts on the way out of a panic; the explicit paths below
+	// disarm it.
+	let mut guard = GroupGuard { armed: true };
 	match f() {
 		Ok(v) => {
 			oak_undo::global::group_end().map_err(|e| e.to_string())?;
+			guard.armed = false;
 			Ok(v)
 		}
 		Err(e) => {
 			let _ = oak_undo::global::group_abort();
+			guard.armed = false;
 			Err(e)
 		}
 	}
