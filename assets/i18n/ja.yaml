@@ -150,6 +150,8 @@
 "panel.ai_assistant": "AIアシスタント"
 "ai.placeholder": "メッセージを入力…"
 "ai.send": "送信"
+"ai.copy": "コピー"
+"ai.copied": "コピーしました"
 "ai.busy": "考え中…"
 "ai.empty": "会話を始めましょう"
 "ai.not_configured": "OAK_AI_API_KEY が未設定です — oak の起動前に環境変数を設定してください"

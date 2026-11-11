@@ -150,6 +150,8 @@
 "panel.ai_assistant": "ИИ-ассистент"
 "ai.placeholder": "Введите сообщение…"
 "ai.send": "Отправить"
+"ai.copy": "Копировать"
+"ai.copied": "Скопировано"
 "ai.busy": "Думаю…"
 "ai.empty": "Начните диалог"
 "ai.not_configured": "OAK_AI_API_KEY не задан — экспортируйте переменную перед запуском oak"

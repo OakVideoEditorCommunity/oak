@@ -150,6 +150,8 @@
 "panel.ai_assistant": "AI 助手"
 "ai.placeholder": "输入消息…"
 "ai.send": "发送"
+"ai.copy": "复制"
+"ai.copied": "已复制"
 "ai.busy": "正在思考…"
 "ai.empty": "开始一段对话吧"
 "ai.not_configured": "未配置 OAK_AI_API_KEY：请在启动 oak 前设置该环境变量"

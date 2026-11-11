@@ -150,6 +150,8 @@
 "panel.ai_assistant": "KI-Assistente"
 "ai.placeholder": "Nachricht eingeben…"
 "ai.send": "Senden"
+"ai.copy": "Kopieren"
+"ai.copied": "Kopiert"
 "ai.busy": "Denke nach…"
 "ai.empty": "Beginnen Sie ein Gespräch"
 "ai.not_configured": "OAK_AI_API_KEY ist nicht gesetzt — exportieren Sie die Variable vor dem Oak-Start"

@@ -150,6 +150,8 @@
 "panel.ai_assistant": "AI Assistant"
 "ai.placeholder": "Type a message…"
 "ai.send": "Send"
+"ai.copy": "Copy"
+"ai.copied": "Copied"
 "ai.busy": "Thinking…"
 "ai.empty": "Start a conversation"
 "ai.not_configured": "OAK_AI_API_KEY is not set — export it before starting oak"

@@ -33,9 +33,10 @@ use gpui_kit::base::input::InputState;
 use gpui_kit::colors::{Colors, DefaultColors};
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
 use gpui_kit::component::input::InputEvent;
+use gpui_kit::component::text::TextView;
 use gpui_kit::{
-	div, prelude::*, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
-	MouseButton, Render, Window,
+	div, prelude::*, AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, EventEmitter,
+	FocusHandle, Focusable, Render, Window,
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,166 @@ pub fn outcome_i18n_key(outcome: &str) -> &'static str {
 /// and needs a key plus a non-empty draft.
 pub fn can_send(busy: bool, configured: bool, draft_nonempty: bool) -> bool {
 	!busy && configured && draft_nonempty
+}
+
+/// Strips Markdown markers so a bubble can be copied as readable plain text.
+///
+/// This is the only place the panel parses Markdown by hand: rendering is
+/// `TextView::markdown`'s job, and the copy button only needs the text a
+/// reader would see — tool names stay bare (`project.open`, not
+/// ``` `project.open` ```), fences/link syntax disappear, list and heading
+/// markers go. Unknown or unbalanced syntax degrades to the literal text.
+pub fn markdown_to_plain(source: &str) -> String {
+	let mut out: Vec<String> = Vec::new();
+	let mut fence: Option<String> = None;
+
+	for line in source.lines() {
+		let trimmed = line.trim_start();
+		if let Some(open) = fence.as_deref() {
+			// Inside a fence: keep the body verbatim, close on the same
+			// fence marker (``` or ~~~, any length >= 3).
+			if trimmed.starts_with(open) {
+				fence = None;
+			} else {
+				out.push(line.to_string());
+			}
+			continue;
+		}
+		if let Some(marker) = fence_marker(trimmed) {
+			fence = Some(marker);
+			continue;
+		}
+		out.push(strip_inline(&strip_block_prefix(trimmed)));
+	}
+
+	// Collapse runs of blank lines; keep inner single blanks as paragraph
+	// breaks, and never return leading/trailing blank lines.
+	let mut cleaned: Vec<String> = Vec::with_capacity(out.len());
+	for line in out {
+		if line.trim().is_empty() {
+			if cleaned.last().is_some_and(|prev: &String| !prev.trim().is_empty()) {
+				cleaned.push(String::new());
+			}
+		} else {
+			cleaned.push(line);
+		}
+	}
+	while cleaned.last().is_some_and(|last| last.trim().is_empty()) {
+		cleaned.pop();
+	}
+	cleaned.join("\n")
+}
+
+/// The fence marker (` ``` ` or ` ~~~ `, at least three) that starts a code
+/// block, if this line is one.
+fn fence_marker(trimmed: &str) -> Option<String> {
+	for ch in ['`', '~'] {
+		let count = trimmed.chars().take_while(|c| *c == ch).count();
+		if count >= 3 {
+			return Some(ch.to_string().repeat(count));
+		}
+	}
+	None
+}
+
+/// Drops ATX heading markers (`#`…`######` plus one space) and list markers
+/// (`-`, `*`, `+`, `1.`, `1)`).
+fn strip_block_prefix(trimmed: &str) -> &str {
+	let hashes = trimmed.chars().take_while(|c| *c == '#').count();
+	if (1..=6).contains(&hashes) {
+		let rest = &trimmed[hashes..];
+		if let Some(stripped) = rest.strip_prefix(' ') {
+			return stripped;
+		}
+	}
+	for bullet in ["- ", "* ", "+ "] {
+		if let Some(stripped) = trimmed.strip_prefix(bullet) {
+			return stripped;
+		}
+	}
+	// Ordered list: digits followed by `.` or `)` and a space.
+	let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
+	if digits > 0 && digits <= 3 {
+		let rest = &trimmed[digits..];
+		if let Some(stripped) = rest
+			.strip_prefix(". ")
+			.or_else(|| rest.strip_prefix(") "))
+		{
+			return stripped;
+		}
+	}
+	trimmed
+}
+
+/// Removes inline emphasis/code/link markers from one line, keeping the text.
+fn strip_inline(line: &str) -> String {
+	let mut out = String::with_capacity(line.len());
+	let mut chars = line.char_indices().peekable();
+	while let Some((ix, ch)) = chars.next() {
+		match ch {
+			'`' => {
+				// Drop the opening run, keep the code text, drop the closer.
+				let run = 1 + line[ix + 1..].chars().take_while(|c| *c == '`').count();
+				let opener_rest = &line[ix + run..];
+				let closer = "`".repeat(run);
+				match opener_rest.find(&closer) {
+					Some(end) => {
+						out.push_str(&opener_rest[..end]);
+						let consumed = ix + run + end + run;
+						while let Some((next_ix, _)) = chars.peek() {
+							if *next_ix < consumed {
+								chars.next();
+							} else {
+								break;
+							}
+						}
+					}
+					// Unbalanced: keep the literal backticks.
+					None => out.push_str(&"`".repeat(run)),
+				}
+			}
+			'*' | '_' | '~' => {
+				// Strikethrough needs `~~`; bold/italic markers just vanish.
+				let run = 1 + line[ix + 1..].chars().take_while(|c| *c == ch).count();
+				let keep = if ch == '~' && run == 1 { "~" } else { "" };
+				out.push_str(keep);
+				for _ in 1..run {
+					chars.next();
+				}
+			}
+			'[' => {
+				// `[label](url)` → `label`; a bare `[` stays literal.
+				// `consumed` counts the WHOLE pattern, so the iterator is
+				// advanced by the same amount that was skipped — deriving
+				// indices from the tail (`find` offsets relative to `rest`)
+				// mis-shifted and left `url)` in the output.
+				let rest = &line[ix + 1..];
+				match (rest.find(']'), rest.find("](")) {
+					(Some(close), Some(open_paren)) if close == open_paren => {
+						let label = &rest[..close];
+						let after = &rest[close..];
+						match after.find(')') {
+							Some(paren_close) => {
+								out.push_str(label);
+								let consumed = ix + 1 + (close + 1) + paren_close + 1;
+								while let Some((next_ix, _)) = chars.peek() {
+									if *next_ix < consumed {
+										chars.next();
+									} else {
+										break;
+									}
+								}
+							}
+							None => out.push('['),
+						}
+					}
+					_ => out.push('['),
+				}
+			}
+			_ => out.push(ch),
+		}
+	}
+	out
 }
 
 /// Appends a finished run to the transcript: tool calls first (in call
@@ -143,6 +304,8 @@ pub struct AiAssistantPanel<E: AppEngine> {
 	configured: bool,
 	/// The live conversation, moved into a run and handed back after.
 	agent: Option<Agent<UreqClient, MockBackend>>,
+	/// The bubble index whose 「已复制」 confirmation is showing.
+	copied: Option<usize>,
 }
 
 impl<E: AppEngine> AiAssistantPanel<E> {
@@ -167,6 +330,7 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 			error: None,
 			configured: AiConfig::from_env().is_ok(),
 			agent: None,
+			copied: None,
 		}
 	}
 
@@ -229,6 +393,24 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 		}
 		cx.notify();
 	}
+
+	/// Shows the 「已复制」 confirmation on `index` for a moment, then clears
+	/// it on the background executor so the button label returns on its own.
+	fn mark_copied(&mut self, index: usize, cx: &mut Context<Self>) {
+		self.copied = Some(index);
+		cx.notify();
+		let executor = cx.background_executor().clone();
+		cx.spawn(async move |this, cx| {
+			executor
+				.timer(std::time::Duration::from_millis(1400))
+				.await;
+			let _ = this.update(cx, |this, cx| {
+				this.copied = None;
+				cx.notify();
+			});
+		})
+		.detach();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -266,26 +448,86 @@ fn status_strip(
 		.child(body)
 }
 
+/// The 「复制」 button: writes the bubble's plain text to the system
+/// clipboard and flashes 「已复制」. Markdown bubbles copy through
+/// [`markdown_to_plain`], so a reader gets `project.open`, not
+/// ``` `project.open` ```.
+fn copy_button<E: AppEngine>(
+	index: usize,
+	plain: String,
+	colors: &Colors,
+	copied: bool,
+	panel: Entity<AiAssistantPanel<E>>,
+) -> AnyElement {
+	div()
+		.id(("ai-copy", index))
+		.px_2()
+		.py_1()
+		.rounded_md()
+		.text_xs()
+		.text_color(if copied { colors.text } else { colors.disabled })
+		.child(if copied {
+			crate::i18n::tr("ai.copied")
+		} else {
+			crate::i18n::tr("ai.copy")
+		})
+		.on_click(move |_: &ClickEvent, _window, cx| {
+			cx.write_to_clipboard(ClipboardItem::new_string(plain.clone()));
+			panel.update(cx, |this, cx| this.mark_copied(index, cx));
+		})
+		.into_any_element()
+}
+
 /// One transcript bubble, laid out by role.
-fn render_bubble(bubble: &Bubble, colors: &Colors) -> gpui_kit::Div {
+///
+/// User and assistant bodies render through `TextView::markdown` — GFM
+/// Markdown plus native drag-selection and `ctrl-c`/`ctrl-a` (gpui-base's
+/// `TextView`, with the copy landing on the clipboard at
+/// `text_view.rs:731`) — so a reply's `**bold**`, headings, lists and
+/// fenced code show as formatting and every word stays selectable.
+fn render_bubble<E: AppEngine>(
+	index: usize,
+	bubble: &Bubble,
+	colors: &Colors,
+	copied: bool,
+	panel: Entity<AiAssistantPanel<E>>,
+) -> AnyElement {
 	match bubble {
 		Bubble::User(text) => div()
 			.flex()
 			.justify_end()
 			.child(
 				div()
+					.flex()
+					.flex_col()
+					.gap_1()
 					.max_w_80()
 					.px_3()
 					.py_2()
 					.rounded_xl()
 					.bg(colors.container)
 					.text_color(colors.text)
-					.child(text.clone()),
-			),
+					.child(
+						TextView::markdown(("ai-md-user", index), text.clone()).selectable(true),
+					)
+					.child(
+						div().flex().justify_end().child(copy_button::<E>(
+							index,
+							markdown_to_plain(text),
+							colors,
+							copied,
+							panel,
+						)),
+					),
+			)
+			.into_any_element(),
 		Bubble::Assistant(text) => div()
 			.flex()
 			.child(
 				div()
+					.flex()
+					.flex_col()
+					.gap_1()
 					.max_w_80()
 					.px_3()
 					.py_2()
@@ -293,8 +535,21 @@ fn render_bubble(bubble: &Bubble, colors: &Colors) -> gpui_kit::Div {
 					.border_1()
 					.border_color(colors.border)
 					.text_color(colors.text)
-					.child(text.clone()),
-			),
+					.child(
+						TextView::markdown(("ai-md-assistant", index), text.clone())
+							.selectable(true),
+					)
+					.child(
+						div().flex().justify_end().child(copy_button::<E>(
+							index,
+							markdown_to_plain(text),
+							colors,
+							copied,
+							panel,
+						)),
+					),
+			)
+			.into_any_element(),
 		Bubble::Tool {
 			name,
 			outcome,
@@ -317,7 +572,15 @@ fn render_bubble(bubble: &Bubble, colors: &Colors) -> gpui_kit::Div {
 					.child(name.clone()),
 			)
 			.child(div().child(crate::i18n::tr(outcome_i18n_key(outcome))))
-			.child(div().truncate().child(detail.clone())),
+			.child(div().truncate().child(detail.clone()))
+			.child(copy_button::<E>(
+				index,
+				format!("{name}\n{detail}"),
+				colors,
+				copied,
+				panel,
+			))
+			.into_any_element(),
 		Bubble::System(text) => div()
 			.flex()
 			.justify_center()
@@ -328,7 +591,8 @@ fn render_bubble(bubble: &Bubble, colors: &Colors) -> gpui_kit::Div {
 					.text_xs()
 					.text_color(colors.disabled)
 					.child(text.clone()),
-			),
+			)
+			.into_any_element(),
 	}
 }
 
@@ -346,18 +610,31 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 		let enabled = can_send(busy, configured, draft_nonempty);
 		let this = cx.entity();
 
-		let bubbles: Vec<_> = if self.bubbles.is_empty() {
+		let bubbles: Vec<AnyElement> = if self.bubbles.is_empty() {
 			vec![div()
 				.flex()
 				.items_center()
 				.justify_center()
 				.py_8()
 				.text_color(colors.disabled)
-				.child(crate::i18n::tr("ai.empty").to_owned())]
+				.child(crate::i18n::tr("ai.empty").to_owned())
+				.into_any_element()]
 		} else {
-			self.bubbles
+			let snapshot = self.bubbles.clone();
+			let copied = self.copied;
+			let panel = cx.entity();
+			snapshot
 				.iter()
-				.map(|bubble| render_bubble(bubble, &colors))
+				.enumerate()
+				.map(|(index, bubble)| {
+					render_bubble::<E>(
+						index,
+						bubble,
+						&colors,
+						copied == Some(index),
+						panel.clone(),
+					)
+				})
 				.collect()
 		};
 
@@ -378,13 +655,11 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 					.px_3()
 					.py_2()
 					.overflow_y_scroll()
-					// Clicking the transcript claims focus for the panel;
-					// the input row below must keep its own focus, or the
-					// root handler would steal every keystroke back.
-					.on_mouse_down(MouseButton::Left, {
-						let focus_handle = self.focus_handle.clone();
-						move |_, window, cx| focus_handle.focus(window, cx)
-					})
+					// No `on_mouse_down` here on purpose: claiming the panel's
+					// focus handle on every click bubbles up and steals the
+					// `TextView`'s focus mid-drag, which kills text selection
+					// (and would eat the composer's keystrokes the same way).
+					// Bubbles and the composer own their own focus handles.
 					.children(bubbles),
 			)
 			.child(
@@ -541,6 +816,68 @@ mod tests {
 		);
 	}
 
+	/// Inline emphasis and code markers disappear; the words stay.
+	#[test]
+	fn inline_markers_are_stripped_for_the_clipboard() {
+		assert_eq!(
+			markdown_to_plain("**Project & Media**"),
+			"Project & Media"
+		);
+		assert_eq!(
+			markdown_to_plain("call `project.open` then `project.save`"),
+			"call project.open then project.save"
+		);
+		assert_eq!(markdown_to_plain("*italic* and __bold__"), "italic and bold");
+		assert_eq!(markdown_to_plain("~~gone~~ now"), "gone now");
+	}
+
+	/// Block markers (headings, bullets, ordered items) are dropped.
+	#[test]
+	fn block_markers_are_stripped_for_the_clipboard() {
+		assert_eq!(markdown_to_plain("## Effects & Nodes"), "Effects & Nodes");
+		assert_eq!(markdown_to_plain("- `media.probe` — inspect"), "media.probe — inspect");
+		assert_eq!(markdown_to_plain("1. first\n2) second"), "first\nsecond");
+	}
+
+	/// A fenced block keeps its body verbatim and loses both fences.
+	#[test]
+	fn fenced_code_keeps_body_and_drops_the_fence() {
+		assert_eq!(
+			markdown_to_plain("before\n```rust\nlet x = 1;\n```\nafter"),
+			"before\nlet x = 1;\nafter"
+		);
+		// Tildes work the same way, and markers inside stay untouched.
+		assert_eq!(
+			markdown_to_plain("~~~\n**not bold**\n~~~"),
+			"**not bold**"
+		);
+	}
+
+	/// Links degrade to their label; the URL is not copied.
+	#[test]
+	fn links_degrade_to_their_label() {
+		assert_eq!(
+			markdown_to_plain("see [the docs](https://example.com/x)"),
+			"see the docs"
+		);
+	}
+
+	/// An empty reply copies as an empty string, not a panic.
+	#[test]
+	fn empty_input_copies_as_empty() {
+		assert_eq!(markdown_to_plain(""), "");
+		assert_eq!(markdown_to_plain("\n\n   \n"), "");
+	}
+
+	/// Unbalanced markers stay literal and blank runs collapse.
+	#[test]
+	fn malformed_markdown_degrades_to_literal_text() {
+		assert_eq!(markdown_to_plain("**unclosed"), "unclosed");
+		assert_eq!(markdown_to_plain("a `tick"), "a `tick");
+		assert_eq!(markdown_to_plain("a [bracket"), "a [bracket");
+		assert_eq!(markdown_to_plain("a\n\n\n\nb"), "a\n\nb");
+	}
+
 	/// Static check: every `ai.*` key the panel renders exists in all eight
 	/// shipped locales (a missing key would render as the raw key).
 	#[test]
@@ -555,11 +892,13 @@ mod tests {
 			("ru", include_str!("../../../../assets/i18n/ru.yaml")),
 			("ja", include_str!("../../../../assets/i18n/ja.yaml")),
 		];
-		const KEYS: [&str; 17] = [
+		const KEYS: [&str; 19] = [
 			"menu.window.ai_assistant",
 			"panel.ai_assistant",
 			"ai.placeholder",
 			"ai.send",
+			"ai.copy",
+			"ai.copied",
 			"ai.busy",
 			"ai.empty",
 			"ai.not_configured",

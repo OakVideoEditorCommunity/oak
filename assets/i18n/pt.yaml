@@ -150,6 +150,8 @@
 "panel.ai_assistant": "Assistente de IA"
 "ai.placeholder": "Digite uma mensagem…"
 "ai.send": "Enviar"
+"ai.copy": "Copiar"
+"ai.copied": "Copiado"
 "ai.busy": "Pensando…"
 "ai.empty": "Inicie uma conversa"
 "ai.not_configured": "OAK_AI_API_KEY não está definido — exporte-o antes de iniciar o oak"
