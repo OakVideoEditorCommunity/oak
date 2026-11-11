@@ -486,7 +486,12 @@ fn device_names(output: bool) -> Vec<String> {
 		return Vec::new();
 	};
 	devices
-		.filter_map(|d| d.id().ok().map(|id| id.id().to_string()))
+		.filter_map(|device| {
+			device
+				.description()
+				.ok()
+				.map(|description| description.name().to_string())
+		})
 		.collect()
 }
 
