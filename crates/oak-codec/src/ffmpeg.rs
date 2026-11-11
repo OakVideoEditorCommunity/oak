@@ -2632,6 +2632,70 @@ fn apply_sws_output_colorspace(scaler: &mut scaling::Context, params: &EncodingP
 	}
 }
 
+/// Hardware encoder implementations to try before the codec's default
+/// software encoder. VAAPI encoding is intentionally absent: the export
+/// pipeline currently supplies CPU frames and has no VAAPI upload chain.
+fn hardware_video_encoder_names(export_codec: i32) -> &'static [&'static str] {
+	#[cfg(target_os = "macos")]
+	{
+		match export_codec {
+			1 => &["h264_videotoolbox"],
+			3 => &["hevc_videotoolbox"],
+			_ => &[],
+		}
+	}
+	#[cfg(any(target_os = "linux", target_os = "windows"))]
+	{
+		match export_codec {
+			1 => &["h264_nvenc", "h264_qsv", "h264_amf"],
+			3 => &["hevc_nvenc", "hevc_qsv", "hevc_amf"],
+			18 => &["av1_nvenc", "av1_qsv", "av1_amf"],
+			_ => &[],
+		}
+	}
+	#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+	{
+		let _ = export_codec;
+		&[]
+	}
+}
+
+/// Hardware candidates in platform priority order, followed by the original
+/// default encoder as the software fallback. H.264 RGB and non-video codecs
+/// have no hardware candidates.
+fn video_encoder_candidates(
+	export_codec: i32,
+	codec_id: ffmpeg::codec::Id,
+) -> Vec<ffmpeg::Codec> {
+	let mut candidates: Vec<ffmpeg::Codec> = hardware_video_encoder_names(export_codec)
+		.iter()
+		.filter_map(|name| ffmpeg::encoder::find_by_name(name))
+		.collect();
+	if let Some(software) = ffmpeg::encoder::find(codec_id) {
+		candidates.push(software);
+	}
+	candidates
+}
+
+/// Pick a CPU pixel format accepted by the selected encoder. QSV requires
+/// NV12 for system-memory input, so an empty/YUV420P request becomes NV12
+/// (the same 8-bit 4:2:0 layout in a different memory arrangement). Other
+/// explicit export settings always win.
+fn pixel_format_for_video_encoder(
+	params: &EncodingParams,
+	codec_id: ffmpeg::codec::Id,
+	encoder_name: &str,
+) -> Pixel {
+	let explicit = pixel_format_from_name(&params.video_pix_fmt);
+	if encoder_name.ends_with("_qsv")
+		&& matches!(explicit, None | Some(Pixel::YUV420P) | Some(Pixel::NV12))
+	{
+		Pixel::NV12
+	} else {
+		explicit.unwrap_or_else(|| default_pixel_format_for_codec(codec_id))
+	}
+}
+
 impl EncoderState {
 	/// Open the output file, create the streams and encoders and write the
 	/// header.
@@ -2653,8 +2717,6 @@ impl EncoderState {
 		if params.video_enabled != 0 {
 			let codec_id = export_codec_to_id(params.video_codec)
 				.ok_or_else(|| fail(format!("unknown video codec {}", params.video_codec)))?;
-			let codec = ffmpeg::encoder::find(codec_id)
-				.ok_or_else(|| fail(format!("no encoder for codec {:?}", codec_id)))?;
 
 			let width = params.video_width.max(1) as u32;
 			let height = params.video_height.max(1) as u32;
@@ -2664,55 +2726,77 @@ impl EncoderState {
 				params.video_time_base_num.max(1),
 			);
 
+			let mut opened_video = None;
+			let mut failures = Vec::new();
+			for codec in video_encoder_candidates(params.video_codec, codec_id) {
+				let pix_fmt = pixel_format_for_video_encoder(params, codec_id, codec.name());
+				let mut encoder = match ffmpeg::codec::Context::new_with_codec(codec)
+					.encoder()
+					.video()
+				{
+					Ok(encoder) => encoder,
+					Err(error) => {
+						failures.push(format!("{}: {error}", codec.name()));
+						continue;
+					}
+				};
+				encoder.set_width(width);
+				encoder.set_height(height);
+				encoder.set_aspect_ratio(FfRational(
+					params.video_pixel_aspect_num.max(1),
+					params.video_pixel_aspect_den.max(1),
+				));
+				encoder.set_frame_rate(Some(frame_rate));
+				// The codecs' packet timestamps use a fine tick (x264 encodes at
+				// 1024 ticks per frame); give H.264 an encoder time base scaled
+				// to that so the frame PTS stay integral. Other codecs (e.g.
+				// MPEG-2) reject the scaled rate and keep the nominal
+				// frame-duration time base. The stream is synced to this value
+				// below (pre-header); packets are rescaled into the stream's
+				// post-header time base when written (`stream_time_base`).
+				let tick = if codec_id == ffmpeg::codec::Id::H264 {
+					FfRational(time_base.0, time_base.1 * 1024)
+				} else {
+					time_base
+				};
+				encoder.set_time_base(tick);
+				if params.video_bit_rate > 0 {
+					encoder.set_bit_rate(params.video_bit_rate as usize);
+				}
+				if params.video_max_bit_rate > 0 {
+					encoder.set_max_bit_rate(params.video_max_bit_rate as usize);
+				}
+				encoder.set_format(pix_fmt);
+				set_encoder_color_metadata(&mut encoder, params);
+
+				if std::env::var_os("OAK_DEBUG_HW").is_some() {
+					eprintln!("[encode] trying {}", codec.name());
+				}
+				match encoder.open() {
+					Ok(opened) => {
+						if std::env::var_os("OAK_DEBUG_HW").is_some() {
+							eprintln!("[encode] selected {}", codec.name());
+						}
+						opened_video = Some((codec, opened, pix_fmt));
+						break;
+					}
+					Err(error) => {
+						if std::env::var_os("OAK_DEBUG_HW").is_some() {
+							eprintln!("[encode] {} failed: {error}", codec.name());
+						}
+						failures.push(format!("{}: {error}", codec.name()));
+					}
+				}
+			}
+			let (codec, opened, pix_fmt) = opened_video.ok_or_else(|| {
+				fail(format!(
+					"no usable encoder for codec {codec_id:?}: {}",
+					failures.join("; ")
+				))
+			})?;
+
 			let mut stream = output.add_stream(codec).map_err(ffmpeg_err)?;
 			let stream_index = stream.index();
-
-			let mut encoder = ffmpeg::codec::Context::new_with_codec(codec)
-				.encoder()
-				.video()
-				.map_err(ffmpeg_err)?;
-			stream.set_parameters(&encoder);
-
-			encoder.set_width(width);
-			encoder.set_height(height);
-			encoder.set_aspect_ratio(FfRational(
-				params.video_pixel_aspect_num.max(1),
-				params.video_pixel_aspect_den.max(1),
-			));
-			encoder.set_frame_rate(Some(frame_rate));
-			// The codecs' packet timestamps use a fine tick (x264 encodes at
-			// 1024 ticks per frame); give H.264 an encoder time base scaled
-			// to that so the frame PTS stay integral. Other codecs (e.g.
-			// MPEG-2) reject the scaled rate and keep the nominal
-			// frame-duration time base. The stream is synced to this value
-			// below (pre-header); packets are rescaled into the stream's
-			// post-header time base when written (`stream_time_base`).
-			let tick = if codec_id == ffmpeg::codec::Id::H264 {
-				FfRational(time_base.0, time_base.1 * 1024)
-			} else {
-				time_base
-			};
-			encoder.set_time_base(tick);
-			if params.video_bit_rate > 0 {
-				encoder.set_bit_rate(params.video_bit_rate as usize);
-			}
-			if params.video_max_bit_rate > 0 {
-				encoder.set_max_bit_rate(params.video_max_bit_rate as usize);
-			}
-
-			// Choose the target pixel format: explicit `video_pix_fmt`, else
-			// a codec-appropriate default.
-			let pix_fmt = pixel_format_from_name(&params.video_pix_fmt)
-				.unwrap_or_else(|| default_pixel_format_for_codec(codec_id));
-			encoder.set_format(pix_fmt);
-
-			// Delivery color metadata (H.273 code points) → the container's
-			// colr atom / H.264-HEVC VUI, so the exported file declares its
-			// colorimetry instead of leaving players to guess. Only set when
-			// the export populated them (0 = leave the codec default).
-			set_encoder_color_metadata(&mut encoder, params);
-
-			let opened = encoder.open().map_err(|e| { eprintln!("DBG-AUD: audio open failed: {e:?}"); ffmpeg_err(e) })?;
 			stream.set_parameters(&opened);
 			// The encoder may adjust the time base during `open` (x264
 			// picks its own); sync the stream to the encoder's ACTUAL time
@@ -3797,6 +3881,68 @@ mod tests {
 	}
 
 	#[test]
+	fn hardware_encoder_priority_matches_platform() {
+		#[cfg(target_os = "macos")]
+		{
+			assert_eq!(
+				hardware_video_encoder_names(1),
+				&["h264_videotoolbox"][..]
+			);
+			assert_eq!(
+				hardware_video_encoder_names(3),
+				&["hevc_videotoolbox"][..]
+			);
+			assert!(hardware_video_encoder_names(18).is_empty());
+		}
+		#[cfg(any(target_os = "linux", target_os = "windows"))]
+		{
+			assert_eq!(
+				hardware_video_encoder_names(1),
+				&["h264_nvenc", "h264_qsv", "h264_amf"][..]
+			);
+			assert_eq!(
+				hardware_video_encoder_names(3),
+				&["hevc_nvenc", "hevc_qsv", "hevc_amf"][..]
+			);
+			assert_eq!(
+				hardware_video_encoder_names(18),
+				&["av1_nvenc", "av1_qsv", "av1_amf"][..]
+			);
+		}
+		assert!(hardware_video_encoder_names(2).is_empty());
+		assert!(hardware_video_encoder_names(6).is_empty());
+	}
+
+	#[test]
+	fn software_encoder_is_the_final_candidate() {
+		let Some(software) = ffmpeg::encoder::find(ffmpeg::codec::Id::H264) else {
+			return;
+		};
+		let candidates = video_encoder_candidates(1, ffmpeg::codec::Id::H264);
+		assert_eq!(candidates.last().map(|codec| codec.name()), Some(software.name()));
+	}
+
+	#[test]
+	fn hardware_encoder_pixel_format_supports_cpu_input() {
+		let params = EncodingParams::default();
+		assert_eq!(
+			pixel_format_for_video_encoder(&params, ffmpeg::codec::Id::H264, "h264_qsv"),
+			Pixel::NV12
+		);
+		assert_eq!(
+			pixel_format_for_video_encoder(&params, ffmpeg::codec::Id::H264, "h264_nvenc"),
+			Pixel::YUV420P
+		);
+
+		let mut explicit = EncodingParams::default();
+		explicit.video_pix_fmt[..7].copy_from_slice(b"yuv420p");
+		assert_eq!(
+			pixel_format_for_video_encoder(&explicit, ffmpeg::codec::Id::H264, "h264_qsv"),
+			Pixel::NV12
+		);
+	}
+
+	#[test]
 	fn pixel_format_from_name_parses_and_rejects() {
 		let empty = [0u8; 64];
 		assert_eq!(pixel_format_from_name(&empty), None);
@@ -4460,6 +4606,41 @@ mod tests {
 		e.close().expect("close flushes");
 		assert!(e.close().is_ok(), "close is idempotent");
 		e.flush().expect("flush after close is safe");
+		assert!(std::fs::metadata(&path).expect("output exists").len() > 0);
+		let _ = std::fs::remove_file(&path);
+	}
+
+	#[test]
+	fn encoder_h264_roundtrip_uses_priority_candidates() {
+		let _guard = crate::lock_tests();
+		let path = temp_file("enc_h264", "mp4");
+		let mut params = encoder_params(&path, false);
+		params.video_codec = 1;
+		params.video_width = 256;
+		params.video_height = 256;
+		let candidates = video_encoder_candidates(1, ffmpeg::codec::Id::H264);
+		let e = FFmpegEncoder::with_params(params);
+		e.open().expect("open H.264");
+
+		let selected = {
+			let state = e.state.lock().unwrap_or_else(|x| x.into_inner());
+			let output = state.output.as_ref().expect("open output");
+			output.video.as_ref().and_then(|video| {
+				video.encoder.codec().map(|codec| codec.name().to_string())
+			})
+		};
+		assert!(
+			candidates
+				.iter()
+				.any(|codec| Some(codec.name()) == selected.as_deref()),
+			"selected encoder {selected:?} is not in the priority list"
+		);
+
+		for frame in 0..3 {
+			e.write_video(&f32_frame(256, 256, Rational::new(frame, 10)))
+				.expect("H.264 frame");
+		}
+		e.close().expect("close H.264");
 		assert!(std::fs::metadata(&path).expect("output exists").len() > 0);
 		let _ = std::fs::remove_file(&path);
 	}
