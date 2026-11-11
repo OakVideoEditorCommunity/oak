@@ -106,7 +106,7 @@ jobs:
         run: |
           case "${{ matrix.distro }}" in
             fedora) dnf install -y --setopt=install_weak_deps=False --setopt=max_parallel_downloads=16 git curl wget which ;;
-            arch) pacman -Sy --noconfirm git curl wget which ;;
+            arch) pacman -Syu --noconfirm git curl wget which ;;
             debian|openkylin) apt-get update && apt-get install -y git curl ca-certificates wget ;;
           esac
 
@@ -214,6 +214,35 @@ jobs:
         run: |
           export PATH="/c/msys64/usr/bin:$PATH"
           tooling/ffmpeg/build-ffmpeg.sh --msvc
+
+      - name: Verify hardware codec support
+        shell: bash
+        run: |
+          config=".cache/ffmpeg/ffbuild/config.mak"
+          case "${{ matrix.platform }}" in
+            linux)
+              required="CONFIG_VAAPI CONFIG_LIBVPL"
+              ;;
+            macos)
+              required="CONFIG_VIDEOTOOLBOX"
+              ;;
+            windows)
+              required="CONFIG_D3D11VA CONFIG_DXVA2 CONFIG_MEDIAFOUNDATION CONFIG_LIBVPL"
+              ;;
+          esac
+          for flag in $required; do
+            grep -q "^${flag}=1" "$config" || {
+              echo "missing required hardware codec flag: $flag"
+              exit 1
+            }
+          done
+          grep -E '^CONFIG_(NVENC|NVDEC|QSV|AMF|VAAPI|LIBVPL|D3D11VA|DXVA2|MEDIAFOUNDATION|VIDEOTOOLBOX)=' "$config" || true
+
+      - name: Verify static FFmpeg linkage (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          ! ldd target/release/libquercus_engine.so | grep -E 'libav(codec|format|device|util|filter|swscale|swresample)'
 
       # ------------------------------------------------------------------
       # Build environment
@@ -341,8 +370,6 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force target/pkg/win-dlls | Out-Null
-          # FFmpeg + codec DLLs from the prebuilt archive (see above).
-          Copy-Item "$env:GITHUB_WORKSPACE\.cache\ffmpeg\bin\*.dll" target/pkg/win-dlls/
           # The MSVC runtime: the build keeps the default dynamic CRT (see
           # the Build step), so ship the redistributable DLLs app-locally.
           $crt = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue |
