@@ -602,6 +602,9 @@ pub struct AiAssistantPanel<E: AppEngine> {
 	agent: Option<Agent<Box<dyn LlmClient + Send>, PanelBackend>>,
 	/// The bubble index whose 「已复制」 confirmation is showing.
 	copied: Option<usize>,
+	/// A 「新会话」 click on a non-empty conversation is pending
+	/// confirmation (the confirm bar renders while this is `true`).
+	pending_new_session: bool,
 }
 
 impl<E: AppEngine> AiAssistantPanel<E> {
@@ -627,7 +630,54 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 			configured: AiConfig::from_env().is_ok(),
 			agent: None,
 			copied: None,
+			pending_new_session: false,
 		}
+	}
+
+	/// Whether a conversation exists worth confirming before dropping: any
+	/// transcript, a live agent (its message history), or a visible error.
+	/// The blank first-run state clears without asking.
+	pub fn has_conversation(&self) -> bool {
+		!self.bubbles.is_empty() || self.agent.is_some() || self.error.is_some()
+	}
+
+	/// 「新会话」: a blank session resets directly; a conversation asks first
+	/// (`pending_new_session` renders the confirm bar). Never fires while a
+	/// run is in flight — the run would refill the transcript right after.
+	pub fn request_new_session(&mut self, cx: &mut Context<Self>) {
+		if self.busy {
+			return;
+		}
+		if self.has_conversation() {
+			self.pending_new_session = true;
+		} else {
+			self.clear_conversation(cx);
+		}
+		cx.notify();
+	}
+
+	/// The confirm bar's 「确认」: drop the conversation for real.
+	pub fn confirm_new_session(&mut self, cx: &mut Context<Self>) {
+		self.clear_conversation(cx);
+	}
+
+	/// The confirm bar's 「取消」: keep everything, close the prompt.
+	pub fn cancel_new_session(&mut self, cx: &mut Context<Self>) {
+		self.pending_new_session = false;
+		cx.notify();
+	}
+
+	/// The actual reset: transcript, live agent, error, copy flag, prompt
+	/// state and the composer — back to the blank first-run state, so the
+	/// next send starts a genuinely fresh conversation.
+	fn clear_conversation(&mut self, cx: &mut Context<Self>) {
+		self.bubbles.clear();
+		self.agent = None;
+		self.error = None;
+		self.copied = None;
+		self.pending_new_session = false;
+		set_input_text(&self.input, "", cx);
+		cx.notify();
 	}
 
 	/// Sends the draft. Refuses (no panic, no queue) while a run is active,
@@ -950,6 +1000,10 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 		let draft_nonempty = !self.input.read(cx).value().trim().is_empty();
 		let enabled = can_send(busy, configured, draft_nonempty);
 		let this = cx.entity();
+		// 「新会话」 is inert while a run is in flight (the run would refill
+		// the transcript right after the reset).
+		let new_session_enabled = !busy;
+		let pending_confirm = self.pending_new_session;
 
 		let bubbles: Vec<AnyElement> = if self.bubbles.is_empty() {
 			vec![div()
@@ -979,13 +1033,108 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 				.collect()
 		};
 
+		let header = div()
+			.flex()
+			.flex_shrink_0()
+			.items_center()
+			.justify_between()
+			.px_2()
+			.py_1()
+			.child(status_strip(configured, busy, error.as_deref(), &colors))
+			.child(
+				// One plain button, top-right of the panel (same visual
+				// language as the send button; sits clear of the dock tabs).
+				div()
+					.id("ai-assistant-new-session")
+					.px_3()
+					.py_1()
+					.rounded_md()
+					.border_1()
+					.border_color(colors.border)
+					.text_color(if new_session_enabled {
+						colors.text
+					} else {
+						colors.disabled
+					})
+					.child(crate::i18n::tr("ai.new_session").to_owned())
+					.on_click({
+						let this = this.clone();
+						move |_: &ClickEvent, _window, cx| {
+							if new_session_enabled {
+								this.update(cx, |this, cx| this.request_new_session(cx));
+							}
+						}
+					}),
+			);
+
+		// The confirm bar: only while a reset is pending (a conversation
+		// exists — dropping it silently would lose context on one misclick).
+		let confirm_bar = if pending_confirm {
+			Some(
+				div()
+					.id("ai-assistant-new-session-confirm")
+					.flex()
+					.flex_shrink_0()
+					.items_center()
+					.justify_between()
+					.gap_3()
+					.px_3()
+					.py_2()
+					.border_b_1()
+					.border_color(colors.border)
+					.bg(colors.container)
+					.child(
+						div()
+							.flex_1()
+							.text_color(colors.text)
+							.child(crate::i18n::tr("ai.new_session.prompt").to_owned()),
+					)
+					.child(
+						div()
+							.id("ai-assistant-new-session-confirm-ok")
+							.px_3()
+							.py_1()
+							.rounded_md()
+							.bg(colors.selected)
+							.text_color(colors.text)
+							.child(crate::i18n::tr("ai.new_session.confirm").to_owned())
+							.on_click({
+								let this = this.clone();
+								move |_: &ClickEvent, _window, cx| {
+									this.update(cx, |this, cx| this.confirm_new_session(cx));
+								}
+							}),
+					)
+					.child(
+						div()
+							.id("ai-assistant-new-session-confirm-cancel")
+							.px_3()
+							.py_1()
+							.rounded_md()
+							.border_1()
+							.border_color(colors.border)
+							.text_color(colors.text)
+							.child(crate::i18n::tr("ai.new_session.cancel").to_owned())
+							.on_click({
+								let this = this.clone();
+								move |_: &ClickEvent, _window, cx| {
+									this.update(cx, |this, cx| this.cancel_new_session(cx));
+								}
+							}),
+					),
+			)
+		} else {
+			None
+		};
+
 		div()
 			.debug_selector(|| "ai-assistant-root".to_string())
 			.flex()
 			.flex_col()
 			.size_full()
 			.track_focus(&self.focus_handle)
-			.child(status_strip(configured, busy, error.as_deref(), &colors))
+			.child(header)
+			.children(confirm_bar)
 			.child(
 				div()
 					.id("ai-assistant-transcript")
@@ -1328,6 +1477,153 @@ mod tests {
 		assert_eq!(markdown_to_plain("a\n\n\n\nb"), "a\n\nb");
 	}
 
+	/// A conversation is never dropped without asking, and the prompt never
+	/// fires while a run is in flight (it would refill the transcript right
+	/// after the reset).
+	#[gpui_kit::test]
+	async fn new_session_confirms_before_dropping_a_conversation(cx: &mut TestAppContext) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let window = cx.open_window(size(px(800.0), px(600.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.bubbles.push(Bubble::User("把帧率改成60".to_string()));
+				// A run in flight: the prompt must not arm.
+				panel.busy = true;
+				panel.request_new_session(cx);
+				assert!(!panel.pending_new_session, "busy: no prompt, no reset");
+				assert_eq!(panel.bubbles.len(), 1, "busy: transcript untouched");
+
+				panel.busy = false;
+				panel.request_new_session(cx);
+				assert!(panel.pending_new_session, "a conversation must ask first");
+				assert_eq!(panel.bubbles.len(), 1, "prompting must not clear");
+
+				// Cancel: everything stays.
+				panel.cancel_new_session(cx);
+				assert!(!panel.pending_new_session, "cancel closes the prompt");
+				assert_eq!(panel.bubbles.len(), 1, "cancel keeps the transcript");
+
+				// Ask again, confirm: everything goes.
+				panel.request_new_session(cx);
+				assert!(panel.pending_new_session);
+				panel.confirm_new_session(cx);
+				assert!(panel.bubbles.is_empty(), "confirm drops the transcript");
+				assert!(panel.agent.is_none(), "confirm drops the live agent");
+				assert!(panel.error.is_none(), "confirm drops the error");
+				assert!(!panel.pending_new_session, "prompt closes after confirm");
+			});
+		});
+	}
+
+	/// The blank first-run state resets directly (with a draft in the
+	/// composer) — no prompt, nothing to lose.
+	#[gpui_kit::test]
+	async fn new_session_resets_a_blank_session_without_asking(cx: &mut TestAppContext) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let window = cx.open_window(size(px(800.0), px(600.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				assert!(!panel.has_conversation(), "starts blank");
+				// A half-typed draft is not a conversation; it still resets.
+				set_input_text(&panel.input, "half a thought", cx);
+				panel.request_new_session(cx);
+				assert!(
+					!panel.pending_new_session,
+					"blank state must not ask for confirmation"
+				);
+				assert!(panel.bubbles.is_empty());
+				assert!(
+					panel.input.read(cx).value().is_empty(),
+					"the composer resets too: {:?}",
+					panel.input.read(cx).value()
+				);
+			});
+		});
+	}
+
+	/// After a confirmed reset the panel conversations again: a fresh agent
+	/// run populates the transcript from scratch.
+	#[gpui_kit::test]
+	async fn a_confirmed_new_session_can_converse_again(cx: &mut TestAppContext) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
+		let window = cx.open_window(size(px(800.0), px(600.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			// Without an open project `send` refuses with ENGINE_UNSUPPORTED
+			// (the panel refuses to pretend a project is open) — same setup
+			// as the e2e tool test.
+			engine.update(cx, |engine, cx| engine.new_project(cx));
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+
+		// First conversation: seed a bubble, then reset through the prompt.
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.bubbles.push(Bubble::User("old chat".to_string()));
+				panel.request_new_session(cx);
+				panel.confirm_new_session(cx);
+				assert!(panel.bubbles.is_empty());
+
+				// A fresh run against a scripted model (no network).
+				panel.agent = Some(Agent::new(
+					Box::new(ToolLlm {
+						tool: "timeline.add_track".to_string(),
+						args: json!({ "type": "video" }),
+						turns: std::cell::Cell::new(0),
+					}),
+					PanelBackend::Real(HostAdapter::new(OppHost::new())),
+					AgentConfig::default(),
+				));
+				set_input_text(&panel.input, "加一条视频轨道", cx);
+			});
+		});
+		// `set_input_text` lands asynchronously: sending in the same frame
+		// reads a still-empty composer and `can_send` refuses silently
+		// (root-caused with a probe: error=None, busy=false, configured=true,
+		// draft visible only after the frame — same split as the e2e test).
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.send(cx));
+		});
+		cx.run_until_parked();
+
+		let (user_bubbles, pending) = cx.read(|app| {
+			let p = panel.read(app);
+			(
+				p.bubbles.iter().filter(|b| matches!(b, Bubble::User(_))).count(),
+				p.pending_new_session,
+			)
+		});
+		assert!(
+			user_bubbles >= 1,
+			"the reset conversation actually sends again: {user_bubbles} user bubbles"
+		);
+		assert!(!pending, "the prompt is not armed for the new chat");
+	}
+
 	/// Static check: every `ai.*` key the panel renders exists in all eight
 	/// shipped locales (a missing key would render as the raw key).
 	#[test]
@@ -1342,7 +1638,7 @@ mod tests {
 			("ru", include_str!("../../../../assets/i18n/ru.yaml")),
 			("ja", include_str!("../../../../assets/i18n/ja.yaml")),
 		];
-		const KEYS: [&str; 23] = [
+		const KEYS: [&str; 27] = [
 			"menu.window.ai_assistant",
 			"panel.ai_assistant",
 			"ai.placeholder",
@@ -1356,6 +1652,10 @@ mod tests {
 			"ai.notice.stalled",
 			"ai.notice.unparsed_tool_call",
 			"ai.outcome.unparsed",
+			"ai.new_session",
+			"ai.new_session.prompt",
+			"ai.new_session.confirm",
+			"ai.new_session.cancel",
 			"ai.error.not_configured",
 			"ai.error.http",
 			"ai.error.api",
