@@ -476,6 +476,10 @@ pub fn input_device_names() -> Vec<String> {
 /// Enumerates the default host's devices, keeping only the ones that
 /// support the requested direction; unnamed devices are skipped.
 fn device_names(output: bool) -> Vec<String> {
+	if std::env::var_os("OAK_DISABLE_AUDIO_DEVICE_ENUMERATION").is_some() {
+		return Vec::new();
+	}
+
 	let host = cpal::default_host();
 	let devices = if output {
 		host.output_devices()
