@@ -335,6 +335,28 @@ impl PanelBackend {
 	}
 }
 
+impl oak_ai_tools::backend::EngineExt for PanelBackend {
+	fn sequence_get_settings(
+		&self,
+		args: serde_json::Value,
+	) -> Result<serde_json::Value, ToolError> {
+		match self {
+			Self::Mock(inner) => oak_ai_tools::backend::EngineExt::sequence_get_settings(inner, args),
+			Self::Real(inner) => oak_ai_tools::backend::EngineExt::sequence_get_settings(inner, args),
+		}
+	}
+
+	fn sequence_set_format(
+		&mut self,
+		args: serde_json::Value,
+	) -> Result<serde_json::Value, ToolError> {
+		match self {
+			Self::Mock(inner) => oak_ai_tools::backend::EngineExt::sequence_set_format(inner, args),
+			Self::Real(inner) => oak_ai_tools::backend::EngineExt::sequence_set_format(inner, args),
+		}
+	}
+}
+
 impl TxnOps for PanelBackend {
 	fn txn_begin(&mut self, label: &str) -> Result<(), ToolError> {
 		match self {
@@ -1026,6 +1048,9 @@ impl<E: AppEngine> Panel for AiAssistantPanel<E> {
 mod tests {
 	use super::*;
 	use crate::ai::ToolLogEntry;
+	// The v2 face's trait must be in scope for the `HostAdapter` calls the
+	// `sequence.*` tests make directly.
+	use oak_ai_tools::backend::EngineExt;
 
 	/// Every structured code the loop can surface maps to a real key, and
 	/// unknown codes degrade to the fallback instead of leaking the raw
@@ -1496,6 +1521,312 @@ mod tests {
 				}
 			})
 		}
+	}
+
+	/// A stub that asks for **one named tool with fixed arguments** on its
+	/// first turn, then answers — the v2 analogue of [`StubLlm`].
+	struct ToolLlm {
+		tool: String,
+		args: Value,
+		turns: std::cell::Cell<u32>,
+	}
+
+	impl LlmClient for ToolLlm {
+		fn complete(&self, _request: &ChatRequest<'_>) -> Result<ChatResponse, LlmError> {
+			let turn = self.turns.get();
+			self.turns.set(turn + 1);
+			Ok(if turn == 0 {
+				ChatResponse {
+					content: None,
+					tool_calls: vec![ToolCall {
+						id: "stub-v2-call-1".to_string(),
+						name: self.tool.clone(),
+						arguments: self.args.clone(),
+					}],
+					finish_reason: Some("tool_calls".to_string()),
+				}
+			} else {
+				ChatResponse {
+					content: Some("Stub answer: the v2 tool ran on the real engine.".to_string()),
+					tool_calls: vec![],
+					finish_reason: Some("stop".to_string()),
+				}
+			})
+		}
+	}
+
+	// ---- T9.2 v2 face: `sequence.get_settings` / `sequence.set_format` ----
+
+	/// `sequence.get_settings` on the real engine answers from the live
+	/// graph: the sequence's own name and its node-default grid
+	/// (`DefaultSequenceFrameRate` = 30000/1001), never a mock constant.
+	#[test]
+	fn real_sequence_get_settings_reads_the_live_grid() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (adapter, _project, seq_id) = real_tool_fixture();
+
+		let settings = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("settings read");
+		assert_eq!(settings["name"], json!("Seq"), "{settings}");
+		assert_eq!(
+			(settings["rate"]["num"].as_i64(), settings["rate"]["den"].as_i64()),
+			(Some(30000), Some(1001)),
+			"the real grid is NTSC: {settings}"
+		);
+		assert!(settings["width"].as_u64().unwrap_or(0) > 0, "{settings}");
+		assert_eq!(settings["id"], json!(seq_id));
+	}
+
+	/// **The undo requirement**: changing the frame rate is one undo row,
+	/// and `undo` restores the previous rate exactly.
+	#[test]
+	fn real_sequence_set_format_is_one_undo_row_that_reverts() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, seq_id) = real_tool_fixture();
+
+		let before = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("before");
+		assert_eq!(before["rate"]["num"].as_i64(), Some(30000));
+
+		// Depth, not just value: "one undo row" must mean the stack grew by
+		// exactly one, so a duplicate *row* cannot ride on the value
+		// assertions below.
+		//
+		// Known limit, measured: this assertion is blind to a duplicate push
+		// **inside** the transaction's group. `count()` is the top-level row
+		// count (`global.rs:216`); a group's pushes become children of one
+		// multi command and only `group_end()` puts that multi on the stack
+		// as a single row (`global.rs:125-137`), so N pushes in a group still
+		// add exactly one row. Ablating the implementation to push twice left
+		// this test green — by construction, not by a wrong assertion.
+		//
+		// That case is not a defect either: undoing a group undoes *all* its
+		// children in reverse order (`MultiUndoCommand::undo`,
+		// `undocommand.rs:287-291`), and both duplicate children restore the
+		// same `before`, so one Ctrl+Z still reverts the whole edit. Atomicity
+		// is owned by the transaction group, and the row assertion here
+		// guards the other direction: a push that escaped the group, or a
+		// second group being opened for one tool call.
+		let depth = oak_undo::global::count().expect("undo count");
+		let index = oak_undo::global::index().expect("undo index");
+
+		// An edit needs the OPP transaction the dispatcher opens; here the
+		// test opens it directly (the group becomes the one undo row).
+		adapter.txn_begin("sequence.set_format").expect("begin");
+		let after = adapter
+			.sequence_set_format(json!({ "sequence": seq_id, "fps": 24 }))
+			.expect("set format");
+		adapter.txn_commit().expect("commit");
+
+		assert_eq!(
+			oak_undo::global::count().expect("undo count"),
+			depth + 1,
+			"the format change must add exactly ONE undo row"
+		);
+		assert_eq!(
+			oak_undo::global::index().expect("undo index"),
+			index + 1,
+			"the edit must be the top of the history, not a buried row"
+		);
+		assert_eq!(
+			(after["rate"]["num"].as_i64(), after["rate"]["den"].as_i64()),
+			(Some(24), Some(1)),
+			"24 is exact: {after}"
+		);
+		assert_eq!(after["undoable"], json!(true), "the reply says it can be taken back");
+		assert!(oak_undo::global::undoable(), "the edit entered the undo stack");
+
+		oak_undo::global::undo().expect("undo the format change");
+		let reverted = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("after undo");
+		assert_eq!(
+			(reverted["rate"]["num"].as_i64(), reverted["rate"]["den"].as_i64()),
+			(Some(30000), Some(1001)),
+			"undo must restore the NTSC grid: {reverted}"
+		);
+	}
+
+	/// **Partial update**: supplying only `fps` must leave width/height —
+	/// and every other unset field — exactly as they were.
+	#[test]
+	fn real_sequence_set_format_only_touches_the_given_fields() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, seq_id) = real_tool_fixture();
+
+		let before = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("before");
+		adapter.txn_begin("sequence.set_format").expect("begin");
+		adapter
+			.sequence_set_format(json!({ "sequence": seq_id, "fps": 25 }))
+			.expect("set only fps");
+		adapter.txn_commit().expect("commit");
+		let after = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("after");
+
+		assert_eq!(
+			(after["width"].clone(), after["height"].clone()),
+			(before["width"].clone(), before["height"].clone()),
+			"width/height must not move when only fps is given"
+		);
+		assert_eq!(after["name"], before["name"], "the name must not move either");
+		assert_eq!(after["interlaced"], before["interlaced"], "nor interlaced");
+		assert_eq!(after["rate"]["num"].as_i64(), Some(25), "only the rate changed");
+	}
+
+	/// **NTSC round trip on the real engine**: `29.97` must become the
+	/// exact `30000/1001` (not `2997/100`), and reading the settings back
+	/// must return that same rational — the engine stores what the tool
+	/// claimed, no rounding on either leg.
+	#[test]
+	fn real_sequence_ntsc_rate_round_trips_exactly() {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		let (mut adapter, _project, seq_id) = real_tool_fixture();
+
+		adapter.txn_begin("sequence.set_format").expect("begin");
+		let written = adapter
+			.sequence_set_format(json!({ "sequence": seq_id, "fps": 29.97 }))
+			.expect("set 29.97");
+		adapter.txn_commit().expect("commit");
+
+		assert_eq!(
+			(
+				written["rate"]["num"].as_i64(),
+				written["rate"]["den"].as_i64()
+			),
+			(Some(30000), Some(1001)),
+			"29.97 must map onto 30000/1001, never 2997/100: {written}"
+		);
+
+		// Read back through a fresh call: the stored rate is the same
+		// rational, i.e. the write really landed on the engine's grid.
+		let reread = adapter
+			.sequence_get_settings(json!({ "sequence": seq_id }))
+			.expect("read back");
+		assert_eq!(
+			(
+				reread["rate"]["num"].as_i64(),
+				reread["rate"]["den"].as_i64()
+			),
+			(Some(30000), Some(1001)),
+			"the engine must store the exact NTSC rational: {reread}"
+		);
+	}
+
+	/// The v2 wire face on the mock: real partial update over the mock's
+	/// in-memory model (the mock is not a stub here — `sequence.set_format`
+	/// has a true implementation so the frozen mock E2E chain can exercise
+	/// the v2 tool).
+	#[test]
+	fn mock_sequence_set_format_updates_partially() {
+		use oak_ai_tools::backend::EngineExt;
+		let mut mock = MockBackend::new();
+		mock.project_open(&json!({ "name": "Mock Probe" }))
+			.expect("open");
+
+		let before = mock.sequence_get_settings(json!({})).expect("before");
+		let after = mock
+			.sequence_set_format(json!({ "fps": { "num": 24000, "den": 1001 } }))
+			.expect("set");
+		assert_eq!(
+			(after["rate"]["num"].as_i64(), after["rate"]["den"].as_i64()),
+			(Some(24000), Some(1001))
+		);
+		assert_eq!(after["width"], before["width"], "width untouched");
+		assert_eq!(after["height"], before["height"], "height untouched");
+		assert_eq!(after["undoable"], json!(true));
+	}
+
+	/// End to end through the panel: the model asks for
+	/// `sequence.set_format`, the real engine executes it, and the panel's
+	/// detail shows the changed rate.
+	#[gpui_kit::test]
+	async fn e2e_panel_runs_sequence_set_format_against_the_real_engine(cx: &mut TestAppContext) {
+		let _g = crate::oakui::graphops::test_lock();
+		oak_undo::global::clear().expect("clear undo stack");
+		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+
+		let window = cx.open_window(size(px(1280.0), px(860.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			engine.update(cx, |engine, cx| engine.new_project(cx));
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.agent = Some(Agent::new(
+					Box::new(ToolLlm {
+						tool: "sequence.set_format".to_string(),
+						args: json!({ "fps": 24 }),
+						turns: std::cell::Cell::new(0),
+					}),
+					PanelBackend::Real(HostAdapter::new(OppHost::new())),
+					AgentConfig::default(),
+				));
+				set_input_text(&panel.input, "set the sequence frame rate to 24", cx);
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.send(cx));
+		});
+		cx.run_until_parked();
+
+		let (bubbles, busy) = cx.read(|app| {
+			let p = panel.read(app);
+			(p.bubbles.len(), p.busy)
+		});
+		assert!(!busy, "the run must finish");
+
+		// The executed tool call is in the transcript with the engine's
+		// answer: a 24/1 rate, not the pre-edit 30000/1001.
+		let (tool_details, tool_outcomes): (Vec<(String, String)>, Vec<&'static str>) =
+			cx.read(|app| {
+				let p = panel.read(app);
+				let mut details = Vec::new();
+				let mut outcomes = Vec::new();
+				for b in &p.bubbles {
+					if let Bubble::Tool {
+						name,
+						detail,
+						outcome,
+					} = b
+					{
+						details.push((name.clone(), detail.clone()));
+						outcomes.push(*outcome);
+					}
+				}
+				(details, outcomes)
+			});
+		let (name, detail) = tool_details
+			.first()
+			.expect("the executed v2 call must be in the transcript");
+		assert_eq!(name, "sequence.set_format", "the v2 tool ran, not a mock");
+		// `applied`, not `failed`/`proposed`: the gate really executed it.
+		assert_eq!(
+			tool_outcomes.first().copied(),
+			Some("applied"),
+			"the v2 tool must actually run: {tool_outcomes:?}"
+		);
+		assert!(
+			detail.contains("24") && !detail.contains("30000"),
+			"the detail must carry the engine's post-edit rate: {detail}"
+		);
+		assert!(bubbles >= 1, "the user bubble is pushed");
 	}
 
 	/// The mock engine keeps a demo project (`project()` is `Some`) but no

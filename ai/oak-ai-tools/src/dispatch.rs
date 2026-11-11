@@ -322,6 +322,98 @@ pub fn execute_with(
 	}
 }
 
+// ---------------------------------------------------------------------------
+// v2 face (T9.2): tools added after the frozen 22
+// ---------------------------------------------------------------------------
+
+/// v2 backend entry point: same shape as [`BackendCall`] but on the
+/// extension face.
+pub type ExtCall = fn(&mut dyn crate::backend::EngineExt, &Value) -> Result<Value, ToolError>;
+
+/// One v2 tool bound to an [`EngineExt`](crate::backend::EngineExt) method.
+pub struct V2ToolDef {
+	pub name: &'static str,
+	/// Whether the call runs inside one undo group (`sequence.get_settings`
+	/// is a read; `sequence.set_format` pushes its own undo row).
+	pub transactional: bool,
+	pub call: ExtCall,
+}
+
+/// The v2 registry: parse, then forward to the extension method.
+pub fn v2_registry() -> &'static [V2ToolDef] {
+	static REGISTRY: [V2ToolDef; 2] = [
+		V2ToolDef {
+			name: "sequence.get_settings",
+			transactional: true,
+			call: |backend, args| {
+				tools::v2::sequence::parse_get_settings(args)?;
+				backend.sequence_get_settings(args.clone())
+			},
+		},
+		V2ToolDef {
+			name: "sequence.set_format",
+			transactional: true,
+			call: |backend, args| {
+				tools::v2::sequence::parse_set_format(args)?;
+				backend.sequence_set_format(args.clone())
+			},
+		},
+	];
+
+	&REGISTRY
+}
+
+/// Looks a v2 tool up by name.
+pub fn find_v2(tool: &str) -> Option<&'static V2ToolDef> {
+	v2_registry().iter().find(|def| def.name == tool)
+}
+
+/// Executes a v2 tool with the same gate/transaction/hook flow the frozen
+/// 22 use ([`execute_with`]), but on the extension face.
+///
+/// The class comes from [`crate::hooks::class_of_v2`] (fail-closed, like
+/// the frozen table); a backend that does not implement the method returns
+/// its default `UNSUPPORTED` with a gap id, which the gate records as a
+/// structured failure rather than a silent success.
+pub fn execute_v2_with(
+	backend: &mut dyn crate::backend::EngineExt,
+	tool: &str,
+	args: Value,
+	policy: crate::hooks::Policy,
+	hooks: &mut dyn crate::hooks::Hooks,
+) -> crate::hooks::GatedOutcome {
+	use crate::hooks::{GatedOutcome, ToolCall};
+
+	let Some(def) = find_v2(tool) else {
+		let error = ToolError::new(CODE_UNKNOWN_TOOL, format!("unknown v2 tool '{tool}'"))
+			.with_tool(tool)
+			.with_step("lookup");
+		return GatedOutcome::failure(hooks, tool, None, error);
+	};
+	let Some(class) = crate::hooks::class_of_v2(tool) else {
+		let error = ToolError::new(
+			crate::hooks::CODE_UNCLASSIFIED_TOOL,
+			format!("v2 tool '{tool}' has no entry in the v2 grading table"),
+		)
+		.with_tool(tool)
+		.with_step("lookup");
+		return GatedOutcome::failure(hooks, tool, None, error);
+	};
+
+	let call = ToolCall {
+		tool,
+		args: &args,
+		class,
+	};
+	if def.transactional {
+		crate::hooks::gated_transactional(backend, &call, policy, hooks, |ops| {
+			(def.call)(ops, &args)
+		})
+	} else {
+		crate::hooks::gated_plain(backend, &call, policy, hooks, |ops| (def.call)(ops, &args))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

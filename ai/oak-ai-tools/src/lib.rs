@@ -37,6 +37,7 @@ pub mod render;
 #[cfg(feature = "sdk")]
 pub mod sdk;
 pub mod schema;
+pub mod schema_v2;
 pub mod timecode;
 pub mod tools;
 pub mod txn;

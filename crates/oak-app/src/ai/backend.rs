@@ -30,7 +30,7 @@
 //! reinterpreted. Field-level behaviour against the real engine is
 //! **untested** until the real-engine task runs it.
 
-pub use oak_ai_tools::backend::EngineBackend;
+pub use oak_ai_tools::backend::{EngineBackend, EngineExt};
 use oak_ai_tools::error::{ToolError, CODE_BACKEND, CODE_INVALID_PARAMS, CODE_NOT_FOUND, CODE_STATE, CODE_UNSUPPORTED};
 pub use oak_ai_tools::mock::MockBackend;
 use oak_ai_tools::timecode::{Rat, TimeContext};
@@ -460,6 +460,53 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 	fn edit_undo(&mut self, _args: &Value) -> Result<Value, ToolError> {
 		let undone = self.host.edit_undo().map_err(map_host)?;
 		Ok(json!({ "undone": undone }))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// v2 extension face (T9.2): `sequence.*` over the same `HostServices` seam
+// ---------------------------------------------------------------------------
+
+/// The v2 face for the real engine: JSON in → typed `HostServices` call →
+/// JSON out (the same shape as the frozen 22 above, so the two faces stay
+/// interchangeable at the dispatch layer).
+impl<H: HostServices> EngineExt for HostAdapter<H> {
+	fn sequence_get_settings(&self, args: Value) -> Result<Value, ToolError> {
+		let sequence = args
+			.get("sequence")
+			.and_then(Value::as_str)
+			.map(str::to_string);
+		let settings = self
+			.host
+			.sequence_get_settings(sequence.as_ref())
+			.map_err(map_host)?;
+		Ok(serde_json::to_value(&settings)
+			.map_err(|e| ToolError::new(oak_ai_tools::error::CODE_INTERNAL, format!("sequence settings encode: {e}")))?)
+	}
+
+	fn sequence_set_format(&mut self, args: Value) -> Result<Value, ToolError> {
+		let parsed = oak_ai_tools::tools::v2::sequence::parse_set_format(&args)?;
+		let req = oak_extensions::host_services::SetSequenceFormatReq {
+			sequence: parsed.sequence,
+			name: parsed.name,
+			width: parsed.width,
+			height: parsed.height,
+			rate: parsed
+				.fps
+				.map(|r| oak_extensions::host_services::Rational::new(r.num, r.den)),
+			interlaced: parsed.interlaced,
+		};
+		let settings = self
+			.host
+			.sequence_set_format(req, self.txn.as_deref())
+			.map_err(map_host)?;
+		let mut value = serde_json::to_value(&settings)
+			.map_err(|e| ToolError::new(oak_ai_tools::error::CODE_INTERNAL, format!("sequence settings encode: {e}")))?;
+		if let Some(obj) = value.as_object_mut() {
+			// The AI reply must say the edit can be taken back (首辅 requirement).
+			obj.insert("undoable".to_string(), Value::Bool(true));
+		}
+		Ok(value)
 	}
 }
 

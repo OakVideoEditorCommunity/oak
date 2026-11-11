@@ -1315,3 +1315,9 @@ fn same_value(requested: &NodeValue, stored: &NodeValue) -> bool {
 		.zip(stored.f.iter())
 		.all(|(a, b)| (a - b).abs() <= 1e-9)
 }
+
+/// The v2 extension face keeps its trait defaults here: this backend has
+/// not been taught `sequence.*` yet, so those tools answer with the
+/// structured `UNSUPPORTED` + gap id the defaults provide (never a fake
+/// success).
+impl crate::backend::EngineExt for SdkBackend {}

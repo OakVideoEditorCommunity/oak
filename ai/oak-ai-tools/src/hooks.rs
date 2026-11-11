@@ -206,6 +206,22 @@ pub const TOOL_CLASSES: [(&str, OperationClass); 22] = [
 	("timeline.trim_clip", OperationClass::Edit),
 ];
 
+/// The v2 face's grading table (T9.2). Kept separate from [`TOOL_CLASSES`]
+/// so the frozen 22-tool table stays byte-identical; [`class_of_v2`]
+/// resolves a v2 name, and the dispatcher tries it only for v2 tools.
+pub const V2_TOOL_CLASSES: [(&str, OperationClass); 2] = [
+	("sequence.get_settings", OperationClass::Read),
+	("sequence.set_format", OperationClass::Edit),
+];
+
+/// The grading of a v2 `tool`, or `None` when the v2 table has no entry.
+pub fn class_of_v2(tool: &str) -> Option<OperationClass> {
+	V2_TOOL_CLASSES
+		.iter()
+		.find(|(name, _)| *name == tool)
+		.map(|(_, class)| *class)
+}
+
 /// The grading of `tool`, or `None` when the table has no entry.
 ///
 /// A `None` is **fail-closed**: [`crate::dispatch::execute_with`] refuses the

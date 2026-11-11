@@ -467,6 +467,61 @@ pub fn set_sequence_parameters(
 	Ok(())
 }
 
+/// The sequence's full editable settings `(name, width, height, rate,
+/// interlaced)` — the tuple [`set_sequence_parameters`] writes. `None`
+/// when `seq` is not a sequence or has no video stream.
+pub fn sequence_settings(g: &Graph, seq: NodeId) -> Option<(String, i32, i32, Rational, bool)> {
+	let entry = g.get(seq)?;
+	let name = entry.core.label.clone();
+	let v = sequence_behavior(g, seq)?.video_params.first()?;
+	Some((name, v.width, v.height, v.frame_rate, v.interlaced))
+}
+
+/// [`set_sequence_parameters`] as **one undo row** (`Set Sequence Format`).
+///
+/// The frame rate is part of a sequence's time base: every block's
+/// duration is reinterpreted against it, so this is a destructive edit
+/// and must be revertible. The command's redo re-applies `after`, its
+/// undo re-applies `before`; [`push_command`] runs the redo eagerly, so
+/// the caller must not apply the change itself.
+pub fn set_sequence_parameters_undoable(
+	project: &ProjectRef,
+	seq: NodeId,
+	after: (String, i32, i32, Rational, bool),
+) -> Result<(), String> {
+	let before = {
+		let g = lock(project);
+		sequence_settings(&g.graph, seq).ok_or_else(|| "sequence no longer exists".to_string())?
+	};
+	let (p1, p2) = (project.clone(), project.clone());
+	let after_c = after.clone();
+	let cmd = oak_undo::undocommand::UndoCommand::from_closures(
+		move || {
+			let _ = set_sequence_parameters(
+				&p1,
+				seq,
+				&after_c.0,
+				after_c.1,
+				after_c.2,
+				after_c.3,
+				after_c.4,
+			);
+		},
+		move || {
+			let _ = set_sequence_parameters(
+				&p2,
+				seq,
+				&before.0,
+				before.1,
+				before.2,
+				before.3,
+				before.4,
+			);
+		},
+	);
+	push_command(cmd, "Set Sequence Format")
+}
+
 /// The label of a node (`NodeCore::label`).
 pub fn node_label(g: &Graph, id: NodeId) -> String {
 	g.get(id).map(|e| e.core.label.clone()).unwrap_or_default()

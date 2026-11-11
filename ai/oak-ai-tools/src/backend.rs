@@ -89,3 +89,36 @@ pub trait EngineBackend: TxnOps {
 	/// `edit.undo` (non-transactional, OPP/1 section 6)
 	fn edit_undo(&mut self, args: &Value) -> Result<Value, ToolError>;
 }
+
+/// The v2 extension face: tools added after the frozen 22 (T9.2).
+///
+/// This trait **extends** [`EngineBackend`] without changing it: the frozen
+/// 22 method set, its mock, its SDK backend and every existing test stay
+/// byte-identical. New tools are declared here and dispatched by
+/// [`crate::dispatch::execute_v2_with`].
+///
+/// Every method has a default body returning
+/// [`ToolError::unsupported`] with a gap id: a backend that cannot perform
+/// the operation must say so structurally (plan section 5 iron rules), and
+/// a backend that has not been taught the v2 face yet (the SDK backend)
+/// keeps compiling.
+pub trait EngineExt: EngineBackend {
+	/// `sequence.get_settings` — reads a sequence's name / format / length.
+	fn sequence_get_settings(&self, args: Value) -> Result<Value, ToolError> {
+		let _ = args;
+		Err(ToolError::unsupported(
+			"GAP_SEQUENCE_SETTINGS",
+			"this backend has no `sequence.get_settings` support",
+		))
+	}
+
+	/// `sequence.set_format` — partial update of name / width / height /
+	/// fps / interlaced, as ONE undo row.
+	fn sequence_set_format(&mut self, args: Value) -> Result<Value, ToolError> {
+		let _ = args;
+		Err(ToolError::unsupported(
+			"GAP_SEQUENCE_SET_FORMAT",
+			"this backend has no `sequence.set_format` support",
+		))
+	}
+}

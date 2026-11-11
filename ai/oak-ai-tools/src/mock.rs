@@ -220,6 +220,26 @@ pub struct ProjectState {
 	pub sequences: Vec<Sequence>,
 	/// Id counters.
 	pub counters: Counters,
+	/// Per-sequence format for the v2 `sequence.set_format` face, keyed by
+	/// sequence id.
+	///
+	/// `#[serde(skip_serializing)]` keeps the frozen tool-face JSON
+	/// byte-identical (the 22 tools never see this field), while deriving
+	/// `PartialEq`/`Clone` through `ProjectState` means the mock's snapshot
+	/// undo restores it like the rest of the timeline.
+	#[serde(skip_serializing)]
+	pub format: std::collections::BTreeMap<String, SequenceFormat>,
+}
+
+/// The v2 format of a mock sequence (defaults: the project grid, 1920×1080,
+/// progressive).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SequenceFormat {
+	pub name: String,
+	pub width: u32,
+	pub height: u32,
+	pub rate: Rat,
+	pub interlaced: bool,
 }
 
 /// An open undo group: the label (tool name) plus the state snapshot
@@ -529,6 +549,7 @@ impl EngineBackend for MockBackend {
 			footage: Vec::new(),
 			sequences,
 			counters: Counters::default(),
+			format: std::collections::BTreeMap::new(),
 		});
 		// The default sequence owns ids track-1/track-2 above; start the
 		// counters past them so later allocations never collide.
@@ -1431,5 +1452,209 @@ mod tests {
 		.unwrap_err();
 		assert_eq!(err.step.as_deref(), Some("validate"));
 		assert!(err.txn.is_none(), "validation failures start no transaction");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// v2 extension face (`sequence.*`, T9.2)
+// ---------------------------------------------------------------------------
+
+impl SequenceFormat {
+	/// The default format of a mock sequence: the project grid, 1920×1080,
+	/// progressive.
+	fn default_for(project: &ProjectState, seq: &Sequence) -> Self {
+		SequenceFormat {
+			name: seq.name.clone(),
+			width: 1920,
+			height: 1080,
+			rate: project.fps,
+			interlaced: false,
+		}
+	}
+}
+
+impl MockBackend {
+	/// The sequence the args name (or the first one) plus its format.
+	fn mock_sequence_mut(
+		&mut self,
+		wanted: Option<&str>,
+	) -> Result<(SequenceFormat, usize), ToolError> {
+		let project = self
+			.model
+			.project
+			.as_mut()
+			.ok_or_else(|| ToolError::invalid_params("no project open"))?;
+		let index = match wanted {
+			Some(id) => project
+				.sequences
+				.iter()
+				.position(|s| s.id == id)
+				.ok_or_else(|| ToolError::invalid_params(format!("no sequence '{id}'")))?,
+			None => 0,
+		};
+		let seq = project
+			.sequences
+			.get(index)
+			.ok_or_else(|| ToolError::invalid_params("the project has no sequence"))?;
+		let base = SequenceFormat::default_for(project, seq);
+		let current = project
+			.format
+			.get(&seq.id)
+			.cloned()
+			.unwrap_or(base);
+		Ok((current, index))
+	}
+
+	/// The wire shape both v2 tools return.
+	fn settings_json(project: &ProjectState, format: &SequenceFormat, index: usize) -> Value {
+		let seq_id = project
+			.sequences
+			.get(index)
+			.map(|s| s.id.clone())
+			.unwrap_or_default();
+		// Duration: the longest clip out point on the project grid, in
+		// seconds — the mock's analogue of `graphops::sequence_length`.
+		let mut longest = Rat::new(0, 1).expect("static rational");
+		if let Some(seq) = project.sequences.get(index) {
+			for track in &seq.tracks {
+				for clip in &track.clips {
+					if let Ok(out) = clip.out() {
+						if out > longest {
+							longest = out;
+						}
+					}
+				}
+			}
+		}
+		serde_json::json!({
+			"id": seq_id,
+			"name": format.name,
+			"width": format.width,
+			"height": format.height,
+			"rate": {"num": format.rate.num, "den": format.rate.den},
+			"interlaced": format.interlaced,
+			"duration": {"num": longest.num, "den": longest.den},
+			"backend": "mock",
+			"undoable": true,
+		})
+	}
+}
+
+impl crate::backend::EngineExt for MockBackend {
+	fn sequence_get_settings(&self, args: Value) -> Result<Value, ToolError> {
+		let parsed = crate::tools::v2::sequence::parse_get_settings(&args)?;
+		let project = self
+			.model
+			.project
+			.as_ref()
+			.ok_or_else(|| ToolError::invalid_params("no project open"))?;
+		let index = match parsed.sequence.as_deref() {
+			Some(id) => project
+				.sequences
+				.iter()
+				.position(|s| s.id == id)
+				.ok_or_else(|| ToolError::invalid_params(format!("no sequence '{id}'")))?,
+			None => 0,
+		};
+		let seq = project
+			.sequences
+			.get(index)
+			.ok_or_else(|| ToolError::invalid_params("the project has no sequence"))?;
+		let format = project
+			.format
+			.get(&seq.id)
+			.cloned()
+			.unwrap_or_else(|| SequenceFormat::default_for(project, seq));
+		Ok(Self::settings_json(project, &format, index))
+	}
+
+	fn sequence_set_format(&mut self, args: Value) -> Result<Value, ToolError> {
+		let parsed = crate::tools::v2::sequence::parse_set_format(&args)?;
+		let (current, index) = self.mock_sequence_mut(parsed.sequence.as_deref())?;
+		// Partial update: only the supplied fields move.
+		let after = SequenceFormat {
+			name: parsed.name.unwrap_or(current.name),
+			width: parsed.width.unwrap_or(current.width),
+			height: parsed.height.unwrap_or(current.height),
+			rate: parsed.fps.unwrap_or(current.rate),
+			interlaced: parsed.interlaced.unwrap_or(current.interlaced),
+		};
+		let project = self
+			.model
+			.project
+			.as_mut()
+			.ok_or_else(|| ToolError::invalid_params("no project open"))?;
+		let seq_id = project
+			.sequences
+			.get(index)
+			.map(|s| s.id.clone())
+			.ok_or_else(|| ToolError::invalid_params("the project has no sequence"))?;
+		project.format.insert(seq_id, after.clone());
+		Ok(Self::settings_json(project, &after, index))
+	}
+}
+
+/// Guard tests for the v2 side table (T9.2).
+///
+/// `ProjectState::format` is `#[serde(skip_serializing)]` so that adding
+/// the v2 face did **not** change the frozen 22-tool JSON by a single
+/// byte. These tests are the tripwire: remove the attribute and they go
+/// red before any frozen-surface test notices.
+#[cfg(test)]
+mod v2_serde_guard_tests {
+	use super::*;
+	use crate::backend::EngineExt;
+	use serde_json::json;
+
+	/// The serialised project state carries no `format` key at all.
+	#[test]
+	fn project_state_serialisation_omits_the_v2_format_table() {
+		let mut mock = MockBackend::new();
+		mock.project_open(&json!({ "name": "Serde Guard" }))
+			.expect("open");
+		mock.sequence_set_format(json!({ "fps": 24, "width": 1280 }))
+			.expect("set format");
+
+		let project = mock
+			.model
+			.project
+			.as_ref()
+			.expect("the mock holds a project");
+		// The side table is populated (otherwise this guard would be vacuous).
+		assert!(
+			!project.format.is_empty(),
+			"the test must actually fill the side table"
+		);
+
+		let value = serde_json::to_value(project).expect("serialise the project state");
+		let obj = value.as_object().expect("an object");
+		assert!(
+			obj.get("format").is_none(),
+			"the v2 side table leaked into the frozen JSON: {value}"
+		);
+		// Nothing nested either: the key name must not appear anywhere.
+		let text = value.to_string();
+		assert!(
+			!text.contains("\"format\""),
+			"no `format` key may appear in the frozen payload: {text}"
+		);
+	}
+
+	/// The frozen tool-face payload is byte-identical before and after a
+	/// v2 edit: `project.get_overview` is what the frozen 22 report, and a
+	/// `sequence.set_format` call must not perturb it.
+	#[test]
+	fn a_v2_edit_does_not_perturb_the_frozen_overview_payload() {
+		let mut mock = MockBackend::new();
+		mock.project_open(&json!({ "name": "Byte Guard" }))
+			.expect("open");
+		let before = mock.project_get_overview(&Value::Null).expect("before");
+		mock.sequence_set_format(json!({ "fps": 25, "name": "Renamed" }))
+			.expect("set format");
+		let after = mock.project_get_overview(&Value::Null).expect("after");
+		assert_eq!(
+			before, after,
+			"a v2 edit must not change the frozen overview payload"
+		);
 	}
 }

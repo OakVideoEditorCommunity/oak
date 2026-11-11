@@ -25,7 +25,8 @@ use oak_extensions::host_services::{
 	AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionReq, AudioLevelsRequest,
 	AudioLevelsResult, ClipInfo, DeleteClipReq, EntityId, ExportJob, ExportRequest, FootageInfo,
 	FrameRequest, FrameResult, HostError, HostServices, MediaProbe, MoveClipReq, NodeTypeInfo,
-	ParamInfo, PlaceClipReq, ProjectInfo, Rational, SequenceInfo, SetKeyframeReq, SetParamReq, SetWorkareaReq,
+	ParamInfo, PlaceClipReq, ProjectInfo, Rational, SequenceInfo, SequenceSettings,
+	SetKeyframeReq, SetParamReq, SetSequenceFormatReq, SetWorkareaReq,
 	RippleDeleteReq, SplitClipReq, ThumbnailsRequest, TimelineStructure, TrackInfo, TrimClipReq,
 };
 use oak_extensions::protocol::{INVALID_PARAMS, METHOD_NOT_FOUND};
@@ -159,6 +160,24 @@ impl OppHost {
 	/// sequence).
 	fn first_sequence(&self, p: &ProjectRef) -> Result<NodeId, HostError> {
 		self.sequence_of(p, &None)
+	}
+
+	/// The wire form of a sequence's settings.
+	fn settings_of(&self, p: &ProjectRef, seq: NodeId) -> Result<SequenceSettings, HostError> {
+		let g = p.lock().unwrap_or_else(|e| e.into_inner());
+		let (name, width, height, rate, interlaced) =
+			graphops::sequence_settings(&g.graph, seq)
+				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?;
+		let duration = graphops::sequence_length(&g.graph, seq);
+		Ok(SequenceSettings {
+			id: id_string(seq),
+			name,
+			width: width.max(0) as u32,
+			height: height.max(0) as u32,
+			rate: host_rational(&rate),
+			interlaced,
+			duration: host_rational(&duration),
+		})
 	}
 
 	/// `(num, den)` frame timebase of `seq` (`graphops::sequence_time_base`).
@@ -903,6 +922,65 @@ impl HostServices for OppHost {
 			 dispatch layer",
 			"opp-spec.md §1.1",
 		))
+	}
+
+	// ---- sequence.* (v2 face) -----------------------------------------
+
+	fn sequence_get_settings(
+		&self,
+		sequence: Option<&EntityId>,
+	) -> Result<SequenceSettings, HostError> {
+		let p = self.project()?;
+		let seq = self.sequence_of(&p, &sequence.cloned())?;
+		self.settings_of(&p, seq)
+	}
+
+	fn sequence_set_format(
+		&self,
+		req: SetSequenceFormatReq,
+		txn: Option<&str>,
+	) -> Result<SequenceSettings, HostError> {
+		self.require_txn(txn)?;
+		let p = self.project()?;
+		let seq = self.sequence_of(&p, &req.sequence)?;
+		// Partial update: read the current tuple, overwrite only the fields
+		// the caller supplied, then write the whole tuple back as ONE undo
+		// row (changing the rate reinterprets every block's time base).
+		let (name, width, height, rate, interlaced) = {
+			let g = p.lock().unwrap_or_else(|e| e.into_inner());
+			graphops::sequence_settings(&g.graph, seq)
+				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?
+		};
+		let rate = match req.rate {
+			Some(r) => core_rational(&r)?,
+			None => rate,
+		};
+		let width = req.width.map(|w| w as i32).unwrap_or(width);
+		let height = req.height.map(|h| h as i32).unwrap_or(height);
+		if width <= 0 || height <= 0 {
+			return Err(HostError::with_data(
+				INVALID_PARAMS,
+				"width and height must be positive",
+				json!({ "width": width, "height": height }),
+			));
+		}
+		if rate.numerator() <= 0 || rate.denominator() <= 0 {
+			return Err(HostError::with_data(
+				INVALID_PARAMS,
+				"fps must be a positive rational",
+				json!({ "rate": host_rational(&rate) }),
+			));
+		}
+		let after = (
+			req.name.unwrap_or(name),
+			width,
+			height,
+			rate,
+			req.interlaced.unwrap_or(interlaced),
+		);
+		graphops::set_sequence_parameters_undoable(&p, seq, after)
+			.map_err(|e| HostError::internal(format!("set sequence format failed: {e}")))?;
+		self.settings_of(&p, seq)
 	}
 }
 

@@ -346,6 +346,39 @@ impl From<HostError> for crate::protocol::ErrorObject {
 ///
 /// `txn` is `Some` for confirmation-class methods (§7.3); passing `None`
 /// where a transaction is required yields [`HostError::not_in_transaction`].
+/// The sequence settings the AI can read and (partially) update (v2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SequenceSettings {
+	pub id: EntityId,
+	pub name: String,
+	pub width: u32,
+	pub height: u32,
+	/// Frames per second as an exact rational (`{"num":30000,"den":1001}`).
+	pub rate: Rational,
+	pub interlaced: bool,
+	/// Total sequence length on the same time base.
+	pub duration: Rational,
+}
+
+/// A **partial** update request: `None` fields keep the engine's current
+/// value (只改给了的字段).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SetSequenceFormatReq {
+	/// `None` = the first/current sequence.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub sequence: Option<EntityId>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub name: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub width: Option<u32>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub height: Option<u32>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub rate: Option<Rational>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub interlaced: Option<bool>,
+}
+
 pub trait HostServices: Send + Sync {
 	// ---- project.* ----
 	fn project_get_info(&self) -> Result<ProjectInfo, HostError>;
@@ -408,6 +441,23 @@ pub trait HostServices: Send + Sync {
 	/// Undoes the whole stack including user operations (§6 rule 5).
 	fn edit_undo(&self) -> Result<bool, HostError>;
 	fn edit_redo(&self) -> Result<bool, HostError>;
+
+	// ---- sequence.* (v2 face; added after the frozen 22, default-free) ----
+	/// Reads the sequence's display name and video parameters (`None`
+	/// `sequence` = the first/current sequence of the open project).
+	fn sequence_get_settings(
+		&self,
+		sequence: Option<&EntityId>,
+	) -> Result<SequenceSettings, HostError>;
+	/// Applies a **partial** update of the sequence's settings: only the
+	/// fields present in `req` change. The edit is one undo row (a
+	/// `Set Sequence Format` command), because changing the frame rate
+	/// reinterprets every block's time base.
+	fn sequence_set_format(
+		&self,
+		req: SetSequenceFormatReq,
+		txn: Option<&str>,
+	) -> Result<SequenceSettings, HostError>;
 
 	// ---- events.* (event-source subscription) ----
 	/// Returns the granted subset (§7.2: events need read-class caps).

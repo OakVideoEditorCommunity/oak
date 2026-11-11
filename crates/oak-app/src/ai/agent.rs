@@ -12,7 +12,7 @@
 
 use serde_json::{json, Value};
 
-use oak_ai_tools::backend::EngineBackend;
+use oak_ai_tools::backend::{EngineBackend, EngineExt};
 use oak_ai_tools::dispatch;
 use oak_ai_tools::hooks::{GatedOutcome, Hooks, NoHooks, Policy};
 
@@ -116,9 +116,13 @@ pub struct Agent<L, B> {
 	tools: Vec<Value>,
 }
 
-impl<L: LlmClient, B: EngineBackend> Agent<L, B> {
+impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 	pub fn new(llm: L, backend: B, config: AgentConfig) -> Self {
-		let tools = openai_tools(dispatch::default_schemas());
+		// The frozen 22 first (their order is the schema-directory order),
+		// then the v2 face — one tool list for the model, two dispatch paths
+		// behind it.
+		let mut tools = openai_tools(dispatch::default_schemas());
+		tools.extend(oak_ai_tools::schema_v2::v2_openai_tools());
 		let messages = vec![ChatMessage::system(
 			"You are Oak's video-editing agent. Use the provided tools to inspect \
 			 and change the project; answer briefly when done.",
@@ -183,13 +187,25 @@ impl<L: LlmClient, B: EngineBackend> Agent<L, B> {
 				.push(ChatMessage::assistant(response.content, response.tool_calls.clone()));
 
 			for call in &response.tool_calls {
-				let outcome = dispatch::execute_with(
-					&mut self.backend,
-					&call.name,
-					call.arguments.clone(),
-					self.config.policy,
-					hooks,
-				);
+				// Two faces, one loop: a v2 name goes to the extension
+				// dispatcher, everything else keeps the frozen 22 path.
+				let outcome = if oak_ai_tools::schema_v2::is_v2_tool(&call.name) {
+					dispatch::execute_v2_with(
+						&mut self.backend,
+						&call.name,
+						call.arguments.clone(),
+						self.config.policy,
+						hooks,
+					)
+				} else {
+					dispatch::execute_with(
+						&mut self.backend,
+						&call.name,
+						call.arguments.clone(),
+						self.config.policy,
+						hooks,
+					)
+				};
 				let (payload, label) = outcome_payload(outcome);
 				self.messages
 					.push(ChatMessage::tool_result(&call.id, &payload));

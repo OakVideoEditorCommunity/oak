@@ -617,3 +617,41 @@ fn hooks_can_be_injected_as_one_object() {
 	run(&mut recording);
 	run(&mut hooks::NoHooks);
 }
+
+// ---------------------------------------------------------------------------
+// The v2 face's honest bottom line (T9.2, N2)
+// ---------------------------------------------------------------------------
+
+/// `Spy` implements the frozen 22 and takes the [`EngineExt`] **defaults** —
+/// the exact situation `SdkBackend` is in today.
+impl oak_ai_tools::backend::EngineExt for Spy<'_> {}
+
+/// A backend that has not been taught the v2 face must answer with the
+/// structured `UNSUPPORTED` + gap id, never a silent `Ok`.
+///
+/// This is the tripwire for the fail-closed promise: if someone ever
+/// rewrites a default body into `Ok(json!({}))`, `SdkBackend` starts
+/// claiming it can change a sequence's frame rate when it cannot — a lie
+/// the agent would act on. Asserting the code *and* the gap id keeps both
+/// halves of that contract.
+#[test]
+fn unimplemented_v2_tools_report_a_structured_unsupported_gap() {
+	use oak_ai_tools::backend::EngineExt;
+	use oak_ai_tools::error::CODE_UNSUPPORTED;
+
+	let mut backend = MockBackend::new();
+	let mut spy = Spy::new(&mut backend);
+
+	let err = EngineExt::sequence_get_settings(&spy, serde_json::json!({}))
+		.expect_err("the default body must refuse, not pretend");
+	assert_eq!(err.code, CODE_UNSUPPORTED, "read gap must be UNSUPPORTED");
+	assert_eq!(err.gap.as_deref(), Some("GAP_SEQUENCE_SETTINGS"));
+
+	let err = EngineExt::sequence_set_format(&mut spy, serde_json::json!({ "fps": 24 }))
+		.expect_err("the default body must refuse, not pretend");
+	assert_eq!(err.code, CODE_UNSUPPORTED, "write gap must be UNSUPPORTED");
+	assert_eq!(err.gap.as_deref(), Some("GAP_SEQUENCE_SET_FORMAT"));
+
+	// Fail-closed also means "no side effect": the defaults touched nothing.
+	assert_eq!(spy.edits, 0, "a refused v2 call must not mutate anything");
+}
