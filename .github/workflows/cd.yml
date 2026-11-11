@@ -175,36 +175,10 @@ jobs:
         shell: bash
         run: tooling/install-deps.sh
 
-      # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
-      # ships include/, MSVC import libs (.lib), pkg-config files and the
-      # runtime DLLs, built from FFmpeg's release/8.1 branch by BtbN's
-      # public GitHub Actions (BtbN is an FFmpeg developer and ffmpeg.org
-      # links these builds). Downloaded from his release page and
-      # verified against the checksums.sha256 published in the same
-      # release; nothing is mirrored here, so provenance stays upstream.
-      # The alternative — a source build — costs ~40 minutes per run on
-      # this platform.
-      - name: Install prebuilt FFmpeg (Windows)
+      - name: Install dependencies (Windows)
         if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
-          $asset = "ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
-          $dir = Join-Path $env:RUNNER_TEMP "ffmpeg-prebuilt"
-          New-Item -ItemType Directory -Force $dir | Out-Null
-          Invoke-WebRequest -Uri "$base/checksums.sha256" -OutFile "$dir\checksums.sha256"
-          $line = Select-String -Path "$dir\checksums.sha256" -Pattern ([regex]::Escape($asset) + "\s*$") |
-            Select-Object -First 1
-          if (-not $line) { throw "no checksum for $asset in the release's checksums.sha256" }
-          $expected = $line.Line.Split()[0].ToLowerInvariant()
-          Invoke-WebRequest -Uri "$base/$asset" -OutFile "$dir\$asset"
-          $actual = (Get-FileHash "$dir\$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "FFmpeg checksum mismatch: expected $expected, got $actual" }
-          $root = "$env:GITHUB_WORKSPACE\.cache"
-          Remove-Item "$root\ffmpeg", "$root\ffmpeg-extract" -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive -Path "$dir\$asset" -DestinationPath "$root\ffmpeg-extract" -Force
-          $inner = Get-ChildItem "$root\ffmpeg-extract" -Directory | Select-Object -First 1
-          Move-Item $inner.FullName "$root\ffmpeg"
+        shell: msys2
+        run: tooling/install-deps.sh
 
       - name: Install pkg-config (Windows)
         if: matrix.platform == 'windows'
@@ -214,8 +188,8 @@ jobs:
           "PKG_CONFIG=C:\msys64\ucrt64\bin\pkgconf.exe" >> $env:GITHUB_ENV
 
       # ------------------------------------------------------------------
-      # FFmpeg — built from source, every codec library included
-      # statically (Linux/macOS), or the prebuilt archive (Windows);
+      # FFmpeg — built from source on every platform, every codec library
+      # included statically;
       # no caches
       # ------------------------------------------------------------------
       # The Linux/macOS jobs follow the local-build path (install-deps.sh
@@ -226,6 +200,16 @@ jobs:
         if: matrix.platform != 'windows'
         shell: bash
         run: tooling/ffmpeg/build-ffmpeg.sh
+
+      - name: Build static FFmpeg (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compile static FFmpeg with MSVC
+        if: matrix.platform == 'windows'
+        shell: msys2
+        run: tooling/ffmpeg/build-ffmpeg.sh --msvc
 
       # ------------------------------------------------------------------
       # Build environment
