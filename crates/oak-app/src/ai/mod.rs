@@ -9,6 +9,8 @@
 //! * [`agent`] — the tool loop: schema → LLM → `tool_calls` →
 //!   `oak-ai-tools::dispatch::execute_with` (hooks gate included) →
 //!   results back into the conversation, capped by `max_rounds`.
+//! * [`memory`] — `memory.*` tools over the memlite CLI (BM25, two tiers,
+//!   Rust-side secret refusal);
 //! * [`backend`] — which `EngineBackend` implements the tools; the
 //!   two-scheme investigation lives in its module docs pending the lead's
 //!   ruling.
@@ -21,9 +23,11 @@ pub mod agent;
 pub mod backend;
 pub mod config;
 pub mod llm;
+pub mod memory;
 pub mod tool_text;
 
 pub use agent::{Agent, AgentConfig, AgentError, AgentReport, ToolLogEntry};
 pub use backend::{EngineBackend, MockBackend};
 pub use config::{AiConfig, ConfigError};
 pub use llm::{ChatMessage, ChatResponse, LlmClient, LlmError, ToolCall, UreqClient};
+pub use memory::{MemoryConfig, MemoryTools};

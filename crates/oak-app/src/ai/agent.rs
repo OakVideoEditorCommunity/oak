@@ -149,8 +149,11 @@ pub struct Agent<L, B> {
 	backend: B,
 	config: AgentConfig,
 	messages: Vec<ChatMessage>,
-	/// Openai tools array built once from the frozen registry.
+	/// Openai tools array built once from the frozen registry (plus the v2
+	/// face and the `memory.*` face).
 	tools: Vec<Value>,
+	/// Long-term memory tools (memlite subprocess; see [`super::memory`]).
+	memory: super::memory::MemoryTools,
 }
 
 impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
@@ -160,6 +163,7 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		// behind it.
 		let mut tools = openai_tools(dispatch::default_schemas());
 		tools.extend(oak_ai_tools::schema_v2::v2_openai_tools());
+		tools.extend(super::memory::openai_tools());
 		let messages = vec![ChatMessage::system(
 			"You are Oak's video-editing agent. Use the provided tools to inspect \
 			 and change the project; answer briefly when done. Call tools through the \
@@ -171,7 +175,20 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 			config,
 			messages,
 			tools,
+			memory: super::memory::MemoryTools::from_env(),
 		}
+	}
+
+	/// Replaces the memory tools (tests pass a private library root; the
+	/// panel may pass the project identity it resolved).
+	pub fn with_memory(mut self, memory: super::memory::MemoryTools) -> Self {
+		self.memory = memory;
+		self
+	}
+
+	/// The memory tools in use.
+	pub fn memory(&self) -> &super::memory::MemoryTools {
+		&self.memory
 	}
 
 	/// The backend, for tests and for the panel that renders engine state.
@@ -287,26 +304,33 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		report: &mut AgentReport,
 		streak: &mut Option<(String, String, usize)>,
 	) -> Result<bool, AgentError> {
-			// Two faces, one loop: a v2 name goes to the extension
-			// dispatcher, everything else keeps the frozen 22 path.
-			let outcome = if oak_ai_tools::schema_v2::is_v2_tool(&call.name) {
-				dispatch::execute_v2_with(
+			// Three faces, one loop: memory tools answer host-side (a
+			// subprocess, no engine and no edit transaction), a v2 name goes
+			// to the extension dispatcher, everything else keeps the frozen
+			// 22 path. All three end in the same payload/streak handling.
+			let (payload, label) = if super::memory::is_memory_tool(&call.name) {
+				memory_payload(super::memory::execute(
+					&self.memory,
+					&call.name,
+					call.arguments.clone(),
+				))
+			} else if oak_ai_tools::schema_v2::is_v2_tool(&call.name) {
+				outcome_payload(dispatch::execute_v2_with(
 					&mut self.backend,
 					&call.name,
 					call.arguments.clone(),
 					self.config.policy,
 					hooks,
-				)
+				))
 			} else {
-				dispatch::execute_with(
+				outcome_payload(dispatch::execute_with(
 					&mut self.backend,
 					&call.name,
 					call.arguments.clone(),
 					self.config.policy,
 					hooks,
-				)
+				))
 			};
-			let (payload, label) = outcome_payload(outcome);
 			self.messages
 				.push(ChatMessage::tool_result(&call.id, &payload));
 			report.tools.push(ToolLogEntry {
@@ -347,6 +371,29 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 				*streak = None;
 			}
 		Ok(false)
+	}
+}
+
+/// Model-facing payload for a `memory.*` call.
+///
+/// Same envelope as the engine tools (`ok` / `code` / `message`), so the
+/// model meets one error vocabulary whichever face answered.
+fn memory_payload(
+	result: Result<Value, oak_ai_tools::error::ToolError>,
+) -> (Value, &'static str) {
+	match result {
+		Ok(value) => (json!({ "ok": true, "result": value }), "applied"),
+		Err(error) => {
+			let mut payload = json!({
+				"ok": false,
+				"code": error.code,
+				"message": error.message,
+			});
+			if let Some(gap) = error.gap {
+				payload["gap"] = json!(gap);
+			}
+			(payload, "failed")
+		}
 	}
 }
 
@@ -920,5 +967,64 @@ mod tests {
 			.expect("tool message");
 		let content = tool_msg.content.as_deref().unwrap_or_default();
 		assert!(content.contains("\"ok\":false") || content.contains("\"ok\": false"), "{content}");
+	}
+
+	/// T11 probe (censor-verify-2): what does `Policy::ProposalOnly` do to
+	/// a `memory.*` write? `execute_call` (agent.rs `if
+	/// super::memory::is_memory_tool(&call.name)`) diverts memory tools to
+	/// `memory::execute(&self.memory, …)` **before** hooks sees them — and
+	/// `self.memory` is not the Backend that `hooks` guards
+	/// (`oak_ai_tools::hooks` doc: "ProposalOnly never touches the
+	/// backend"). So the record lands directly in `~/.oak/memory` with no
+	/// confirmation gate.
+	///
+	/// This test ASSERTS THE CURRENT (bypassing) behaviour so the finding
+	/// is reproducible; **it is not an endorsement**. Whether a
+	/// `memory.*` write should be gated under `ProposalOnly` (it is a
+	/// persistent side effect outside the project document) is a design
+	/// question reserved for the Lead — see task-45. If the gate is later
+	/// enforced, this probe must be updated in the same change.
+	#[test]
+	fn zz_probe_memory_write_ignores_proposal_only() {
+		use oak_ai_tools::hooks::Policy;
+		use oak_ai_tools::mock::MockBackend;
+
+		let root = std::env::temp_dir().join(format!("oak-mem-probe-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&root);
+		let memory = super::super::memory::MemoryTools::new(
+			super::super::memory::MemoryConfig::new(
+				super::super::memory::MemoryTools::from_env().config().bin(),
+				&root,
+				Some("p".into()),
+			),
+		);
+		let llm = ScriptedLlm::new(vec![
+			ScriptedLlm::tool_call("memory.remember", json!({"content": "把这段的帧率改成 24", "title": "剪辑事实"})),
+			ScriptedLlm::say("done"),
+		]);
+		let mut agent = Agent::new(
+			llm,
+			MockBackend::new(),
+			AgentConfig {
+				max_rounds: 4,
+				policy: Policy::ProposalOnly,
+				..Default::default()
+			},
+		)
+		.with_memory(memory);
+		let report = agent.run("remember this").expect("run");
+		println!("TOOLS={:?}", report.tools);
+		let listed = agent
+			.memory()
+			.list(&json!({"limit": 10}))
+			.expect("list");
+		println!("LISTED={listed}");
+		assert_eq!(
+			listed["entries"].as_array().unwrap().len(),
+			1,
+			"the probe expects the write to have LANDED under ProposalOnly: {listed}"
+		);
+		assert_eq!(report.tools[0].outcome, "applied");
+		let _ = std::fs::remove_dir_all(&root);
 	}
 }
