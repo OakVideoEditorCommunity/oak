@@ -41,9 +41,10 @@
 # libdrm, ffnvcodec), probed per host. Build tools come from
 # tooling/install-deps.sh.
 #
-# Usage: tooling/ffmpeg/build-ffmpeg.sh [-j N] [--shared]
+# Usage: tooling/ffmpeg/build-ffmpeg.sh [-j N] [--shared] [--msvc]
 #   -j N       parallel make jobs (default: nproc/sysctl)
 #   --shared   build shared libraries instead of the default static+PIC
+#   --msvc     build with Microsoft's cl/link/lib instead of MinGW/GCC
 
 set -euo pipefail
 
@@ -53,14 +54,17 @@ PREFIX="$ROOT/.cache/ffmpeg"
 SRC="$ROOT/.cache/ffmpeg-src"
 JOBS="$( (nproc 2>/dev/null) || sysctl -n hw.ncpu)"
 SHARED=0
+MSVC="${MSVC:-0}"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-j) JOBS="$2"; shift 2 ;;
 		--shared) SHARED=1; shift ;;
+		--msvc) MSVC=1; shift ;;
 		*) echo "unknown argument: $1" >&2; exit 2 ;;
 	esac
 done
+export MSVC
 
 have_pkg() { pkg-config --exists "$1" 2>/dev/null; }
 
@@ -131,6 +135,9 @@ if [ "$SHARED" = 1 ]; then
 	FLAGS+=(--enable-shared --disable-static)
 else
 	FLAGS+=(--enable-static --disable-shared --enable-pic)
+fi
+if [ "$MSVC" = 1 ]; then
+	FLAGS+=(--toolchain=msvc)
 fi
 if [ "$OS" = Linux ]; then
 	# libass' font provider on Linux (macOS uses CoreText, Windows
