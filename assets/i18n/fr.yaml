@@ -156,6 +156,7 @@
 "ai.empty": "Commencez une conversation"
 "ai.not_configured": "OAK_AI_API_KEY n'est pas défini — exportez-le avant de démarrer oak"
 "ai.notice.limit": "Limite d'étapes atteinte — la réponse a été coupée"
+"ai.notice.stalled": "Arrêt sur un échec répété : le même outil a échoué 3+ fois avec la même erreur"
 "ai.error.not_configured": "Clé API non configurée"
 "ai.error.http": "Échec de la requête réseau"
 "ai.error.api": "Le service a renvoyé une erreur"

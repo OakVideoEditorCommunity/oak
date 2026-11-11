@@ -62,7 +62,37 @@ pub struct AgentReport {
 	pub final_text: Option<String>,
 	/// Every tool call executed, in order.
 	pub tools: Vec<ToolLogEntry>,
+	/// Set when the loop stopped early because the same tool kept failing
+	/// with the same error code: what it was stuck on, for the user.
+	pub stalled: Option<StallStop>,
 }
+
+/// Why the loop stopped before the round cap: the same tool failed with the
+/// same code `repeats` times in a row, so further rounds would burn the
+/// budget on one unfixable call (the measured 6-round failure).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StallStop {
+	pub tool: String,
+	pub code: String,
+	pub repeats: usize,
+	/// The last structured message, verbatim, for the user-facing notice.
+	pub message: String,
+}
+
+impl StallStop {
+	/// The user-facing sentence: what is stuck and what to do about it.
+	pub fn describe(&self) -> String {
+		format!(
+			"stopped early: `{}` failed {} times in a row with `{}` ({}); \
+			 nothing further was attempted. Fix that call (or tell the assistant \
+			 what to do differently) and try again",
+			self.tool, self.repeats, self.code, self.message
+		)
+	}
+}
+
+/// How many identical failures in a row end the loop (首辅 ruling, T9.3).
+pub const MAX_IDENTICAL_FAILURES: usize = 3;
 
 /// Loop failure. Both variants are structured (`code()`), never a panic.
 #[derive(Debug, Clone, PartialEq)]
@@ -168,6 +198,11 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		self.messages.push(ChatMessage::user(user));
 		let mut report = AgentReport::default();
 
+		// Repeated-identical-failure guard: the streak spans rounds on
+		// purpose (the measured failure re-sent the same call every round);
+		// a different tool or a different code resets it.
+		let mut streak: Option<(String, String, usize)> = None;
+
 		for round in 1..=self.config.max_rounds.max(1) {
 			let response = self.llm.complete(&ChatRequest {
 				model: &self.config.model,
@@ -215,6 +250,37 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 					outcome: label,
 					detail: payload.to_string(),
 				});
+
+				// Track the failing streak. Only structured refusals count:
+				// an applied edit is progress even if an earlier one failed.
+				if let Some(code) = payload.get("code").and_then(Value::as_str) {
+					let message = payload
+						.get("message")
+						.and_then(Value::as_str)
+						.unwrap_or_default()
+						.to_string();
+					let repeat = match &streak {
+						Some((tool, prev, count)) if tool == &call.name && prev == code => count + 1,
+						_ => 1,
+					};
+					if repeat >= MAX_IDENTICAL_FAILURES {
+						report.stalled = Some(StallStop {
+							tool: call.name.clone(),
+							code: code.to_string(),
+							repeats: repeat,
+							message,
+						});
+						// `round` is this turn's 1-based index, so the turns
+						// consumed are exactly `round` (not round + 1).
+						report.rounds = round;
+						return Ok(report);
+					}
+					let _ = message;
+					streak = Some((call.name.clone(), code.to_string(), repeat));
+				} else {
+					// Anything that is not a structured failure resets it.
+					streak = None;
+				}
 			}
 		}
 
@@ -303,6 +369,85 @@ mod tests {
 				finish_reason: Some("stop".into()),
 			}
 		}
+	}
+
+	/// The field failure's worst symptom (T9.3): six rounds spent on one
+	/// call that could never succeed, ending in "reached the round limit".
+	/// The loop must stop at the third identical failure and say what it was
+	/// stuck on.
+	#[test]
+	fn repeated_identical_failures_stop_the_loop_early() {
+		use oak_ai_tools::mock::MockBackend;
+
+		// A schema failure is repeatable and never touches the backend.
+		let bad = ScriptedLlm::tool_call("sequence.set_format", json!({ "frameRate": 60 }));
+		let llm = ScriptedLlm::new(vec![bad.clone(), bad.clone(), bad.clone(), bad]);
+		let mut agent = Agent::new(
+			llm,
+			MockBackend::new(),
+			AgentConfig {
+				max_rounds: 20,
+				..Default::default()
+			},
+		);
+		let report = agent.run("set the frame rate").expect("the loop must report, not error");
+		assert!(
+			report.stalled.is_some(),
+			"the loop must notice the repeated failure: {report:?}"
+		);
+		let stall = report.stalled.expect("stall");
+		assert_eq!(stall.tool, "sequence.set_format");
+		assert_eq!(stall.code, oak_ai_tools::error::CODE_SCHEMA_VALIDATION);
+		assert_eq!(stall.repeats, MAX_IDENTICAL_FAILURES);
+		assert!(
+			stall.describe().contains("sequence.set_format")
+				&& stall.describe().contains("stopped early"),
+			"the stop must be explained to the user: {}",
+			stall.describe()
+		);
+		assert!(
+			report.tools.len() < 20,
+			"the cap must not be burned: {} calls",
+			report.tools.len()
+		);
+		assert!(!report.converged, "it did not converge; it stalled");
+		// The report must not inflate the work: three calls are three rounds.
+		assert_eq!(
+			report.rounds, MAX_IDENTICAL_FAILURES,
+			"the reported rounds must equal the turns consumed"
+		);
+	}
+
+	/// A different error code resets the streak, so a model that changes its
+	/// approach is never cut off.
+	#[test]
+	fn a_different_failure_resets_the_streak() {
+		use oak_ai_tools::mock::MockBackend;
+
+		let bad = ScriptedLlm::tool_call("sequence.set_format", json!({ "frameRate": 60 }));
+		// Three failures of two different codes never reach 3 in a row of one.
+		let other = ScriptedLlm::tool_call("sequence.get_settings", json!({ "sequence": {} }));
+		let llm = ScriptedLlm::new(vec![
+			bad.clone(),
+			bad.clone(),
+			other.clone(),
+			bad.clone(),
+			bad.clone(),
+			ScriptedLlm::say("done"),
+		]);
+		let mut agent = Agent::new(
+			llm,
+			MockBackend::new(),
+			AgentConfig {
+				max_rounds: 20,
+				..Default::default()
+			},
+		);
+		let report = agent.run("set the frame rate").expect("run");
+		assert!(
+			report.stalled.is_none(),
+			"interleaved failures must not stall: {report:?}"
+		);
 	}
 
 	impl LlmClient for ScriptedLlm {

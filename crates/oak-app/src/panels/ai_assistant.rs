@@ -265,6 +265,17 @@ fn strip_inline(line: &str) -> String {
 /// order), then the final answer — or the round-cap notice when the loop
 /// ran out of rounds.
 pub fn append_report(bubbles: &mut Vec<Bubble>, report: &AgentReport) {
+	// A stall is reported before the answer: the user must know the run
+	// stopped on a repeated failure rather than silently hitting the cap.
+	if let Some(stall) = &report.stalled {
+		bubbles.push(Bubble::System(format!(
+			"{} ({} · {} ×{})",
+			crate::i18n::tr("ai.notice.stalled"),
+			stall.tool,
+			stall.code,
+			stall.repeats
+		)));
+	}
 	for entry in &report.tools {
 		bubbles.push(Bubble::Tool {
 			name: entry.tool.clone(),
@@ -1089,6 +1100,51 @@ mod tests {
 	/// The transcript gets tool bubbles in call order, then the answer; a
 	/// capped run gets the round-limit notice instead of a fake answer.
 	#[test]
+	/// **O3**: a stalled run must reach the panel as a notice, not as a
+	/// silent truncation — the field's worst symptom was "reached the round
+	/// limit" after six identical failures.
+	#[test]
+	fn append_report_surfaces_a_stall_as_a_notice() {
+		let mut bubbles = Vec::new();
+		let report = AgentReport {
+			rounds: 3,
+			converged: false,
+			final_text: None,
+			tools: vec![ToolLogEntry {
+				round: 3,
+				tool: "sequence.set_format".to_string(),
+				outcome: "failed",
+				detail: "{\"code\":\"INVALID_PARAMS\"}".to_string(),
+			}],
+			stalled: Some(crate::ai::agent::StallStop {
+				tool: "sequence.set_format".to_string(),
+				code: "INVALID_PARAMS".to_string(),
+				repeats: 3,
+				message: "`fps` must be a number".to_string(),
+			}),
+		};
+		append_report(&mut bubbles, &report);
+
+		let notice = bubbles.iter().find_map(|b| match b {
+			Bubble::System(text) => Some(text.clone()),
+			_ => None,
+		});
+		let notice = notice.expect("a stall must produce a system notice");
+		assert!(
+			notice.contains(crate::i18n::tr("ai.notice.stalled")),
+			"the notice must use the translated wording: {notice}"
+		);
+		assert!(
+			notice.contains("sequence.set_format") && notice.contains("INVALID_PARAMS"),
+			"the notice must name what is stuck: {notice}"
+		);
+		// The round-limit notice must not be what the user sees here.
+		assert!(
+			!notice.contains(crate::i18n::tr("ai.notice.limit")),
+			"a stall is not the round cap: {notice}"
+		);
+	}
+
 	fn append_report_orders_tools_then_answer() {
 		let tool = |name: &str, outcome: &'static str| ToolLogEntry {
 			round: 1,
@@ -1102,6 +1158,7 @@ mod tests {
 			converged: true,
 			final_text: Some("done".to_owned()),
 			tools: vec![tool("project.open", "applied"), tool("node.set_param", "failed")],
+			stalled: None,
 		};
 		append_report(&mut bubbles, &report);
 		assert_eq!(
@@ -1132,6 +1189,7 @@ mod tests {
 			converged: false,
 			final_text: None,
 			tools: Vec::new(),
+			stalled: None,
 		};
 		append_report(&mut bubbles, &report);
 		assert_eq!(
@@ -1216,7 +1274,7 @@ mod tests {
 			("ru", include_str!("../../../../assets/i18n/ru.yaml")),
 			("ja", include_str!("../../../../assets/i18n/ja.yaml")),
 		];
-		const KEYS: [&str; 20] = [
+		const KEYS: [&str; 21] = [
 			"menu.window.ai_assistant",
 			"panel.ai_assistant",
 			"ai.placeholder",
@@ -1227,6 +1285,7 @@ mod tests {
 			"ai.empty",
 			"ai.not_configured",
 			"ai.notice.limit",
+			"ai.notice.stalled",
 			"ai.error.not_configured",
 			"ai.error.http",
 			"ai.error.api",

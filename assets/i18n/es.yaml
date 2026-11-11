@@ -156,6 +156,7 @@
 "ai.empty": "Empiece una conversación"
 "ai.not_configured": "OAK_AI_API_KEY no está definido — expórtelo antes de iniciar oak"
 "ai.notice.limit": "Se alcanzó el límite de rondas — la respuesta se cortó"
+"ai.notice.stalled": "Detenido en un fallo repetido: la misma herramienta falló 3+ veces con el mismo error"
 "ai.error.not_configured": "Clave API no configurada"
 "ai.error.http": "Error en la solicitud de red"
 "ai.error.api": "El servicio devolvió un error"

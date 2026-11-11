@@ -156,6 +156,7 @@
 "ai.empty": "Beginnen Sie ein Gespräch"
 "ai.not_configured": "OAK_AI_API_KEY ist nicht gesetzt — exportieren Sie die Variable vor dem Oak-Start"
 "ai.notice.limit": "Rundengrenze erreicht — die Antwort wurde abgeschnitten"
+"ai.notice.stalled": "Bei einem wiederholten Fehler gestoppt: dasselbe Werkzeug schlug 3+ Mal mit demselben Fehler fehl"
 "ai.error.not_configured": "API-Schlüssel nicht konfiguriert"
 "ai.error.http": "Netzwerkanfrage fehlgeschlagen"
 "ai.error.api": "Der Dienst gab einen Fehler zurück"

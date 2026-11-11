@@ -156,6 +156,7 @@
 "ai.empty": "会話を始めましょう"
 "ai.not_configured": "OAK_AI_API_KEY が未設定です — oak の起動前に環境変数を設定してください"
 "ai.notice.limit": "ラウンド上限に達しました — 返信は打ち切られました"
+"ai.notice.stalled": "同じ失敗の繰り返しで停止しました：同じツールが同じエラーで3回以上失敗しました"
 "ai.error.not_configured": "APIキーが未設定です"
 "ai.error.http": "ネットワークリクエストに失敗しました"
 "ai.error.api": "サービスがエラーを返しました"
