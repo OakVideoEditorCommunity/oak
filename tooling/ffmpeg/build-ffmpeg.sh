@@ -169,6 +169,18 @@ if [ -d /usr/local/cuda ] || pkg-config --exists ffnvcodec 2>/dev/null; then
 else
 	echo "  - nvdec/nvenc/cuda (no ffnvcodec headers)"
 fi
+if have_pkg libvpl; then
+	FLAGS+=(--enable-libvpl)
+	echo "  + Intel QSV (libvpl)"
+else
+	echo "  - Intel QSV (no libvpl)"
+fi
+if [ -f /usr/include/AMF/core/Factory.h ] || [ -f /ucrt64/include/AMF/core/Factory.h ] || [ -f /mingw64/include/AMF/core/Factory.h ]; then
+	FLAGS+=(--enable-amf)
+	echo "  + AMD AMF"
+else
+	echo "  - AMD AMF (no AMF headers)"
+fi
 
 # --- Build ------------------------------------------------------------------
 

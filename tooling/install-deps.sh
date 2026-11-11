@@ -67,7 +67,9 @@ if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || -n "${MSYSTEM:-}" ]]; then
 			make diffutils git curl \
 			mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-pkgconf \
 			mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-cmake \
-			mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-meson
+			mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-meson \
+			mingw-w64-ucrt-x86_64-libvpl mingw-w64-ucrt-x86_64-ffnvcodec-headers \
+			mingw-w64-ucrt-x86_64-amd-amf
 		then
 			exit 0
 		fi
@@ -114,7 +116,7 @@ case "$(uname -s)" in
 			libxkbcommon-dev libxkbcommon-x11-dev
 			xvfb gdb file fonts-dejavu-core icc-profiles-free
 			dpkg-dev librsvg2-bin patchelf
-			libva-dev libdrm-dev
+			libva-dev libdrm-dev libvpl-dev
 		)
 		# A single unavailable package (e.g. pkgconf on openKylin, which
 		# ships pkg-config under its classic name) must not kill the whole
@@ -158,7 +160,7 @@ case "$(uname -s)" in
 				libxkbcommon-devel libxkbcommon-x11-devel
 				xorg-x11-server-Xvfb xorg-x11-xauth gdb file dejavu-sans-fonts
 				rpm-build librsvg2-tools
-				libva-devel libdrm-devel
+				libva-devel libdrm-devel libvpl-devel
 			)
 			if ! run "${SUDO[@]}" dnf install -y --setopt=install_weak_deps=False \
 				--setopt=max_parallel_downloads=16 "${DNFPKGS[@]}"; then
@@ -168,7 +170,7 @@ case "$(uname -s)" in
 					"${DNFPKGS[@]}"
 			fi
 		elif command -v pacman >/dev/null; then
-			run "${SUDO[@]}" pacman -S --needed --noconfirm \
+			run "${SUDO[@]}" pacman -Syu --needed --noconfirm \
 				base-devel clang cmake meson ninja \
 				python pkgconf nasm curl git zip unzip tar patch xz which \
 				autoconf autoconf-archive automake libtool gperf \
@@ -177,7 +179,7 @@ case "$(uname -s)" in
 				libxkbcommon libxkbcommon-x11 \
 				xorg-server-xvfb xorg-xauth gdb file ttf-dejavu \
 				librsvg \
-				ffnvcodec-headers libva libdrm
+				ffnvcodec-headers libva libdrm libvpl
 		else
 			echo "Unsupported Linux distribution (need apt-get, dnf or pacman)." >&2
 			exit 1
