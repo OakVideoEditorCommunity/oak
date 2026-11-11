@@ -89,6 +89,7 @@ opt-level = 1
 # The fork carries all three fixes; return to the crates.io release once it
 # does (the ocio-rs patch pulls the fork's `ocio-sys` path dependency too).
 [patch.crates-io]
+gpu-allocator = { path = "vendor/gpu-allocator" }
 # 10-bit display path (docs/zh/gpui-kit-migration.md): minimal renderer
 # patches vendored from the registry snapshots. gpui-pre gains
 # `SurfaceSource::Texture` + `Window::gpu_context`, gpui-pre-linux exposes

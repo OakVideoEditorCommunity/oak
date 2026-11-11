@@ -227,7 +227,7 @@ jobs:
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
         shell: bash
-        run: tooling/ffmpeg/build-ffmpeg.sh
+        run: tooling/ffmpeg/build-ffmpeg.sh --shared
 
       # ------------------------------------------------------------------
       # Build environment
@@ -249,6 +249,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -260,6 +261,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'

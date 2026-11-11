@@ -177,7 +177,7 @@ jobs:
             echo "FFmpeg restored from cache; skipping the build"
           else
             rm -rf .cache/ffmpeg
-            tooling/ffmpeg/build-ffmpeg.sh
+            tooling/ffmpeg/build-ffmpeg.sh --shared
             # The cargo cache may hold ffmpeg-sys-next rlibs that bundled
             # the previous archives (cargo does not track archive
             # changes); flag a refresh so the build relinks the new one.
@@ -210,6 +210,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -221,6 +222,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'

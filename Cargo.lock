@@ -2333,6 +2333,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ffmpeg-next"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6380599799e175191eb7ffe82c97f36a2a90a36cbc54c738a903e5287d7f516a"
+dependencies = [
+ "bitflags 2.13.2",
+ "ffmpeg-sys-next",
+ "libc",
+]
+
+[[package]]
+name = "ffmpeg-sys-next"
+version = "9.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f932d8c1cede016c65d4f1435f323369c99c74df55143b18676aa10e7603f9"
+dependencies = [
+ "bindgen 0.73.2",
+ "cc",
+ "libc",
+ "num_cpus",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2797,15 +2822,13 @@ dependencies = [
 [[package]]
 name = "gpu-allocator"
 version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51255ea7cfaadb6c5f1528d43e92a82acb2b96c43365989a28b2d44ee38f8795"
 dependencies = [
  "ash",
  "hashbrown 0.16.1",
  "log 0.4.35",
  "presser",
  "thiserror 2.0.21",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -6531,23 +6554,21 @@ dependencies = [
 
 [[package]]
 name = "quercus-audio"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cpal",
+ "ffmpeg-next",
  "quercus-codec",
  "quercus-core",
- "quercus-ffmpeg-link",
- "quercus-ffmpeg-next",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "quercus-codec"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
+ "ffmpeg-next",
  "quercus-core",
- "quercus-ffmpeg-link",
- "quercus-ffmpeg-next",
  "subparse",
  "thiserror 2.0.21",
  "windows 0.62.2",
@@ -6555,7 +6576,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ash",
  "half",
@@ -6576,13 +6597,12 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libc",
  "quercus-audio",
  "quercus-codec",
  "quercus-core",
- "quercus-ffmpeg-link",
  "quercus-node",
  "quercus-ofx-plugin",
  "quercus-otio",
@@ -6597,52 +6617,15 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine-rs"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "quercus-engine",
  "thiserror 2.0.21",
 ]
 
 [[package]]
-name = "quercus-ffmpeg-bootstrap"
-version = "0.7.0"
-dependencies = [
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "quercus-ffmpeg-link"
-version = "0.7.0"
-dependencies = [
- "quercus-ffmpeg-bootstrap",
-]
-
-[[package]]
-name = "quercus-ffmpeg-next"
-version = "0.7.0"
-dependencies = [
- "bitflags 2.13.2",
- "libc",
- "quercus-ffmpeg-link",
- "quercus-ffmpeg-sys",
-]
-
-[[package]]
-name = "quercus-ffmpeg-sys"
-version = "0.7.0"
-dependencies = [
- "bindgen 0.73.2",
- "cc",
- "libc",
- "num_cpus",
- "pkg-config",
- "quercus-ffmpeg-bootstrap",
- "vcpkg",
-]
-
-[[package]]
 name = "quercus-node"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6652,7 +6635,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-ofx-plugin"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cc",
  "libc",
@@ -6667,7 +6650,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-otio"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "quercus-core",
  "quick-xml",
@@ -6678,7 +6661,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-render"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cosmic-text",
  "libc",
@@ -6695,7 +6678,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-storage"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "quercus-core",
@@ -6711,7 +6694,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-task"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6724,7 +6707,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-timeline"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "quercus-core",
  "quercus-node",
@@ -6734,7 +6717,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-undo"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
