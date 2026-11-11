@@ -424,7 +424,7 @@ jobs:
         timeout-minutes: 40
         shell: pwsh
         run: |
-          cargo test --workspace --locked
+          cargo test --workspace --locked -- --test-threads=1
           if ($LASTEXITCODE -ne 0) {
             # Retry once: a few gpui keystroke tests flake on Windows CI —
             # a synthetic keystroke is occasionally never delivered (the
@@ -432,7 +432,7 @@ jobs:
             # each identically to its pass state). A real regression
             # fails both passes.
             Write-Host "first pass failed; retrying once for gpui keystroke flakes"
-            cargo test --workspace --locked
+            cargo test --workspace --locked -- --test-threads=1
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
