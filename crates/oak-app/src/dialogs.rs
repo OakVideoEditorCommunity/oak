@@ -165,7 +165,6 @@ impl PreferencesContent {
 	/// subscriptions.
 	pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// --- 渲染 Rendering: the renderer backend --------------------------
-		eprintln!("preferences: renderer configuration");
 		let backends = renderer_backends();
 		let current_backend = config_get_string(CONFIG_KEY_RENDERER_BACKEND);
 		let backend_selected = backends
@@ -509,7 +508,6 @@ impl PreferencesContent {
 		// --- 音频 Audio: output / input devices -----------------------------
 		// The enumeration reads the oakaudio manager even on the mock
 		// engine; the config choice applies the moment the dropdown changes.
-		eprintln!("preferences: audio device enumeration");
 		let (audio_output, output_devices) = device_combo(5, true, window, cx);
 		let (audio_input, input_devices) = device_combo(6, false, window, cx);
 		cx.subscribe(&audio_output, |this, _combo, event: &ComboBoxEvent, cx| {
