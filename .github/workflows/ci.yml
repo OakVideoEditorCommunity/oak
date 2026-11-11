@@ -165,9 +165,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-shared-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
+            ffmpeg-shared-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
 
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
