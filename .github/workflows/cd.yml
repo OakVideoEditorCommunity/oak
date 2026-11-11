@@ -179,8 +179,10 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: matrix.platform == 'windows'
-        shell: msys2
-        run: tooling/install-deps.sh
+        shell: bash
+        run: |
+          export PATH="/c/msys64/usr/bin:$PATH"
+          tooling/install-deps.sh
 
       - name: Install pkg-config (Windows)
         if: matrix.platform == 'windows'
@@ -210,8 +212,10 @@ jobs:
           arch: x64
       - name: Compile static FFmpeg with MSVC
         if: matrix.platform == 'windows'
-        shell: msys2
-        run: tooling/ffmpeg/build-ffmpeg.sh --msvc
+        shell: bash
+        run: |
+          export PATH="/c/msys64/usr/bin:$PATH"
+          tooling/ffmpeg/build-ffmpeg.sh --msvc
 
       # ------------------------------------------------------------------
       # Build environment
