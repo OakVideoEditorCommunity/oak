@@ -423,6 +423,8 @@ jobs:
         if: matrix.platform == 'windows'
         timeout-minutes: 40
         shell: pwsh
+        env:
+          OAK_DISABLE_AUDIO_DEVICE_ENUMERATION: 1
         run: |
           cargo test --workspace --locked -- --test-threads=1 --nocapture
           if ($LASTEXITCODE -ne 0) {
