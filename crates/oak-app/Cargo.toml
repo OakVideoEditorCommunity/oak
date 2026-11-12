@@ -57,6 +57,11 @@ half = "2.7.1"
 # English table as the fallback.
 serde_yaml = "0.9"
 thiserror = "2"
+# T13A: the system keyring (Secret Service) store for the AI API key —
+# the sovereign's ruling that the key lives in the OS keyring, not in an
+# env var only and never in a plaintext file. Tests inject their own
+# store and never touch the real keyring (see `ai/secrets.rs`).
+keyring = "4"
 # The startup update check and the external oakvideoeditor.org links: a
 # blocking, bounded HTTPS GET (rustls) plus JSON response parsing. The
 # fetch runs on the gpui background executor, never on the UI thread.

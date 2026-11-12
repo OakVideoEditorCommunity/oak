@@ -24,6 +24,7 @@ pub mod backend;
 pub mod config;
 pub mod llm;
 pub mod memory;
+pub mod secrets;
 pub mod tool_text;
 
 pub use agent::{Agent, AgentConfig, AgentError, AgentReport, ToolLogEntry};
@@ -31,3 +32,4 @@ pub use backend::{EngineBackend, MockBackend};
 pub use config::{AiConfig, ConfigError};
 pub use llm::{ChatMessage, ChatResponse, LlmClient, LlmError, ToolCall, UreqClient};
 pub use memory::{MemoryConfig, MemoryTools};
+pub use secrets::{MemoryStore, SecretError, SecretStore};
