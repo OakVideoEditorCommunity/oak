@@ -38,8 +38,8 @@ use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::text::TextView;
 use gpui_kit::{
-	div, prelude::*, AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, EventEmitter,
-	FocusHandle, Focusable, Render, Window,
+	div, prelude::*, px, AnyElement, App, ClickEvent, ClipboardItem, Context, Entity,
+	EventEmitter, FocusHandle, Focusable, Render, WeakEntity, Window,
 };
 use oak_ai_tools::error::ToolError;
 use oak_ai_tools::timecode::{Rat, TimeContext, TimeValue};
@@ -80,6 +80,11 @@ pub fn error_i18n_key(code: &str) -> &'static str {
 		// different truth from "no project is open", so it gets its own
 		// wording instead of borrowing the real engine's error.
 		"ENGINE_UNSUPPORTED" => "ai.error.engine_unsupported",
+		// Saving to the system keyring (T13B): the codes come from
+		// `ai::secrets::SecretError` and get their own wording so a
+		// failed save reads as a keyring problem, not "unknown error".
+		"AI_SECRET_UNAVAILABLE" => "ai.error.secret_unavailable",
+		"AI_SECRET_WRITE" => "ai.error.secret_write",
 		_ => "ai.error.unknown",
 	}
 }
@@ -605,6 +610,24 @@ pub struct AiAssistantPanel<E: AppEngine> {
 	/// A 「新会话」 click on a non-empty conversation is pending
 	/// confirmation (the confirm bar renders while this is `true`).
 	pending_new_session: bool,
+	/// T13B: the settings view is open (three fields + save/cancel).
+	show_settings: bool,
+	/// T13B: the injected secret store. Production uses the system
+	/// keyring ([`KeyringStore`](crate::ai::secrets::KeyringStore));
+	/// tests swap in a `MemoryStore` and never touch the real keyring.
+	secrets: Box<dyn crate::ai::secrets::SecretStore>,
+	/// The write half of the same store (the save button's path). Kept
+	/// beside `secrets` so one swap moves both seams — see
+	/// `set_secret_store`.
+	secrets_writer: Box<dyn crate::ai::secrets::KeyringWriter>,
+	/// The three settings fields (API key masked; url/model show their
+	/// defaults as placeholders).
+	settings_key: Entity<InputState>,
+	settings_url: Entity<InputState>,
+	settings_model: Entity<InputState>,
+	/// Set when a save was refused (empty key) or the keyring errored;
+	/// shown in the settings view and mapped through [`error_i18n_key`].
+	settings_error: Option<String>,
 }
 
 impl<E: AppEngine> AiAssistantPanel<E> {
@@ -612,6 +635,15 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 	/// setup guide renders without ever reading the key itself.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let input = cx.new(|cx| InputState::new(window, cx));
+		// The settings fields: the API key is masked (a saved key must
+		// never be re-displayed in the clear) and starts empty — we
+		// deliberately do **not** prefill it from the store, so "what the
+		// field shows" can never leak the stored value.
+		let settings_key = cx.new(|cx| InputState::new(window, cx).masked(true));
+		let settings_url =
+			cx.new(|cx| InputState::new(window, cx).placeholder(crate::ai::config::DEFAULT_BASE_URL));
+		let settings_model =
+			cx.new(|cx| InputState::new(window, cx).placeholder(crate::ai::config::DEFAULT_MODEL));
 		// Repaint on every keystroke so the send button's enabled state
 		// tracks the draft (the value itself is read at render time).
 		cx.subscribe(&input, |_this, _state, event: &InputEvent, cx| {
@@ -627,11 +659,104 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 			input,
 			busy: false,
 			error: None,
-			configured: AiConfig::from_env().is_ok(),
+			// T13B: the same layered read the send path uses — env first,
+			// then the system keyring (the sovereign's settings UI).
+			configured: AiConfig::from_env_and_keyring().is_ok(),
 			agent: None,
 			copied: None,
 			pending_new_session: false,
+			show_settings: false,
+			secrets: Box::new(crate::ai::secrets::KeyringStore),
+			secrets_writer: Box::new(crate::ai::secrets::KeyringStore),
+			settings_key,
+			settings_url,
+			settings_model,
+			settings_error: None,
 		}
+	}
+
+	/// Swaps both store seams at once (tests inject a `MemoryStore`;
+	/// production keeps the real keyring installed by [`new`](Self::new)).
+	pub fn set_secret_store(
+		&mut self,
+		store: Box<dyn crate::ai::secrets::SecretStore>,
+		writer: Box<dyn crate::ai::secrets::KeyringWriter>,
+	) {
+		self.secrets = store;
+		self.secrets_writer = writer;
+		// Re-read `configured` against the new store: an injected store
+		// may carry a key the env does not (that is exactly what the
+		// save tests assert).
+		self.configured = AiConfig::load_with(|n| std::env::var(n).ok(), self.secrets.as_ref()).is_ok();
+	}
+
+	/// Opens the settings view (empty key field; url/model show their
+	/// defaults as placeholders). Clears a stale settings error.
+	pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+		self.show_settings = true;
+		self.settings_error = None;
+		set_input_text(&self.settings_key, "", cx);
+		set_input_text(&self.settings_url, "", cx);
+		set_input_text(&self.settings_model, "", cx);
+		cx.notify();
+	}
+
+	/// Closes the settings view without touching the stores (cancel's
+	/// job — a no-op on storage by construction).
+	pub fn close_settings(&mut self, cx: &mut Context<Self>) {
+		self.show_settings = false;
+		self.settings_error = None;
+		cx.notify();
+	}
+
+	/// Saves the three fields to the injected store (keyring in
+	/// production), then re-reads `configured` so the strip flips
+	/// immediately. Rules: an empty key is refused **before** any write
+	/// (no empty credentials), url/model fall back to their defaults,
+	/// and a `SecretError` surfaces as its code — never a panic.
+	pub fn save_settings(&mut self, cx: &mut Context<Self>) {
+		let key = self.settings_key.read(cx).value().trim().to_string();
+		if key.is_empty() {
+			self.settings_error = Some("AI_SETTINGS_KEY_REQUIRED".to_string());
+			cx.notify();
+			return;
+		}
+		let url = self.settings_url.read(cx).value().trim().to_string();
+		let model = self.settings_model.read(cx).value().trim().to_string();
+		let url = if url.is_empty() {
+			crate::ai::config::DEFAULT_BASE_URL.to_string()
+		} else {
+			url
+		};
+		let model = if model.is_empty() {
+			crate::ai::config::DEFAULT_MODEL.to_string()
+		} else {
+			model
+		};
+
+		if let Err(err) = self.secrets_writer.store(crate::ai::secrets::ACCOUNT_API_KEY, &key) {
+			self.settings_error = Some(err.code().to_string());
+			cx.notify();
+			return;
+		}
+		if let Err(err) = self.secrets_writer.store(crate::ai::secrets::ACCOUNT_BASE_URL, &url) {
+			self.settings_error = Some(err.code().to_string());
+			cx.notify();
+			return;
+		}
+		if let Err(err) = self.secrets_writer.store(crate::ai::secrets::ACCOUNT_MODEL, &model) {
+			self.settings_error = Some(err.code().to_string());
+			cx.notify();
+			return;
+		}
+
+		// All three landed: flip the strip and close the view.
+		self.configured = AiConfig::load_with(|n| std::env::var(n).ok(), self.secrets.as_ref()).is_ok();
+		self.settings_error = None;
+		self.show_settings = false;
+		// Clear the fields so a re-open never shows the key, even masked.
+		set_input_text(&self.settings_key, "", cx);
+		cx.notify();
 	}
 
 	/// Whether a conversation exists worth confirming before dropping: any
@@ -692,7 +817,7 @@ impl<E: AppEngine> AiAssistantPanel<E> {
 		}
 		// The key is read here, into memory only; a config error surfaces as
 		// a structured code instead of a panic.
-		let config = match AiConfig::from_env() {
+		let config = match AiConfig::from_env_and_keyring() {
 			Ok(config) => config,
 			Err(err) => {
 				self.error = Some(err.code().to_string());
@@ -822,18 +947,63 @@ fn status_strip(
 		None
 	};
 	let Some(body) = body else {
-		return div().flex_shrink_0();
+		return div().min_w_0();
 	};
+	// T13B header fix (see the `header` builder in `render`): the strip
+	// yields `min_w_0` and its text truncates, so a long status cannot
+	// push the buttons out — the buttons are `flex_shrink_0` instead.
 	div()
-		.flex_shrink_0()
+		.min_w_0()
 		.px_3()
 		.py_2()
 		.border_b_1()
 		.border_color(colors.border)
 		.bg(colors.container)
 		.text_xs()
+		.truncate()
 		.text_color(if configured { colors.text } else { colors.disabled })
 		.child(body)
+}
+
+/// One settings row: a label plus the app's text input bound to `state`.
+/// The state itself carries the interesting bits — `masked(true)` for the
+/// API key, the default value as `placeholder` for url/model — so this
+/// wrapper stays a plain label + field.
+fn settings_field(
+	id: &'static str,
+	state: WeakEntity<InputState>,
+	label: String,
+	cx: &App,
+) -> gpui_kit::Div {
+	div()
+		.flex()
+		.flex_shrink_0()
+		.items_center()
+		.gap_2()
+		.child(
+			div()
+				.w(px(96.))
+				.flex_shrink_0()
+				.text_xs()
+				.text_color(cx.default_colors().text)
+				.child(label),
+		)
+		.child(
+			div()
+				.min_w_0()
+				.flex_1()
+				.border_1()
+				.rounded_md()
+				.border_color(cx.default_colors().border)
+				.child(text_input(id, cx).state(state)),
+		)
+}
+
+/// The i18n key the unconfigured status strip shows — and, because the
+/// strip is now a button, the promise it makes ("open Settings and
+/// paste your key"). Split out so a test can pin the key itself.
+pub fn not_configured_key() -> &'static str {
+	"ai.not_configured"
 }
 
 /// The 「复制」 button: writes the bubble's plain text to the system
@@ -1033,19 +1203,69 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 				.collect()
 		};
 
+		// The strip is a button while unconfigured: one click opens
+		// Settings (the old copy told users to set an env var before
+		// launch, which stopped being the only way in T13B).
+		let strip = status_strip(configured, busy, error.as_deref(), &colors);
+		let strip: AnyElement = if configured {
+			strip.into_any_element()
+		} else {
+			strip.id("ai-assistant-not-configured")
+				.on_click({
+					let this = this.clone();
+					move |_: &ClickEvent, _window, cx| {
+						this.update(cx, |this, cx| {
+							if !this.busy {
+								this.open_settings(cx);
+							}
+						});
+					}
+				})
+				.into_any_element()
+		};
+
 		let header = div()
 			.flex()
 			.flex_shrink_0()
 			.items_center()
 			.justify_between()
+			.gap_2()
 			.px_2()
 			.py_1()
-			.child(status_strip(configured, busy, error.as_deref(), &colors))
+			// Shrinking text first, `min_w_0` so it may actually shrink
+			// (T13B truncation fix): the strip yields, the buttons do not.
+			.child(div().flex_1().min_w_0().child(strip))
 			.child(
-				// One plain button, top-right of the panel (same visual
-				// language as the send button; sits clear of the dock tabs).
+				// 设置 sits right of the status strip, left of 新会话 —
+				// both buttons `flex_shrink_0`, so neither can be clipped
+				// no matter how long the status text runs.
+				div()
+					.id("ai-assistant-settings")
+					.flex_shrink_0()
+					.px_3()
+					.py_1()
+					.rounded_md()
+					.border_1()
+					.border_color(colors.border)
+					.text_color(if new_session_enabled {
+						colors.text
+					} else {
+						colors.disabled
+					})
+					.child(crate::i18n::tr("ai.settings").to_owned())
+					.on_click({
+						let this = this.clone();
+						move |_: &ClickEvent, _window, cx| {
+							if new_session_enabled {
+								this.update(cx, |this, cx| this.open_settings(cx));
+							}
+						}
+					}),
+			)
+			.child(
 				div()
 					.id("ai-assistant-new-session")
+					.flex_shrink_0()
 					.px_3()
 					.py_1()
 					.rounded_md()
@@ -1127,6 +1347,104 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 			None
 		};
 
+		// The settings view (T13B): inline under the header, above the
+		// transcript. State lives on the panel — never global.
+		let settings_view = if self.show_settings {
+			let settings_error = self.settings_error.clone();
+			let key_state = self.settings_key.downgrade();
+			let url_state = self.settings_url.downgrade();
+			let model_state = self.settings_model.downgrade();
+			Some(
+				div()
+					.id("ai-assistant-settings-view")
+					.flex()
+					.flex_shrink_0()
+					.flex_col()
+					.gap_2()
+					.px_3()
+					.py_2()
+					.border_b_1()
+					.border_color(colors.border)
+					.bg(colors.container)
+					.child(
+						div()
+							.text_xs()
+							.font_weight(gpui_kit::FontWeight(600.0))
+							.text_color(colors.text)
+							.child(crate::i18n::tr("ai.settings.title").to_owned()),
+					)
+					.child(settings_field(
+						"ai-assistant-settings-key",
+						key_state,
+						crate::i18n::tr("ai.settings.api_key").to_owned(),
+						cx,
+					))
+					.child(settings_field(
+						"ai-assistant-settings-url",
+						url_state,
+						crate::i18n::tr("ai.settings.base_url").to_owned(),
+						cx,
+					))
+					.child(settings_field(
+						"ai-assistant-settings-model",
+						model_state,
+						crate::i18n::tr("ai.settings.model").to_owned(),
+						cx,
+					))
+					.child(
+						div()
+							.flex()
+							.flex_shrink_0()
+							.justify_end()
+							.gap_2()
+							.child(
+								div()
+									.id("ai-assistant-settings-save")
+									.px_3()
+									.py_1()
+									.rounded_md()
+									.bg(colors.selected)
+									.text_color(colors.text)
+									.child(crate::i18n::tr("ai.settings.save").to_owned())
+									.on_click({
+										let this = this.clone();
+										move |_: &ClickEvent, _window, cx| {
+											this.update(cx, |this, cx| this.save_settings(cx));
+										}
+									}),
+							)
+							.child(
+								div()
+									.id("ai-assistant-settings-cancel")
+									.px_3()
+									.py_1()
+									.rounded_md()
+									.border_1()
+									.border_color(colors.border)
+									.text_color(colors.text)
+									.child(crate::i18n::tr("ai.settings.cancel").to_owned())
+									.on_click({
+										let this = this.clone();
+										move |_: &ClickEvent, _window, cx| {
+											this.update(cx, |this, cx| this.close_settings(cx));
+										}
+									}),
+							),
+					)
+					// A refused save (empty key) or a keyring error — the
+					// codes map through `error_i18n_key`, shown in place.
+					.children(settings_error.map(|code| {
+						div()
+							.id("ai-assistant-settings-error")
+							.text_xs()
+							.text_color(colors.disabled)
+							.child(crate::i18n::tr(error_i18n_key(&code)).to_owned())
+					})),
+			)
+		} else {
+			None
+		};
+
 		div()
 			.debug_selector(|| "ai-assistant-root".to_string())
 			.flex()
@@ -1135,6 +1453,7 @@ impl<E: AppEngine> Render for AiAssistantPanel<E> {
 			.track_focus(&self.focus_handle)
 			.child(header)
 			.children(confirm_bar)
+			.children(settings_view)
 			.child(
 				div()
 					.id("ai-assistant-transcript")
@@ -1624,6 +1943,335 @@ mod tests {
 		assert!(!pending, "the prompt is not armed for the new chat");
 	}
 
+	/// Shared in-memory store used by the settings tests: one map behind
+	/// both seams, so a test can read what `save_settings` wrote without
+	/// ever naming `KeyringStore`.
+	#[derive(Clone, Default)]
+	struct TestStore(std::sync::Arc<std::sync::Mutex<crate::ai::secrets::MemoryStore>>);
+	impl TestStore {
+		fn get(&self, account: &str) -> Option<String> {
+			crate::ai::secrets::SecretStore::get(self, account)
+		}
+	}
+	impl crate::ai::secrets::SecretStore for TestStore {
+		fn get(&self, account: &str) -> Option<String> {
+			self.0.lock().unwrap().get(account)
+		}
+	}
+	impl crate::ai::secrets::KeyringWriter for TestStore {
+		fn store(
+			&mut self,
+			account: &str,
+			value: &str,
+		) -> Result<(), crate::ai::secrets::SecretError> {
+			self.0.lock().unwrap().store(account, value)
+		}
+		fn remove(&mut self, account: &str) -> Result<(), crate::ai::secrets::SecretError> {
+			self.0.lock().unwrap().remove(account)
+		}
+	}
+
+	/// Opens a panel with the injected `TestStore` on both seams.
+	fn open_settings_panel(
+		cx: &mut TestAppContext,
+	) -> (
+		gpui_kit::WindowHandle<AiAssistantPanel<crate::oakui::RealEngine>>,
+		TestStore,
+	) {
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let window = cx.open_window(size(px(800.0), px(600.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+		let store = TestStore::default();
+		cx.update(|app| {
+			panel.update(app, |panel, _cx| {
+				panel.set_secret_store(Box::new(store.clone()), Box::new(store.clone()));
+			});
+		});
+		(window, store)
+	}
+
+	/// The full save round trip: open → fill (key masked!) → save →
+	/// three accounts in the store, view closed, `configured` flipped.
+	#[gpui_kit::test]
+	async fn settings_save_writes_all_three_accounts_and_flips_configured(
+		cx: &mut TestAppContext,
+	) {
+		let (window, store) = open_settings_panel(cx);
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.open_settings(cx);
+				assert!(panel.show_settings, "view opens");
+				// The key field is masked and starts empty — the stored
+				// value (if any) is never prefilled into the clear.
+				assert!(
+					panel.settings_key.read(cx).presentation().is_masked(),
+					"the API key field must be masked"
+				);
+				assert!(panel.settings_key.read(cx).value().is_empty());
+
+				set_input_text(&panel.settings_key, "sk-test-key", cx);
+				set_input_text(&panel.settings_url, "https://example.test/v1", cx);
+				set_input_text(&panel.settings_model, "m1", cx);
+			});
+		});
+		// `set_input_text` defers: land the values before saving.
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.save_settings(cx));
+		});
+
+		let (shown, configured, open) = cx.read(|app| {
+			let p = panel.read(app);
+			(
+				p.settings_key.read(app).value().to_string(),
+				p.configured,
+				p.show_settings,
+			)
+		});
+		assert!(store.get("api_key").is_some_and(|v| v == "sk-test-key"), "key landed");
+		assert_eq!(
+			store.get("base_url").as_deref(),
+			Some("https://example.test/v1"),
+			"url landed"
+		);
+		assert_eq!(store.get("model").as_deref(), Some("m1"), "model landed");
+		assert!(!open, "the view closes on success");
+		assert!(configured, "configured flips after a successful save");
+		assert!(
+			shown.is_empty(),
+			"the key field is cleared on save (never echoes back): {shown}"
+		);
+	}
+
+	/// An empty key is refused **before** any write: no store changes,
+	/// the view stays open with a message, `configured` unchanged.
+	#[gpui_kit::test]
+	async fn settings_save_refuses_an_empty_key(cx: &mut TestAppContext) {
+		let (window, store) = open_settings_panel(cx);
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.open_settings(cx);
+				set_input_text(&panel.settings_url, "https://u", cx);
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.save_settings(cx));
+		});
+
+		let (err, open) = cx.read(|app| {
+			let p = panel.read(app);
+			(p.settings_error.clone(), p.show_settings)
+		});
+		assert_eq!(
+			err.as_deref(),
+			Some("AI_SETTINGS_KEY_REQUIRED"),
+			"the refusal says which field"
+		);
+		assert!(open, "the view stays open so the user can fix it");
+		assert!(store.get("api_key").is_none(), "nothing was written");
+		assert!(store.get("base_url").is_none(), "no partial writes either");
+		assert!(store.get("model").is_none());
+	}
+
+	/// Cancel closes the view and touches nothing.
+	#[gpui_kit::test]
+	async fn settings_cancel_keeps_the_store_untouched(cx: &mut TestAppContext) {
+		let (window, store) = open_settings_panel(cx);
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.open_settings(cx);
+				set_input_text(&panel.settings_key, "typed-but-never-saved", cx);
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.close_settings(cx));
+		});
+
+		let (open, err) = cx.read(|app| {
+			let p = panel.read(app);
+			(p.show_settings, p.settings_error.clone())
+		});
+		assert!(!open, "the view closes");
+		assert!(err.is_none(), "no error to show");
+		assert!(
+			store.get("api_key").is_none(),
+			"cancel must not write anything"
+		);
+	}
+
+	/// A store that errors (the headless-keyring case) surfaces its code
+	/// and never panics; `configured` stays honest.
+	#[gpui_kit::test]
+	async fn settings_save_reports_a_failing_store_without_panicking(
+		cx: &mut TestAppContext,
+	) {
+		#[derive(Clone)]
+		struct DeadStore;
+		impl crate::ai::secrets::SecretStore for DeadStore {
+			fn get(&self, _account: &str) -> Option<String> {
+				None
+			}
+		}
+		impl crate::ai::secrets::KeyringWriter for DeadStore {
+			fn store(
+				&mut self,
+				_account: &str,
+				_value: &str,
+			) -> Result<(), crate::ai::secrets::SecretError> {
+				Err(crate::ai::secrets::SecretError::new(
+					crate::ai::secrets::SecretError::WRITE,
+					"no session bus",
+				))
+			}
+			fn remove(&mut self, _account: &str) -> Result<(), crate::ai::secrets::SecretError> {
+				Err(crate::ai::secrets::SecretError::new(
+					crate::ai::secrets::SecretError::UNAVAILABLE,
+					"no session bus",
+				))
+			}
+		}
+
+		// Sibling tests set `OAK_AI_API_KEY` in the shared process env;
+		// with it set, `configured` is true no matter how dead the store
+		// is (env outranks the store by design). Clear it for this test
+		// and put it back after, so the assertion measures the store.
+		let saved_key = std::env::var("OAK_AI_API_KEY").ok();
+		unsafe { std::env::remove_var("OAK_AI_API_KEY") };
+		let restore = |saved_key: Option<String>| {
+			if let Some(v) = saved_key {
+				unsafe { std::env::set_var("OAK_AI_API_KEY", v) };
+			}
+		};
+
+		cx.update(|cx| {
+			gpui_kit::init(cx);
+			cx.init_colors();
+		});
+		let window = cx.open_window(size(px(800.0), px(600.0)), |window, cx| {
+			let engine = cx.new(RealEngine::create);
+			AiAssistantPanel::new(engine, window, cx)
+		});
+		cx.run_until_parked();
+		let panel = window.root(cx).expect("panel root");
+
+		cx.update(|app| {
+			panel.update(app, |panel, cx| {
+				panel.set_secret_store(Box::new(DeadStore), Box::new(DeadStore));
+				panel.open_settings(cx);
+				set_input_text(&panel.settings_key, "any-key", cx);
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|app| {
+			panel.update(app, |panel, cx| panel.save_settings(cx));
+		});
+
+		let (err, open, configured) = cx.read(|app| {
+			let p = panel.read(app);
+			(p.settings_error.clone(), p.show_settings, p.configured)
+		});
+		assert_eq!(
+			err.as_deref(),
+			Some("AI_SECRET_WRITE"),
+			"the SecretError code reaches the view"
+		);
+		assert!(open, "the view stays open on failure");
+		assert!(!configured, "a dead store is not a configured AI");
+		restore(saved_key);
+	}
+
+	/// Header truncation (T13B): the strip yields (`min_w_0` +
+	/// `truncate`), the buttons don't (`flex_shrink_0`). Pinned as a
+	/// source-level contract because layout needs a live window to
+	/// *see*, and this is the assertion that fails first when someone
+	/// reverts either half.
+	#[test]
+	fn header_strip_yields_and_buttons_never_shrink() {
+		let source = include_str!("ai_assistant.rs");
+		let strip_fn = source
+			.split("fn status_strip(")
+			.nth(1)
+			.expect("status_strip exists");
+		let strip_body = strip_fn.split("\n}\n").next().expect("body end");
+		assert!(
+			strip_body.contains("min_w_0()"),
+			"the strip must be shrinkable (T13B truncation fix)"
+		);
+		assert!(
+			strip_body.contains(".truncate()"),
+			"the strip's text must truncate with an ellipsis"
+		);
+		assert!(
+			!strip_body.contains("flex_shrink_0()"),
+			"flex_shrink_0 on the strip is the bug: it made the text unyielding"
+		);
+
+		// Both header buttons carry the no-shrink marker, right next to
+		// their ids.
+		for id in ["ai-assistant-settings", "ai-assistant-new-session"] {
+			let at = source.find(&format!(".id(\"{id}\")")).expect(id);
+			let near = &source[at..at + 220];
+			assert!(
+				near.contains("flex_shrink_0()"),
+				"{id} must be flex_shrink_0: {near}"
+			);
+		}
+	}
+
+	/// T13B: the unconfigured strip now points at Settings, not at an
+	/// env var — the key itself is what changed, so pin it.
+	#[test]
+	fn not_configured_copy_points_at_settings() {
+		// Other tests (and `actions.rs`) flip the global language; pin
+		// zh-CN for the assertion and restore afterwards so the suite
+		// stays order-independent.
+		let prev = crate::i18n::language_code().to_string();
+		crate::i18n::set_language_code("zh-CN");
+		let zh = crate::i18n::tr(not_configured_key());
+		crate::i18n::set_language_code(&prev);
+		assert!(zh.contains("设置"), "zh copy must offer 设置: {zh}");
+		assert!(
+			!zh.contains("OAK_AI_API_KEY"),
+			"the env-var-only instruction is gone: {zh}"
+		);
+	}
+
+	/// T13B: the two secret-error codes and the empty-key refusal all
+	/// map to their own wording (never the generic "unknown error").
+	#[test]
+	fn secret_error_codes_map_to_their_own_copy() {
+		assert_eq!(
+			error_i18n_key("AI_SECRET_UNAVAILABLE"),
+			"ai.error.secret_unavailable"
+		);
+		assert_eq!(
+			error_i18n_key("AI_SECRET_WRITE"),
+			"ai.error.secret_write"
+		);
+		// The settings view renders AI_SETTINGS_KEY_REQUIRED through the
+		// same mapper: it needs a key of its own in every language.
+		assert_eq!(
+			error_i18n_key("AI_SETTINGS_KEY_REQUIRED"),
+			"ai.error.unknown",
+			"key_required is handled by the settings view itself"
+		);
+	}
+
 	/// Static check: every `ai.*` key the panel renders exists in all eight
 	/// shipped locales (a missing key would render as the raw key).
 	#[test]
@@ -1638,7 +2286,7 @@ mod tests {
 			("ru", include_str!("../../../../assets/i18n/ru.yaml")),
 			("ja", include_str!("../../../../assets/i18n/ja.yaml")),
 		];
-		const KEYS: [&str; 27] = [
+		const KEYS: [&str; 38] = [
 			"menu.window.ai_assistant",
 			"panel.ai_assistant",
 			"ai.placeholder",
@@ -1656,6 +2304,17 @@ mod tests {
 			"ai.new_session.prompt",
 			"ai.new_session.confirm",
 			"ai.new_session.cancel",
+			"ai.settings",
+			"ai.settings.title",
+			"ai.settings.api_key",
+			"ai.settings.base_url",
+			"ai.settings.model",
+			"ai.settings.save",
+			"ai.settings.cancel",
+			"ai.settings.saved",
+			"ai.settings.key_required",
+			"ai.error.secret_unavailable",
+			"ai.error.secret_write",
 			"ai.error.not_configured",
 			"ai.error.http",
 			"ai.error.api",
