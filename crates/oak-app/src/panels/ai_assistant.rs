@@ -1572,7 +1572,16 @@ mod tests {
 				continue;
 			}
 			checked += 1;
-			let window: String = lines[i..(i + 40).min(lines.len())].join("\n");
+			// Stop at the next test attribute: a fixed 40-line window
+			// would swallow the following test's `env_lock()` and wave
+			// an unlocked test through — exactly the way a new test
+			// pasted next to an old one would slip in.
+			let next = lines[i + 1..]
+				.iter()
+				.position(|l| l.trim_start().starts_with("#[gpui_kit::test]"))
+				.map(|p| i + 1 + p)
+				.unwrap_or(lines.len());
+			let window: String = lines[i..next].join("\n");
 			assert!(
 				window.contains("env_lock()"),
 				"test at line {} declares #[gpui_kit::test] but never takes env_lock(); \
