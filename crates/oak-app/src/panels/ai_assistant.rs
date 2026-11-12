@@ -1542,6 +1542,79 @@ impl<E: AppEngine> Panel for AiAssistantPanel<E> {
 mod tests {
 	use super::*;
 	use crate::ai::ToolLogEntry;
+
+	/// The T13B DeadStore flake (1 red in 9 full runs): `OAK_AI_API_KEY`
+	/// is shared process state, and every test here constructs a panel
+	/// that reads it (`from_env_and_keyring`), so a writer's
+	/// set/remove window races any reader's `configured` snapshot.
+	/// **Every `#[gpui_kit::test]` in this module takes this lock on
+	/// its first line** — writers and readers on one lock, or neither
+	/// direction is safe. A new test without `let _env = env_lock();`
+	/// is a bug; `all_panel_tests_hold_the_env_lock` enforces it.
+	fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+		static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+		LOCK.lock().unwrap_or_else(|e| e.into_inner())
+	}
+
+	/// The doc on `env_lock` promises this invariant; here it is, so the
+	/// promise cannot rot. Scans this file's own source for every real
+	/// `#[gpui_kit::test]` attribute and requires `env_lock()` in the
+	/// window that follows — a new unlocked test turns this red.
+	#[test]
+	fn all_panel_tests_hold_the_env_lock() {
+		let src = include_str!("ai_assistant.rs");
+		let lines: Vec<&str> = src.lines().collect();
+		let mut checked = 0;
+		for (i, line) in lines.iter().enumerate() {
+			// Attribute syntax only: skip prose that merely quotes the
+			// attribute (this file's comments do, around line 3460).
+			if !line.contains("#[gpui_kit::test]") || !line.trim_start().starts_with("#[") {
+				continue;
+			}
+			checked += 1;
+			let window: String = lines[i..(i + 40).min(lines.len())].join("\n");
+			assert!(
+				window.contains("env_lock()"),
+				"test at line {} declares #[gpui_kit::test] but never takes env_lock(); \
+				 the shared OAK_AI_API_KEY would race other tests",
+				i + 1
+			);
+		}
+		// A scanner that finds nothing would pass vacuously; this module
+		// has had 10+ panel tests since T12.
+		assert!(
+			checked >= 10,
+			"the scanner must actually find the tests, found {checked}"
+		);
+	}
+
+	/// Saves one process env var, clears it (so the test controls the
+	/// exact value it asserts on), and restores the original in `Drop`
+	/// — including when the test panics, which a tail-of-function
+	/// restore would skip and then poison every later test.
+	struct EnvVarGuard {
+		name: &'static str,
+		saved: Option<String>,
+	}
+	impl EnvVarGuard {
+		fn clear(name: &'static str) -> Self {
+			let saved = std::env::var(name).ok();
+			// SAFETY: tests are single-process and hold `env_lock`.
+			unsafe { std::env::remove_var(name) };
+			Self { name, saved }
+		}
+	}
+	impl Drop for EnvVarGuard {
+		fn drop(&mut self) {
+			// SAFETY: same process, same lock discipline as `clear`.
+			unsafe {
+				match &self.saved {
+					Some(v) => std::env::set_var(self.name, v),
+					None => std::env::remove_var(self.name),
+				}
+			}
+		}
+	}
 	// The v2 face's trait must be in scope for the `HostAdapter` calls the
 	// `sequence.*` tests make directly.
 	use oak_ai_tools::backend::EngineExt;
@@ -1801,6 +1874,7 @@ mod tests {
 	/// after the reset).
 	#[gpui_kit::test]
 	async fn new_session_confirms_before_dropping_a_conversation(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -1847,6 +1921,7 @@ mod tests {
 	/// composer) — no prompt, nothing to lose.
 	#[gpui_kit::test]
 	async fn new_session_resets_a_blank_session_without_asking(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -1882,6 +1957,7 @@ mod tests {
 	/// run populates the transcript from scratch.
 	#[gpui_kit::test]
 	async fn a_confirmed_new_session_can_converse_again(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -2003,6 +2079,7 @@ mod tests {
 	async fn settings_save_writes_all_three_accounts_and_flips_configured(
 		cx: &mut TestAppContext,
 	) {
+		let _env = env_lock();
 		let (window, store) = open_settings_panel(cx);
 		let panel = window.root(cx).expect("panel root");
 
@@ -2056,6 +2133,7 @@ mod tests {
 	/// the view stays open with a message, `configured` unchanged.
 	#[gpui_kit::test]
 	async fn settings_save_refuses_an_empty_key(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		let (window, store) = open_settings_panel(cx);
 		let panel = window.root(cx).expect("panel root");
 
@@ -2088,6 +2166,7 @@ mod tests {
 	/// Cancel closes the view and touches nothing.
 	#[gpui_kit::test]
 	async fn settings_cancel_keeps_the_store_untouched(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		let (window, store) = open_settings_panel(cx);
 		let panel = window.root(cx).expect("panel root");
 
@@ -2120,6 +2199,7 @@ mod tests {
 	async fn settings_save_reports_a_failing_store_without_panicking(
 		cx: &mut TestAppContext,
 	) {
+		let _env = env_lock();
 		#[derive(Clone)]
 		struct DeadStore;
 		impl crate::ai::secrets::SecretStore for DeadStore {
@@ -2148,15 +2228,10 @@ mod tests {
 
 		// Sibling tests set `OAK_AI_API_KEY` in the shared process env;
 		// with it set, `configured` is true no matter how dead the store
-		// is (env outranks the store by design). Clear it for this test
-		// and put it back after, so the assertion measures the store.
-		let saved_key = std::env::var("OAK_AI_API_KEY").ok();
-		unsafe { std::env::remove_var("OAK_AI_API_KEY") };
-		let restore = |saved_key: Option<String>| {
-			if let Some(v) = saved_key {
-				unsafe { std::env::set_var("OAK_AI_API_KEY", v) };
-			}
-		};
+		// is (env outranks the store by design). The RAII guard clears
+		// it for this test and restores it on drop (panic included), so
+		// the assertion measures the store alone.
+		let _guard = EnvVarGuard::clear("OAK_AI_API_KEY");
 
 		cx.update(|cx| {
 			gpui_kit::init(cx);
@@ -2192,7 +2267,6 @@ mod tests {
 		);
 		assert!(open, "the view stays open on failure");
 		assert!(!configured, "a dead store is not a configured AI");
-		restore(saved_key);
 	}
 
 	/// Header truncation (T13B): the strip yields (`min_w_0` +
@@ -3178,6 +3252,7 @@ mod tests {
 	/// detail shows the changed rate.
 	#[gpui_kit::test]
 	async fn e2e_panel_runs_sequence_set_format_against_the_real_engine(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		let _g = crate::oakui::graphops::test_lock();
 		oak_undo::global::clear().expect("clear undo stack");
 		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
@@ -3263,6 +3338,7 @@ mod tests {
 	/// is open", and must not start a run or push a bubble.
 	#[gpui_kit::test]
 	async fn panel_refuses_tools_when_engine_keeps_no_handle(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
 		cx.update(|cx| {
 			gpui_kit::init(cx);
@@ -3305,6 +3381,7 @@ mod tests {
 	/// then a screenshot as evidence.
 	#[gpui_kit::test]
 	async fn e2e_real_engine_tools_run_in_the_panel(cx: &mut TestAppContext) {
+		let _env = env_lock();
 		let _g = crate::oakui::graphops::test_lock();
 		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
 		cx.update(|cx| {
