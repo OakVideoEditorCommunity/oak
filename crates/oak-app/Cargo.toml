@@ -90,11 +90,16 @@ quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/qu
 # and friends) are direct writes with no history of their own, so an undoable
 # "Set Sequence Format" has to be recorded from this side.
 quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-undo" }
+
 # OPP/1 host services (T7.2 P1.2): the app-side `HostServices`
 # implementation routes plugin calls into the engine through this crate's
 # trait and protocol types. One-way dependency — `oak-extensions` never
 # depends on `oak-app` (notes §2).
 oak-extensions = { path = "../oak-extensions" }
+
+[target.'cfg(not(windows))'.dependencies]
+oak-ffmpeg-link = { version = "=0.5.2", path = "../oak-ffmpeg-link" }
+
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by

@@ -1024,7 +1024,7 @@ fn send_sigterm(child: &Child) {
 }
 
 #[cfg(not(unix))]
-fn send_sigterm(child: &Child) {
+fn send_sigterm(child: &mut Child) {
 	let _ = child.kill();
 }
 

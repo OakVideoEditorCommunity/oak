@@ -16,12 +16,15 @@
 
 //! An independent Oak editor built only on `quercus-engine-rs`.
 //!
-//! This crate is the P8 proof: its Cargo manifest has exactly one Oak
-//! dependency (the Rust SDK), and the whole workflow below uses only public
-//! SDK types. It is deliberately small and readable so a new frontend can
-//! copy the session/task/ownership patterns.
+//! This crate is the P8 proof: the whole workflow below uses only public SDK
+//! types. It is deliberately small and readable so a new frontend can copy
+//! the session/task/ownership patterns.
 
 pub mod shell;
+
+#[cfg(not(windows))]
+#[used]
+static FORCE_FFMPEG_LINK: fn() = oak_ffmpeg_link::force_link;
 
 use std::path::{Path, PathBuf};
 

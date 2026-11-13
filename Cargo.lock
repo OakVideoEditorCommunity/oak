@@ -5788,6 +5788,7 @@ dependencies = [
  "log 0.4.35",
  "oak-ai-tools",
  "oak-extensions",
+ "oak-ffmpeg-link",
  "quercus-engine-rs",
  "quercus-undo",
  "serde",
@@ -5804,6 +5805,7 @@ name = "oak-cli"
 version = "0.5.2"
 dependencies = [
  "clap",
+ "oak-ffmpeg-link",
  "quercus-engine-rs",
 ]
 
@@ -5816,6 +5818,10 @@ dependencies = [
  "serde_json",
  "toml 0.8.23",
 ]
+
+[[package]]
+name = "oak-ffmpeg-link"
+version = "0.5.2"
 
 [[package]]
 name = "objc"
@@ -7934,6 +7940,7 @@ dependencies = [
 name = "sdk_editor"
 version = "0.1.0"
 dependencies = [
+ "oak-ffmpeg-link",
  "quercus-engine-rs",
 ]
 

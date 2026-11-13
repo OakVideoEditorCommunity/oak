@@ -31,3 +31,6 @@ clap = { version = "4", features = ["derive"] }
 # audio, probe/transcode and export all cross the quercus-engine C ABI through
 # the safe Rust wrapper. It links no other Oak crate.
 quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-engine-rs", features = ["ffmpeg-static"] }
+
+[target.'cfg(not(windows))'.dependencies]
+oak-ffmpeg-link = { version = "=0.5.2", path = "../oak-ffmpeg-link" }

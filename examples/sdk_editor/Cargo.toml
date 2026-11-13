@@ -9,9 +9,12 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/oakvideoeditor/oak"
 
 [dependencies]
-# The ONLY Oak dependency: the example proves a new editor can be built on
-# the public Rust SDK without any other Oak crate.
+# The only engine API dependency: the example proves a new editor can be
+# built on the public Rust SDK without using engine-internal crates.
 quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-engine-rs", features = ["ffmpeg-static"] }
+
+[target.'cfg(not(windows))'.dependencies]
+oak-ffmpeg-link = { version = "=0.5.2", path = "../../crates/oak-ffmpeg-link" }
 [features]
 default = []
 

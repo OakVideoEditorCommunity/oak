@@ -1,0 +1,13 @@
+[package]
+name = "oak-ffmpeg-link"
+version.workspace = true
+edition = "2021"
+description = "Oak Video Editor internal link helper: transitive dependencies of a static FFmpeg (Rust)"
+license = "GPL-3.0-or-later"
+# A dedicated `links` crate so the emitted link directives propagate to
+# every dependent's final link (cargo only propagates rustc-link-* from
+# `links` crates). ffmpeg-sys-next already claims links = "ffmpeg".
+links = "oak_ffmpeg_static_deps"
+
+[lib]
+path = "src/lib.rs"
