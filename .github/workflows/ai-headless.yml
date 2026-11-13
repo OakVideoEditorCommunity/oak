@@ -55,8 +55,8 @@ jobs:
       - name: System deps (ffmpeg for prescan tests)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: pi dependencies (offline reproducible install)
-        run: npm ci --offline --no-audit --no-fund
+      - name: pi dependencies (cached reproducible install)
+        run: npm ci --prefer-offline --no-audit --no-fund
         working-directory: ai/agent
 
       - name: Build MCP binary (default features, no engine)
