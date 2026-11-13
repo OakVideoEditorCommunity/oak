@@ -1445,6 +1445,7 @@ mod tests {
 	/// A fake CLI records its argv and environment, so the invocation
 	/// contract is asserted directly instead of inferred: `--bm25` pinned,
 	/// `--data-dir` passed, and `MEMLITE_CONFIG` pointing at Oak's own file.
+	#[cfg(unix)]
 	#[test]
 	fn every_call_pins_bm25_and_the_private_config() {
 		let root = temp_root("fakecli");
@@ -1487,6 +1488,7 @@ mod tests {
 
 	/// A CLI that never answers must surface as the structured timeout, not
 	/// as a hung panel turn and not as a panic.
+	#[cfg(unix)]
 	#[test]
 	fn slow_cli_times_out_as_a_structured_error() {
 		let root = temp_root("slowcli");

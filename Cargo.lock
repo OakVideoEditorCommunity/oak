@@ -5788,7 +5788,6 @@ dependencies = [
  "log 0.4.35",
  "oak-ai-tools",
  "oak-extensions",
- "oak-ffmpeg-link",
  "quercus-engine-rs",
  "quercus-undo",
  "serde",
@@ -5805,7 +5804,6 @@ name = "oak-cli"
 version = "0.5.2"
 dependencies = [
  "clap",
- "oak-ffmpeg-link",
  "quercus-engine-rs",
 ]
 
@@ -5818,10 +5816,6 @@ dependencies = [
  "serde_json",
  "toml 0.8.23",
 ]
-
-[[package]]
-name = "oak-ffmpeg-link"
-version = "0.5.2"
 
 [[package]]
 name = "objc"
@@ -6870,6 +6864,7 @@ version = "0.7.1"
 dependencies = [
  "ffmpeg-next",
  "quercus-core",
+ "quercus-ffmpeg-link",
  "subparse",
  "thiserror 2.0.21",
  "windows 0.62.2",
@@ -6923,6 +6918,10 @@ dependencies = [
  "quercus-engine",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "quercus-ffmpeg-link"
+version = "0.7.1"
 
 [[package]]
 name = "quercus-node"
@@ -7940,7 +7939,6 @@ dependencies = [
 name = "sdk_editor"
 version = "0.1.0"
 dependencies = [
- "oak-ffmpeg-link",
  "quercus-engine-rs",
 ]
 

@@ -97,9 +97,6 @@ quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus
 # depends on `oak-app` (notes §2).
 oak-extensions = { path = "../oak-extensions" }
 
-[target.'cfg(not(windows))'.dependencies]
-oak-ffmpeg-link = { version = "=0.5.2", path = "../oak-ffmpeg-link" }
-
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by

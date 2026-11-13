@@ -58,11 +58,6 @@
 pub mod actions;
 pub mod ai;
 
-// Keep the static FFmpeg dependency closure on every final app/test link.
-#[cfg(not(windows))]
-#[used]
-static FORCE_FFMPEG_LINK: fn() = oak_ffmpeg_link::force_link;
-
 /// Program-generated test media for the app's render/import tests
 /// (M12 P0 content contract, ported verbatim from the retired
 /// `oak_codec` crate's `testmedia` module — upstream deleted it in the P7

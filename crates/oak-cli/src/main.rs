@@ -43,10 +43,6 @@ mod fmt;
 mod ppm;
 mod wav;
 
-#[cfg(not(windows))]
-#[used]
-static FORCE_FFMPEG_LINK: fn() = oak_ffmpeg_link::force_link;
-
 use std::process::exit;
 
 use clap::{Parser, Subcommand};
