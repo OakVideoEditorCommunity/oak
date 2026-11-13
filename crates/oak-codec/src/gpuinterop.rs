@@ -452,7 +452,15 @@ fn d3d11_import(req: &HwImportRequest<'_>, ctx: &Arc<GpuContext>) -> ImportOutco
 	}
 	let slice = unsafe { (*req.frame).data[1] } as usize as u32;
 	// SAFETY: FFmpeg owns the texture reference for the frame's lifetime.
-	let texture: &ID3D11Texture2D = unsafe { &*(texture_ptr as *const ID3D11Texture2D) };
+	// `data[0]` IS the COM interface pointer (`ID3D11Texture2D*`). windows-rs
+	// interface types wrap that pointer, so the borrow must be built from a
+	// reference to the pointer (`from_raw_borrowed`). Casting the pointer to
+	// `*const ID3D11Texture2D` reinterpreted the COM object itself as the
+	// wrapper and called `GetDesc` through its vtable pointer, crashing every
+	// D3D11VA zero-copy import with STATUS_ACCESS_VIOLATION.
+	let Some(texture) = (unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_ptr) }) else {
+		return ImportOutcome::Unsupported;
+	};
 	let mut desc = D3D11_TEXTURE2D_DESC::default();
 	unsafe { texture.GetDesc(&mut desc) };
 	let array_size = desc.ArraySize.max(1);
