@@ -1,0 +1,877 @@
+﻿#,Commit,Date,Author,Author Email,Committer,Committer Email,Subject
+1,df1c828f9b01db1c0775fd10e57cd7803b46ab2f,2026-10-30 13:25:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: consume quercus-engine-rs 0.5.7
+2,8facb7efd3b44845230042e1741a1dcc360d72cd,2026-10-30 13:11:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: consume quercus-engine-rs 0.5.6
+3,b72c4ab6ea90543b3e9035a7404c7f9cab0c20f5,2026-10-30 13:02:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: consume quercus-engine-rs 0.5.5
+4,611e8228eaa0ef7073222faffef27bd333e1b5d0,2026-10-30 11:43:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(app): point the engine process backend at Oak's worker launcher
+5,53e6744028d5b9c77f9e9fc6d3332acab6dea16b,2026-10-30 11:39:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: consume quercus-engine-rs from crates.io
+6,851dd46fda85f4fd044f8ff5ec23b5ad16631493,2026-10-30 10:54:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: Oak builds the external Quercus engine and needs the project FFmpeg
+7,2a29426d2090c67e13ca24e9b0a8ce2e9a5c7645,2026-10-30 05:26:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(plans): record the P10 dependency-cycle verification
+8,c94ff44ca934c22714fd1fa13c77a1a260d227b8,2026-10-30 05:24:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(plans): add the P10 engine consolidation feasibility plan
+9,3a962176b632896bb5dcc24d815a43193a8a83ed,2026-10-30 05:18:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(sdk): complete the public API docs for docs.rs
+10,ec906c27cc6db0da07b08e0ce8a8aca783939e41,2026-10-30 05:18:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(sdk): move worker runtime into the engine and port the CLI
+11,19f58fb6872df3427914a6768e584a5d5beab7e4,2026-10-30 04:47:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore(sdk): drop unused package.metadata.release entries
+12,25fe46f3c82465ecb47a778993df98a463fd4c4d,2026-10-30 04:47:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: record P8 and document the SDK/C ABI
+13,324c88269b52b45cd56a1df6c81bf3a2c0626e75,2026-10-30 04:47:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(sdk): add the P8 independent consumer and C header
+14,f46a19702cc375a46c6acc52ae9ac405c83c2eb4,2026-10-30 04:28:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(plans): record the P1-P6 audit and close P7
+15,bff3bcf93eb01c19fc97d4a22fb87847c0e60108,2026-10-30 04:28:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(sdk): make oak-app a pure SDK consumer
+16,42dafeec603f9fd2ee271cecb7acfd53045f337e,2026-10-30 02:20:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): unify OFX lifecycle and interactions
+17,316ab5421952f19af8f45c643205eb3c66d80c1e,2026-10-30 02:00:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): migrate preview and export to SDK tasks
+18,b3e31948e5a1c332646bc3064c15d8f140f71754,2026-10-29 00:08:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): migrate multicam workflows to editor sessions
+19,e7f9ba77931a0726ac2532a2a970a75cdf6b3825,2026-10-28 23:28:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add media analysis tasks and sync metadata
+20,889d78148ec4df7c271a774bc52909ae58cad2e4,2026-10-28 22:43:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): migrate proxy lifecycle to editor sessions
+21,d55d399b1a7401d8b891df74db04d90c15adaaff,2026-10-28 22:23:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add footage proxy overrides and sequence conversion
+22,1943f5a0214cdbd6526e74d643c1ff26c61f98c2,2026-10-28 21:43:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): unify history and media lifecycle
+23,05afd002829f4a850ed75e11e6bcbfef0b258ffc,2026-10-28 19:44:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): complete node graph and parameter migration
+24,e20d0c90f8992e73f79da872925cdf781e70deed,2026-10-28 17:08:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add edit subscriptions and button actions
+25,5474fed42f9f8eb5e258387d50e18727923e8470,2026-10-28 17:00:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add parameter and keyframe sessions
+26,52cbbc62f2cbbb069af0c6e505b2ff6b8071564f,2026-10-28 16:48:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add owned editor graph snapshots
+27,6a9b294787c864d5998667530f77872b5102b648,2026-10-28 16:24:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add session effect chain commands
+28,37f4997c4b123e8ffa777289b3363d0bda1a35b1,2026-10-28 15:10:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): add semantic editing commands and native SDK ABI
+29,b1ca27ce4d4fc3a8792bff60270ae7855c809097,2026-10-26 00:52:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat: add editor sessions and project snapshots
+30,95cbf8cdc3a111ab0d74b879373ed3ea00518717,2026-10-25 23:49:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: establish app engine boundary baseline
+31,11011eb3d589c18e6547d26d83dcba8a90dcf414,2026-10-25 23:11:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,mark(plan): Mark some plan as completed.
+32,2a663868f7aa7c20ca1d80b94ed2d2f1e4530cc5,2026-10-25 23:04:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: plan pure SDK engine facade migration
+33,ed049df68f7a645468930f2838efccf64797fa4f,2026-10-25 22:24:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add(readme): Add notes for how to read Chinese docs.
+34,3e028b88c9f7d8afb3e29fa15305e17d1363ca95,2026-10-25 22:19:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove: remove unused C headers.
+35,585f3438a2a44a311d0271095fa9c656ffbed7d7,2026-10-25 21:59:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: restore missing UI icons
+36,14f31e24ddb8849d2f3ca448d5c5e16ed0beff39,2026-10-23 21:32:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,release: v0.5.2
+37,5eee3d07887070b1acc88615fd491279bbe5c8ff,2026-10-23 21:32:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: whole-archive the libass stack in oak-ffmpeg-link (aarch64-linux link)
+38,096b105a74802cedf657c7e07906cb0ca7f32146,2026-10-23 16:40:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci (Windows): clean the ocio-sys unit when its recorded path predates the TEMP pin
+39,518c53428561691016b5bcca9783d82e84c6983a,2026-10-23 16:15:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci (Windows): diagnose the OCIO link path mismatch
+40,1ca72b7f5f71019cb32653fb25a425d09031ba38,2026-10-23 15:53:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: build the test sqlite URI with two slashes (Windows)
+41,bccd738fc9189de118280b087e9aea13d7bae2ee,2026-10-23 09:18:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci (Windows): cache the bundled OCIO build; unbreak the OpenColorIO link
+42,b9d451ee4822034fab0e806e5c66180c634326e8,2026-10-23 02:53:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: the remaining macOS/Windows CI failures
+43,b75f4605adc42483e768407d401d1b92302a3f00,2026-10-23 01:53:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: portable sed -i in the x265.pc rewrite (macOS CI)
+44,ecdc4e33f915fb48bda72f7da4fbd259496c133a,2026-10-23 01:53:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: compile gpui-pre's surface element on Windows (CI)
+45,75f5c9306893e913a8b73ccd82def396df019416,2026-10-23 01:37:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,license: add CLA
+46,e5d874b7192beaf76cca73d01ed6b7d5c6522a64,2026-10-23 01:35:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: point contributors at the CLA (copyright stays with the author)
+47,2cbab5b5c13c3209087b820c4bb8764a815d7e3d,2026-10-23 01:35:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove: the stale M14 R5 module-doc note from copier
+48,3d0838d60b00a6e46766c547e6adf97331f86b9c,2026-10-23 01:35:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: reject cross-media effects on clips
+49,35c94d512a856f793c02ea0c7fb14a7c42dc4ab8,2026-10-21 12:11:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: serialize wgpu instance creation (parallel-test SIGSEGV)
+50,7e370cfd07449cd344856fc4c00647f201a6beb7,2026-10-21 12:11:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: back cache UUIDs with the uuid crate and document PlaybackCache
+51,999aad8f8e756ad06840482dbe426e50e0771fa5,2026-10-21 12:10:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: make TimeRangeList::snap an associated function
+52,3b9ab0ee68e235d62170db13598b491cfa762c0f,2026-10-21 12:10:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: register the real OIIODecoder in the codec registry
+53,0713962418c00c50cd0ce5c79365d73f9e250a7c,2026-10-14 21:25:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove: the oak-gpui fork submodule
+54,85b48f1c978af7bb9c4e3f15ef7e4c03774f7bf7,2026-10-14 21:24:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: search fields swallow hotkeys, transition drops unreachable, effect drops on clips"
+55,5a0cab0b8f753fbd4987848fe5f5808124ef9c00,2026-10-14 20:41:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: keep the three-wheel row inside the panel (the third wheel was unreachable)
+56,b52bd57eca902dc257bb62e9282ebbfec58acb0b,2026-10-14 19:44:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: three-way color wheels (the grading wheel UI for Three-Way Color)
+57,12820f7ef96e9a40e7c5b0d704aeeb75221206dd,2026-10-14 13:50:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: implement the Edit menu's placeholder actions for real
+58,6e0367bff8400e51fb91e7ce455b0a0da90715f6,2026-10-14 11:59:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ui: hover feedback on every clickable element
+59,7febd273d853ba275faf8f44a5b7162a0ba9c160,2026-10-14 11:58:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: node editor cards teleporting down on drag release
+60,d4130d5ea0d67e74267dc8657b103d627317c054,2026-10-14 11:58:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: clip links lost on project reopen (serializer resolves links by file ptr)
+61,db7126d1e59da46cbdd49bfc97ec6a76eec33f37,2026-10-14 11:57:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: skip the engine read-back on sliders mid-drag (pointer lag)
+62,72acfb9e5a6a1523d7b6327267b6006cb96ddcc1,2026-10-14 11:57:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,rewrite: migrate oak-app to gpui-kit (drop the oak-gpui fork)
+63,2e6b9997e65d22ca32978bc99737958a337cc5a2,2026-10-14 11:42:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,vendor: vendor the gpui-pre crates and restore the 10-bit display path
+64,960b5f673ddb8893d1060b0135d1ad3da4302004,2026-10-13 07:52:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: lift the gpui_widgets library onto gpui-kit (oak-widgets)
+65,1c6845015b841187f669976259677cc99f330825,2026-10-13 07:26:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove oak-app-new; lift the fork's widget modules onto gpui-kit (oak-widgets)
+66,da94619c0d3a93cbf69ae994995f67ed6599b4a2,2026-10-13 07:25:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: effect-system C ABI (oak_effect_*) and Rust SDK wrappers
+67,3fae1392c3fbb1587e4ede1244b4b29acdff6784,2026-10-13 06:26:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: SDK displayicc smoke test calls the platform-gated functions
+68,0275b92233458112bc7ead44e269c07b88efa0ea,2026-10-13 06:24:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,rewrite: oak-app-new on gpui-kit + oak-engine-rust-sdk; add engine SDK capability gap analysis
+69,ee4a7563ddc729bb3f9110d21ed8e04a8affa755,2026-10-13 06:23:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"wip: oak-app-new mid-migration snapshot (oak-gpui fork based, pre-gpui-kit)"
+70,4645ddb1a90c6cc12067a91a898c81112f6e0507,2026-10-12 17:36:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: oak-core's public constants to the SDK core module
+71,ed60318d4d7119db2b773489633c6b1421e42c51,2026-10-12 17:23:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: SDK core module — the oak-core surface as a one-stop umbrella
+72,f2be08bf350e995fc679b7474f506b415e2e89c3,2026-10-11 20:15:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"add: close the C ABI gaps oak-cli/oak-worker exercise (node labels, sequence params, render manager lifecycle, textengine, BGRA swizzle)"
+73,b71fc6341ca8b78959415651eb69dd6c05f567cf,2026-10-11 19:47:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"add: undo history, timeline edit commands, and task C ABIs (oak_undo_*/oak_timeline_*/oak_task_*) and Rust SDK wrappers"
+74,dbfc068bf7b9c994173f31760cd3d92ff09543d0,2026-10-11 19:20:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: render frame-grab and storage C ABIs (oak_render_*/oak_storage_*) and Rust SDK wrappers
+75,3871a6862adb69304770284e57cee519b5bdd872,2026-10-11 18:49:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: OTIO/FCPXML interchange C ABI (oak_otio_*) and Rust SDK wrapper
+76,d10c53971bfeaef957e7ae8af56434a09e70f37e,2026-10-11 18:36:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: OFX plugin-host C ABI (oak_ofx_*) and Rust SDK wrapper; fix libspa/pipewire bindgen and FFmpeg static-closure build
+77,0984f911cb29649de93cccfd4be7135d7d1b9930,2026-10-03 22:45:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: oak-node document-model C ABI (all four batches) and extension-plugin protocol
+78,a3d858e8b7c068c701ee9cfe08166cef801045b9,2026-10-02 19:14:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: CancelAtom C ABI and cancellable probe
+79,99c0f0e815d97e744a1e0daf128bc16d94f2d6de,2026-10-02 17:06:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: encode session C ABI and write_subtitle
+80,01298e02ec204a445bce3f366f85f32403b3d670,2026-10-02 16:56:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: decode session C ABI with opaque retrieve-params builder
+81,e73cd19e0a5666359a84977d050150a482da1100,2026-10-02 15:49:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: decoder probe ABI and codec query helpers
+82,a6495f666f5ff2491dcdbd71e6c8d8b0d2e8851e,2026-10-02 15:09:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"add: media handle ABI (Frame, ColorProcessor), VideoParams mirror"
+83,1ec24a9cb910023111cdfff4763512cf2efb5a21,2026-10-02 14:27:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: oak-core C ABI bindings and SDK modules
+84,3481c3968c7b29a5f0741e428d691166c4388f5c,2026-10-01 23:49:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: drop unix-only path assumptions in codec tests
+85,ba5407e38bf3e6c9a6a3bf2aba6150215f88d2d2,2026-10-01 23:18:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(sdk): link the engine's MSVC import library verbatim on Windows
+86,502e3661583177e8cab5f84d350da89447a4ddc1,2026-10-01 23:15:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: codec C ABI bindings and SDK codec module
+87,d6c5f604a6294a15e1afc475197a30667539faf4,2026-10-01 19:46:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"add: Arc-backed C handle ABI, vector FFI, and safe Rust SDK"
+88,9701d35ddfabbf355e17f63c44eb468d43d473e6,2026-09-30 23:26:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: nightly build
+89,de514c669169646e783371e66615ab6d06bde44f,2026-09-30 20:18:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update: Update CI and CD
+90,c4eac79c8c4ddc5b20e368820ef2d533a89a5176,2026-09-30 20:09:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add: oak-engine and reference counted handle
+91,686482a299b71f2378161d30db94e72db11a0d07,2026-09-30 19:11:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,change: Rename oak-plugin to oak-ofx-plugin.
+92,90a03c7027e42e7d511bc09f2fa0db3ba6f1da1b,2026-09-30 16:51:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update readme
+93,bc843ea9b6d752f387afb498d3fcadfa6cc7e431,2026-09-30 16:19:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build(deps): download freetype and config.guess/sub from the OakVideoEditorCommunity/freetype-mirror GitHub release
+94,2453efd77429a6d124cd41a831f7e6ac6d1499f0,2026-09-29 22:32:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci:fix WarpCache
+95,3e9b913d167210e5da0215b4db0b13e971cb0dfa,2026-09-29 22:14:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: add WarpBuild cache token to container environment variables
+96,8e2fd3b519201d14c1b52bf0c275f91c9c049f1b,2026-09-29 19:07:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(ci): add gperf for fontconfig.
+97,db4b1235f4ca3381bed022850c43c9de148a40ea,2026-09-29 19:03:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(ci): change package name for Arch.
+98,8dedd0d558a493f21473882db55cc720a98b1ad7,2026-09-29 18:38:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,change(ci): use full static link for ffmpeg.
+99,fd6f1cd98cbe86363670150f943508c2e4dc0e5b,2026-09-28 20:12:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: run on pushes and pull requests to any branch
+100,6d1481a1332d2067c734829a26c08d8b368a20c1,2026-09-28 20:12:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore(release): bump the workspace version to 0.5.1, drop the stale version.txt"
+101,07520d46fccb3485a16d7cf131d5161a014321d1,2026-09-28 20:10:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(timeline): keep the spliced remainder in the link group on ripple-remove
+102,3ceaf0ee6b8c3180af232954d4587756569d5635,2026-09-28 19:55:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(timeline): anchor the spliced remainder at its out point on ripple-remove
+103,017dc80a1610c4249655e4ea33bba7b36c3394c5,2026-09-28 16:55:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,dock: refresh cached panel titles on language switch
+104,c94d7f479ed66daa2a5c7ee1b7f30933e56bd7ce,2026-09-25 22:00:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: key the FFmpeg cache on install-deps.sh too, drop bare restore-key"
+105,8747eafe780830c57a7f5bcafce134a9be30cf8a,2026-09-25 21:37:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: package for Debian 13 instead of Debian 12
+106,982593aa2cd566c219ffe4017c3411a2462d64c8,2026-09-24 21:26:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: stop probing for openh264 in the project FFmpeg
+107,fac63e24d40fca05155daa9233bee2735671c565,2026-09-24 19:52:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tooling/package: list /usr/share/oak/icons in the rpm %files
+108,5f92db9dc7836ec08efd9cc0c7f7b595e1883c19,2026-09-24 19:44:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: install fonts for the font-backend test; CD publishes drafts
+109,aba7298ab323ba090a707005bf080101776bff4c,2026-09-24 19:44:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: package the UI icons and resolve assets at runtime
+110,c9ba8695fc5f41673eba362adc6cdf7cfa554a66,2026-09-24 19:39:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,windows: no console window for the release app and its children
+111,8f6527887d1254460e3bcb71bba8cf3a3962f243,2026-09-24 19:23:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oak-task: keep the software proxy path fully software; report ffmpeg errors
+112,d213826924dc04ea4bf0e1d0fc2125f8bd820216,2026-09-24 19:10:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oak-app: fix the NSIS license path
+113,e27bc690f1d6de95982c3b7be9fa1415520f18b3,2026-09-24 19:10:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oak-task: verify a hardware encoder actually works before using it
+114,ad3dbfe928a746e65fa97af97853f0583fe85fec,2026-09-24 18:57:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: refresh ffmpeg-sys-next after a cache-miss FFmpeg build
+115,08c48473a6ff4908466d1fc546a8b245a645259f,2026-09-24 18:56:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tooling: fix the Fedora package names and enable RPM Fusion
+116,563a3625ca6cb71e1a85b7b2a72ee237c3e61591,2026-09-24 18:50:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: drop vcpkg; distro packages + the project FFmpeg everywhere
+117,725a1d4da095274ce1ad1f50d304e9d9dc83a8e9,2026-09-24 18:49:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oak-ffmpeg-link: link the prebuilt shared FFmpeg on Windows
+118,bd447e1a7d89c2a5f8cdcd8feb09584d95a30464,2026-09-24 18:49:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tooling/ffmpeg: mark completed builds; refresh the pairing comment
+119,dd003ba6bb48236dc2a6ae9bd3dcc610b56175f7,2026-09-24 18:49:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tooling: make install-deps.sh container-friendly and complete
+120,df65a3f1a4d16bb24139b77de1f22eb294f2464d,2026-09-24 18:39:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: use BtbN's prebuilt FFmpeg on Windows
+121,a1268df2f6f5c9aebdf5b82f698edf0baef4c34d,2026-09-24 18:28:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: fetch x264 from the GitHub mirror (overlay port)
+122,1dc5a77ab0cdb1516b50f496a467a7aefdd7fa59,2026-09-24 18:19:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: build vcpkg ports release-only via an overlay triplet
+123,6de991de33985aae88fba543994c56cdf1f02e90,2026-09-24 18:19:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tooling/package: fix deb/rpm packaging against the real distro layouts
+124,f817483e4e5ef4e308232af4d68f0987cd7ffb29,2026-09-24 17:48:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: move Fedora to 43 and speed up its dnf installs
+125,133b139036767ce63703171803766c4caadab332,2026-09-24 17:45:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: install the split perl modules Fedora's openssl build needs
+126,ad90fd34aed53462205a360301995ce16627ac32,2026-09-24 17:36:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: fix the xz package name on Fedora and Arch
+127,1fd32d3d486048b85b4b2d38364dafc8b4d21015,2026-09-24 17:34:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: use smaller runners to reduce CI fees.
+128,88a5bee50e598eef993fd0af81d0b1551da193e4,2026-09-24 17:32:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: unify both workflows on one seven-platform matrix
+129,7b64e4119bf7fcb95571d19ed4161bd21b686a79,2026-09-24 17:19:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): build release packages from scratch (drop vcpkg/cargo caches)
+130,5fd1c151da753b2c2ab0006ca25c2695dd871051,2026-09-24 17:17:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): add libdrm-dev to the debian list and use a committed icon on Windows
+131,ea96357806e839d4f82aea9bf8cb6f31eabc1ed4,2026-09-24 17:13:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): fix the Fedora deps continuation and unshallow the AppImage vcpkg clone
+132,7f544a65e6237c45b17d053c67e4daa94e00639e,2026-09-24 17:10:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): add openKylin x64/arm64 debs and label the Debian build
+133,73f7e451c91500bc689c28ae03ab07d33a0e3adf,2026-09-24 16:26:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: authenticate WarpCache and install wget in the openKylin container
+134,9b3a031d5877defe8e03f1dae44ada3b3d95c420,2026-09-24 16:22:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(oak-render): probe true in /usr/bin for the dispatcher tests
+135,61cb4b71edad9c9c995b043c5abd2f305bf0f74d,2026-09-24 16:22:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oak-render): fold over-long POSIX shm names for macOS
+136,9a7d0765a5057558d7933687eaad2d15cd970d53,2026-09-24 16:11:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: retry vcpkg manifest install on transient source-download failures
+137,224a1474b7b95be5e3805b2cef37b805ff27eb38,2026-09-24 16:11:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oak-plugin): gate every GL entry point in macOS test builds
+138,deb55d770e9aa6ccc78460256974ea8aa3de46fb,2026-09-24 16:11:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oak-plugin): serialize OFX binary loading across threads
+139,d0a8fcd2a5199cefe2571e723e717d22c017810e,2026-09-24 16:11:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(oak-render): make frame-path and worker-bin tests platform-neutral
+140,c50d489dc051838d86144c5ed7978d02ee11d4e9,2026-09-24 16:11:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oak-render): composite the CPU track stack bottom-up
+141,12e7c9b0539ceebd1d19898f91f78cfdfeae0c52,2026-09-24 15:51:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(oak-app): ignore the multicam graph switch test (post-v0.5)
+142,77214bff7903972aeddb3b8a589d97a28dcfa628,2026-09-24 15:45:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(macos): sample hung test processes; more Windows switch diagnostics
+143,5625f28c9462c000fa37b7a369bc4d38f9d160d1,2026-09-24 15:38:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: move the three Linux jobs to WarpBuild's cache
+144,67cea4844c992a926e0bda2bb4d8d4d6032bca92,2026-09-24 15:22:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(macos): gate real GL for the whole test build; add Windows diagnostics
+145,b94158a9411decaea4f887222a793db5ba885c11,2026-09-24 15:09:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: latest action majors, rolling cache keys and Test timeouts"
+146,c64dd5ce0687358c216e4aae03689d598161861a,2026-09-24 15:06:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(ci): give the Windows tests vcpkg's DLLs; skip root-only perm checks
+147,38e231c4801fdca69bbb645810a95cd516403f73,2026-09-24 14:45:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: speed up Windows, harden openKylin, capture crash backtraces"
+148,b13ef477a8a6db4a65f300b65a9c1fccee27860a,2026-09-24 14:45:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(tests): make the platform-specific suites portable and deterministic
+149,21dbde8435e570d83646a6104458653507bb9439,2026-09-24 14:45:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(timeline): place a clip from empty space on top of what it covers
+150,eed019c00268429c7d9077dbac8fa37afee31758,2026-09-24 13:37:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: install fonts on openKylin; carry the runner and cache tuning
+151,13ddd8c0e74c11371d93c85bc11dbefd5eacd3f7,2026-09-24 13:37:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(macos): compile the VideoToolbox import and clean platform warnings
+152,274ae84c011d464f124d55de67b7d4739611cc9b,2026-09-24 12:56:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(app): keep the language -> config lock order in the update test
+153,9cfcb0af92074082acbbb4dfb4977b84a04806f1,2026-09-24 12:55:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): startup update check and Help > Report a Bug
+154,c86bcae68ed07392f9c886005cc9d4212c179183,2026-09-24 12:44:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(openkylin): pin HOME so rustup installs in the container job
+155,7a9e11b7297af92e4b565d5651df1b141714ea6a,2026-09-24 12:43:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix the vcpkg ffmpeg manifest feature and pin
+156,eddfeb59b49c89e56d6dfe0e28412a170b99ecd2,2026-09-24 12:41:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(i18n): refresh docked panel titles on language switch
+157,d88e2d6ec17b47cab871aa707b1a3cb0a78c149c,2026-09-24 12:41:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(timeline): restore the C++ block length anchors and repair pointer edits
+158,415262a7b2155394993b4c6dcd1d13d22b75e2a4,2026-09-24 12:18:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(ofx-params): render vec4 grading controls and base-stepped ranges
+159,4cc30d871183fc8a375cb7534bd99666d819e351,2026-09-22 20:54:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test(oak-app): UI panels, engines, dialogs and widgets"
+160,fe8fbff8a917dc5e9da377937904acc9205d0c28,2026-09-22 20:54:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test(oak-timeline, oak-plugin): undo commands and plugin host"
+161,e04ce03058768fa0d8540f0d135a24ec9a4f4015,2026-09-22 20:54:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test(oak-task, oak-storage): task managers, codec bridge, storage"
+162,666ac9b4d4646505d7af05c19fa7e2fafa7c2c0b,2026-09-22 20:54:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test(oak-render, oak-worker): eval, procpool and worker coverage"
+163,12ca9d1d7a78aa5e5e152fe72d3ee266e22a9490,2026-09-22 20:54:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test(oak-codec, oak-core): boundary and branch coverage"
+164,df3957b0dc655015f7ecc2841abbdf90f2ff6061,2026-09-22 20:54:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: coverage plan and review reports; drop the stray artifact
+165,18abdec423235ea77d5a2e0cb855df2749f44f80,2026-09-22 20:54:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: production defects and observability found by the test suites
+166,f188bc79e78d7c9ed09731cbd17ebc6b5578110d,2026-09-22 20:54:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(gpu-decode): zero-copy hardware imports and the planar pipeline
+167,800011ef7377f4c56ac35f0f6ecde516f394a02a,2026-09-15 19:32:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: M5 kickoff — staging baseline confirmed, first import PR design"
+168,ee7ea18d94263798e288e2c3f79862d1c645a0fe,2026-09-15 19:29:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,clippy: clear the workspace errors and apply the machine fixes
+169,7e87ec135edf9a3b66ad4b2f555b6af14d2b52cd,2026-09-15 19:29:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: the M4 audit follow-ups — autocache priority, cancel-in-flight, decode LRU"
+170,ba1143e7a3584a92e201e91c211d4354458103f8,2026-09-15 17:10:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: the M4 playback prefetch — dependency window, priorities and backpressure"
+171,794850daf6ec4d3d423a3ae4e643fa1ae42c06f6,2026-09-12 23:10:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: fix the VA runtime path, container shm and the vcpkg binary cache"
+172,fec6e9dba70d2e867d4a3656a2e7c833faca0a9e,2026-09-12 23:10:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: the M3 OFX host — one oak-worker --ofx-host process for every plugin job
+173,4337559ed0c50f963e8731885b78f4f2bb6f3c43,2026-09-12 21:08:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: fix the Windows, Linux, macOS and ARM64 failures"
+174,48e99e56b71226ed924cb17800c502d3017d4ceb,2026-09-12 20:52:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: the M2 GPU zero-copy pipeline — wgpu 29, shared gpui device, GPU color LUTs"
+175,a5b0b2a1b121b7a41d22adf87f06f7302835b7ac,2026-09-11 19:37:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: the M1 thread pipeline — one render thread, one decode thread"
+176,23174512c03fe25d3dd3fd8ef5a1a09495e672a5,2026-09-11 19:37:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,codec: restore ffmpeg-next 9.0.0 (FFmpeg 8.1.2 stays)
+177,96e6ce327dfd81677fdfed99bf04f2ceea55edd8,2026-09-11 17:52:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: add  autoconf dependency  for Linux.
+178,0d404b242799703df63b42d1216e170b209a171c,2026-09-11 17:46:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: add libdrm and autoconf dependency.
+179,9e750cc78a7fa53843c87093c6b51d853ff48bf3,2026-09-11 17:38:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: use full vcpkg clones.
+180,876e32c1a5bc3b2374f070f4a47f0330ee96fba0,2026-09-11 17:31:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: change ffmpeg to version 8.
+181,9a2c7e5ddeb6a912af5a5ea69d0c4b38832ef683,2026-09-11 17:01:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: vcpkg everywhere, FFmpeg pinned, openKylin container job"
+182,4f0f5cbba6b955bdeda1a1580d7e56a8968b18fc,2026-09-11 16:38:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,workspace: zero compiler warnings across all targets
+183,faebc79c314da58dbfbbc1fb1d8fff5f2e4d7e13,2026-09-11 15:59:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci/cd: Windows goes vcpkg manifest + MSVC on the VS 2026 runner
+184,80e6b8bb6ee54371f1cd2742645aaca9aca2be3c,2026-09-11 15:49:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: skip posix_fallocate off Linux (macOS CI)
+185,441367678011f345e5228e5214b4f732fccaea03,2026-09-11 15:48:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: show the graph endpoints in the node editor, protected"
+186,29204d1f6355027c984da35e058143cf4e3328a7,2026-09-11 15:13:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,node: virtual graph endpoints and the Kahn-order BFS sweep (M0b core)
+187,3a48dd49915faf9770897e0cfdafa017589c4310,2026-09-11 10:38:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: Job enum in the tables, single-loop match resolve, real CacheJob"
+188,3c05f7107b974c61776f39c15ee2163e4ca700b3,2026-09-11 10:01:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: harden the pipeline plan — GPU decode zero-copy, Job-graph BFS"
+189,87ed45ffee93d48cdf50c45f17b60ef6dabfd6e6,2026-09-11 09:48:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: plan the decode/render thread pipeline with GPU zero-copy
+190,d216567bcdee5e43992510b9f63da4eb370f5a47,2026-09-11 09:40:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: fix the swirl shader's duplicated uv declaration
+191,20535546d6801f7511c50ae06349f9746db6e0ac,2026-09-11 09:40:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"timeline: drag a whole multi-selection, not just the grabbed clip"
+192,5b0f5939f31c769525bc7fb59d02b36d971451a3,2026-09-11 09:40:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: fix the transition drop (frame rate lookup + lock reentry)
+193,f9b1863e5fbf62e5c4c2a787e5d3d0c2ce974719,2026-09-11 08:56:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: move CI back to GitHub Actions, add a macOS job"
+194,2817ac286c24dd1a523103410d54c12cad99c48c,2026-09-11 08:49:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"timeline: drag generators onto the timeline, drop transitions at clip edges"
+195,16364d414a81d561406241481812c4a53aa7500e,2026-09-11 08:48:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: mask off-frame samples to transparent in the distort shaders
+196,882d9091ad2a8066154204827c13e88d75f2c881,2026-09-11 08:47:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: keep global shortcuts out of text fields
+197,19b7d3ac78f4a2f328369a824299a5efb93fb0ab,2026-09-11 08:47:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: move the text engine into oak-render and install it in the worker
+198,4a2614b3fca615803b02076da423710d8f087b5f,2026-09-10 22:03:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,timeline: adjustment layers and first-class transitions
+199,1e0d48578e6dbc3ae2ba3708a20f97e586f2f957,2026-09-10 22:02:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: text becomes structured footage with a real text engine
+200,a7916aa93d9ea1c7679694902c4f601c97a105a1,2026-09-10 22:02:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"nodes: OpenFX-Misc cleanroom GPU ports, grouped and collapsible in the library"
+201,5f8db8e31c072c7b299249fa900c5baca459fbfd,2026-09-10 18:13:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: never re-sync a text field while it is focused
+202,a97bc19c14cbc33e261f97390a12466ba4af1721,2026-09-10 18:13:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: refresh the paused frame after the debounced snapshot upload
+203,d028a45ffa4d9e683bbdf03f5ab22cdb5ead3ef1,2026-09-10 18:13:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: pivot transform rotation/scale around the frame center
+204,280118a342e919bd2ecf02fa3cc0dfa56b2e7f06,2026-09-10 16:55:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,otio: write importable OTIO/FCPXML (DaVinci Resolve rejects both)
+205,71e41d2d821e72a1eef8e4a64960c1a31522a618,2026-09-10 16:54:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: ship the Oak icon on every platform surface
+206,012659bf575996dbc84b1db0f89f526c09ff9b17,2026-09-10 16:54:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,export: fix render-ticket classification; export any sequence
+207,fc90604245ea24a605fd1e6ccf5facb393507d78,2026-09-10 16:53:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: anchor resolution_in to the sequence resolution
+208,7ce80bf8b3120cfe7c8e391eeb865132e4ab471f,2026-09-10 16:53:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: keep the color popup alive through the viewer-pick click
+209,37df1d3d343bc370461efe5886a4d1adede7be6f,2026-09-09 16:51:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: spell shape/despill shader dispatch as if/else chains
+210,4f404f8cc6d3ed4a71e5e003a477a968194c5108,2026-09-09 16:33:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: replace placebo assertions with real behavior checks
+211,5ab12b937f32b1f8de78e4dc5a4731ccbd7c00b5,2026-09-09 16:33:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: real texture binding, generator layers and iteration feedback in shader passes"
+212,cde4dddf326cad2f1039e8588d9c006fbe795749,2026-09-03 17:44:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,structure: move jobs out of nodes/
+213,4babbf5de85674cb180ddc4eff12797970571bb1,2026-09-03 17:42:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,core: merge oak-common into oak-core
+214,49fed365a43df5984c2389e1c9e15af0751b2584,2026-09-02 20:04:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: real OCIO color grading (linear + log) on the GPU
+215,b06c4fbbb63f99825f55c3a3d1a246c9ad8b1315,2026-09-02 16:59:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: real polygon and mask implementations on the GPU
+216,4ef5b3e31df32b7dd4012e0e58ad87b4033da537,2026-09-02 16:19:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: snapshot store temp dir is unique per store (test parallel flake)
+217,6b5b30fd36601ef16ac11f1f429a512cd57e4bce,2026-09-02 16:17:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gpui submodule: macos file filter disabled
+218,1d45216c1f0ae55427c50d5dc3b5dcc1a61a5108,2026-09-02 13:04:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gpui submodule: windows file filter spec fix
+219,6153a2ac3362c1e4b11dceaf90dbeb78255a9b71,2026-09-02 12:34:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: fix three stale assertions
+220,1ab1c29df4f05ddbe42dfe5bc72262a4b3a95ed8,2026-09-02 12:18:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cli: fill the new EncodingParams fields (export_sequence)
+221,a72e86dfafadbef9dcb7ed3c416554864c906366,2026-09-02 12:16:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gpui: extension-limited file pickers on Windows/macOS (submodule bump)
+222,fe017aa0608870c5d7725bb7cf84d7720938e193,2026-09-02 12:00:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,project file: format dialog hands to the SYSTEM dialog (extension-limited)
+223,22a17442ac2ed654e23aaadca70815ec6e87d269,2026-09-02 09:55:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci (gitea): ocio-env.sh via bash, drop ocio-sys unpack/glob on Windows"
+224,726b7d6a60fd18325839812e1dad53fceab62b0a,2026-09-02 09:53:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: invoke ocio-env.sh through bash (no exec bit needed)
+225,83dd13234bbe63405bf3c3add321e773ad9ec2da,2026-09-02 09:40:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix Linux/Windows package builds
+226,2c64317a58be7db2f1f6dd6b256bbd6735ad5faa,2026-09-02 09:35:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,export media: editable resolution / frame rate / bit rate spin boxes
+227,92813707bc813782f6961a1b8bdf5839b460d0c3,2026-09-02 09:31:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"export media: dialog UI — container→codec gating, color space/bit depth, range"
+228,499246b48ee5ecd7801d97526833654a3f7badd2,2026-09-02 09:27:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,export media: settings protocol (codec/color/bit-depth/bitrate/range) end to end
+229,56af662b832f90a26f596d313808d6f084b047b8,2026-09-02 09:22:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,project file: 另存为 — duplicate the project in the library under a new name and switch to the copy
+230,660a32a1b3fa32e6a459b9f0066014f9419dac05,2026-09-02 09:15:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"project file: new-project dialog (name + sequence format), open prompt lists formats"
+231,c9008049411b104a85d074f97cb8a6e471fc8ec4,2026-09-02 09:10:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,project file: export dialog with OTIO/OVE/FCPXML format choice
+232,19a83f83597af4da2e98b19f119e695a7e59cdae,2026-09-01 22:06:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,multicam: hide the wizard menu item for v0.5
+233,be42620e22da19a4c3d1ad58ee3e206ee132889a,2026-09-01 21:52:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"multicam: throttle angle refresh, shrink pre-render window"
+234,7f41570596ac5257d9687b3f878680b05524ecb1,2026-09-01 21:46:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: stop evicting the only hardware decoder session on every open
+235,7065fb0108388e4c089a73911c035dd8707bdc36,2026-09-01 21:33:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"footage: node-graph decode uses a ready proxy, tolerate unset stream index"
+236,45c288ce97960a5dfad4e3de9ae68774021cd905,2026-09-01 21:31:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,revert 3bcf4e0b1 (multicam no-split/stride/proxy-ng) pending split re-verification
+237,3bcf4e0b1a5a75b762cb3bd228dd2d5c0ad6825e,2026-09-01 21:19:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"multicam: no-split switch skips full rebuild, angle refresh stride, proxy in node-graph decode"
+238,1b0a15192e722960f361b4bf4ec652bd5806404a,2026-09-01 20:27:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,multicam: wizard + AFV + node-graph preview + performance
+239,8de9af705eab0580165eb21c53c8f7df08cbe037,2026-08-30 22:03:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: query GPU vram on AMD/Intel Linux too, document the UMA/Windows fallbacks"
+240,9352fca4a9d2f1b36934af6c150d18aaba830954,2026-08-30 21:58:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"codec/render: silence hw-decode failures, vram-aware dynamic worker pool"
+241,5937e557a7dd4ab81381257531c49a76bdb63f7d,2026-08-30 21:58:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: project-explorer new-sequence button, 4K presets, keying node fix, color-picker canvases"
+242,71bc748d983a2466c115895801c7ee8888a047fa,2026-08-30 16:28:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: point ocio-sys at the fork carrying the zlib-ng detection fix
+243,8bf3f1e2dfae2d1acbe1dc91fdc4821a09f6e775,2026-08-30 16:02:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci/cd: vendored static OCIO everywhere, ocio-sys tracks upstream main"
+244,91a6accf754d0c70da01b9858f9d26868f23ccfa,2026-08-30 00:32:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"build: track the workspace cargo config (FFMPEG_DIR, OCIO env)"
+245,5b38d072991a33c839f2490c81efb948f45d7fc5,2026-08-30 00:31:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci/cd: NVDEC-capable FFmpeg, GCC16-proof OCIO, system-first OCIO env"
+246,ef01570c5deba96fd2f55cbc27842885513f6e91,2026-08-30 00:31:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: warn that ffmpeg-sys-next bundles the project FFmpeg into its rlib
+247,3be8c3e8fd0f9d6e5bbedb9f7f0014daafdb31eb,2026-08-30 00:31:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,codec: prefer native NVDEC over VAAPI on Linux
+248,197212bc4654d351953d7b3a54fc32c27ab43e08,2026-08-29 23:31:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: extend OAK_DEBUG_AUDIO diagnostics to the render thread and output stream
+249,84caa3589b2091a5be08af085dadc0528ec81b93,2026-08-29 23:31:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: sync the playback clock to the sequence rate; heal underruns by trimming
+250,10ec63efb3b240eb1962cb3097e756fd4a1ae471,2026-08-29 23:31:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,node: read the canonical DefaultSequenceFrameRate key for sequence defaults
+251,d2ac02a4743c9d32071bac90cce7eee430e1fe17,2026-08-29 19:52:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: relax the ocio-rs constraint to 0.2
+252,81c38399376df95f9da8e30eb8faa321ef84d769,2026-08-29 19:52:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,codec: cap FFmpeg decoder frame threads at 4
+253,9dab9efc3838bf1e04393d18d618290b241563b3,2026-08-29 19:51:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,codec: carry codec-frame overflow across audio chunk boundaries
+254,e128a6aca198d9797d3eb87fc4155106feba651f,2026-08-29 19:51:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render: clamp mixed audio to [-1,1] before it reaches the device"
+255,6fb9a80afcdcfb3ab9f3f7ed378553cad3ac7352,2026-08-29 19:51:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: silence wgpu-core's debug-only snatch-lock backtrace capture
+256,cbd4ba24427a5581936ae91f5a57087791e4f0d4,2026-08-29 05:01:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,optimize: video and audio render
+257,ca18105c8ba5bb227938f9b6d1ef7e4a5075aea7,2026-08-29 00:37:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: retry the Linux test suite once; log render-manager init failures
+258,fdb5caabd57f657a491e974cca4370af8ede0dc2,2026-08-29 00:24:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"color: non-sRGB preview, per-monitor display ICC, pipeline hardening"
+259,879ff8da5bd6f56f0190d659ad32d2b2c3a36e84,2026-08-27 20:43:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: PS-style colour picker and an eyedropper that keeps the popup open
+260,c730061018a4fba52fc3d26bc54672ec0bdc1c89,2026-08-27 20:43:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: occlude the app-owned ComboBox dropdown
+261,9c0269bcbb819461c93d367a222d2b274eba3357,2026-08-27 20:35:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: cache worker frames and decouple audio from the video workers
+262,c78be39f8b3618632f5e9d01593d41a8b0356daa,2026-08-27 20:35:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gpui: anchored popups block clicks from reaching the layers below
+263,246de6352f116aeb52831877394ed4d40671b790,2026-08-27 19:55:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: true 10-bit presentation -- F32 frames reach the swapchain unquantized
+264,5d21f83e1e8e10129a38646e9fb61d5d9365211c,2026-08-27 19:08:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"render/app: display bit depth option (10-bit default, 8-bit optional)"
+265,7422ccd7e94c1b493f2b039afd8595eff0276bd3,2026-08-27 19:08:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: rename the razor tool to Blade with an I-beam cursor
+266,82ad9891ade4247c95b1a94b4d9f6447b3e94dec,2026-08-27 19:08:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: white fill with black border for unchecked checkboxes
+267,eb5643249c11d8a9c69f65f259299247e3f9239e,2026-08-27 19:08:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: scope multicam digit shortcuts to the multicam panel
+268,719e43eba3042153e9a3cdaaa485110764b64751,2026-08-27 18:54:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: render at proxy resolution and honour the playback divider
+269,54945e39af901baa2defa6acfead590078ac8815,2026-08-27 18:32:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: pick colors from the program viewer frame (PS-style eyedropper)
+270,1ae03c1b1e3829cef182ff756010f881f9293f4f,2026-08-27 17:59:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: real timeline tools, live zoom buttons, clickable snap toggle"
+271,4e619efb93c1357ee5aaeebdd0b5b7d2a3cf447d,2026-08-27 17:39:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: make the viewer context menu real
+272,bad2f9552ef34993cc20132bc6213ef1064b352b,2026-08-27 17:38:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: sequence management -- new-sequence dialog, folders, sequences in the project bin"
+273,d65b84a6ca960cb83464b25add51abc8434a74df,2026-08-27 17:34:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: live color swatch and a project-media eyedropper in the color picker
+274,107ee079c61f8d27496da76a79fccdcecfaacf4f,2026-08-27 17:33:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,inspector: vertical scrollbar for long effect stacks
+275,2dfdf8a5b036af9385bcd12e4613f005534eccf2,2026-08-27 17:32:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: click-to-jump and a persistent value box on sliders
+276,a372d7244600d56747d807b3fb2a354596f57524,2026-08-27 17:32:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: white background with inner shadow for unchecked checkboxes
+277,9f88b9b8563a0167ef64cf2e1f6ecdc0b0e00b14,2026-08-27 17:32:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,codec: rescale packet timestamps to the stream time base the muxer chose
+278,c03f1ec604781fba7e97e3a8eb9d263ee2faa472,2026-08-27 15:20:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: stack higher-numbered video tracks on top
+279,663d879908a7b76deadb8f7662bedb02f898a5b9,2026-08-27 15:20:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"node/app: keep clip links symmetric and intact across paste, delete, and undo"
+280,f7352ae19dc4984a0c47abafa71e519e25dba05b,2026-08-27 13:52:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: fall back to CPU when the adapter cannot render Rgba32Float
+281,cbf9d3c543a21336d21d98576ddb200acc6e44be,2026-08-27 10:13:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: silently ignore clip drags across track kinds (video<->audio)
+282,8c306986ab2056b7b830546e361f69edb0129020,2026-08-27 10:13:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: stamp clips with a stable creation-time color and footage-name label
+283,c51a349070086952473cb5cb6b4d32b85674c735,2026-08-27 07:07:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: translate node GLSL shaders to WGSL and run them as wgpu passes
+284,4f6c44a0d024ed00f611b01428c88b2db19761e9,2026-08-26 06:40:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"proxy: hardware-accelerated transcode with configurable, resource-aware concurrency"
+285,ca64b61156d5f298e02af99f630b05dbd0e12fc8,2026-08-26 04:23:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: drop the throughput assumption from the playhead tracking test
+286,96df9293e59493736fc8314515861acf71a76f52,2026-08-26 04:23:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: extract audio waveforms off the UI thread
+287,09c7e7de32efc7ea8f4025ca8b90a4bb9563e412,2026-08-26 04:22:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: auto-generate proxies in the background and badge them in the bin
+288,287a17399b6a9b2679a6ea656cb1c879a1b6ce37,2026-08-26 01:31:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,plugin: render non-F32 OFX plugins by converting in and out
+289,fa3951344bfc240c328f6e6f14e74dff5b1fa6bb,2026-08-26 01:31:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: fix 4K playback memory growth and decode-to-target-size
+290,ea9b451d0b8d659a7c5433d31e6d31586db49cd4,2026-08-25 21:56:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"plugin: instantiate more real-world plugins (FieldOrder, UIColour, context fallback)"
+291,3792c498543768d601a22a4f46b1b5857d73132d,2026-08-25 20:30:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"plugin: abort() must return 0/non-zero, not ReplyYes/No — fixes black frames"
+292,3bf914a2b8ac92c857b7495270ea8b2ffad8021f,2026-08-25 19:10:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: stop slider drags from leaking into other sliders
+293,a56f6ddf870cd750cb7e4e8aae0c661bddeda6a4,2026-08-25 19:10:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: link the rear halves when splitting an A/V pair at the playhead
+294,2828984187ce9c637fe4eacafe370c4f0a133d40,2026-08-25 19:04:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,plugin: fix OFX host property-suite gaps that purple-framed real plugins
+295,f2aab8ce159dbfbeff53a47e92423ec220083ba1,2026-08-25 04:49:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: apply clip effect stacks in the montage path
+296,28f4ed655e9c7312665c1328da233437e61aed21,2026-08-25 03:53:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: refine the link toggle + human-readable node ports
+297,1ad2d71c81e77c14cd26fa871df632edbcf5665f,2026-08-25 03:40:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: implement Link/Unlink for timeline clips
+298,a1bfe5ee5ee2a31311f5edda7ff177dd113608f4,2026-08-25 03:03:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: msys2 clang-libs; drop the msvcrt link workaround
+299,3cc6f75ccc799170c358ed97b6462e28b19a3407,2026-08-25 03:03:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: archive completed plans, add the external plugin system design"
+300,8679bef6de27d568836d80b17f97648ef5067ef9,2026-08-25 02:51:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"components: focus-gated spin wheel, spin text entry, combo outside-dismiss"
+301,186c41b8945830322749224c1e6022a5151dc95a,2026-08-25 01:55:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: about dialog, modal close affordances, more preferences"
+302,ccfd8fec60a10f1c122be095a7b83607cdafa0e0,2026-08-25 01:55:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,components: paint the ComboBox popup deferred (above following rows)
+303,72416e621e4869f4078b8e7c19ad7e1366e3332d,2026-08-25 01:32:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,style: rustfmt app.rs/dialogs.rs (no behavior change)
+304,dfbb0eaec5d4028fe8281f41005153faf95384d0,2026-08-25 00:46:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: move Preferences into the Tools menu (the C++ layout)
+305,476114cec0537649eccb734f74170d3b81e176b6,2026-08-25 00:45:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: project properties dialog (File > Project Properties…)
+306,f7b5996032a1a84651ef5a5512aad672745aa994,2026-08-24 23:26:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: fix the BGRA8 display transform + dispatcher diagnostics
+307,53dbaba8fe5eadd1335f0e510890c57b2597e5c4,2026-08-24 23:25:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: fix the Cmd+= (track height) self-deadlock
+308,cac73dc89ae2f2028fdaef9d9d24330e9899a8a8,2026-08-24 02:11:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: msys2 clang for the OCIO build; point the README badge at Gitea
+309,30ef02803da912894991fea163f5b222d1a9daf0,2026-08-24 02:11:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: fix the interactive-seek deadlock and seek starvation
+310,c9b9a45eef7e1af2bcd51d4b273195637894d117,2026-08-23 19:08:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: CD uses GitHub Actions
+311,532d0cf0ef8ed15e6bcf5ea851fda1335966fcf3,2026-08-23 19:06:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix Windows CI can't find git
+312,8a8ed5045167fcd9b6b5fdba316675262e36e228,2026-08-23 19:05:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oak-plugin: serialize the identity-registry tests
+313,16e90bcfbf1a434f6be2200f341c9b7a8c795d39,2026-08-23 18:39:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix OFX fixture env typo (ofx-fixtre -> ofx-fixture)
+314,b6f1f7fd41e9b2ad59ff38409679383a8097caba,2026-08-23 17:01:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: detach the Linux test watchdog from the step's I/O pipes
+315,c32341c8889acbb33541b35ea14cfa2409a01c5b,2026-08-22 22:28:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci+fixtures: UCRT64 msys2 env; fix remaining fixture paths
+316,4edea377bf4802639e660dc4572c3b0230541cea,2026-08-22 20:40:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: cd into the workspace in every Windows msys2 step
+317,0e68806351310965e0ba779d7e30e68189f19936,2026-08-22 20:30:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gitattributes: keep workflow manifests LF on Windows checkouts
+318,a8836275dc5aafaa6a05c764305cc3b47c16f207,2026-08-22 20:23:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix Windows CI
+319,a5208b6caefdeddffbb6c8c8468a1e4420ab6f0a,2026-08-22 20:11:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: replace wall-clock loop deadlines with progress criteria
+320,c4705cbb2cf82975f5f6b7ff1c3472a7c8af5a6c,2026-08-22 19:40:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"test: playback tracking asserts on playhead progress, not wall time"
+321,9b35a9c6d466ef723900a9ca5d5145fc89a460ae,2026-08-22 19:09:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,components: effect controls with full mouse+keyboard; app-move path fixes
+322,aee368cb788c5e4483c98a42a26d5d2260a1e42e,2026-08-22 18:06:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: finish fix Windows CI
+323,6b497ccb9703f79df408224662a9235399892fac,2026-08-22 17:49:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: remove probes
+324,b8f9e755c4b5b7ca90ea5dab12537c9c53280043,2026-08-22 17:43:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: remove windows panic
+325,244d5e860fe7d7079072a3b8607393a6136506aa,2026-08-22 16:58:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"workspace: kebab-case crates, app under crates/oak-app, shared versions"
+326,7e2b3cb4b81c373a5dc21840bfc8c69fcfd97380,2026-08-22 16:44:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,components: app-owned text input and menu; use-import style
+327,e7483ba73520007fd83834ae7514552478f11a14,2026-08-22 14:44:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: add throw exception to debug Windows CI
+328,e8d08c77f0d73e67e26d23d9581a8101e91bad41,2026-08-22 14:35:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: add probe to debug Windows CI
+329,2721225a3f9510e43f146dcf1839ba169efd4886,2026-08-22 14:32:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: debug Windows CI
+330,2289bc70d8d7311e3aba199c4f2e798311ad7dcb,2026-08-22 06:24:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: debug missing bash and missing limits.h
+331,b4c8a00ce74dba9e2c01b0330159dedb03710332,2026-08-22 06:10:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: debug missing bash and missing cargo
+332,ca33f310bbedc9c61af234ef5082bdb6d0336e27,2026-08-22 05:59:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: debug missing bash
+333,69ab45a1030d1fb561018838a9e9c8cdad1890bd,2026-08-22 05:42:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: configure GitHub environment vars and use bash instead of msys2
+334,cea28f8bbc8215019817671ea97daef50ccff6d0,2026-08-22 05:25:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: migrate to Gitea and AWS
+335,4637a84c8519c4ae8e16a42a62b6c194fe716ef0,2026-08-22 01:00:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: split Linux and Windows into separate jobs; drop macOS
+336,1564844bab799072a9a74dc45a1c9a60b4b2efcf,2026-08-21 23:53:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"gitea: move workflows to .gitea, disable caches; settle the keystroke flake"
+337,08269a680dc518c447da3dbdb16345bd7b382c91,2026-08-21 23:26:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: use AWS instead of warpbuild
+338,24a2ce80e142eaf029a4ccb20ee2e385e7ba3029,2026-08-21 21:33:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: retry the Windows test suite once on failure
+339,6946226a0ab91d2b4875025b7e35a520a8d488cc,2026-08-21 21:08:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: park between the undo/redo keystrokes (Windows CI flake)
+340,40c8043a76bd58706482974a4c9532fba3213054,2026-08-21 20:37:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: size the preview-window headroom by alive workers
+341,d48b04da5a740251653269477737854e87d687dd,2026-08-21 18:48:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci+tests: oakstorage Windows URIs, Linux hang watchdog, cache-on-failure"
+342,9aab5623bfb900ede4aa8d1a545f1daca5fb1ad0,2026-08-21 17:49:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,gitattributes: keep LF in golden/test data files on Windows
+343,7323a6d2bece2543818962c67055af2c2421f620,2026-08-21 17:22:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: make the shortcuts-test mutex poison-tolerant
+344,cada2f4c3a678ce677e3f9adb372def8781eb793,2026-08-21 16:34:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: CI fallout from the i18n refactor + Windows path assertions
+345,4622a1af1edc0982c2e4ccb1c272513f38ec8176,2026-08-21 15:35:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,i18n: six new languages; packs become fully data-driven
+346,3efdee5a101cdd75d8c402dad4aea2e8eedf1a28,2026-08-21 13:36:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: share one language-test mutex; read the OFX marker via Win32 env
+347,d9dc16ec26f55d83dea18d457a3e2aca3d3a1c6b,2026-08-21 12:53:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: bundle all runtime dylibs on Windows/macOS; version from workspace
+348,498669509ae2a9a7fe69c5c90e298df92efaef16,2026-08-21 12:53:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: current bilingual build guide; retire the C++/CMake one
+349,eacc47930a8406bccd0ec346b7d413add11690c5,2026-08-21 12:53:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: assemble the OFX fixture bundle correctly on Windows
+350,e163702a6b385ee80bf432778870b66b670d7a64,2026-08-21 11:56:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: entry-point-less test binaries on Linux; gate timeformat test FFI
+351,8660cbcf971b00ada88d661f24aaab94eb4e817b,2026-08-21 11:17:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: unbreak Windows tests; sharpen Linux loader-crash forensics
+352,bea50f4d8095ce629fa66e1c22b4f4cc2c769641,2026-08-21 10:37:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,oakaudio: drop asio-sys from the lock (feature removal follow-up)
+353,e8372775579855689d2794bf81f7657fe4a85f11,2026-08-21 10:29:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix Windows asio-sys link failure; improve Linux crash diagnostics
+354,b5a2ea7697cfa76e02fd324e12a395cf3508c261,2026-08-21 09:51:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci+fix: link the exported UCRT time symbols; gdb over copier_test too
+355,7fb9c929317b98447895491e0c59b55966182ac8,2026-08-21 09:17:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci+fix: UCRT time functions on Windows; skip libsnappy on MinGW; NUL-terminated names in the mt test
+356,032a3a559bd5f2cd6c6213dfb85ae8926efd92b3,2026-08-21 08:41:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci+tests: skip libopenh264 on MinGW; fix UB varargs in the message-suite test
+357,cd95514cf8dce8ef11fbf639978078aba14e8821,2026-08-21 08:09:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: skip -ldl on MinGW links; widen the gdb backtrace to the plugin test binaries
+358,2794f8bb80d1c53f6ed9683c7a2221cff4c10e94,2026-08-21 07:33:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(plugin): guard plugin calls across host shutdown generations
+359,74b18ea71a57ee445b4d8b8f0481d316c0f441b7,2026-08-21 07:08:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: gate ocio-sys' forced MSVC includes behind OCIO_RS_NO_MSVC_INCLUDES
+360,ed7389ea95ffa8d7384a4929548c34f3cc91ad39,2026-08-21 06:38:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: clear hook-injected MSVC env in-step; gdb backtrace for the Linux segfault
+361,f6e7bf20a4a4373e42ed4105f804d0763a0a15ab,2026-08-21 05:59:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: the package builder scripts (ignored by the *build-* glob)
+362,32cd8f46f0654f10a47e42e35e6f45b21b31254b,2026-08-21 05:58:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: container-native Linux packaging (deb/rpm/pacman) + AppImage
+363,551909df6264b23a6b6ad37b27af3b2478d20a15,2026-08-21 05:52:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: clear MSVC INCLUDE/LIB for the GNU build; worker test helper fixes; hw tolerance
+364,738120bffce10a48a54db820dfc6913ecad8f863,2026-08-21 05:17:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: Windows uses the MSYS2 OpenColorIO (2.5.2, dynamic); test diagnostics"
+365,f6a7dfd0b3f8413cc5e97d7f22e4ee77612347fd,2026-08-21 04:42:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(ui): curve editor for OFX parametric parameters
+366,13b1799c7189942f0b56827af5936fded0747aec,2026-08-21 04:25:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: resolve CARGO_HOME via cygpath for the ocio-sys patch; gate screenshot example to macOS
+367,a43302d9b72cd24ad608d57781cb5b5f517b121e,2026-08-21 04:20:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(plugin,node): bridge parametric params into the node/inspector path"
+368,980c41acec6767c7bd9de77e4113a33b1f2b899c,2026-08-21 04:06:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(plugin,codec): Windows plugin loading and ffmpeg discovery"
+369,4f3c140b28ded3128ae1217d7804b867a3ff48b9,2026-08-21 03:47:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(render): Windows shared memory (CreateFileMapping/MapViewOfFile)
+370,e8aac4a30dc96a29f421e354826d322440e402f3,2026-08-21 03:34:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: create the registry src dir before patching ocio-sys
+371,c9d557e127a6175f42abf305be39aa0f7b76a6b3,2026-08-21 03:03:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(plugin): OfxParametricParameterSuite v1
+372,09cfd9f09e452a0a92d56488e001a98a405ad296,2026-08-21 02:47:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(ui): don't bump the display-color generation on the first build
+373,2d4342ff481989bf413052515f1535710a1fa90a,2026-08-21 02:40:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: unpack ocio-sys before patching yaml-cpp; fix oakaudio test compile
+374,d5b8cd99d6c1a3f5a814e1cd13c9da1d0845dde4,2026-08-21 02:17:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui (macOS layer colorspace coordination)
+375,eff845a5cde7af8e57695f5a093dc867724c8adf,2026-08-21 02:16:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: linux xkbcommon-x11, yaml-cpp cstdint patch, hwaccel test skips on VT-less hosts"
+376,fa7d8153bdfde4bd594c35db012aa27f5ebf20a3,2026-08-21 00:51:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: declare the full shlib dependency set on the deb
+377,e1871494aee04b69d8f905d11de02824dd41b060,2026-08-21 00:46:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: audit the release binaries' NEEDED list on Linux
+378,6b91748a5a1bee706c43ea3715c766467b626b8e,2026-08-21 00:44:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: static OCIO link, full audio dev set on Linux, yaml-cpp cstdint fix"
+379,05fda5bcfce47e598ec36739533815938ed78d6f,2026-08-21 00:20:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: libjack-jackd2-dev on Linux (cpal's JACK backend build dep)
+380,a1e4f47300cd197758f918096c4aaa753eb7dd0b,2026-08-21 00:12:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: GNU-target Rust on Windows, pipewire dev packages on Linux"
+381,3c31c67f993f247c1597e3c6b28f37c304c2568c,2026-08-21 00:01:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: build OpenColorIO from the ocio-sys vendored source on every platform
+382,9c77d27b7fdbd3ade9f5c9b2d7e826dd4b8c9aea,2026-08-20 23:53:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix dependency install on macOS and Windows runners
+383,9003b78176d3452819a1fbb1867aa56a2b021d4c,2026-08-20 23:46:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat: built-in effect params, clip click-select, effect drag-and-drop, project load with plugins"
+384,0a7f3766e2d771394c3d19bd6694553ff7531d14,2026-08-20 22:37:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: probe OFX plugin discovery with a real fixture plugin; cd: restore Windows NSIS job
+385,12ffce77dbe73e738545fcf608b45195d2e33b23,2026-08-20 22:28:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(common): persist configuration as TOML, migrate legacy config.ini"
+386,c5455c7521ac8d45ccf98146916ed582440d5c63,2026-08-20 22:28:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix(ui): track growth direction, proxy status, effect library search"
+387,54985043986577898fe54730e96880970a2ecf0d,2026-08-20 22:28:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(plugin): full OFX plugin discovery — host conformance fixes
+388,bf0416c50ba76bb8464b8223608d1f0940927d07,2026-08-20 22:27:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(i18n): externalize UI strings to YAML language packs
+389,73bb686940a064cd4ab03e10176dc3b0b5ab6a72,2026-08-20 18:56:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix(app): thumbnail PNG encoding, effect-card collapse echo, linked A/V drag"
+390,cc0a15919f1b5ff22d2dc4e1c4d2bf4db52cc760,2026-08-20 17:43:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"style(app): apply the refreshed theme, drop-ghost timeline shell, misc"
+391,02cea7e3eef8d476b982c5bde14ae3e912b39bef,2026-08-20 17:08:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): node editor follows the selected clip, two-way selection sync"
+392,d7cbeba85010bc06a1d248fad51ba0f954cab115,2026-08-20 16:20:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): window menu checkmarks with panel toggle, OFX standard search paths"
+393,877f5775647aa65f6d2721796f7990f27ca6381b,2026-08-20 15:33:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oaktimeline): placement sets the block's in point (drop-at-cursor fix)
+394,1f6ed30423423862a04b9c6d89e717f8e3ce7bf9,2026-08-20 15:11:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (viewer interact events)
+395,844c747681344a7a0141fcd9ddce31f9e4660d96,2026-08-20 15:10:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): drop-at-cursor placement and a translucent drop ghost
+396,55bd1132cd93880ff1249b5ba6986eaf52bf9c63,2026-08-20 00:28:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): OFX Interact viewer integration - overlay drawing and event forwarding
+397,b4ceaa9cabcff9a23fc3adfa722ad74981aba25d,2026-08-19 22:14:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(oakplugin): GL render bridge, color picker, push-button action, worker progress, Interact host"
+398,29696479b5950d1eb056aff0500d12d66e58f0ea,2026-08-19 17:42:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix(app): context-menu actions, clip clipboard, A/V drop, add-track, default tracks, undo divergence"
+399,dffa94127adc037d35f6a6ea479ebc5237d8eb59,2026-08-19 15:21:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): A/V drop creates linked clips, add-track affordances, default 2V+2A layout"
+400,35b9ad95412139dddde2820a269022a0aef0225d,2026-08-19 14:04:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(oakcodec): hardware video decoding by default on all platforms
+401,4dd4ceb08af239df532233864e42bef5ba5108ed,2026-08-19 13:11:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): playback resolution divider (Full/Half/Quarter/Eighth)
+402,46e43b51d99a5444e8a8203e01989c9c9c5a7121,2026-08-19 12:17:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix(app): playback tracks the playhead after stalls - clamp, prune, never teleport"
+403,9e9c6d986386b24f0a5fa625d11ca2f569054cb0,2026-08-19 05:12:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(app): never block the UI thread on a sync render during playback
+404,a17d5be56a6b99248da37e2c9201e74abf7d68a8,2026-08-19 04:49:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(render): assign batch slots in the worker's acquisition order
+405,345c464e55483a1ccf76865496443d73a1ab42d6,2026-08-19 01:55:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(render): cap the playback pre-render window to the slot headroom
+406,6dc8285f2a9faf0a0067b817a3377d1a307b5f8a,2026-08-19 01:19:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix(app): probed stream indices for original media, central modal-defer, one less onscreen copy"
+407,adf2cef32cd8c15e50045ace0931c4ed14e95550,2026-08-19 00:42:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(oakrender): render-process isolation S3 - audio over shm, per-ticket slot formats, tuning"
+408,194d761ade6a321dac2d1e4b0ea6ede6650c08a4,2026-08-19 00:41:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(oakundo): replace the CHandle vtable layer with owned trait objects
+409,e0aa597f1e644370b67bc3e8aab326e4c4cc9d8f,2026-08-18 23:09:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): custom shortcuts, Keyboard preferences tab, Action Search"
+410,ec7b7e6d136aa65eacd22a3ab162668fef2d9908,2026-08-18 22:16:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): OpenFX UI wiring - effect library, inspector params, startup glue"
+411,d61acb9e0a6473fd17b36da9dccac2d4010d87b7,2026-08-18 21:40:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore(crates): retire oakengine facade, drop oakcommon handle module"
+412,f12cf3ffef35c4536c2e7787d24cf2ef852e88d5,2026-08-18 21:40:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(oakundo): mark raw-pointer facade functions unsafe
+413,cf459d7e4cb54ae2e4e731fb8fb0b04e09703156,2026-08-18 21:40:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): multicam panel with live angle grid, switching, timeline enable"
+414,cad1d9354482210014475c75515210cbf2fb9a83,2026-08-18 20:45:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(oakrender): render-process isolation S2 - process backend by default, zero-copy onscreen"
+415,74b080f88a107e31806a176e65670faaeda9fa73,2026-08-18 20:45:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(oaktimeline): multicam enable/disable/switch commands, split copies the dependency graph"
+416,431b9ed2b11ebb4fc0f3a1985bd5e0e85e77474f,2026-08-18 18:58:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(oakrender): render-process isolation S1 - dispatcher, scheduler, real worker"
+417,f2af92958a64a0892d94b75361b61d5b91830c12,2026-08-18 18:58:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): proxy editing and audio sync, aligned with the C++ version"
+418,2db16154536ad6a7da170994d63daf4683573bd6,2026-08-18 17:15:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(oakplugin): wire OpenFX plugins into the node graph and renderer
+419,9daa266189d9d244828cb6adbf5b1b4077ea97ba,2026-08-18 17:15:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): gpui action/keymap shortcut system, full main menu, context menus"
+420,6576113a691b811581789534fd97e3db447f548f,2026-08-18 12:42:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore: bump gpui submodule (node zoom scaling, explorer thumbnails, divider drag fix)"
+421,33db5657e0531f4c09f6279e86ce9b1e6e4f862f,2026-08-18 12:42:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): reprobe legacy footage on load; background thumbnail pipeline
+422,b8a3beaee461d7503b9e1a67d56401b91a504418,2026-08-18 12:41:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(probe): record and print the footage stream inventory
+423,61da70ecf8915851780ab60354f4f2df0459f730,2026-08-17 19:42:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(build): launch crash — @rpath/libz.1.dylib had no LC_RPATH
+424,b36cbd6b6f5c62bc90ebbdadeb398c6261f73b4f,2026-08-17 16:40:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: purge CHandle from module internals (M14 R5)
+425,ede03d0bfe9698cea5f9e981660ea27da98ee005,2026-08-17 01:37:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (track toggles + explorer icon buttons)
+426,21cc2fba240796c2eb42686b24d87e5b0f5bf18b,2026-08-17 01:37:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): track-header toggles, effect library, panel titles (design parity)"
+427,c5f1d0d76c6a328ba2c9e04a069b3b8a419efbc6,2026-08-17 00:51:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(engine): pure cdylib + undo-stack test race fix (M14 R4)
+428,022c0a7a5a7e5553b8f7ceae9c00bedfe021428f,2026-08-16 23:36:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(app): cut liboakengine, link module rlibs directly (M14 R3)"
+429,a45a7af2ac43bb523f20e9c09d20c1d210326a5d,2026-08-16 21:16:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(cli,worker): cut liboakengine, link module rlibs directly (M14 R2)"
+430,8a2e45225fc3d37efccb8d9a00080c57ed84b4d5,2026-08-16 20:37:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: sink facade glue into modules (M14 R1)
+431,f59c7c847657955a0571d318d7407e585f09527e,2026-08-16 19:54:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(riir): M14 — frontends link module rlibs directly (plan A)
+432,4f6c903edb0dc4ca1a826b163aa16d5941997152,2026-08-16 19:46:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (dock panel drag-drop layout)
+433,b2d353fe99170813e42a441aaf9842d3eb76cd99,2026-08-16 19:46:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(app): footage drop auto-creates the media's track
+434,2958464bd776ee1ff21f0d8ef035e1e139078052,2026-08-16 19:07:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (explorer icons + footage drag)
+435,061aab9180816b772ebd00559823a23c068a5dc7,2026-08-16 19:07:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(app): full-res worker crash + source playback frozen + cli/worker DS batch
+436,36ca413a84489996a826ad375308ac741936f465,2026-08-16 18:21:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: restore macOS and move all runners back to WarpBuild
+437,f3f37481734cb2c1599202932010ce9a6fc438f2,2026-08-16 18:09:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): release needs only the linux job while macos/windows stay disabled
+438,83348949844348ba479fea992edf60a7f3b6002b,2026-08-16 18:05:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(cd): packaging verified end-to-end on macOS
+439,4e5d8747b5f26014c1dbd673236c5f9d4807b653,2026-08-16 18:05:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(oakengine): absorb oakcore host symbols into the dylib
+440,e346ea5338253cec1cbe525183e6d3ea40505856,2026-08-16 18:05:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): P5 — async full-res render, full preferences, shortcut map"
+441,466cdcb7d7b3f83ea0d2f8e89bb12ba33f8284c6,2026-08-16 16:06:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (ruler markers + work-area drag)
+442,92daff1a83b5ec96654693c18035e3c1a2aeb945,2026-08-16 16:06:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine,app): timeline markers, work area, cross-track move (M12 P4)"
+443,23e6fa7a5b0dd3a1f63f5c134968534a42cb2128,2026-08-16 15:05:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (project explorer drop fix)
+444,693e2df5eb4c35382ac1dfe40ca65732874f2cd0,2026-08-16 15:05:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): project browser on real project data + drag-drop import (M12 P3)
+445,0f82092e9531fcb95a240f09397e730e3ab3976b,2026-08-16 14:17:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(app): retire manual-save semantics (M13 D5)
+446,025dc88c25be1ce063d248ca8d1c1a1a2f29bff4,2026-08-16 10:39:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(storage,app): PostgreSQL backend (D3) + project manager window (D4)"
+447,5fabad8efd97fd0465979a6647e55a5b1d07dbc2,2026-08-16 08:52:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(engine): write-through persistence (M13 D2)
+448,b35f3b49bca460b081d393a2aa08bc9a22a975a1,2026-08-16 01:40:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: project storage architecture (en+zh), linked from README and docs index"
+449,3dfeed67f5c34340e94eaa3671872002503b9270,2026-08-16 01:38:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(storage): database backend D1 — SQLite, node-granular journal, snapshots, persistent undo"
+450,530bc762dc54ae521ac19d09fd4f6ed10d14bd18,2026-08-16 01:19:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs(riir): M13 final — node-granular journal (diff-produced), snapshots, persistent undo"
+451,78d8073c8934a3fc96371435bb0b48eee6cab7c3,2026-08-16 00:40:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs(riir): M13 — database backend, write-through persistence, project manager"
+452,ab1a2e9c7b79121ea88049ec8bc139f181a6166e,2026-08-16 00:33:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: drop internal bridge/ffi layers; exporter family lands
+453,2248be8567d36c8b6a027861b77da47678c11fd9,2026-08-14 15:14:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(storage): real oakstorage file backends + full-timeline .ove serializer
+454,48d3027d5077cebf25c833f021711ac929534cc0,2026-08-14 13:33:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine,app): node editor bound to the facade graph (M12 P2)"
+455,4240df1d715eab89574b0f8871546e1905e30a2c,2026-08-14 05:45:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(crates): implement std::error::Error for all module error enums
+456,d460d578052f579e83c87fe4e8764cab377a8932,2026-08-14 05:45:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oakaudio): P1 output hardening
+457,c8c282f06cf4beb7fa5e9376649a2d227561358e,2026-08-13 23:39:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore: bump gpui submodule (content-width dock tabs, rounded clips)"
+458,f0517fe6af66fe9a5741734591908f386ffd3240,2026-08-13 23:37:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(app): UI walkthrough pass — faithful screenshots, dock labels, timeline clips, status bar, meter"
+459,c5287ff2342cbea471e98d4319dab4687f6bf9ec,2026-08-13 18:16:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (menu scrubbing + density pass)
+460,5afa95c80e48850e68d96251532c46f8386a6156,2026-08-13 18:16:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(render,app): footage decode lands (M12 P0) + UI density pass"
+461,3625e37081f37ef3fe3e693bd9db1013ca5145ed,2026-08-12 14:35:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs(riir): M12 app rewrite plan (gpui shell, P0-P5 phases)"
+462,06f47235b2ea38191488c6c5402a872d73d60d7f,2026-08-12 14:19:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine,app): source-monitor frames + real audio meter"
+463,f1f4124b18976075bd1f593f4b5a2aa4b84d8074,2026-08-11 23:06:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: bump gpui submodule (tab-policy formatting pass)
+464,18ff60f147219c5468a82a0946ef9b4159af8085,2026-08-11 23:04:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine): clip move, clip effect_input, mandatory static FFmpeg"
+465,a209f63d52223742dc57096fafc88f7e9c9e1222,2026-08-11 20:04:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: rewrite CI/CD for the Rust workspace
+466,05e42668cbbe39a22c7a5cf3072f0307b90e91b9,2026-08-11 20:04:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build(ffmpeg): static GPL FFmpeg 8.0 via project script + FFMPEG_DIR
+467,cdda643d649d7686af92659088775d4cf38ba4bf,2026-08-11 20:04:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine,app): effect chain facade + app effect stack wiring"
+468,f86a895c8ac33aa3161888018079ef8ada270477,2026-08-11 18:05:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"Revert ""build: root .cargo/config.toml enables the real OCIO bridge workspace-wide"""
+469,43003d0e3396f2c0e4a722c6eb96dcdac4b9f02b,2026-08-11 18:00:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: root .cargo/config.toml enables the real OCIO bridge workspace-wide
+470,7b295b76616e424e5e73348d5931cc97ea8224c8,2026-08-11 17:04:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): scopes (histogram/waveform/vectorscope) fed by rendered frames
+471,f908724a7aaf80dfb0b9b00b03eccfa8902224d3,2026-08-11 16:10:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): real engine renders true frames to the viewers
+472,26009a5ea54a961df842389443124b20caa3639d,2026-08-11 16:10:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(oakaudio): drop ffmpeg_bridge fb_* imports, call ffmpeg-next in-process"
+473,aa5fcef66ede63adafe42cf2691a1b889d5846e8,2026-08-11 01:30:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(oakengine): facade bugs found by integration tests
+474,b564e7a71f5444fdb1bfc9a931e46af1c85a4c04,2026-08-11 00:25:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore: bump gpui submodule (submenu hover fix, icons/tooltip helpers)"
+475,063837446d2fc9390916ac1d8eb7669485d5aab9,2026-08-11 00:25:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(app): link liboakengine.dylib via frozen C ABI; UI fixes
+476,3110e5cc3a90c2f849b056e6ebc46ca7b162b93a,2026-08-11 00:24:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(oakengine): rename integration test families to English names
+477,d9c477365a213dfb366b8de5066a3e2746edc9db,2026-08-10 21:12:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove: remove some unneccessary files
+478,013a17570774a583b5a79e85f8a7f4b15efa1daf,2026-08-10 20:24:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor: workspace layout — crates/, app at root, legacy C++ removed"
+479,f8540e38921a3651ec97bd2910a71da8f64f70e1,2026-08-10 19:11:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(engine): single-lib phase 3 — plugin/timeline/task/codec bridges converted
+480,96e57b3705e4553bddcfd5dfdb4539798fd7b92f,2026-08-10 18:29:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(engine): single-lib phase 2 — node/render/audio bridges to direct calls
+481,e1423553c7bdbe0e556f725f2129b41df748a3b4,2026-08-10 17:48:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(engine): single-lib phase 1 — direct Rust calls across the facade
+482,f0d551d4a881eb00e3b22b18703a1bc438c9d39c,2026-08-10 17:00:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(riir): settle stale tech-debt entries in notes.md
+483,0ca9cad4481e00894c27dfc4cff252d7a2253fdc,2026-08-10 16:55:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(engine): rename facade to oakengine, build liboakengine.dylib"
+484,e563b340ac4c81941d82d95c5daaf06f700be5d8,2026-08-10 08:12:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat: oakengine facade, oaknode/oakrender impls, worker+CLI, app skeleton"
+485,d11d80ea5326067726aee3d02138603c98c7b75c,2026-08-09 20:21:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,chore: add oak-gpui submodule (UI framework for the app rewrite)
+486,cac41d92c1d9b7975a5fd77e208ad2b2f6322261,2026-08-09 05:49:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(rust): oakcodec/oaktask/oakplugin crates + oakotio + node/render/storage skeletons
+487,4b24aa9d672c9432e4c1cfa091594f530e25e1f8,2026-08-09 04:24:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat(rust): first green Rust crates — oakcore-rs, oakundo, oakcommon, oaktimeline, oakaudio"
+488,5a564f30ca5b98881706ca8afce07372a482f761,2026-08-08 03:56:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(node,render): route oaknode->oakrender calls through the C ABI"
+489,81431d180d61915d22f4d241888c50b5182507f4,2026-08-07 22:53:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(node,timeline): route oaknode->oaktimeline calls through the C ABI"
+490,fd2111d560e51e3156cf5ad04432178d10d0beeb,2026-08-07 22:18:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(plugin): de-Qt oakplugin and wrap it in a pure C ABI
+491,0462842f8c3f50981f8acec088b36e4583b29315,2026-08-07 18:05:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(render,timeline,task): switch remaining handles to refcounted value structs"
+492,67176281d9cf37400fb77ac70ca692c76a773aba,2026-08-07 17:20:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(node): switch oaknode to refcounted value handles, migrate consumers"
+493,295ea1bfe57ac84b536e80b5efb1a209aabd88d3,2026-08-07 15:48:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(undo): switch oakundo to refcounted value handles, migrate consumers"
+494,da2ab512c6402df05638182653a56c92e0deae0b,2026-08-07 14:58:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(task): OTIO load/save tasks over oaknode/oaktimeline C ABIs
+495,40a336276f5077f9fee9fb7452bfbe1476933320,2026-08-07 14:40:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(task,render): RenderTask family over a new oakrender ticket C ABI"
+496,6ded1d2d63ee651a1cf5160d33a6aef0f9990540,2026-08-07 14:01:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(task): de-Qt oaktask base + project tasks, wire codec task submitter"
+497,66831a870e45280d8ef8748d71e4129c2d2ce400,2026-08-07 04:37:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(timeline): de-Qt oaktimeline and wrap it in a pure C ABI
+498,354df2e194a2c624d8a73248a697735b283965a8,2026-08-06 20:53:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"refactor(config,audio): merge config into oakcommon, split oakaudio"
+499,3d004c081b10fe3a3f7be8f3e29ff2c731e3b3f6,2026-08-06 18:50:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(codec): de-Qt oakcodec and wrap it in a pure C ABI; switch common handles to refcounted value structs
+500,edbd3913af62969bfb16e81b87df8b09e551ce41,2026-08-06 03:21:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(render): de-Qt oakrender and wrap it in a pure C ABI
+501,d77348ad9f4fb38e94624a9ca810fa293f51e531,2026-08-05 23:55:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(node): de-Qt oaknode and wrap it in a pure C ABI
+502,c50017127b7655d723b336a2bc435fd8e7e0e8ce,2026-08-05 18:02:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(undo): de-Qt oakundo and wrap it in a pure C ABI
+503,bad52feda315be36615713d64aa11bb61d33d5b3,2026-08-05 17:20:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor(common): de-Qt oakcommon and wrap it in a pure C ABI
+504,bb09872a2f16b03fcfe753a6b930460c5d0c3bc5,2026-08-05 14:57:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge remote-tracking branch 'upstream/main'
+505,82162580efb0b070da0297c0c09eaeec9265e05d,2026-08-05 14:53:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test(app): add gtest coverage for previously untested app modules
+506,7b6042168a345c867961aa9eac13dd21325d9159,2026-08-05 14:53:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(widget): harden TimelineAndTrackView teardown and TimeScaledObject limits
+507,774eda75fea300a19ee0712f0168539ce391f858,2026-08-05 14:48:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs(riir): design inter-module C ABI interfaces and split out oakstorage
+508,b55d626c0cab4ff7e58d9ed4d93e734b5cfa432b,2026-08-05 01:16:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: dependency analysis and two-person split for issues 9-20 (#34-#45)
+509,00328ee95e072fa821b0d37ddb426c51ae7012f7,2026-08-05 01:12:31 +0800,Mike Solar,iam@mikesolar.cn,GitHub,noreply@github.com,Merge pull request #57 from Mike-Solar/main
+510,40eea8d97cab58203e3856e2bd3bd856ec584672,2026-08-05 00:59:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: use smaller runners
+511,a030f2da2058cbf2e81993cad1be59f1b520924d,2026-08-05 00:52:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: migrate playhead/undo/modified events off EventBridge (issues 5-8)
+512,1738dbf224bab21c4e7c320508c48317b0dcbc80,2026-08-05 00:13:06 +0800,Mike Solar,iam@mikesolar.cn,GitHub,noreply@github.com,Merge pull request #56 from Mike-Solar/main
+513,b77344b506bf88da007b7dea74f6dfd8b23c87f3,2026-08-05 00:01:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"app: PlaybackController + playhead subscription migration (issues 0c, 1-4)"
+514,ac7d942ec7c40a33890c3ada41fb3dfe12234c1c,2026-08-04 23:24:05 +0800,Mike Solar,iam@mikesolar.cn,GitHub,noreply@github.com,Merge pull request #27 from lulumumu9999/main
+515,5baa9e3814a6d9b98d9ccb8826b81cc7018d9947,2026-08-04 23:10:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge branch 'main' into lulumumu9999/main
+516,712badbaa7abf27007736dfd185717ed17433862,2026-08-04 21:34:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build/ci: green builds and tests on all three platforms
+517,50063827905b0d36a8a55f0382b5cbd90147faad,2026-08-03 14:38:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: oakvulkan keeps full sources on Windows
+518,248b1873e8110356c8e48f7ffd395cfec12c3dd0,2026-08-03 14:01:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: enable Vulkan tests on Linux via Mesa lavapipe
+519,a304cc0759d9ffbda7812adafedc6f38b036608e,2026-08-03 13:56:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: install Mesa DRI drivers for llvmpipe GL in headless Linux tests
+520,960d6361d51c5b6767a7b199a6654e2ca16d71d3,2026-08-03 13:52:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: make Windows render plugins entry-point-only (fix duplicate symbols)
+521,1af7ab7838b80af6aa230babb697a283514b55b0,2026-08-03 13:32:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: engine tests use dllexport-consistent macros on Windows; run Linux tests under Xvfb
+522,631f9e5bd1075f7ea5c9df08be305e8dedb2eac3,2026-08-03 13:13:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: link render backend plugins against oakengine-obj on Windows; switch runners
+523,835d47244c055e1e9fa16b66474566a3d69dd275,2026-08-03 12:48:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: sweep remaining QLatin1String::toUtf8; embed version obj in oakengine.dll
+524,348881f55841b76787ef3e7747f093abeebd331d,2026-08-02 21:29:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix Qt6.4 QLatin1String::toUtf8 and stale Windows shm branch
+525,4f13e20fffa2361b3cb811576fa62a6c0eac4053,2026-08-02 18:56:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: move OakEngineMarker opaque decl to timeline.h; guard execinfo.h for Windows
+526,393b650fb44ce2c36fb9a43859eae49ca92cd720,2026-08-02 18:25:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: opaque-pointer declarations need qmetatype include and single ownership
+527,824e352da1443eb0e62adfcecbc48fc0d4f8be5e,2026-08-02 17:44:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: declare all oakengine handle types opaque for Qt metatypes; defer gtest discovery on Windows
+528,d57c812fa6be312c6e300272cf604fd9c5f1032b,2026-08-02 16:24:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix three platform-specific build failures
+529,5f8232a594d0bb7d64fcaf368a7d9d5a2bcfa7ad,2026-08-02 15:32:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix macOS/Linux configure (oakgl) and Windows MSYS2 git
+530,22438e0596248bed58c21c8f90adfac93902297a,2026-08-02 15:22:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: plan for eliminating EngineEventBridge (architecture + good first issues)
+531,6f931e720a1ea3d3e2a869430b0b243166264bfe,2026-08-02 14:56:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: black screen during playback
+532,a59c33715f84d3a8406b6a235e99e0533bf437fb,2026-08-02 14:29:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: node graph edge display, teardown crashes, and event/audio lifetime bugs"
+533,30853cbcfd08850216d1e40d370d9cac182dc9d3,2026-08-01 20:35:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: teardown UAF in Track block cache and headless test/render environment
+534,8399d04b447d5b1b41d79be049c4f41840b0d3f8,2026-08-01 19:14:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: raise gtest discovery timeout to 60s
+535,a4dfc62f0fdd4381912c5145f5f33f55b2e9a896,2026-08-01 19:14:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: memory-safety and playback regressions found via ASan
+536,66d761b4b7b855ff0a908d9778451f1d95dacdda,2026-07-31 22:46:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,R8: finish app/ pure C ABI migration (P3-P9) and make OTIO required
+537,18aed979a22e905211a9ca6d1688e26a7908ddb7,2026-07-27 17:14:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: fix macOS build issues blocking app compilation
+538,c0dcd33de0f3d821f15378eb538d3bfacdb58bc3,2026-07-27 17:14:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,R8 phase 1: extract app/engine shared utilities into shared/include/oakutil
+539,17888a2dc16c2ec74cf806e6d3b634cd1d866571,2026-07-27 08:26:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,change: remove UB in core.h
+540,a84e75ef4760eae2690a940bf0b3d8b117c4f2a8,2026-07-27 05:27:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,change: UI and migrate to gtest
+541,dd5508e5714f7eeb1fecc4d33a7c10c46da27954,2026-07-27 01:52:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: archive completed C ABI campaign docs under plans/completed/
+542,d7c0970d913b50daa2c44d8c1f2c202e6732568c,2026-07-27 00:55:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: mark R7 complete, unlock plans/riir module split"
+543,eb634b53efae0e5edd1d424e4e5c54d774d961ca,2026-07-27 00:54:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,R7: pure C ABI display boundary + engine visibility closure
+544,9b25772267e0d7cf4889016e8b3137837093a677,2026-07-27 00:05:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: module-split execution manuals for RIIR stage 1 (plans/riir/)
+545,6ea653e6dc0ee2e429837dc9ab56d669e0630979,2026-07-26 22:44:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge branch 'c-abi-migration': complete C ABI facade migration
+546,96defacacb560044913db4511222cba67c465fee,2026-07-26 22:43:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"chore: recovery backups, temp files and misc campaign artifacts"
+547,5b68bbeec8339d04810844ef836eb1497a7ef8aa,2026-07-26 22:43:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cli/worker/tests: facade-only linkage and updated test suites
+548,0aa5879f354034ea54923a268ef7fa7790a03e9a,2026-07-26 22:43:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: migrate all engine access to the C ABI facade (nm U _ZN5olive = 0)
+549,f95590e924155cd4b00023f5533ee0d6885ee2c0,2026-07-26 22:43:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: internals supporting the facade migration
+550,e9f173916f235f539bc9e9ca0bb056b9c95ca084,2026-07-26 22:43:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: complete C ABI facade (liboakengine oakengine_* surface)
+551,c486c853ffa4dde980a2cec045a0009dc72ac444,2026-07-26 22:42:44 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: C ABI migration campaign plans, handoffs and roadmap"
+552,fcf717f6a7346396d8f0ed014abb7a3249a78ece,2026-07-20 19:08:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"docs: correct the icon plan - move the registry to the app, not to core"
+553,3e37f7d7025508c65c9447cc806197f2f46b676e,2026-07-20 19:03:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: lay out the phase-4 coupling-reduction campaign in the roadmap
+554,772029adc304fd73b20e7dd3c5e293aadfb86b9b,2026-07-20 18:59:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: record the composite-scenario facade verdicts in the roadmap
+555,1384ad1e95c44d25afdba372b31e79fc594bbc13,2026-07-20 18:55:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: migrate the viewer panel to the facade playback engine
+556,d63131cb124d9eb933579c01dae40d4bf70e1263,2026-07-20 17:46:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the playback family to the facade
+557,f5acf31b43be3ecad6642e705ce9855f5921137b,2026-07-20 16:45:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: refine the viewer migration mapping with frame-path reuse and facade refinements
+558,9872c4f48f1916c4e6ac68c32535991f16a0d3d4,2026-07-20 16:37:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: record the icon cluster and core-boundary findings in the roadmap risks
+559,cc6105ddd05cd5fe6ddf6439adb12b02946df28e,2026-07-20 16:32:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: add a measurable engine-coupling metric to the roadmap acceptance list
+560,8f3ae107b49b14cf7e3fbe841c26db8608432dda,2026-07-20 16:27:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: detail the viewer panel migration mapping in the facade roadmap
+561,245f204c819fe718f867a61006284570d778c802,2026-07-20 16:17:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: timeline panel leftover commands migrate to the facade (round 3)
+562,37aa859cd0c52a522242815ddde027d0417577dc,2026-07-20 15:41:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: keyframe properties dialog migrates; keyframeviewundo deleted
+563,8311128f4c0158c3b70416944f29956678ec2fb2,2026-07-20 14:42:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: node parameter panel migrates to the facade
+564,0fe37dba3cc3b64425b1e279af36810279c850ab,2026-07-20 13:37:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: timeline panel batch/composite commands migrate to the facade (part 2)
+565,2aa7eec016216197a27dca3d2f7a599624731be9,2026-07-20 13:17:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: timeline panel core edit commands migrate to the facade (part 1)
+566,0a25d43218b943dcbff225c5a075f866893bdeb7,2026-07-20 12:42:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: sequence parameters dialog migrates to the facade
+567,456060ef3e81022588a1a9633e2064ddb19d2675,2026-07-20 12:16:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: footage properties and project explorer migrate to the facade
+568,62f18125cbd2c2c6e7d93b777b31fbc57c79c627,2026-07-20 11:06:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,export: dialog execution path now goes through the facade
+569,1ea6527b80033016b0329568b03dd5b485471c12,2026-07-20 09:55:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: prewarm conforms before facade export
+570,bb17c59c0f169d58fba9076c35dbe3cfdc8cc081,2026-07-20 09:28:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the preview family to the C ABI facade
+571,882ce8268c3be1b42d3e6fac839a313e046cabec,2026-07-20 08:53:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add media management (relink/proxy) to the footage facade
+572,71b1243ad83b358ccc8731c579d9b439d58c81cd,2026-07-20 08:42:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add sequence structure to the timeline facade
+573,eaa301b755774840abe1872cfdae6032be396b77,2026-07-20 08:31:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the keyframe family to the node facade
+574,e82011b0ee172bb2d2ce4590964fb9a4d7ef925c,2026-07-20 08:16:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the node graph family to the C ABI facade
+575,db355c28b92a42085ee7e0bbf14cb515fb722107,2026-07-20 07:53:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: facade migration roadmap for the remaining UI migration work
+576,1ab7fa49a0fdb07c80c8245aeffbf11e663aa863,2026-07-20 07:52:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: timeline edit primitives round 2 (split/ripple-delete/trim/move)
+577,b9b5ad09f7279ce6a1081eec91105574b2962d0c,2026-07-20 07:34:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the export family to the C ABI facade; mp4 transcode
+578,c1ee784600996058aea22d3bafedb9f03a6a982b,2026-07-20 06:33:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: timeline edit primitives and oak-cli transcode
+579,1a7029fd8f140b150cb974b32dfc2493ec62c9a3,2026-07-20 06:03:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the footage family to the C ABI facade; oak-cli probe
+580,6118260e017185a2a2b02d1bf43ffa9122cdeb91,2026-07-20 05:51:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: expose sequence video dimensions in the timeline facade
+581,009af0ff3f0cb6c5fc38972a644f7fb7e161a212,2026-07-20 05:48:07 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"cli: add oak-cli, the first pure C ABI consumer of liboakengine"
+582,b26ffb7d64cafbe631f85d9a7fc5ea23874d5143,2026-07-20 05:26:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add the renderer family to the C ABI facade
+583,5db7aac058421ccb00d60dc978c1e73c629deede,2026-07-20 04:54:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: add init/project/timeline families to the C ABI facade
+584,37845302f9115e0c77088dd8963da5ef84fa0d96,2026-07-20 04:12:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,engine: begin the liboakengine C ABI facade with the IPC subsystem
+585,28c44262368949e38986647aa21f32ee59717675,2026-07-20 03:23:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: split the engine into liboakengine.so; worker drops the UI entirely
+586,026ff94b5e639315f83f4dbc282c536df1776ff9,2026-07-20 02:05:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: invert the last engine-to-UI dependencies
+587,bff06e00e55d4193f662bf6769546488ac880931,2026-07-20 01:38:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: split Core into EngineCore (engine) and Core (UI)
+588,5109dd2995cf850f5597628cc3f57f621a6b1d00,2026-07-20 01:04:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: move the ratio input dialog out of engine common/ into dialog/
+589,69cd8d3a75e85b4652bf6c33d92c12ca939ebbf2,2026-07-20 01:01:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: move msg_box out of engine qtutils into the dialog layer
+590,03d4087124c374f6d7282f51eb6abdb98bfa3cc2,2026-07-20 00:52:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,refactor: cut engine-to-UI include violations ahead of the liboakengine split
+591,98f2f3e22476121dfd9af1d98d2f4a321bfae4a9,2026-07-19 23:52:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: install liboakcore from the default target set
+592,11286942572faaba4b3c947a6bb8763eac6d8195,2026-07-19 23:51:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,core: restrict liboakcore exports to the C ABI via version script
+593,4fc8b80d7e5ec2cbeb590015d6ac40fb3e8dc285,2026-07-19 23:49:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,core: turn olivecore into liboakcore.so with a pure C ABI
+594,52625f2b98401e4f62d8330d8288575158b531ae,2026-07-19 23:49:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,proxy: restore pdivider (de)serialization dropped in the commit split
+595,7832cb30b33bd5f056cb26e230d6bdb8f5726932,2026-07-19 22:12:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: move render worker out of app/ into top-level worker/
+596,76f5c2a65bae8f14ca6a89b516c14ba19a5c9329,2026-07-19 21:45:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"color: input colorspace auto-detection, HDR export tags, LGG/white balance nodes, more LUT formats, waveform parade"
+597,a7ddc0f114f6103408399cc133f2fac7e89b5cf4,2026-07-19 21:44:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"audio: master-clock playback timing, output clock compensation, buffer config, interpolated speed"
+598,0c02ff0d775ab8eca7b56a57f1e402f15c4769ac,2026-07-19 21:43:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,proxy: isolate proxies from export renders and improve proxy workflow
+599,bb40b4923e7a210a04ea4e76eb76b2a10fbb3b82,2026-07-19 16:10:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,style: unify identifier naming per updated conventions
+600,cb1718a103655894e3458d1b1ccbd777c08ef05d,2026-07-19 13:58:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: replace fake and duplicate tests with real assertions
+601,b0aa6834992f177d354cc0bf418097bf59d3febc,2026-07-19 13:58:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: dangling OpenGL context crash and uninitialized audio frame size
+602,842bc7632b5c4260ba581ceb0f49d80236ba9a20,2026-07-18 20:57:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update: Update build.md
+603,64a250391c3d7b32f62dfe6814d2fa1d3581f938,2026-07-18 20:13:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,about: thank Enzo GD in the About and Welcome dialogs
+604,fd93de42ca6a743eb1ed23a759c843181f27aeb4,2026-07-18 18:27:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge remote-tracking branch 'origin/main'
+605,ca68005fc282f4e09a6ad47d5a57aeb1042b2d2d,2026-07-18 14:29:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: switch to GitHub-hosted runners and add daily cache-warming build
+606,4eb0ef6fc63f7202efe4cf792a27fee5d7e4684c,2026-07-18 14:20:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,change: remove dymatic backend.
+607,7206ae8c9f52a37eef15adaed0be52877cb7d5aa,2026-07-18 14:05:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: switch all caches to actions/cache (drop WarpBuilds/cache)
+608,f6fc12bb9dd36802e2a148f5e24e5ce10bf0be59,2026-07-18 14:03:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: use actions/cache for ccache on Windows runners
+609,988e0e5b446f17358f61f6f4fd0be53d8ae7ae12,2026-07-18 14:02:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: fix ccache dir path — runner.temp is not a valid expression context
+610,bfce4d916abc75afd0546e5bd13882aa17d71a54,2026-07-18 13:57:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"ci: add ccache compile caching via WarpBuilds/cache, shrink runners to 8x"
+611,900120d9bafd49b017d0208739589607e1ea0b2c,2026-07-17 22:51:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update: Update README.md
+612,1cad5a8fdb123108b1f3aa9704b0b6224e72ab13,2026-07-17 22:20:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update: Update README.md
+613,e18724129ba3e213dd58b51b05c7edb94617eb9d,2026-07-17 22:08:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: make ViewerSmokeTimer.DifferentTimebases robust to CI jitter
+614,dff1f2955d40cec201ed717c3d35fb86a7ebcd35,2026-07-17 21:51:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: Remove vulkan-headers which is replaced by libvulkan-dev.
+615,ae908441c819d7c54101811b3bb1fff6c33819dd,2026-07-17 21:41:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"packaging: ship the Vulkan backend on all platforms, standard lib layout"
+616,62293814265f18ddbcc710dafa9ee51ca036aa58,2026-07-17 21:10:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,version: derive from git tag/commit hash; drop audio playback debug logs
+617,016341ea7c03427700a226a1d63994f9e93ad068,2026-07-17 20:35:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: honor DirectoryIsValid create flag; unbreak Windows CI tests
+618,c734ecdba1357a540ad9d589e284b90f333ade7e,2026-07-17 18:28:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: make unknown-icon check robust across Qt builds
+619,ff95ffa216b74a19887ae0aafad5a5ea034cdd7b,2026-07-17 18:28:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: initialize default OCIO config on first use
+620,9ca2b0e716a4289eb333c2f764c521da0f09bbd3,2026-07-17 17:38:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: skip MainWindow construction test where OpenGL is unavailable
+621,bbf3b2ca38c65c9657fa7b2033ba88bac9535285,2026-07-17 17:26:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: include <cstring> for std::memset in oiio utils test
+622,004e942cf92e5266c6cd423e5861ed3244dd5559,2026-07-17 17:20:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: remaining issues recorded during test coverage work
+623,7223900b6dcc96cd2debd3951fc450f032da672c,2026-07-17 17:04:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: initialize EncodingParams enum members
+624,ba55123b131ebaff4201020aef1066128d594160,2026-07-17 16:53:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage for panels, main window, ratio dialog (44 cases)"
+625,c812f6ea28b76233f180aa882184752df053827b,2026-07-17 16:53:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: panel/window bugs surfaced by new gtest coverage
+626,0dae545cba1f63e1bc302aa33ea13b4a1c5666a5,2026-07-17 15:48:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: coverage for large widgets (61 cases)
+627,b4db6ebc8828adaaa62b1a0aa5847236f061e2d1,2026-07-17 15:48:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: define TimeRuler::SetCenteredText (declared but never defined)
+628,e9488904b347d9afd91ea336e2e74285e126dc12,2026-07-17 14:13:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: coverage for small utility widgets (66 cases)
+629,ecc66e3e2a49a9d4e68dd0226ba14eebd38fa8fa,2026-07-17 14:13:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: widget bugs surfaced by new gtest coverage
+630,26d158146ae97c211a17cf319f82517df7491ab6,2026-07-17 13:20:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: coverage for dialogs (56 cases)
+631,1475525eb2ac7714d8652434071dd6d81ce18f18,2026-07-17 13:20:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: dialog bugs surfaced by new gtest coverage
+632,807e02614b01541a3552d8d7faa6946bbed41349,2026-07-17 13:07:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage for common utils, cli, timeline undo, tasks, codec, ui"
+633,dd7427f51a939a6905ff3776e02103c24c220550,2026-07-17 13:07:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: bugs surfaced by new gtest coverage
+634,a9afb2fac52de0441ee5df11e4d6f9bcfe826f1a,2026-07-17 09:22:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix FFmpegBridgeDecoder.DecodeFirstFrame failed.
+635,b103697662e4705a3747e21b4f808f2d23d54242,2026-07-17 09:11:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix Windows CI crash due to execute order.
+636,bec52b46b33a99e458bb852ded8f2c21a836eb02,2026-07-17 08:38:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,nodes: fix serialized ID typos with backward compatibility
+637,2aa921b21573ce72e9a507ec298f2d2ebe217dec,2026-07-17 08:26:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: bug-fix sweep across node, audio, render, plugin subsystems"
+638,d9a4e2704547196b83a419bd19d59851ff18440a,2026-07-17 07:48:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage round 8 (serialization, folder, text/polygon, probe, render tail)"
+639,4302a0aca2dbc33cce45f0d9e386086b40ece255,2026-07-17 06:24:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage round 7 (audio, distort, filter/keying, math/transition nodes)"
+640,b98c5bd0c0806dac7ac3b52722833f875edf98cd,2026-07-17 05:57:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage round 6 (sequence, generators, renderer misc, multicam/serializer)"
+641,734481f732902c6f1c0c85a55853e947ba0cb0e9,2026-07-17 05:22:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage round 5 (render processor/manager, time nodes, color nodes, OFX host)"
+642,7e55bd049b682e238255d1bf5d4589bdd8623327,2026-07-17 04:55:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"tests: coverage round 4 (footage, IPC, input immediate, project/factory)"
+643,576a843e4d14558d91f887142710c3df2216f1d1,2026-07-17 04:17:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: major coverage round for node/render/audio/plugin subsystems
+644,e1228f666352832737be57962253a5340f0b248b,2026-07-17 00:36:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"cmake: bump version to 0.4.1-alpha, quote CMAKE_C_FLAGS"
+645,ac10bf83a3e10b064de3f1d1a6166cda8093acf5,2026-07-17 00:13:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"packaging: ship render worker on Linux, ffmpeg_bridge.dll on Windows"
+646,4a4dcae5809921f553aaae45f81af8bf24c24ab4,2026-07-16 23:49:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,lut: pick from the global LUT library in node params; i18n; doc
+647,caafac42035859cdcc514c1a8887355157df5827,2026-07-16 23:09:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"sync: masked waveform correlation, stretch sync, manual start time"
+648,547c2480e0b01ec8aeba26b0a1dbefbf3214417a,2026-07-16 22:53:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"color: global LUT library, LUT error reporting, clamp + display fixes"
+649,ddca6a5e01f6bc8ea8e1780f02989a2472d75035,2026-07-16 22:53:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,proxy: add dedicated Proxy dialog and preferences fields
+650,6aaf37e2e5084c1c0ca80cf81b4fbeced2a9914f,2026-07-16 22:31:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"proxy: per-footage presets, audio in proxies, configurable ffmpeg path"
+651,15525528c911342cef12394f16afb575e9728715,2026-07-16 22:31:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,mainwindow: keep Preferences in the Tools menu on macOS
+652,2b118836a76298578bcf523cedb29558ec1cd3cb,2026-07-16 17:31:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: skip viewer display repro tests when the render backend is unusable
+653,cb7e911c3595f591065ea9513bfa95b8d465a900,2026-07-16 16:21:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI crash
+654,9957577cb9e54cdf29f5ba0350bf9739de6ad3a2,2026-07-16 08:35:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ffmpeg_bridge: fix cross-platform CI failures (Ubuntu/macOS/Windows)
+655,c203ce1dbfcb6dba776f81db4fc4b8afe82f3cd9,2026-07-16 01:06:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: black preview when footage connects directly to a clip
+656,e1d3019659b608c0f636222709d17e6b9fa215ca,2026-07-15 23:00:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,tests: migrate gtest suite to the ffmpeg_bridge API and add bridge coverage
+657,3a3ead6fc097d22462d72571c3694dd362281167,2026-07-15 23:00:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,app: route all FFmpeg access through the ffmpeg_bridge C API
+658,ddb2b30cf4733da27bbeb6385a5875a338833471,2026-07-15 22:07:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ffmpeg_bridge: new shared library isolating all FFmpeg access behind a pure C API
+659,0f41620a0bbcb5c78ca6f11c326e8abab73f97e0,2026-07-15 21:55:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,core: remove direct FFmpeg dependency from libolivecore
+660,3be4294e15c20b0e22097418dce0e5dfa02c097e,2026-07-14 22:33:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix Linux audio backend preference and worker footage render crash
+661,5c8ce17c7ea43608a2c5505b58db009efb0a4421,2026-07-14 15:14:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"submodule: change core into nomarl folder, and move KDockWidgets into third_party."
+662,e37a87be6728199c767edc6fd5a525325c9f29db,2026-07-13 22:01:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: Update test plan.
+663,93d92c93db80914e0722865579484f5b0ec6f198,2026-07-13 18:47:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge remote-tracking branch 'origin/main'
+664,8b431c941e798c32ed6bb5d25371e21e971a22a3,2026-07-13 18:46:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: Update README.md download link
+665,b4b52abbd46132b8f684589707ec90e0b0e64c2e,2026-07-13 18:05:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Remove noisy graph-snapshot logs and add waveform-sync diagnostics
+666,7cde0b0f1a477cd6154750a77965a61e120d4e4b,2026-07-13 17:46:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix invalid channel layout (0x0) in audio processor and add playback diagnostics
+667,c6310d104d4742c649d57991c56e077c1fe3ce02,2026-07-13 17:24:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Prefer PipeWire/PulseAudio over raw ALSA/JACK default on Linux audio devices
+668,e484af9a1b454fd6644d756350458d145a4114d5,2026-07-13 17:05:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge remote-tracking branch 'origin/main'
+669,536d664cbbd93cce438a32d5500669484fc9ba9b,2026-07-13 16:39:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ui+ci: style KDDockWidgets tabs and add Applications symlink to DMG
+670,36f48a6a4b079be80a9034d6c30cb25b2ca5d7c8,2026-07-13 16:17:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(macos): skip Qt libs in custom bundler and process all binaries
+671,035b460c2d440f3a6db0dfe8467ef4611d10a200,2026-07-13 16:12:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci(macos): make macdeployqt verbose and verify platform plugins
+672,a4a932238c871e78c25559f06a6bcb532837990f,2026-07-13 15:54:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(macOS): disable KDDockWidgets QtQuick frontend to resolve launch crash
+673,e16facf123135079228ba517bec4c9d46a5ea7a0,2026-07-13 15:35:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: restore Qt translation files to valid XML
+674,f03b6b58fffba6e0b9025c7d2d321115eccfc517,2026-07-13 15:34:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,style: reformat C/C++ sources and headers with clang-format
+675,6a696bc2340c05bf363f47e0e2474df9ef5696cf,2026-07-13 15:31:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"Revert ""docs: update README binary link to v0.4.0-alpha"""
+676,e5eeaddf2f425aa5c3d4897bb2fc2c112e5043a9,2026-07-13 15:30:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,format: reformatting files
+677,7522543c481d54cd0c202a2af662e14f1d57f390,2026-07-13 15:29:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: update README binary link to v0.4.0-alpha
+678,64abc9cc76ff82673588cd9c48a61af7008c9804,2026-07-13 15:27:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: update CONTRIBUTING.md to Linux Kernel Coding Style
+679,f0d41eae524251f91d3377d2f5ff188c98526b2b,2026-07-13 15:26:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: rebrand output artifacts to Oak and fix macOS QML deployment
+680,a4a2903e49180eac1717979ce9ada544d7aa895b,2026-07-13 15:00:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: Update CI/CD to use 32x runner for Windows.
+681,c31415e847ca7c7c20ff860c5f64d3a61f32ac51,2026-07-13 14:56:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: drop lib prefix from oakgl/oakvulkan DLLs on Windows
+682,8fa32f5df45cb049d46b69c8a0372f1157680cce,2026-07-13 14:54:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: switch RPM build back to job container with pre-checkout git install
+683,c786469a5871e29fe563a506cf2fe5fc95ae25d9,2026-07-13 14:52:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,cd: fix Arch tarball creation and Fedora container checkout
+684,2f0beeb7dab14b7b4c3c278e8f162efd1d99086a,2026-07-13 14:47:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"cd: add DEB, RPM and Arch Linux packages"
+685,847abbfd5c1401beb84aed9ccfd9de7f84bbf819,2026-07-13 14:39:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,ci: Update CI/CD to use 32x runner for Windows.
+686,2e1c40af634fd0a17b638759a49aff93936ea895,2026-07-13 14:34:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: use olive-render-worker.exe on Windows in render worker footage test
+687,2a11988b7734e1631eeacf525b09522710874890,2026-07-13 14:32:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,dpcs: Update build instructions
+688,43773c430a6b999ab1e53ab52b9badf72e756ce9,2026-07-13 14:29:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: update build guides for official macOS support and sync Fedora deps
+689,e797914c62db22caba306d9adecedcd1ef13c5df,2026-07-13 14:25:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Edit README
+690,8f3c06555fe8c778da354af6399bdcd9f0910176,2026-07-13 14:25:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: skip worker/backend tests when GPU backend unavailable and fix cross-platform path test
+691,a5c98e129718263754e1a9fe667a6219cc88b001,2026-07-13 14:21:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Edit README
+692,288e9050e10039a0b9a656d14b3e73c9a7608390,2026-07-13 14:03:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: guard SIGPIPE ignore with #ifndef _WIN32
+693,ea78558a3169c3a6e2e66b38f7e1ecf261c2b50b,2026-07-13 13:43:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: reference-count graph snapshots to prevent premature deletion
+694,8580542ac718e4228d7f1eb8b3c07226845f6ae6,2026-07-13 13:29:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: write graph snapshots to AppLocalData instead of system temp
+695,5a5ad3bc146d8515d57a66228f249fea78300698,2026-07-13 13:25:25 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,render: add diagnostics for worker graph load failures
+696,3abb4ff75bfb111543383f8d0d3142930db80b99,2026-07-13 13:14:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: update README and remove obsolete documentation/files
+697,182bfd0aadcc01bda18e975ed1be1ba1c41e40c9,2026-07-13 13:12:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,build: bundle render worker/backends and fix concurrent param test
+698,4f23051b2b36cea1ac7c8a4ca3fbc1874be7bab1,2026-07-13 11:09:32 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix waveform sync using stale selection and add Ctrl+Shift+W shortcut
+699,f3389fe6bab04bbc64ddb19e9650f06b87bf4a67,2026-07-13 10:54:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Allow waveform sync with partially cached audio and add regression tests
+700,0410ff2fe75734938ad51215359b9714e0334453,2026-07-13 10:44:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Skip GPU-dependent tests when Vulkan/OpenGL backend is unavailable in CI
+701,e881bb049fef765544d2bede4f58d9386d47d025,2026-07-13 10:29:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Remove some logs
+702,942ffd16353ac0d8246b5901f187330df9859873,2026-07-13 04:09:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: extend coverage for file/qt/xml utilities and core audio/math
+703,c57608b8f895d7fae85b1eaf6859568f47b29119,2026-07-13 03:54:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,test: expand gtest coverage for common/core utilities
+704,748c53ac5c49f980ed7297a5303054805025d077,2026-07-13 03:29:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Expand Google Test coverage across core subsystems
+705,b7ff687220dc2e3c22bbb2c92d62a50ca2907fcb,2026-07-13 02:59:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Expand gtest coverage across recently changed modules
+706,b47887e127ca78ca07ef36d808adbfebbb1f1dda,2026-07-13 02:34:23 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Defer parameter editor panel raise/focus to queued invocation
+707,21ae1125f5134ca075e10eebfb096f528bc1cc38,2026-07-13 02:27:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Activate parameter editor panel when jumping from node view
+708,dba76ea9f2c0dc081dad14075c65af1eb8caa011,2026-07-13 02:23:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Switch to the correct dock/tab when jumping to parameter editor
+709,a7fdab607dcc26ba6bfcb7b5d99701def7c6cef1,2026-07-13 02:18:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix node context-menu jump to parameter editor and drag-release crash
+710,5c8f80480d2f160fbf3a0c84f28a3a10e7a30401,2026-07-13 02:10:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,UI: flatten preferences behavior tabs and add node parameter editor shortcut
+711,f57ffa482fded39f939b88991c385f4860047ae2,2026-07-13 01:20:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Flatten Behavior preferences into sidebar categories and scroll to node on double-click
+712,1f446f55b4fd43e8ddceea409544603303355099,2026-07-13 01:09:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Cache color processors in render worker and canonicalize OCIO roles
+713,b3c124fe7a00481310e69f14913767d339500540,2026-07-13 00:49:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Default viewer display transform to config display/view instead of input colorspace
+714,69cbe37f4f1afd47216f05c76bd2b5374e62dea2,2026-07-12 22:20:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update project file reference with bilingual Chinese/English docs
+715,d66779d28177c9fdccb7d6b45eab42faeaf212b1,2026-07-12 22:15:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Apply export color transform in render worker
+716,43599dba9e831ef2659e698bccdd61346529957d,2026-07-12 21:53:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add batch proxy menu to Project Explorer and persist Use Proxy state
+717,ea37dc5da6db4a73a8eef56007176e3c112af52f,2026-07-12 21:44:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Prevent main-process crash when render worker dies during IPC write
+718,01f8be7267b13412ed2b73a034d1fdfdb04d58dd,2026-07-12 21:41:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix crash when closing export dialog while export is running
+719,8d3bde5a50b45bbba3c0637f55dff587768f7e67,2026-07-12 20:53:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Implement software scope rendering for backend-neutral display paths
+720,f0119a910cce9831dbdeee2fa51d6c869ecdeb35,2026-07-12 20:39:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Enable video auto-cache by default
+721,468b6f1d1baa6708c8c43ddd4117a3f994f43409,2026-07-12 20:36:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix playback backup timer interval and waveform-only prequeue
+722,094f4a8e446156323fea82c0fdbbe7d1ecb9a282,2026-07-12 19:45:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix audio waveform view scene rect and timebase refresh
+723,282a06b7770b9ca4cfaf6b9077d72c79c4f63826,2026-07-12 19:37:01 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Default to full-resolution preview and fix audio-waveform freeze
+724,51ea3ca24e161c64298f41d114adcdd73088f676,2026-07-12 19:17:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Use 10-bit packed preview format and add OCIO LUT regression tests
+725,a7f7890db049682e3931feb3381c6ce49a8a5b36,2026-07-12 18:13:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Use F16 for preview frames to halve GPU-to-CPU readback bandwidth
+726,e8443f8f8f66fcd8f2ecaf8c158abd0a5ee33996,2026-07-12 17:32:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix crash when toggling Use Proxy during playback and proxy generation output format
+727,0969e2adc59a26240524da7d110fd3cec69444ab,2026-07-12 17:20:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add diagnostics for proxy toggle synchronization
+728,9bb63ca576e5f7838a6e71410b9b3002fb391088,2026-07-12 16:26:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update translation files with new proxy strings
+729,cf32fcfee14044957d1bb9350b34de7ec2155cba,2026-07-12 16:26:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add configurable proxy settings and a menu entry
+730,818b76b64ea3d821e7f7220d0dd680cab8ed8f27,2026-07-12 16:20:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Sync Footage proxy state to render worker copy project
+731,279fb2f44261297d8f89db776e2460eb0beed70b,2026-07-12 16:12:53 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix proxy generation by explicitly setting ffmpeg output format
+732,94250a76908dc1dda838b1d33e7da88f6c55f5f5,2026-07-12 16:11:31 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix proxy decoding path and add proxy generation diagnostics
+733,e52570c89f4c59b2e3f599e21dd8eb2e5e253e89,2026-07-12 15:47:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add diagnostics and robust direction reading for OCIO LUT node
+734,f131abc5f74908b1e5978086fafefbd05b634eba,2026-07-12 15:17:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix OCIOLutNode direction changes being ignored
+735,ca22028a5264d50f90ecd8e6885b713c5c659bf1,2026-07-03 14:06:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Defer OCIO LUT processor generation in render worker and fix stale graph snapshots
+736,a753d2f7873889ad9e23a1f94118ec0e9dad1fef,2026-07-03 13:56:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Always recreate LUT processor when input changes (debug)
+737,632ef5b495fa3c4731c06683f062703365146b52,2026-07-03 13:54:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Invalidate cache before cancelling tasks on LUT change
+738,fb50b5202e7afe8a214814e000fb4bbbe09916a9,2026-07-03 13:44:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Do not block while cancelling video cache tasks on LUT change
+739,a4aaf10357a64b01d14663da260eef9d57155f81,2026-07-03 09:39:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Use QApplication presence to detect main GUI process for LUT refresh
+740,d83569c08e295a06405995c629c9b5c2820021da,2026-07-03 02:52:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix worker crash when loading LUT node
+741,9185b6fd60aef0e4fbbbb9c7eec65871abac51d5,2026-07-03 02:49:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Auto-refresh viewer after LUT change without freezing
+742,d88341f9db5d2cc09036bab5461d6bcb1e60c7e6,2026-07-03 02:46:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Revert OCIO LUT processor generation to synchronous
+743,8636ee0dc67fa99f871374cc454e51ec39aa8d5e,2026-07-03 02:44:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Remove automatic full-cache invalidation on LUT processor change
+744,63a4008ce40127b3b82143358786651a177110fa,2026-07-03 02:37:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Avoid full cache invalidation in render worker after LUT processor is ready
+745,800859b0effb4915cc0e0a45cb5bf42aac9348ae,2026-06-21 00:28:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix OCIO LUT async processor black screen and freeze
+746,68c0477715d250b0011edff58b381feccc0b9b80,2026-06-20 20:41:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add hardware decoding support
+747,f6211f97a51637144e664674852e07c4f23de927,2026-06-20 10:20:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix render worker reuse and stabilize out-of-process video rendering
+748,30e7153154bb9bee76185a96692da30afdd1790e,2026-06-16 03:13:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix Windows and macOS symbol error
+749,83424e3c790f907604a598810adfb58a92c5676b,2026-06-16 03:09:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix Linux outdated package name
+750,e77de4940630dd41aded41234d2f98b4fdaa886d,2026-06-16 03:06:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add Comments
+751,3c9592da45f92ca63a32894fd9efe77dcfca355d,2026-06-16 02:48:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,完成Vulkan渲染后端
+752,cd5efa8ea4a929ec3a69b225a0d79dc028be885f,2026-06-15 21:25:19 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update dynamic backend plan to reflect Vulkan real-render progress
+753,e908786d43c26b27203e00faf6875c6248947139,2026-06-15 21:21:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"Improve Vulkan Blit: caching, interpolation, swizzle, enable flags"
+754,f4906862a1310c283f569663ce4658a5c997fa41,2026-06-15 21:14:16 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Make Vulkan shader/UBO/layout path real enough for end-to-end blits
+755,f1d19a03f8b8d7801aad83fbac111d11e7d0e2c8,2026-06-15 20:59:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Harden Vulkan init/device selection and resource teardown
+756,55271a53c7055a483410ad4b6c551880cebf198d,2026-06-15 20:45:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Document RenderManager backend sync and manual test checkpoints
+757,8b8aa945f0b7a641fcec6f62213df3e60f58243e,2026-06-15 20:44:40 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Sync RenderManager::backend_ after DynamicRenderer fallback
+758,b4e39e5bcda31540c7c47610614c191a1cddebf7,2026-06-15 20:24:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Address ChatGPT Vulkan review items
+759,225f8505c27bc3f3de6569f697baadf2e54dc215,2026-06-15 20:10:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat(render): dynamic OpenGL/Vulkan backend split and backend-neutral viewer
+760,5fc82326716c6d0507af0fa125424b72641183dd,2026-06-07 18:06:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add render backend capability info ABI
+761,38c5afb13d1f85daaa8ae215f3bc376ed10d3ae2,2026-06-07 18:02:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add Vulkan backend placeholder with dynamic fallback
+762,76a98e5a93257e013d85af4e1c1270f15e5c13c3,2026-06-07 17:54:59 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Route viewer through dynamic backend in experimental builds
+763,3f43073261205b11d0f1cb84db6a613daae25b03,2026-06-07 17:39:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add dynamic backend load smoke test
+764,2d6b2107afc5ca819f1afa93b7d88fe6e46402bb,2026-06-07 17:32:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Enable experimental OpenGL backend library build
+765,14778873b9eb8dae03ebeb46be712a33630a8958,2026-06-07 17:28:00 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix LUT tests for OCIO 2.1
+766,d5d70d0151c9766ecbe5d62d96e335e6b0a6bfc4,2026-06-07 17:21:42 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add dynamic render backend adapter scaffold
+767,341283b1cdf6e41c4810519eaed1adfbb652a463,2026-06-07 16:42:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add graphics backend selection
+768,c74cc928799fcc1909c873a8d414891ebc61b83e,2026-06-07 16:23:48 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Set default OCIO config for gtests
+769,5b069b47fd24a7db5746f95d6d9b964cb2641e79,2026-06-07 16:18:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI compatibility for LUT and decoder tests
+770,8ae8e3a159e01ca755f3032f58447d916bf8ecdf,2026-06-07 16:16:15 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Implement proxy media workflow
+771,9c1fba493221b87fca586236bf4098c6713dca59,2026-06-07 01:00:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add timeline audio sync actions
+772,08b1c6d5623622ae1d7a07c16227a42b369eed4e,2026-06-07 00:51:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Implement audio sync foundations
+773,4d52267c4a4d900574edc2a5df724d27b889a85d,2026-07-13 10:07:42 +0800,Mike Solar,iam@mikesolar.cn,GitHub,noreply@github.com,Merge pull request #13 from riffpointer/main
+774,cac5a40b58797f28ffa3ae1085fbee6afd25c33b,2026-06-07 00:24:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Implement color LUT v0.4 features
+775,0daad22129ed95278baa593b5967a77a53d99fea,2026-06-06 23:31:52 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Complete render process isolation phases 4 and 5
+776,042f008a02bdc1a5d5cec49ce7f0b51ba93d8c19,2026-06-04 21:32:43 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,Add decoded input slots for render workers
+777,98c884c3811aaecb1bebf3ac1f31bdee61318f55,2026-06-04 16:23:36 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,Wire render worker pool into render manager
+778,b23e01b916c7d1f6ebebc9487fcea1dc87b3ca73,2026-06-04 13:57:36 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,Add render worker IPC loop
+779,8c1c7658d911678299cb252eb3dbf4a0fca5d868,2026-06-03 20:59:50 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix(macos): skip self-copy when lib already in Frameworks
+780,3fc6d0f4855814c9095d7656ab643b872c7daaaf,2026-06-03 20:43:31 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,"chore: bump version to 0.3.0-alpha, unify all icons from icon.png"
+781,830f5f76af106e0d502fb0c4ee83fc387ce656d1,2026-06-03 20:34:56 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix(macos): replace dylibbundler with custom Python script for dependency bundling
+782,3205a27985de71aa6e6ffc7fbbd6f50cfcc3eed0,2026-06-03 20:25:01 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix(macos): add dylibbundler search paths and debug output
+783,ef8cefcbed5734e87c0df809237ae7045e07b607,2026-06-03 20:11:06 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix(windows): add OutFile directive to nsis script
+784,7a3ac3186a6936006547a73ffe7a7a5f5de4309e,2026-06-03 20:06:56 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,ci: cache MSYS2 packages in Windows builds
+785,9406704f6c8f18da508e9e718049719a3e2a49f1,2026-06-03 20:00:24 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix(windows): replace ShellExecAsUser plugin with built-in ExecShell
+786,34ed808d4221640c2313eec884666102e3541dab,2026-06-03 19:49:01 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,change: Change CI OpenFX -j
+787,6c9d53d01be0471f23bfb7afff4a522fd29fc1a1,2026-06-03 19:43:34 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,"fix(cd): fix AppStream validation, update runners to Warp, verify bundled libs"
+788,04aad3415f6aa71390e2aa8073efacad3c0242ab,2026-06-03 18:30:48 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,"fix(cd): bundle all runtime dependencies for Windows, macOS and Linux"
+789,f731470c0f26390277bbccd4df517804d5a88ab5,2026-06-03 17:49:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix macOS timer bug
+790,a2af4b5bf69a72ea480650ada21717e6bec387a9,2026-06-03 14:52:32 +0800,孙羽,iam@mikesolar.cn,孙羽,iam@mikesolar.cn,fix ci
+791,218166982578cb490effca0bf1fe9e7eea9e2b2c,2026-05-29 00:54:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add `libavfilter-dev` to CI/CD dependencies
+792,a3724d3ec9f1f4bc7157996c5fa3bdfdde5b74eb,2026-05-29 00:50:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update CI/CD to use Ubuntu 24.04 and distro FFmpeg 6.x
+793,5c40a3376fea07f4ed66c62bea2f6fe98bd42ce2,2026-05-29 00:04:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix Arch Linux CD.
+794,8657c3f5490bb9248fe653f0001992698f1aaceb,2026-05-29 00:01:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add GitHub Actions CD.
+795,e6fe406318f9b678f19d0dac8f61333e97af5a06,2026-05-28 23:26:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix Ubuntu and Windows CI
+796,4802b897fa46d25bbef7596640aa725a9125d96a,2026-05-28 22:29:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix Ubuntu and Windows CI
+797,9a4d635a7a8a510f74307fa10f0e22849c652ad5,2026-05-28 21:43:57 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge branch 'main' of https://github.com/OakVideoEditorCommunity/oak
+798,9cae5d9c5fe606f1ede7d969773404020b6fad2e,2026-05-28 21:43:33 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix Ubuntu and Windows CI
+799,00f57533e662ed67a6230f8010833f2e431a5f6a,2026-05-28 18:21:42 +0800,孙羽,public@mikesolar.cn,孙羽,public@mikesolar.cn,Add null checks for color processing functions
+800,116a4b8368af5ebbaa1b3a5493d0248137cbb155,2026-05-27 21:34:09 +0800,孙羽,public@mikesolar.cn,孙羽,public@mikesolar.cn,fix windows compile
+801,6b94ceea14b978c6c7cc4326f77857daa15ce98d,2026-05-21 20:31:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs:Add plan of spilting into multi-library
+802,295c5eaa24b5b029149453c0c66479caed910a56,2026-05-21 17:46:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: Use makefile to compile OpenFX-Misc
+803,0984756c19a49570f4be01ab9d2c859af922f5a2,2026-05-21 17:40:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: Compile v8.1.1 instead of latest ffmpeg for Ubuntu, remove override for MainWindow::nativeEvent, and change Windows packages to UCRT."
+804,444a8e5287dc94a9fe011b85f18cdbfe94aa57f5,2026-05-21 17:26:37 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: Compile latest ffmpeg for Ubuntu, install fmt for Windows."
+805,3f238ce08eedc8359e7acd31e3da236d0524ef95,2026-05-21 17:06:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"fix: Define WIN32 and WINDOWS for MSYS2, and remove <qtypes.h> in image.h."
+806,027476e6910c7767bcab646db2275f1d50e0b556,2026-05-21 17:01:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: update roadmap
+807,0daef48b62527c0be31cebe2829c29d0734136ae,2026-05-21 16:53:55 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: remove <qtypes.h> to fix Linux CI.
+808,393a9eda63b11c08fce422fcf13335f6d2b75f0c,2026-05-21 16:50:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,docs: add build guide and CI.
+809,a0abf9cfb0905986bbdba0b38680b28124dd210d,2026-05-21 16:29:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fixed: fixed black screen when pulling playhead back.
+810,2a84027ff97ef9bcf40e50166847e9d1c92f8407,2026-05-17 14:54:49 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix(renderer): macOS TBDR cross-context sync and OFX instance thread-safety
+811,ff0eee3a88c20bab666961fa4ce812101e05223a,2026-05-16 17:34:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,perf(plugin): cache PluginRenderer per-thread and skip redundant clip prefs
+812,3845c31b372d0eaa6c7afcf9b4a5dc41f495ca62,2026-05-16 16:17:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,perf(plugin): eliminate GPU↔CPU ping-pong in OFX render path
+813,7ebfebb29a21ff7790ddfd8dba5899ee9704374e,2026-05-15 21:32:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix OFX plugin render failures and stabilize integration tests
+814,e85c6cf60a0b29aad02ed8045f6dee91d5760478,2026-05-14 22:32:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix: OFX param instance lifecycle and thread-safety fixes
+815,4aa4d59770ace0f11e9e3a99379fb9697b45e061,2026-05-14 21:54:18 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat: hide non-texture OFX params from node graph + host coordinate standardization
+816,e012f16083c37053227189d4aba6532b1b3c537a,2026-05-14 21:05:29 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"feat: group OpenFX plugins under dedicated ""OpenFX"" category with sub-groups"
+817,b2de04962d8fd1de6ad04cfcd233c498b1384bd5,2026-05-14 20:50:45 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,feat: heuristic semantic display for OFX RGBA parameters
+818,43ba1c464202ede372f3d1510c7ba17ba79474fc,2026-05-14 20:26:17 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix ofx plugin bug
+819,599c876d030748a24d977eb50d14e88b6aec6322,2026-05-14 01:51:14 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,全链路强制F32
+820,f3c50017e9d47b2071d416e2d543e6ca07dcb28e,2026-04-19 18:59:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,rendering still not correct
+821,3b5b0187cb9dadde5283af9b691d7d0614d58391,2026-04-12 01:42:27 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix chroma keyer
+822,eb79be87a449c5651715367f7df55f3cf6e85238,2026-04-12 01:26:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,add smoke test
+823,843b8762f6543d6b094b3790621c591702ccc518,2026-04-12 01:08:22 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix audio bug
+824,c1b77ceec53b38295bc75bde083ce8538d3a5655,2026-01-17 17:03:39 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Merge branch 'plugin'
+825,648de07b00cab694fd98f6591f53cdee64a3a18b,2026-01-17 16:53:54 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add LRU TODO
+826,c1bcfeb78b28b779d7b6f47babcf9a7a1ed70a6c,2026-01-17 16:49:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,finish plugin suppoirt
+827,a2698e7ef4ef92451921a4932aa6b7d999b1535b,2026-01-17 16:41:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,solve problem invalid roi and param
+828,894ee5c0dac4b7f8a6e0dd9f76ea18110ec714bb,2026-01-16 22:29:47 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update copyright
+829,bfb1b2fce4824e1bda7a72ae9c3a8664807fc245,2026-01-16 21:22:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update copyright back
+830,e851653fa3fc4b15709e4f109fde5d6a18c23aae,2026-01-16 21:11:24 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,尝试修复粉紫屏未果
+831,3f774dfa538dd8a245f004de6faf3151b2e5e877,2026-01-10 18:57:46 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,update core
+832,4d393f3d2379c7e88a6cdc5b0d72db66e161f4f1,2026-01-10 18:56:58 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,尝试解决插件bug
+833,e37972b227d4f2fa95d4d1ea225ce19bb934fae4,2026-01-05 21:31:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Try to fix plugin issue
+834,8ed5660faf0532b230f02a9c276226d90eabd0cd,2026-01-05 18:01:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,solve some bugs
+835,6b64abb1fa354772576b9f67ebfb49aab5a7f142,2026-01-05 16:36:43 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Limit import files
+836,4bd453bab09bb486973a927474bb38d68acd073e,2026-01-05 16:23:11 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Undate core
+837,b8669f6a1171dbc49316fe2dda2149b7e3452cc5,2026-01-05 16:22:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Change project name;
+838,86e82b13e2edb782894c76656573d598ee48a5aa,2026-01-05 14:24:28 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,remove unused includes
+839,cdc66d1a02aca2d99eb28db220d448f8cd2e9b90,2026-01-05 13:52:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,fix no video shown
+840,b1073705502df22fb6709a5cd7e6b30fff4fb131,2026-01-05 13:19:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+841,eea983b3a2bad70c421c08f17902efb89dd83caa,2026-01-05 13:13:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+842,12bca573f1f9dbe42b73ef1aaed0f89c3351df0c,2026-01-05 13:06:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+843,ffc634ab42ee5038fd3a342c2a068a24334a84ad,2026-01-05 12:42:03 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+844,02b58bde8e5b398d650db5fc69d78836fa86ee55,2026-01-05 12:16:06 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+845,632afa9ce8db3769d7160d43aa1aca66caab51cf,2026-01-05 12:14:08 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix CI
+846,ee128f1b37563457476ca5cdf893703b2d1206da,2026-01-05 12:11:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,修正ext/KDDockWidgets
+847,21d5ed5f5991ff06192bebe182f5406aa0befa2d,2026-01-05 04:02:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,完善测试
+848,4b97a66f17fcd60f665a891cbad05eb6eb95b2a6,2026-01-05 03:52:02 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,添加测试
+849,79f376b51267a57619879262a98cf9b7a6ef4976,2026-01-05 03:40:36 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,修复bug
+850,8263ccf814d866ba053baa88c02e8d5375c421dc,2026-01-05 03:11:34 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,修正测试
+851,1f679551f271f382efc01ee27034ba100bbe75a6,2026-01-05 02:55:21 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,添加测试
+852,9d0790370fa8e2159bddceb17d1488fcf8aed31b,2026-01-05 02:55:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,添加测试
+853,0323c74c8328c9ac7c1675d185beb4d7d7408a06,2026-01-05 02:26:20 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,添加文档
+854,003c3bb5be1ca415c0576415409e2ffaf2c56ae5,2026-01-05 02:25:13 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,修改部分语法错误
+855,cad331eb2c764663136c6833ccb9d7a8a6c14490,2026-01-05 01:50:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Fix compile errors
+856,c136cdf7f64151070874f443689ea1125f1bc099,2026-01-05 00:03:51 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,完成1
+857,4cbdfd1a88c51bf0483c742625146009c3095dc4,2026-01-04 23:53:12 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"Finish TODO 8,9"
+858,271f56f3dd2211cbc8307238b630722b28ccad36,2026-01-04 23:22:50 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Procceed translate
+859,e1938a14e0f8b8bc6665a94955bdb9593ccc63e2,2026-01-04 23:16:10 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Finish TODO 6 and 7
+860,1b29bd147eb27d3e549b88f869afd0a26de66f88,2026-01-04 22:53:26 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,"Add missing param instance types (String, Double3D/Integer3D, Group/Page, Custom/Bytes) and mapping to node inputs. `app/pluginSupport/OlivePluginInstance.cpp`, `app/node/plugins/Plugin.cpp`"
+861,3b16824f34302ebbce911afe1e488527dd9e5f85,2026-01-04 22:40:05 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Ensure render path sets per-frame output data and handles ROD/bounds correctly.
+862,f191486375a755e8dd0525e9d1eefb788cb22201,2026-01-04 22:30:41 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Implement multi-input OFX clip wiring and texture handling
+863,7c0f37b0a7bed8940a3b02d5fffa303d8e8ae8d0,2025-12-24 21:07:17 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,"Implement default methods for plugin parameter editing and progress, and integrate plugin rendering into the build system."
+864,88ba0e4841fde851f79ef7dadead8a54a0d37249,2025-12-24 17:51:56 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Update plugin parameter instances to use shared pointers and add new parameter creation logic
+865,ef3efce2a89d22b63638ba83eb0a07ce5137bb91,2025-12-13 22:46:46 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Add undo support for parameter changes in plugin parameters
+866,27ee6067cccbdce538f3a104d46250613b0280fc,2025-12-13 21:46:12 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Merge remote-tracking branch 'origin/plugin' into plugin
+867,22fd52195135e9506a0e1246227d96ca4d3a4461,2025-12-13 21:45:46 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Merge branch 'refs/heads/dev' into plugin
+868,6dec37eef419f2b293de1f12f745e0fac2e71b5e,2025-11-24 21:39:01 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Add a patch to fix include path for Window_p.h in qtcommon directory
+869,d81140a312571bfe315e0b4ea63b4b165b1de7ee,2025-11-24 20:41:22 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Update KDDockWidgets library
+870,2dd8c4629a660dad8daa40fa34ecd06d59c1e633,2025-11-24 20:33:45 +0800,Mike Solar,iam@mikesolar.com,Mike Solar,iam@mikesolar.com,Update include path for Window_p.h
+871,f317e0e173e8b69c393aba90c027f0a531f1da88,2025-11-24 10:33:38 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add null checks for timebase in TimeScaledObject and fix background color assignment in ViewerDisplayWidget
+872,2c4d235da6a782468e9c1b114c8919c9033547c2,2025-11-23 16:39:30 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update KDDockWidgets submodule URL
+873,1e33a31b73c7211671016fac55c69c69f217c2c7,2025-11-23 16:35:09 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Update FFmpeg handling and focus management
+874,2ea53667c049d50ee72f866b63ba5d99fd334b3c,2025-11-10 21:06:35 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Refactor FFmpeg decoder for improved readability and efficiency
+875,5aaa49c515aa45f6128f6ac25e813ce200288ceb,2025-11-10 13:57:04 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add push button support for OFX plugins
+876,8a7b6cf8690e16d8a1958a2a943318cb7930134f,2025-11-09 17:03:56 +0800,Mike Solar,iam@mikesolar.cn,Mike Solar,iam@mikesolar.cn,Add OFX plugin support and related infrastructure
