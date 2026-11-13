@@ -42,6 +42,7 @@ use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 use gpui_kit::{Action, KeyBinding, KeyBindingContextPredicate};
+use quercus_engine_rs::utils::configuration_location;
 
 // One macro call generates all three views of the registry, so they can
 // never drift apart: the gpui action structs, the `ActionId` enum and the
@@ -109,6 +110,9 @@ define_actions! {
 	SaveProjectAs { cpp: "saveprojas", i18n: "menu.file.save_as", keys: ["secondary-shift-s"], route: Global, menu_id: 1004 };
 	Revert { cpp: "revert", i18n: "menu.file.revert", keys: ["f12"], route: Global, menu_id: 1005 };
 	Import { cpp: "import", i18n: "menu.file.import_footage", keys: ["secondary-i"], route: Global, menu_id: 108 };
+	ImportSubtitles { cpp: "importsubtitles", i18n: "menu.file.import_subtitles", keys: [], route: Global, menu_id: 610 };
+	SubtitleProperties { cpp: "subtitleproperties", i18n: "menu.sequence.subtitle_properties", keys: [], route: Global, menu_id: 613 };
+	ExportSubtitles { cpp: "exportsubtitles", i18n: "menu.file.export_subtitles", keys: [], route: Global, menu_id: 611 };
 	Export { cpp: "export", i18n: "menu.file.export_media", keys: ["secondary-m"], route: Global, menu_id: 106 };
 	ProjectProperties { cpp: "projectproperties", i18n: "menu.file.project_properties", keys: ["shift-f10"], route: Global, menu_id: 1006 };
 	CloseProject { cpp: "closeproj", i18n: "menu.file.close", keys: [], route: Global, menu_id: 105 };
@@ -192,6 +196,17 @@ define_actions! {
 	SetWorkArea { cpp: "setworkarea", i18n: "menu.sequence.set_workarea", keys: [], route: Global, menu_id: 507 };
 	ClearWorkArea { cpp: "clearworkarea", i18n: "menu.sequence.clear_workarea", keys: [], route: Global, menu_id: 508 };
 	RemoveMarker { cpp: "removemarker", i18n: "menu.sequence.remove_marker", keys: [], route: Global, menu_id: 506 };
+	AudioGain50 { cpp: "audiogain50", i18n: "menu.sequence.audio_gain_50", keys: [], route: Global, menu_id: 620 };
+	AudioGain100 { cpp: "audiogain100", i18n: "menu.sequence.audio_gain_100", keys: [], route: Global, menu_id: 621 };
+	AudioGain200 { cpp: "audiogain200", i18n: "menu.sequence.audio_gain_200", keys: [], route: Global, menu_id: 622 };
+	AudioPanLeft { cpp: "audiopanleft", i18n: "menu.sequence.audio_pan_left", keys: [], route: Global, menu_id: 623 };
+	AudioPanCenter { cpp: "audiopancenter", i18n: "menu.sequence.audio_pan_center", keys: [], route: Global, menu_id: 624 };
+	AudioPanRight { cpp: "audiopanright", i18n: "menu.sequence.audio_pan_right", keys: [], route: Global, menu_id: 625 };
+	AudioFadeIn { cpp: "audiofadein", i18n: "menu.sequence.audio_fade_in", keys: [], route: Global, menu_id: 626 };
+	AudioFadeOut { cpp: "audiofadeout", i18n: "menu.sequence.audio_fade_out", keys: [], route: Global, menu_id: 627 };
+	AudioAddVolume { cpp: "audioaddvolume", i18n: "menu.sequence.audio_add_volume", keys: [], route: Global, menu_id: 628 };
+	AudioAddPan { cpp: "audioaddpan", i18n: "menu.sequence.audio_add_pan", keys: [], route: Global, menu_id: 629 };
+	AudioProperties { cpp: "audioproperties", i18n: "menu.sequence.audio_properties", keys: [], route: Global, menu_id: 630 };
 	SeqCache { cpp: "seqcache", i18n: "menu.sequence.cache", keys: [], route: Global, menu_id: 1060 };
 	SeqCacheInOut { cpp: "seqcacheinout", i18n: "menu.sequence.cache_in_out", keys: [], route: Global, menu_id: 1061 };
 	SeqCacheClear { cpp: "seqcacheclear", i18n: "menu.sequence.cache_clear", keys: [], route: Global, menu_id: 1062 };
@@ -207,12 +222,12 @@ define_actions! {
 	FocusTimeline { cpp: "focustimeline", i18n: "menu.window.timeline", keys: [], route: Global, menu_id: 607 };
 	FocusEffectLibrary { cpp: "focuseffectlibrary", i18n: "menu.window.effect_library", keys: [], route: Global, menu_id: 608 };
 	FocusMulticam { cpp: "focusmulticam", i18n: "menu.window.multicam", keys: [], route: Global, menu_id: 609 };
-	FocusAiAssistant { cpp: "focusaiassistant", i18n: "menu.window.ai_assistant", keys: [], route: Global, menu_id: 610 };
+	FocusAiAssistant { cpp: "focusaiassistant", i18n: "menu.window.ai_assistant", keys: [], route: Global, menu_id: 631 };
 	// The multicam wizard was cut from the v0.5 surface: the menu item and
 	// the action-search entry are gone (menu_id 0 = hidden, like the
 	// panel-context hotkeys), the engine pathway stays for a future
 	// release.
-	MulticamWizard { cpp: "multicamwizard", i18n: "menu.sequence.multicam_wizard", keys: [], route: Global, menu_id: 0 };
+	MulticamWizard { cpp: "multicamwizard", i18n: "menu.sequence.multicam_wizard", keys: [], route: Global, menu_id: 612 };
 	MaximizePanel { cpp: "maximizepanel", i18n: "menu.window.maximize_panel", keys: ["`"], route: Global, menu_id: 1070 };
 	ResetDefaultLayout { cpp: "resetdefaultlayout", i18n: "menu.window.reset_layout", keys: [], route: Global, menu_id: 1071 };
 
@@ -500,9 +515,8 @@ pub(crate) fn shortcuts_test_lock() -> &'static Mutex<()> {
 /// The path of the custom-shortcuts file: `<config>/shortcuts`, exactly like
 /// the C++ `MainWindow::get_custom_shortcuts_file`.
 pub fn custom_shortcuts_path() -> String {
-	let dir = oak_core::filefunctions::FileFunctions::new()
-		.get_configuration_location()
-		.unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+	let dir = configuration_location()
+		.unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
 	format!("{}/shortcuts", dir.trim_end_matches('/'))
 }
 
@@ -541,7 +555,17 @@ pub fn parse_shortcut_file(contents: &str) -> Vec<(String, Vec<String>)> {
 	contents.lines().filter_map(parse_shortcut_line).collect()
 }
 
-/// Serializes override lines back to `id\tkey` (empty key = unbound).
+/// Serializes override lines back to `id\tkey` (empty key = unbound),
+/// joining entries with `\n`; the output is the shortcut-file body parsed
+/// by [`parse_shortcut_file`].
+///
+/// Only the first key of each entry is written, so multi-binding entries
+/// do not round-trip exactly.
+///
+/// # Arguments
+///
+/// * `entries` - `(action id, keys)` pairs in file order; an entry with no
+///   keys is written with the trailing tab and no key (the unbound marker).
 pub fn serialize_shortcut_file(entries: &[(String, Vec<String>)]) -> String {
 	let mut out = String::new();
 	for (index, (id, keys)) in entries.iter().enumerate() {
@@ -774,7 +798,13 @@ impl Tool {
 		}
 	}
 
-	/// The tool an action selects, if it is a tool action.
+	/// The tool selected by `action`, or `None` when `action` is not a tool
+	/// action. This is the inverse of [`Tool::action`] for the tool actions.
+	///
+	/// # Arguments
+	///
+	/// * `action` - the action id to map; only the `*Tool` action ids yield
+	///   `Some`.
 	pub const fn from_action(action: ActionId) -> Option<Tool> {
 		match action {
 			ActionId::PointerTool => Some(Tool::Pointer),

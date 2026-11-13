@@ -52,7 +52,7 @@
 //! ## The content space
 //!
 //! The chain starts from the project's output spec
-//! ([`oak_core::color::pipeline_output_spec`]): sRGB content runs
+//! ([`quercus_engine_rs::core::pipeline_output_spec`]): sRGB content runs
 //! through the named sRGB/Rec.709 space of the active OCIO config, and
 //! non-sRGB content (P3/BT.2020 gamuts, PQ/HLG transfers) is converted to
 //! CIE XYZ (D65, unit luminance) first and flows through the ICC's
@@ -82,9 +82,11 @@
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use oak_core::color::{pipeline_output_spec, ColorProcessor};
-use oak_core::colormath::{output_spec_to_xyz_d65, OutputColorSpec, OutputGamut, OutputTransfer};
-use oak_core::configstore::ConfigStore;
+use quercus_engine_rs::color::ColorProcessor;
+use quercus_engine_rs::core::{pipeline_output_spec, OutputColorSpec};
+use quercus_engine_rs::render::gpu_set_display_transform_required;
+use quercus_engine_rs::state::Config;
+use quercus_engine_rs::utils::output_spec_to_xyz_d65;
 
 /// Config key: the display color management mode ("icc" / "off"). The
 /// preference only applies where the platform policy allows self-management
@@ -186,7 +188,7 @@ pub fn display_policy() -> DisplayPolicy {
 	// sRGB; a non-sRGB project output can't be honored through it — warn
 	// once so the degradation is visible in the log.
 	#[cfg(target_os = "windows")]
-	if oak_core::displayicc::windows_acm_active() {
+	if quercus_engine_rs::state::displayicc_windows_acm_active() {
 		if pipeline_output_spec() != OutputColorSpec::default() {
 			static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 			WARNED.get_or_init(|| {
@@ -206,11 +208,9 @@ pub fn display_policy() -> DisplayPolicy {
 	// mapping, so self-management is the only way to honor wide-gamut
 	// displays there (the "off" preference opts back into OS-management).
 	#[cfg(target_os = "macos")]
-	match ConfigStore::instance()
-		.get(None, CONFIG_KEY_COLOR_MODE)
-		.as_deref()
+	match Config::global().get(CONFIG_KEY_COLOR_MODE).as_deref()
 	{
-		Ok("icc") => DisplayPolicy::SelfManaged,
+		Some("icc") => DisplayPolicy::SelfManaged,
 		_ => DisplayPolicy::OsManaged,
 	}
 	#[cfg(not(target_os = "macos"))]
@@ -222,9 +222,8 @@ pub fn display_policy() -> DisplayPolicy {
 
 /// The persisted mode preference ("icc" = self-manage, "off" = OS-managed).
 fn configured_mode() -> String {
-	ConfigStore::instance()
-		.get(None, CONFIG_KEY_COLOR_MODE)
-		.unwrap_or_else(|_| "icc".to_string())
+	Config::global().get(CONFIG_KEY_COLOR_MODE)
+		.unwrap_or_else(|| "icc".to_string())
 }
 
 /// Drop the cached processors (call after a preference change).
@@ -281,7 +280,7 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 	#[cfg(target_os = "windows")]
 	{
 		let id = u64::from(window.display(cx)?.id());
-		return oak_core::displayicc::windows_monitor_fingerprint(id);
+		return quercus_engine_rs::state::displayicc_windows_monitor_fingerprint(id);
 	}
 	#[cfg(target_os = "linux")]
 	{
@@ -289,7 +288,7 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 		let center = window.bounds().center();
 		let x = f64::from(center.x) * f64::from(window.scale_factor());
 		let y = f64::from(center.y) * f64::from(window.scale_factor());
-		oak_core::displayicc::x11_monitor_fingerprint_at(x, y)
+		quercus_engine_rs::state::displayicc_x11_monitor_fingerprint_at(x, y)
 	}
 	#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 	{
@@ -301,20 +300,18 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 /// The active (policy, mode, icc, content, monitor) key.
 fn current_key() -> (DisplayPolicy, String, String, String, String) {
 	let policy = display_policy();
-	let custom = ConfigStore::instance()
-		.get(None, CONFIG_KEY_CUSTOM_ICC)
+	let custom = Config::global().get(CONFIG_KEY_CUSTOM_ICC)
 		.unwrap_or_default();
 	// The content space: a non-empty override (an explicit OCIO colorspace
 	// name) wins; otherwise the chain follows the project's output spec —
 	// its (gamut, transfer) pair rekeys (and so rebuilds) the chain, so a
 	// project settings change flows through the same GENERATION machinery
 	// as a preference change.
-	let space = ConfigStore::instance()
-		.get(None, CONFIG_KEY_CONTENT_SPACE)
+	let space = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 		.unwrap_or_default();
 	let space = if space.is_empty() {
 		let spec = pipeline_output_spec();
-		format!("{}:{}", spec.gamut.as_setting(), spec.transfer.as_setting())
+		format!("{}:{}", spec.gamut, spec.transfer)
 	} else {
 		format!("override:{space}")
 	};
@@ -328,7 +325,23 @@ fn current_key() -> (DisplayPolicy, String, String, String, String) {
 	(policy, configured_mode(), custom, space, monitor)
 }
 
-/// The cached state, (re)built when the key changed.
+/// Returns the display processor set, (re)building it when the active key
+/// changed.
+///
+/// The key is [`current_key`]: policy, configured mode, custom ICC path,
+/// content space and monitor fingerprint. A cached state with an equal key is
+/// cloned and returned; otherwise the chain is rebuilt and — when a previous
+/// state existed — `GENERATION` is bumped so the engine's frame caches drop
+/// images produced with the stale transform (the first build deliberately does
+/// not bump: nothing can be stale yet). An OS-managed policy or a non-`"icc"`
+/// mode yields an empty state (all processors `None`); the self-managed path
+/// resolves the ICC (custom path first, else the monitor's profile, else the
+/// main display) and builds the sRGB, XYZ and BGRA8 variants.
+///
+/// # Returns
+///
+/// `Some` on every currently reachable branch; a state whose three processors
+/// are all `None` means nothing is applied. Callers treat `None` as inactive.
 fn current() -> Option<State> {
 	let key = current_key();
 	let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -415,10 +428,8 @@ fn current() -> Option<State> {
 /// inside `system_display_icc_for`); an unknown one (empty or malformed)
 /// falls back to the main-display profile — the pre-multi-monitor behavior.
 fn monitor_icc_path(monitor: &str) -> Option<String> {
-	match oak_core::displayicc::monitor_ref_from_fingerprint(monitor) {
-		Some(monitor) => oak_core::displayicc::system_display_icc_for(&monitor),
-		None => oak_core::displayicc::system_display_icc(),
-	}
+	quercus_engine_rs::state::displayicc_system_display_icc_for(monitor)
+		.or_else(quercus_engine_rs::state::displayicc_system_display_icc)
 }
 
 fn clone_state(state: &State) -> Option<State> {
@@ -449,6 +460,8 @@ pub fn is_active() -> bool {
 /// output spec changes (which rekeys the content-colorspace declaration).
 pub fn apply_to_window(window: &mut gpui_kit::Window) {
 	let active = is_active();
+	let gpu_transform = super::gpu::install_display_lut();
+	gpu_set_display_transform_required(!gpu_transform);
 	let mode = if active {
 		gpui_kit::LayerColorManagement::SelfManaged
 	} else {
@@ -468,22 +481,29 @@ pub fn apply_to_window(window: &mut gpui_kit::Window) {
 fn content_colorspace() -> gpui_kit::WindowContentColorspace {
 	let spec = pipeline_output_spec();
 	gpui_kit::WindowContentColorspace {
-		primaries: match spec.gamut {
-			OutputGamut::Srgb => gpui_kit::ContentPrimaries::Srgb,
-			OutputGamut::DisplayP3 => gpui_kit::ContentPrimaries::DisplayP3,
-			OutputGamut::Bt2020 => gpui_kit::ContentPrimaries::Bt2020,
+		primaries: match spec.gamut.as_str() {
+			"displayp3" => gpui_kit::ContentPrimaries::DisplayP3,
+			"bt2020" => gpui_kit::ContentPrimaries::Bt2020,
+			_ => gpui_kit::ContentPrimaries::Srgb,
 		},
-		transfer: match spec.transfer {
-			OutputTransfer::Srgb => gpui_kit::ContentTransfer::Srgb,
-			OutputTransfer::Gamma22 => gpui_kit::ContentTransfer::Gamma22,
-			OutputTransfer::Pq => gpui_kit::ContentTransfer::Pq,
-			OutputTransfer::Hlg => gpui_kit::ContentTransfer::Hlg,
+		transfer: match spec.transfer.as_str() {
+			"gamma22" => gpui_kit::ContentTransfer::Gamma22,
+			"pq" => gpui_kit::ContentTransfer::Pq,
+			"hlg" => gpui_kit::ContentTransfer::Hlg,
+			_ => gpui_kit::ContentTransfer::Srgb,
 		},
 	}
 }
 
-/// Apply the display transform to an F32 RGBA buffer in place (no-op
-/// when inactive).
+/// Applies the display transform to an F32 RGBA buffer in place.
+///
+/// `samples` is `pixels * 4` floats (RGBA, display-referred encoded values in
+/// the project's output space) and `pixels` is the pixel count. For a
+/// non-sRGB project output the samples are first linearized and gamut-mapped
+/// to CIE XYZ (D65, unit luminance) and then run through the ICC
+/// connection-space chain; sRGB output runs the sRGB-named chain directly.
+/// No-op when the transform is inactive (OS-managed, or no ICC processor) —
+/// the caller must then leave the mapping to the OS.
 pub fn apply_f32_rgba(samples: &mut [f32], pixels: i64) {
 	let Some(state) = current() else {
 		return;
@@ -493,15 +513,22 @@ pub fn apply_f32_rgba(samples: &mut [f32], pixels: i64) {
 		// encoded form — linearize the transfer and gamut-map to CIE XYZ
 		// (D65, unit luminance) first, then let the ICC chain map the
 		// connection space to the display.
-		output_spec_to_xyz_d65(samples, pipeline_output_spec());
+		let spec = pipeline_output_spec();
+		output_spec_to_xyz_d65(samples, &spec.gamut, &spec.transfer);
 		let _ = xyz.convert_f32_rgba(samples, pixels);
 	} else if let Some(processor) = &state.f32 {
 		let _ = processor.convert_f32_rgba(samples, pixels);
 	}
 }
 
-/// Apply the display transform to a packed BGRA8 buffer in place (no-op
-/// when inactive).
+/// Applies the display transform to a packed BGRA8 buffer in place.
+///
+/// `data` is `pixels * 4` bytes of BGRA (the viewer's 8-bit slot) and
+/// `pixels` is the pixel count. No-op when the transform is inactive
+/// (OS-managed, or no ICC processor). The 8-bit slot always runs the
+/// sRGB-named chain, so a non-sRGB project spec degrades here — its
+/// encoding cannot be honored in 8 bits. The processor's result is ignored:
+/// the mapping is best-effort on a display-side copy.
 pub fn apply_bgra8(data: &mut [u8], pixels: i64) {
 	let Some(state) = current() else {
 		return;
@@ -543,8 +570,7 @@ mod tests {
 	fn key_tracks_monitor_and_content_override() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = ConfigStore::instance()
-			.get(None, CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(Some("x11:TEST-1".into()));
@@ -559,20 +585,20 @@ mod tests {
 			key.3
 		);
 
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, "ACEScg");
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, "ACEScg");
 		let key = current_key();
 		assert_eq!(key.3, "override:ACEScg");
 
 		// Clearing the override returns to the project output spec, and an
 		// unknown monitor falls back to the main display.
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, &previous);
 		note_monitor(None);
 		let key = current_key();
 		assert_eq!(key.4, "");
 		assert_eq!(key.3, format!(
 			"{}:{}",
-			pipeline_output_spec().gamut.as_setting(),
-			pipeline_output_spec().transfer.as_setting()
+			pipeline_output_spec().gamut,
+			pipeline_output_spec().transfer
 		));
 	}
 
@@ -582,8 +608,7 @@ mod tests {
 	fn current_caches_per_key() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = ConfigStore::instance()
-			.get(None, CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(None);
@@ -653,7 +678,7 @@ mod tests {
 			"a first build after invalidate does not bump"
 		);
 
-		ConfigStore::instance().set(None, CONFIG_KEY_CONTENT_SPACE, &previous);
+		let _ = Config::global().set(CONFIG_KEY_CONTENT_SPACE, &previous);
 		invalidate();
 	}
 

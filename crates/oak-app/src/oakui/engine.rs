@@ -35,15 +35,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::widgets::audio_meter::AudioMeterDataSource;
 use crate::widgets::effect_stack::{EffectId, EffectStackDataSource, EffectStackEvent};
 use crate::widgets::node_graph::{NodeGraphDataSource, NodeGraphEvent, NodeId};
+use crate::widgets::project_explorer::ProjectDataSource;
 use crate::widgets::timeline::{
 	ClipId, Frame, FrameRate, TimelineDataSource, TimelineEvent, TrackData, TrackKind,
 };
-use gpui_kit::{App, Context, Entity, Pixels, Point, Rgba, RenderImage, SharedString};
-use crate::widgets::audio_meter::AudioMeterDataSource;
-use crate::widgets::project_explorer::ProjectDataSource;
 use crate::widgets::viewer::PlaybackClock;
+use gpui_kit::{App, Context, Entity, Pixels, Point, RenderImage, Rgba, SharedString};
 
 pub use super::scopes::ScopeData;
 
@@ -191,20 +191,116 @@ pub struct EffectParam {
 	/// The display name (the OFX param label).
 	pub display_name: String,
 	/// The value type.
-	pub value_type: oak_node::value::ValueType,
+	pub value_type: EffectValueType,
 	/// The current value.
-	pub value: oak_node::value::NodeValue,
-	/// The input flag bits (`oak_node::input::flags::*`).
+	pub value: EffectValue,
+	/// The input flag bits (`input_flags::*`).
 	pub flags: u32,
 	/// The input properties (`combo_option` / `combo_value` / `ui_group` /
 	/// `ui_page` / `min` / `max` / ...).
-	pub properties: Vec<(String, oak_node::value::NodeValue)>,
+	pub properties: Vec<(String, EffectValue)>,
+}
+
+/// UI-independent value types exposed by the app engine contract.
+///
+/// This deliberately mirrors only the type vocabulary, not an internal
+/// crate's Rust type. RealEngine converts at its domain boundary and the
+/// mock constructs these values directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EffectValueType {
+	None,
+	Int,
+	Float,
+	Color,
+	Text,
+	Boolean,
+	Texture,
+	Samples,
+	Rational,
+	Vec2,
+	Vec3,
+	Vec4,
+	Matrix,
+	Combo,
+	StrCombo,
+	VideoParams,
+	AudioParams,
+	Binary,
+	NodeRef,
+	PushButton,
+	Parametric,
+}
+
+/// An owned parameter value safe for both real and mock backends.
+/// Values outside the inspector's editable vocabulary remain available
+/// as read-only debug text instead of leaking an internal payload type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectValue {
+	None,
+	Int(i64),
+	Float(f64),
+	Color([f64; 4]),
+	Text(String),
+	Boolean(bool),
+	Vec2([f64; 2]),
+	Vec3([f64; 3]),
+	Vec4([f64; 4]),
+	Combo(i64),
+	StrCombo(String),
+	Binary(Vec<u8>),
+	PushButton,
+	Unsupported(String),
+}
+
+impl EffectValue {
+	/// Numeric conversion used by sliders and numeric parameter tests.
+	/// Non-numeric and read-only payloads yield zero, matching the old
+	/// inspector behavior without exposing the domain value type.
+	pub fn to_double(&self) -> f64 {
+		match self {
+			Self::Int(value) | Self::Combo(value) => *value as f64,
+			Self::Float(value) => *value,
+			Self::Color(value) => value[0],
+			Self::Boolean(value) => f64::from(*value),
+			Self::Vec2(value) => value[0],
+			Self::Vec3(value) => value[0],
+			Self::Vec4(value) => value[0],
+			_ => 0.0,
+		}
+	}
+}
+
+/// Input flag bits used by parameter views. Values are part of the app
+/// contract and no longer require consumers to import an engine crate.
+pub mod input_flags {
+	pub const NOT_CONNECTABLE: u32 = 1 << 0;
+	pub const NOT_KEYFRAMABLE: u32 = 1 << 1;
+	pub const ARRAY: u32 = 1 << 2;
+	pub const HIDDEN: u32 = 1 << 3;
+	pub const IGNORE_INVALIDATIONS: u32 = 1 << 4;
+}
+
+/// Node categories used by the Add-menu contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NodeCategory {
+	Output,
+	Effect,
+	Generator,
+	Input,
+	Math,
+	Color,
+	Distort,
+	Filter,
+	Keying,
+	OpenFx,
+	Timeline,
+	Group,
 }
 
 /// The i18n key of a node category submenu, or `None` for categories that
 /// never appear in the node editor's Add menu (timeline-structural nodes).
-pub fn node_category_key(category: oak_node::node::Category) -> Option<&'static str> {
-	use oak_node::node::Category as C;
+pub fn node_category_key(category: NodeCategory) -> Option<&'static str> {
+	use NodeCategory as C;
 	Some(match category {
 		C::Output => "node.category.output",
 		C::Effect => "node.category.effect",
@@ -377,6 +473,10 @@ pub trait AppEngine:
 	/// target). The app shell forwards `TimelineEvent::SelectionChanged`
 	/// with the view's selection set. Default: no-op (engines without a
 	/// selection-driven stack keep their existing behavior).
+	///
+	/// `clips` is the complete new selection in timeline order; it
+	/// replaces the previous selection (an empty slice clears it) and
+	/// only retargets the inspector/effect stack.
 	fn set_selected_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 
 	/// The node-graph selection mirror: the single node currently selected
@@ -443,11 +543,17 @@ pub trait AppEngine:
 
 	/// Sets an effect parameter (a node input) undoably. Returns a
 	/// user-facing error on failure. Default: unsupported.
+	///
+	/// `effect` is the effect-stack node identity, `input_id` the node
+	/// input identifier and `value` the new typed value in the
+	/// parameter's native unit. One call is one undo entry; a drag
+	/// gesture should be bracketed by [`Self::begin_param_drag`] and
+	/// [`Self::end_param_drag`].
 	fn set_effect_param(
 		&mut self,
 		_effect: EffectId,
 		_input_id: &str,
-		_value: oak_node::value::NodeValue,
+		_value: EffectValue,
 		_cx: &mut Context<Self>,
 	) -> Result<(), String> {
 		Err("effect params not supported".into())
@@ -456,6 +562,10 @@ pub trait AppEngine:
 	/// Triggers a push-button parameter of `effect` (the OFX push-button
 	/// press). Returns a user-facing error on failure. Default:
 	/// unsupported.
+	///
+	/// `effect` is the effect-stack node identity and `input_id` the
+	/// push-button input's identifier; the press runs the parameter's
+	/// action once rather than storing a value.
 	fn effect_push_button(
 		&mut self,
 		_effect: EffectId,
@@ -503,42 +613,7 @@ pub trait AppEngine:
 	/// first category's i18n key. Runtime-registered (plugin) entries are
 	/// included.
 	fn node_library(&self) -> Vec<NodeLibraryEntry> {
-		let mut out = Vec::new();
-		let factory = oak_node::factory::Factory::global();
-		for meta in factory.entries() {
-			// A scratch instance per entry just to read its flags (the
-			// factory metadata carries no flag copy).
-			let (core, _behavior) = (meta.create)();
-			if core.flags & oak_node::node::flags::DONT_SHOW_IN_CREATE_MENU != 0 {
-				continue;
-			}
-			let Some(category_key) = meta.categories.first().copied().and_then(node_category_key)
-			else {
-				continue;
-			};
-			let name = if meta.name.is_empty() {
-				meta.type_id.to_string()
-			} else {
-				meta.name.to_string()
-			};
-			out.push(NodeLibraryEntry {
-				type_id: meta.type_id.to_string(),
-				name,
-				category_key,
-			});
-		}
-		for meta in factory.dynamic_entries() {
-			let Some(category_key) = meta.categories.first().copied().and_then(node_category_key)
-			else {
-				continue;
-			};
-			out.push(NodeLibraryEntry {
-				type_id: meta.type_id,
-				name: meta.name,
-				category_key,
-			});
-		}
-		out
+		Vec::new()
 	}
 
 	/// Creates a node of type `type_id` at `position` (graph space) in the
@@ -561,9 +636,10 @@ pub trait AppEngine:
 	fn delete_empty_tracks(&mut self, cx: &mut Context<Self>) {
 		let budget = self.track_count();
 		for _ in 0..budget {
-			let Some(index) = (0..self.track_count())
-				.find(|index| self.track(*index).is_some_and(|track| track.clips().is_empty()))
-			else {
+			let Some(index) = (0..self.track_count()).find(|index| {
+				self.track(*index)
+					.is_some_and(|track| track.clips().is_empty())
+			}) else {
 				break;
 			};
 			self.remove_track(index, cx);
@@ -623,6 +699,11 @@ pub trait AppEngine:
 	}
 
 	/// Adds a marker at the program playhead (undoable).
+	///
+	/// The marker has an empty label and lands on the current sequence's
+	/// marker list at the program monitor's playhead frame; one undo
+	/// entry. No-op when no sequence is open. Pairs with
+	/// [`Self::remove_marker_at_playhead`].
 	fn add_marker_at_playhead(&mut self, cx: &mut Context<Self>) {
 		let _ = cx;
 	}
@@ -634,6 +715,11 @@ pub trait AppEngine:
 
 	/// Applies a work-area range **live** (not undoable) — the ruler drag
 	/// preview path (Olive's `set_range` during drag).
+	///
+	/// `start` / `end` are sequence frames marking the half-open
+	/// `[start, end)` render range. The range is stored enabled but
+	/// creates no undo entry, so the drag's final state is committed by
+	/// [`Self::commit_workarea`]. No-op when no sequence is open.
 	fn set_workarea_preview(&mut self, start: Frame, end: Frame, cx: &mut Context<Self>) {
 		let _ = (start, end, cx);
 	}
@@ -651,7 +737,12 @@ pub trait AppEngine:
 		let _ = (old_start, old_end, start, end, cx);
 	}
 
-	/// Clears (disables) the work area (undoable).
+	/// Clears (disables) the work area in one undoable entry.
+	///
+	/// Afterwards [`Self::workarea`] reports `None` again, so export and
+	/// render fall back to the whole sequence; no-op when no sequence is
+	/// open. Pairs with [`Self::set_workarea_preview`] (live drag) and
+	/// [`Self::commit_workarea`] (the undoable commit).
 	fn clear_workarea(&mut self, cx: &mut Context<Self>) {
 		let _ = cx;
 	}
@@ -661,26 +752,60 @@ pub trait AppEngine:
 	fn delete_clip(&mut self, clip: ClipId, ripple: bool, cx: &mut Context<Self>);
 
 	/// Copy the selected clips to the engine clipboard (C++ Copy).
+	///
+	/// `clips` are the timeline clips to copy; the snapshot keeps their
+	/// relative offsets and links so [`Self::clipboard_paste`] can
+	/// rebuild them. Default: no-op (engines without a clipboard).
 	fn clipboard_copy(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Copy then gap-delete the selected clips (C++ Cut).
+	///
+	/// `clips` are the timeline clips to cut. The engine clipboard
+	/// receives a copy first (see [`Self::clipboard_copy`]), then each
+	/// clip is deleted without ripple, so gaps are left behind; ripple
+	/// deletion is a separate action.
 	fn clipboard_cut(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Paste the clipboard at the playhead (C++ Paste), one undoable entry.
 	fn clipboard_paste(&mut self, _cx: &mut Context<Self>) {}
 	/// Paste the clipboard at the playhead, rippling following content
 	/// right (C++ Paste Insert), one undoable entry.
 	fn clipboard_paste_insert(&mut self, _cx: &mut Context<Self>) {}
-	/// Duplicate the clips right after the selection's end (C++ Duplicate).
+	/// Duplicate the clips right after the selection's end (C++
+	/// Duplicate).
+	///
+	/// `clips` are the timeline clips to duplicate; the copies keep their
+	/// relative offsets and links and land immediately after the
+	/// selection's end. Clips on locked tracks are skipped; one undo
+	/// entry.
 	fn duplicate_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 	/// Rename the clips (C++ Rename, one undoable entry).
+	///
+	/// `clips` are the selected timeline clips and `name` becomes their
+	/// node label; a blank/whitespace-only name is rejected before the
+	/// edit runs, so the old labels stay. One undo row covers the whole
+	/// selection.
 	fn rename_clips(&mut self, _clips: Vec<ClipId>, _name: String, _cx: &mut Context<Self>) {}
 	/// Toggle the enabled flag of the clips (C++ Enable/Disable).
+	///
+	/// `clips` are the selected timeline clips: the new state is the
+	/// inverse of the first clip's current flag, applied to the whole
+	/// selection in one undo entry. Clips on locked tracks are skipped
+	/// and an empty selection is a no-op.
 	fn toggle_clips_enabled(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
-	/// Nudge the clips (and their linked groups) by `delta` frames
-	/// (C++ Nudge Left/Right).
+	/// Nudge the clips (and their linked groups) by `delta` frames.
+	///
+	/// `clips` are the selected timeline clips and `delta` is a signed
+	/// frame count (negative = left, positive = right). Linked clips move
+	/// together as one undo entry per group; the C++ Nudge Left/Right
+	/// actions drive it.
 	fn nudge_clips(&mut self, _clips: Vec<ClipId>, _delta: i64, _cx: &mut Context<Self>) {}
 	/// Trim the clips' in/out edge to the playhead, rippling the track
 	/// when `ripple` is set (C++ Move In/Out to Playhead /
 	/// Ripple to In/Out).
+	///
+	/// `clips` are the selected timeline clips and `in_edge` picks the
+	/// in-edges (`true`) or out-edges (`false`) to trim. Clips on locked
+	/// tracks are skipped, as are clips where the playhead lies outside
+	/// the clip or on the wrong side of the trimmed edge.
 	fn trim_selection_to_playhead(
 		&mut self,
 		_clips: Vec<ClipId>,
@@ -691,6 +816,11 @@ pub trait AppEngine:
 	}
 	/// Roll the boundary at the clips' in/out edge to the playhead
 	/// (C++ Edit to In/Out).
+	///
+	/// `clips` are the selected timeline clips and `at_in` picks the
+	/// in-edge (`true`) or out-edge (`false`) to move to the program
+	/// playhead. Clips on locked tracks are skipped; a rejected roll
+	/// stops the loop and surfaces the error.
 	fn roll_selection_to_playhead(
 		&mut self,
 		_clips: Vec<ClipId>,
@@ -701,17 +831,35 @@ pub trait AppEngine:
 	/// Delete the workarea's in/out range on every unlocked track,
 	/// rippling the gap closed when `ripple` is set (C++ Delete/Ripple
 	/// Delete In to Out).
+	///
+	/// `ripple` = `true` shifts the later clips left to close the gap,
+	/// `false` leaves the gap. One undo entry; no-op when the workarea
+	/// is disabled or no sequence is open.
 	fn delete_in_to_out(&mut self, _ripple: bool, _cx: &mut Context<Self>) {}
 	/// Set the clips' speed (span unchanged; C++ Speed/Duration).
+	///
+	/// `clips` are timeline clip ids and `speed` is the playback-rate
+	/// multiplier (`1.0` = normal, `2.0` = double, `0.5` = half). The
+	/// value must be finite and non-zero — the edit is rejected
+	/// otherwise - and clips on locked tracks are skipped.
 	fn set_clips_speed(&mut self, _clips: Vec<ClipId>, _speed: f64, _cx: &mut Context<Self>) {}
 	/// Bracket a multi-write parameter gesture (a color-wheel drag) so its
 	/// per-move writes land in ONE undo entry. Default no-ops for engines
 	/// without an undo stack.
+	///
+	/// `name` labels the undo group (the history row's command name).
+	/// Every call must be paired with [`Self::end_param_drag`]; engines
+	/// without undo groups simply ignore it.
 	fn begin_param_drag(&mut self, _name: &str, _cx: &mut Context<Self>) {}
 	/// Close the gesture's undo group (see [`Self::begin_param_drag`]).
 	fn end_param_drag(&mut self, _cx: &mut Context<Self>) {}
 	/// Nest the clips into a new sequence and replace them with one
 	/// nested clip (C++ Nest).
+	///
+	/// `clips` are the timeline clips to move; the nested clip spans
+	/// their combined range and is the only clip left on the timeline
+	/// afterwards. Clips on locked tracks are skipped, and the edit is
+	/// one undo entry.
 	fn nest_clips(&mut self, _clips: Vec<ClipId>, _cx: &mut Context<Self>) {}
 
 	/// Whether the undo stack has an entry to undo.
@@ -760,8 +908,7 @@ pub trait AppEngine:
 	/// [`open_project_path`] (AppEngine::open_project_path). Exporting is a
 	/// pure file write — the write-through library already persists every
 	/// edit, so there is no "save" anymore.
-	fn export_project_path(&mut self, path: PathBuf, cx: &mut Context<Self>)
-		-> Result<(), String>;
+	fn export_project_path(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<(), String>;
 
 	/// Closes the current project, leaving the app with no sequence.
 	fn close_project(&mut self, cx: &mut Context<Self>);
@@ -822,6 +969,11 @@ pub trait AppEngine:
 	/// 另存为: saves the OPEN project into the library as a differently-
 	/// named copy and switches the current project to that copy. Default:
 	/// unsupported.
+	///
+	/// `name` is the new copy's library name (trimmed); the original row
+	/// stays untouched and keeps its history. `Err` when the engine has
+	/// no library support (the default) or duplicating/opening the copy
+	/// fails.
 	fn save_project_as(&mut self, name: &str, cx: &mut Context<Self>) -> Result<(), String> {
 		let _ = (name, cx);
 		Err("save-as not supported".into())
@@ -846,7 +998,213 @@ pub trait AppEngine:
 		None
 	}
 
-	/// Import a media file into the project (M12 P3). Default: no-op.
+	/// Imports an SRT file as Text clips on the current sequence's top
+	/// video track and returns the imported cue count.
+	///
+	/// `path` is the `.srt` source. `Err` when the file cannot be parsed
+	/// or the engine has no subtitle support (the default).
+	fn import_subtitles(
+		&mut self,
+		_path: std::path::PathBuf,
+		_cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		Err("subtitle import not supported".into())
+	}
+
+	/// Exports the current sequence's Text clips as an SRT file and
+	/// returns the number of cues written.
+	///
+	/// `path` is the destination file (overwritten). `Err` when the
+	/// engine has no subtitle support (the default), no sequence is
+	/// open, or the write fails.
+	fn export_subtitles(
+		&mut self,
+		_path: std::path::PathBuf,
+		_cx: &mut Context<Self>,
+	) -> Result<usize, String> {
+		Err("subtitle export not supported".into())
+	}
+
+	/// Reads the subtitle style currently applied to a Text clip.
+	///
+	/// `clip` is a timeline clip id; returns `None` when the engine has
+	/// no subtitle support (the default), no project is open, or the
+	/// clip is not a Text clip. Pairs with
+	/// [`Self::set_subtitle_style`].
+	fn subtitle_style(&self, _clip: u64) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
+		None
+	}
+
+	/// Measures loudness over the current sequence, if supported.
+	fn measure_loudness(&mut self) -> Option<quercus_engine_rs::editor::LoudnessMeasurement> {
+		None
+	}
+
+	/// Reads the current sequence's master-bus effect chain.
+	fn audio_bus_effects(&self) -> Vec<quercus_engine_rs::editor::AudioBusEffect> {
+		Vec::new()
+	}
+
+	/// Replaces the master-bus limiter settings.
+	///
+	/// `enabled` toggles the limiter, `ceiling_db` is the output ceiling
+	/// in dBFS (0 = full scale, negative leaves headroom) and
+	/// `release_ms` the release time in milliseconds. `Err` when the
+	/// engine has no audio-bus support (the default) or no project is
+	/// open.
+	fn set_audio_bus_limiter(
+		&mut self,
+		_enabled: bool,
+		_ceiling_db: f64,
+		_release_ms: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("audio bus is not supported".into())
+	}
+
+	/// Reads a clip's audio mix (gain, pan, fades) and effect chain.
+	///
+	/// `clip` is a timeline clip id; returns `None` when the engine has
+	/// no clip-audio support (the default), no project is open, or the
+	/// id is not a clip. It is the read side of the `set_clip_audio_*`
+	/// family.
+	fn clip_audio(&self, _clip: u64) -> Option<quercus_engine_rs::editor::ClipAudioState> {
+		None
+	}
+
+	/// Applies a subtitle style to one Text clip.
+	///
+	/// `clip` is the timeline clip id and `style` the style to write —
+	/// the value [`Self::subtitle_style`] reads back. `Err` when the
+	/// engine has no subtitle support (the default), no project is open,
+	/// or the clip is not a Text clip.
+	fn set_subtitle_style(
+		&mut self,
+		_clip: u64,
+		_style: &quercus_engine_rs::editor::SubtitleStyle,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("subtitle styling is not supported".into())
+	}
+
+	/// Sets one parameter of a clip's audio effect chain entry.
+	///
+	/// `clip` is a timeline clip id, `index` the zero-based chain
+	/// position, `input` the effect input identifier and `value` the new
+	/// numeric value in the parameter's native unit. `Err` when the
+	/// engine has no clip-audio support (the default) or the write is
+	/// rejected.
+	fn set_clip_audio_effect_param(
+		&mut self,
+		_clip: u64,
+		_index: usize,
+		_input: &str,
+		_value: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Sets the per-clip audio gain on each clip.
+	///
+	/// `clips` are timeline clip ids and `gain` is a linear multiplier
+	/// (`1.0` = unity, `0.0` = silence), not decibels. `Err` when the
+	/// engine has no clip-audio support (the default) or a clip is
+	/// rejected.
+	fn set_clip_audio_gain(
+		&mut self,
+		_clips: &[u64],
+		_gain: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Sets per-clip stereo pan.
+	///
+	/// `clips` are timeline clip ids and `pan` runs from `-1.0` (hard
+	/// left) through `0.0` (center) to `1.0` (hard right). `Err` when
+	/// the engine has no clip-audio support (the default), no project is
+	/// open, or a clip is rejected.
+	fn set_clip_audio_pan(
+		&mut self,
+		_clips: &[u64],
+		_pan: f64,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Sets linear fade-in/out durations (seconds) on each clip.
+	///
+	/// `clips` are timeline clip ids. `fade_in` and `fade_out` are
+	/// `(numerator, denominator)` rationals in seconds; `(0, 1)` means
+	/// "no fade". Clips are written in turn, so a failure leaves the
+	/// earlier clips updated.
+	fn set_clip_audio_fade(
+		&mut self,
+		_clips: &[u64],
+		_fade_in: (i64, i64),
+		_fade_out: (i64, i64),
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Enables or disables one entry of a clip's audio effect chain.
+	///
+	/// `clip` is a timeline clip id, `index` the zero-based chain
+	/// position and `enabled` the new bypass state (`false` keeps the
+	/// entry in the chain but skips its processing). `Err` as for
+	/// [`Self::remove_clip_audio_effect`].
+	fn set_clip_audio_effect_enabled(
+		&mut self,
+		_clip: u64,
+		_index: usize,
+		_enabled: bool,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Removes one entry from a clip's audio effect chain.
+	///
+	/// `clip` is a timeline clip id and `index` is the zero-based
+	/// position in that clip's chain (as listed by
+	/// [`Self::clip_audio`]). `Err` when the engine has no clip-audio
+	/// support (the default), no project is open, or the entry cannot be
+	/// removed.
+	fn remove_clip_audio_effect(
+		&mut self,
+		_clip: u64,
+		_index: usize,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Appends a Volume/Pan audio effect to each clip's audio chain.
+	///
+	/// `clips` are timeline clip ids and `type_id` names the effect type
+	/// to instantiate; the effect is appended at the chain end, so
+	/// existing entries keep their order. `Err` when the engine has no
+	/// clip-audio support (the default) or a clip is rejected.
+	fn add_clip_audio_effect(
+		&mut self,
+		_clips: &[u64],
+		_type_id: &str,
+		_cx: &mut Context<Self>,
+	) -> Result<(), String> {
+		Err("clip audio is not supported".into())
+	}
+
+	/// Imports a media file into the project and lists it in the project
+	/// explorer as footage.
+	///
+	/// `path` is the media file to probe. Returns `Err` when no project
+	/// is open or the file cannot be imported; when the global proxy
+	/// switch is on, proxy generation for the new footage starts in the
+	/// background. Default: no-op (`Ok(())`).
 	fn import_footage(
 		&mut self,
 		_path: std::path::PathBuf,
@@ -870,6 +1228,16 @@ pub trait AppEngine:
 	/// such track exists (the facade validates only the track type — video
 	/// or audio, subtitles are rejected — never the media/track pairing).
 	/// Default: no-op.
+	///
+	/// # Arguments
+	///
+	/// * `id` - Project-explorer entry id of the footage (the backend
+	///   resolves it to a footage node).
+	/// * `track_kind` - Kind of the track under the cursor, used by the
+	///   media/track mismatch policy above.
+	/// * `track_index` - Display index of the pointed track in the
+	///   timeline (0 = topmost row).
+	/// * `time` - Sequence frame where the new clip starts (its in-point).
 	fn drop_footage(
 		&mut self,
 		_id: u64,
@@ -949,20 +1317,18 @@ pub trait AppEngine:
 	/// The global "Use Proxy Media" switch (the C++ `UseProxyMedia`
 	/// config; preview-only — exports always decode the original media).
 	fn use_proxy_media(&self) -> bool {
-		oak_core::configstore::ConfigStore::instance()
-			.get_bool(None, "UseProxyMedia", 1)
-			!= 0
+		super::settings::use_proxy_media()
 	}
 
 	/// Toggles the global "Use Proxy Media" switch and invalidates every
 	/// footage's rendered frames (the C++ toggles the config and
 	/// re-renders; the preview path reads the switch on every montage).
+	///
+	/// `enabled` writes the app-wide `UseProxyMedia` config (default
+	/// `true`), not the project, so every open project sees the switch.
+	/// It is preview-only: exports always decode the original media.
 	fn set_use_proxy_media(&mut self, enabled: bool, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			"UseProxyMedia",
-			if enabled { "true" } else { "false" },
-		);
+		super::settings::set_use_proxy_media(enabled);
 		let _ = cx;
 	}
 
@@ -971,19 +1337,13 @@ pub trait AppEngine:
 	/// size, 2/4/8 = progressively smaller preview renders for machines
 	/// that cannot keep up. Preview-only; exports always render native.
 	fn playback_divider(&self) -> i64 {
-		oak_core::configstore::ConfigStore::instance()
-			.get_int(None, "PlaybackDivider", 1)
-			.clamp(1, 8) as i64
+		super::settings::playback_divider()
 	}
 
 	/// Sets the playback resolution divider and invalidates the rendered
 	/// frames so the next pull re-renders at the new geometry.
 	fn set_playback_divider(&mut self, divider: i64, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			"PlaybackDivider",
-			&divider.clamp(1, 8).to_string(),
-		);
+		super::settings::set_playback_divider(divider);
 		let _ = cx;
 	}
 
@@ -997,19 +1357,17 @@ pub trait AppEngine:
 	/// Whether playback stops at the last frame instead of looping (the C++
 	/// viewer `Stop on Last` toggle / `StopOnLastFrame` config).
 	fn stop_on_last(&self) -> bool {
-		oak_core::configstore::ConfigStore::instance()
-			.get_bool(None, "StopOnLastFrame", 0)
-			!= 0
+		super::settings::stop_on_last()
 	}
 
-	/// Sets the `StopOnLastFrame` config (the next tick past the end either
-	/// pauses at the last frame or wraps around).
+	/// Sets the `StopOnLastFrame` config (the next tick past the end
+	/// either pauses at the last frame or wraps around).
+	///
+	/// `enabled` = `true` pauses playback on the last frame, `false`
+	/// loops back to the sequence start. App-wide config (default
+	/// `true`), not project data, so every engine shares it.
 	fn set_stop_on_last(&mut self, enabled: bool, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			"StopOnLastFrame",
-			if enabled { "true" } else { "false" },
-		);
+		super::settings::set_stop_on_last(enabled);
 		let _ = cx;
 	}
 
@@ -1017,30 +1375,25 @@ pub trait AppEngine:
 	/// value (`0` automatic / `1` only / `2` both), clamped to the valid
 	/// range.
 	fn waveform_mode(&self) -> i32 {
-		oak_core::configstore::ConfigStore::instance()
-			.get_int(None, "ViewerWaveformMode", 0)
-			.clamp(0, 2)
+		super::settings::waveform_mode()
 	}
 
-	/// Sets the `ViewerWaveformMode` config value (clamped to `0..=2`).
+	/// Sets the `ViewerWaveformMode` config value (clamped to `0..=2`)
+	/// and stores it in the app-wide config.
+	///
+	/// `mode` is 0 = automatic (on when the sequence has audio), 1 =
+	/// only, 2 = both. The viewer reads it back through
+	/// [`Self::waveform_mode`] on its next paint; not project data, so
+	/// every project sees the same value.
 	fn set_waveform_mode(&mut self, mode: i32, cx: &mut Context<Self>) {
-		oak_core::configstore::ConfigStore::instance().set(
-			None,
-			"ViewerWaveformMode",
-			&mode.clamp(0, 2).to_string(),
-		);
+		super::settings::set_waveform_mode(mode);
 		let _ = cx;
 	}
 
 	/// Saves `monitor`'s current CPU frame as a BGRA PNG at `path` and
 	/// returns the path on success. The viewer menu's `Save Frame` entry
 	/// falls back to this for engines without a dedicated capture path.
-	fn save_frame(
-		&self,
-		monitor: Monitor,
-		path: PathBuf,
-		cx: &App,
-	) -> Result<PathBuf, String> {
+	fn save_frame(&self, monitor: Monitor, path: PathBuf, cx: &App) -> Result<PathBuf, String> {
 		let image = self.cpu_frame(monitor, cx);
 		let size = image.size(0);
 		let bytes = image
@@ -1072,7 +1425,11 @@ pub trait AppEngine:
 	/// as an OCIO config (Err keeps the dialog open, like the C++ accept()),
 	/// then the display color pipeline reloads and every rendered frame is
 	/// invalidated. Empty path restores the app default.
-	fn set_project_ocio_config(&mut self, path: String, cx: &mut Context<Self>) -> Result<(), String> {
+	fn set_project_ocio_config(
+		&mut self,
+		path: String,
+		cx: &mut Context<Self>,
+	) -> Result<(), String> {
 		let _ = (path, cx);
 		Ok(())
 	}
@@ -1086,27 +1443,39 @@ pub trait AppEngine:
 
 	/// Sets the disk-cache location; later cache writes (thumbnails and
 	/// any future per-project caches) land in the new location.
-	fn set_project_cache_location(&mut self, setting: i32, custom_path: String, cx: &mut Context<Self>) {
+	///
+	/// `setting` is clamped to `0..=2` (0 = default location, 1 =
+	/// alongside the project file, 2 = custom path); `custom_path` is
+	/// only stored for mode 2 and is trimmed, while other modes clear the
+	/// stored path. Not undoable; no-op when no project is open.
+	fn set_project_cache_location(
+		&mut self,
+		setting: i32,
+		custom_path: String,
+		cx: &mut Context<Self>,
+	) {
 		let _ = (setting, custom_path, cx);
 	}
 
 	/// The project's color pipeline settings:
 	/// `(working colorspace, output gamut, output transfer)` as the
-	/// persisted setting strings (see `oak_core::colormath`). The
+	/// persisted setting strings. The
 	/// working colorspace is the pipeline's scene space (ACEScg by
 	/// default, not hard-coded sRGB); the output pair is the delivery
 	/// target for export and presentation.
 	fn project_color_settings(&self) -> (String, String, String) {
-		(
-            oak_core::colormath::WorkingColorSpace::default().as_setting().to_string(),
-            oak_core::colormath::OutputGamut::default().as_setting().to_string(),
-            oak_core::colormath::OutputTransfer::default().as_setting().to_string(),
-		)
+		super::settings::default_project_color_settings()
 	}
 
 	/// Applies the project color pipeline settings: stores them in the
 	/// project properties and invalidates every cached frame (they were
 	/// rendered under the old pipeline).
+	///
+	/// `working` is the scene (working) colorspace, `gamut` the output
+	/// primaries and `transfer` the output transfer function — the three
+	/// values [`Self::project_color_settings`] reads back. The change is
+	/// not recorded on the undo stack; the next frame pull re-renders
+	/// under the new pipeline.
 	fn set_project_color_settings(
 		&mut self,
 		working: String,
@@ -1125,6 +1494,11 @@ pub trait AppEngine:
 	// -------------------------------------------------------------------
 
 	/// Whether the project-explorer entry `id` is a sequence node.
+	///
+	/// `id` is the entry identity from the project explorer; returns
+	/// `false` when no project is open, the id is unknown, or the node is
+	/// not a sequence. The explorer uses this to pick the sequence
+	/// context menu; it pairs with [`Self::open_sequence_id`].
 	fn entry_is_sequence(&self, id: u64) -> bool {
 		let _ = id;
 		false
@@ -1145,7 +1519,13 @@ pub trait AppEngine:
 	}
 
 	/// Creates a sequence in the open project with the given parameters
-	/// and opens it. `Err` keeps the new-sequence dialog open.
+	/// and opens it, returning the new sequence's project-entry id.
+	///
+	/// `name` is the sequence label (blank names fall back to a default
+	/// such as `Sequence 1`), `format` carries the frame size and rate,
+	/// and `interlaced` selects two-field timing. The new sequence
+	/// becomes the current one, so the timeline rebuilds against it.
+	/// `Err` keeps the new-sequence dialog open.
 	fn create_sequence_with_params(
 		&mut self,
 		name: String,
@@ -1157,8 +1537,12 @@ pub trait AppEngine:
 		Err("no project open".to_string())
 	}
 
-	/// Creates a folder in the open project. `Err` keeps the caller's
-	/// action from completing.
+	/// Creates a folder in the open project and returns its project-entry
+	/// id.
+	///
+	/// `name` is the folder label; a blank/whitespace-only name is
+	/// replaced by a `Folder N` default. `Err` (for example when no
+	/// project is open) keeps the caller's action from completing.
 	fn create_folder(&mut self, name: String, cx: &mut Context<Self>) -> Result<u64, String> {
 		let _ = (name, cx);
 		Err("no project open".to_string())
@@ -1244,7 +1628,7 @@ pub trait AppEngine:
 	}
 
 	/// Starts generating the proxy of footage `id` (a background ffmpeg
-	/// transcode through `oak_task::ProxyTask`). Progress is reported
+	/// transcode through the engine proxy task). Progress is reported
 	/// through [`proxy_task_progress`](Self::proxy_task_progress) and
 	/// drained on the engine tick; completion invalidates the footage's
 	/// rendered frames.
@@ -1278,12 +1662,7 @@ pub trait AppEngine:
 
 	/// Sets footage `id`'s custom proxy generation params (the proxy
 	/// dialog's per-footage "custom" checkbox path).
-	fn proxy_set_custom_params(
-		&mut self,
-		id: u64,
-		params: ProxyParamsUi,
-		cx: &mut Context<Self>,
-	) {
+	fn proxy_set_custom_params(&mut self, id: u64, params: ProxyParamsUi, cx: &mut Context<Self>) {
 		let _ = (id, params, cx);
 	}
 
@@ -1385,7 +1764,11 @@ pub trait AppEngine:
 	/// background render and notifies when it lands). The backend caches
 	/// per (multicam node, source) with an LRU cap, so a paused panel never
 	/// re-renders a cell.
-	fn multicam_angle_frame(&mut self, source: i32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+	fn multicam_angle_frame(
+		&mut self,
+		source: i32,
+		cx: &mut Context<Self>,
+	) -> Option<Arc<RenderImage>> {
 		let _ = (source, cx);
 		None
 	}
@@ -1464,6 +1847,20 @@ pub trait AppEngine:
 	/// multicam node feeding a fresh clip on the CURRENT timeline's top
 	/// video track at the playhead. One undo entry. Returns the sequence
 	/// identity (the app opens it).
+	///
+	/// # Arguments
+	///
+	/// * `selected` - The wizard's angle footage rows in display order:
+	///   index `i` becomes track `i`, so the top track holds `selected[0]`.
+	/// * `offsets` - Per-angle placement offset in seconds, one entry per
+	///   angle (positive means that angle starts later on its track).
+	/// * `name` - Display name of the new sequence, stored verbatim.
+	///
+	/// # Errors
+	///
+	/// Returns `Err` when the engine has no multicam support (the default),
+	/// when no project or host sequence is open, or when the backend's
+	/// create-multicam edit fails.
 	fn multicam_create_sequence(
 		&mut self,
 		_selected: Vec<WizardFootage>,
@@ -1483,8 +1880,15 @@ pub trait AppEngine:
 	}
 
 	/// Whether the program viewer's eyedropper is currently armed.
+	///
+	/// Reads the `EyedropperMailbox` global that
+	/// [`Self::set_eyedropper_armed`] writes; `cx` is only the lookup
+	/// handle, so the call has no side effects. Returns `false` when no
+	/// mailbox was installed yet. The program viewer and the OFX color
+	/// picker poll this to mirror the armed state into their own widgets.
 	fn eyedropper_armed(&self, cx: &App) -> bool {
-		cx.try_global::<EyedropperMailbox>().is_some_and(|mailbox| mailbox.armed)
+		cx.try_global::<EyedropperMailbox>()
+			.is_some_and(|mailbox| mailbox.armed)
 	}
 
 	/// Reports a color picked by the program viewer's eyedropper and
@@ -1560,7 +1964,7 @@ pub struct WizardSyncOffset {
 }
 
 /// The lifecycle state of one footage's proxy (the UI mirror of
-/// `oak_codec::proxymanager::ProxyState`).
+/// the engine's proxy lifecycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProxyMediaState {
 	/// No proxy on disk (the menu offers "Generate").
@@ -1574,7 +1978,7 @@ pub enum ProxyMediaState {
 }
 
 /// The proxy generation parameters the proxy dialog edits (the app-side
-/// mirror of `oak_codec::proxymanager::ProxyParams`, minus the fixed
+/// mirror of the engine proxy parameters, minus the fixed
 /// version / extension).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProxyParamsUi {
@@ -1596,50 +2000,7 @@ pub struct ProxyParamsUi {
 /// default values): `ProxyWidth`/`ProxyHeight`/`ProxyDivider`/`ProxyCRF`/
 /// `ProxyPreset`/`ProxyIncludeAudio`.
 pub fn proxy_params_from_config() -> ProxyParamsUi {
-	let codec = oak_codec::proxymanager::ProxyManager::proxy_params_from_config();
-	let end = |a: &[u8; 32]| a.iter().position(|&b| b == 0).unwrap_or(a.len());
-	let preset = std::str::from_utf8(&codec.preset[..end(&codec.preset)])
-		.unwrap_or("")
-		.to_string();
-	ProxyParamsUi {
-		width: codec.width,
-		height: codec.height,
-		divider: codec.divider,
-		crf: codec.crf,
-		preset,
-		include_audio: codec.include_audio != 0,
-	}
-}
-
-impl ProxyParamsUi {
-	/// The codec-side params these UI params stand for.
-	pub fn to_codec(&self) -> oak_codec::proxymanager::ProxyParams {
-		let mut p = oak_codec::proxymanager::ProxyParams::default();
-		p.width = self.width;
-		p.height = self.height;
-		p.divider = self.divider;
-		p.crf = self.crf;
-		p.include_audio = if self.include_audio { 1 } else { 0 };
-		let bytes = self.preset.as_bytes();
-		let n = bytes.len().min(31);
-		p.preset[..n].copy_from_slice(&bytes[..n]);
-		p
-	}
-
-	/// UI params from codec-side params.
-	pub fn from_codec(codec: &oak_codec::proxymanager::ProxyParams) -> ProxyParamsUi {
-		let end = |a: &[u8; 32]| a.iter().position(|&b| b == 0).unwrap_or(a.len());
-		ProxyParamsUi {
-			width: codec.width,
-			height: codec.height,
-			divider: codec.divider,
-			crf: codec.crf,
-			preset: std::str::from_utf8(&codec.preset[..end(&codec.preset)])
-				.unwrap_or("")
-				.to_string(),
-			include_audio: codec.include_audio != 0,
-		}
-	}
+	super::settings::proxy_params_from_config()
 }
 
 /// One footage row of the proxy dialog's footage-mode list.
@@ -1697,11 +2058,11 @@ pub enum ExportEvent {
 /// which combos are selectable — an incompatible codec is never offered).
 #[derive(Debug, Clone)]
 pub struct ExportSettings {
-	/// The container format id ([`oak_codec::exportformat::Format`]).
+	/// The container format id defined by the engine export contract.
 	pub format: i32,
-	/// The video codec ([`oak_codec::exportcodec::Codec`]).
+	/// The video codec id defined by the engine export contract.
 	pub video_codec: i32,
-	/// The audio codec ([`oak_codec::exportcodec::Codec`]).
+	/// The audio codec id defined by the engine export contract.
 	pub audio_codec: i32,
 	/// Output size (`(width, height)`; `(0,0)` keeps the sequence size).
 	pub size: (i32, i32),
@@ -1726,7 +2087,7 @@ pub struct ExportSettings {
 impl Default for ExportSettings {
 	fn default() -> Self {
 		Self {
-			format: 2, // MPEG4Video (.mp4)
+			format: 2,       // MPEG4Video (.mp4)
 			video_codec: 1,  // H.264
 			audio_codec: 12, // AAC
 			size: (0, 0),
@@ -1742,7 +2103,8 @@ impl Default for ExportSettings {
 	}
 }
 
-pub struct ExportSession {	/// The event receiver (the background thread's sender lives as long as
+pub struct ExportSession {
+	/// The event receiver (the background thread's sender lives as long as
 	/// the session's `cancel` side, so a dropped receiver just stops
 	/// delivering).
 	pub events: std::sync::mpsc::Receiver<ExportEvent>,
@@ -1755,13 +2117,13 @@ mod tests {
 	use super::*;
 	use crate::oakui::MockClock;
 	use crate::widgets::effect_stack::EffectData;
-	use gpui_kit::{AppContext as _, TestAppContext};
 	use crate::widgets::node_graph::PortId;
 	use crate::widgets::project_explorer::ProjectEntry;
+	use gpui_kit::{AppContext as _, TestAppContext};
 
 	#[test]
 	fn node_category_key_covers_every_category() {
-		use oak_node::node::Category as C;
+		use NodeCategory as C;
 		for category in [
 			C::Output,
 			C::Effect,
@@ -1974,7 +2336,13 @@ mod tests {
 
 			// Footage defaults.
 			assert_eq!(engine.read(app).entry_path(1), None);
-			assert_eq!(engine.read(app).project_entry_name(1).map(|s| s.to_string()), None);
+			assert_eq!(
+				engine
+					.read(app)
+					.project_entry_name(1)
+					.map(|s| s.to_string()),
+				None
+			);
 			assert_eq!(engine.read(app).footage_length_frames(1), None);
 			assert_eq!(engine.read(app).footage_video_params(1), None);
 			assert_eq!(engine.read(app).workarea(), None);
@@ -1983,26 +2351,44 @@ mod tests {
 			engine.update(app, |engine, cx| {
 				assert!(engine.add_adjustment_layer(0, Frame::ZERO, cx).is_err());
 				assert!(engine.add_effect(0, "no.such.effect", cx).is_err());
-				assert!(engine
-					.set_effect_param(EffectId(0), "p", oak_node::value::NodeValue::None, cx)
-					.is_err());
+				assert!(
+					engine
+						.set_effect_param(EffectId(0), "p", EffectValue::None, cx)
+						.is_err()
+				);
 				assert!(engine.effect_push_button(EffectId(0), "p", cx).is_err());
-				assert!(engine.add_node_at("no.such.node", Point::default(), cx).is_err());
-				assert!(engine
-					.replace_footage(1, PathBuf::from("/tmp/x.mp4"), cx)
-					.is_err());
-				assert!(engine
-					.library_projects()
-					.is_err());
+				assert!(
+					engine
+						.add_node_at("no.such.node", Point::default(), cx)
+						.is_err()
+				);
+				assert!(
+					engine
+						.replace_footage(1, PathBuf::from("/tmp/x.mp4"), cx)
+						.is_err()
+				);
+				assert!(engine.library_projects().is_err());
 				assert!(engine.library_create_project("x", cx).is_err());
 				assert!(engine.library_open_project("u", cx).is_err());
 				assert!(engine.library_delete_project("u").is_err());
 				assert!(engine.library_rename_project("u", "n").is_err());
 				assert!(engine.library_duplicate_project("u").is_err());
 				assert!(engine.save_project_as("x", cx).is_err());
-				assert!(engine.library_import_project(PathBuf::from("/tmp/x.ove")).is_err());
-				assert!(engine.library_export_project("u", PathBuf::from("/tmp/x.ove")).is_err());
-				assert!(engine.import_footage(PathBuf::from("/tmp/x.mp4"), cx).is_ok());
+				assert!(
+					engine
+						.library_import_project(PathBuf::from("/tmp/x.ove"))
+						.is_err()
+				);
+				assert!(
+					engine
+						.library_export_project("u", PathBuf::from("/tmp/x.ove"))
+						.is_err()
+				);
+				assert!(
+					engine
+						.import_footage(PathBuf::from("/tmp/x.mp4"), cx)
+						.is_ok()
+				);
 
 				// All panelless operations are silent no-ops.
 				engine.set_selected_clips(vec![ClipId(1), ClipId(2)], cx);
@@ -2023,61 +2409,8 @@ mod tests {
 			// `delete_empty_tracks` walks the (empty) track list and stops.
 			engine.update(app, |engine, cx| engine.delete_empty_tracks(cx));
 
-			// The node library comes from the global factory; every entry
-			// carries an Add-menu category key.
-			let library = engine.read(app).node_library();
-			assert!(!library.is_empty(), "the factory has creatable entries");
-			for entry in &library {
-				assert!(entry.category_key.starts_with("node.category."));
-				assert!(!entry.type_id.is_empty());
-				assert!(!entry.name.is_empty());
-			}
+			assert!(engine.read(app).node_library().is_empty());
 		});
-	}
-
-	#[test]
-	fn proxy_params_ui_round_trips_through_the_codec_type() {
-		let codec = oak_codec::proxymanager::ProxyParams {
-			width: 1280,
-			height: 720,
-			divider: 2,
-			crf: 23,
-			include_audio: 0,
-			..oak_codec::proxymanager::ProxyParams::default()
-		};
-		let ui = ProxyParamsUi::from_codec(&codec);
-		assert_eq!(ui.width, 1280);
-		assert_eq!(ui.height, 720);
-		assert_eq!(ui.divider, 2);
-		assert_eq!(ui.crf, 23);
-		assert!(!ui.include_audio);
-		let back = ui.to_codec();
-		assert_eq!(back.width, 1280);
-		assert_eq!(back.divider, 2);
-		assert_eq!(back.include_audio, 0);
-
-		// A long preset is truncated to the 31-byte codec field.
-		let long = ProxyParamsUi {
-			preset: "x".repeat(40),
-			include_audio: true,
-			..ui
-		};
-		let codec = long.to_codec();
-		assert_eq!(&codec.preset[..31], "x".repeat(31).as_bytes());
-		assert_eq!(codec.preset[31], 0);
-		assert_eq!(codec.include_audio, 1);
-	}
-
-	#[test]
-	fn proxy_params_from_config_returns_the_defaults() {
-		// No Proxy* config is installed by the test environment: the codec
-		// defaults come back.
-		let params = proxy_params_from_config();
-		let codec_defaults = oak_codec::proxymanager::ProxyManager::proxy_params_default();
-		assert_eq!(params.width, codec_defaults.width);
-		assert_eq!(params.height, codec_defaults.height);
-		assert_eq!(params.divider, codec_defaults.divider);
-		assert_eq!(params.crf, codec_defaults.crf);
 	}
 
 	/// The remaining `AppEngine` defaults: project/library/proxy/sync/
@@ -2105,9 +2438,11 @@ mod tests {
 			assert_eq!(engine.read(app).multicam_wizard_footage(), None);
 			assert!(engine.read(app).multicam_wizard_sync_offsets(&[]).is_err());
 			assert!(!engine.read(app).eyedropper_armed(app));
-			let _ = engine
-				.read(app)
-				.save_frame(Monitor::Program, PathBuf::from("/tmp/oak-null.png"), app);
+			let _ = engine.read(app).save_frame(
+				Monitor::Program,
+				PathBuf::from("/tmp/oak-null.png"),
+				app,
+			);
 
 			// Config-backed getters; the setters write their compiled-in
 			// defaults back so the process config stays neutral.
@@ -2131,30 +2466,40 @@ mod tests {
 				engine.set_project_color_settings(String::new(), String::new(), String::new(), cx);
 
 				// Unsupported operations report errors instead of panicking.
-				assert!(engine
-					.start_export_of(1, &ExportSettings::default(), PathBuf::from("/tmp/x.mp4"))
-					.is_err());
-				assert!(engine
-					.create_sequence_with_params(
-						"s".into(),
-						VideoFormat::hd_1080p25(),
-						false,
-						cx,
-					)
-					.is_err());
+				assert!(
+					engine
+						.start_export_of(1, &ExportSettings::default(), PathBuf::from("/tmp/x.mp4"))
+						.is_err()
+				);
+				assert!(
+					engine
+						.create_sequence_with_params(
+							"s".into(),
+							VideoFormat::hd_1080p25(),
+							false,
+							cx,
+						)
+						.is_err()
+				);
 				assert!(engine.create_folder("f".into(), cx).is_err());
 				assert!(engine.create_text_footage(cx).is_err());
 				assert!(engine.drop_generator_clip("t", 0, Frame::ZERO, cx).is_err());
-				assert!(engine.drop_transition_at("t", 0, Frame::ZERO, 25, cx).is_err());
-				assert!(engine
-					.update_sequence_parameters(
-						1,
-						"n".into(),
-						VideoFormat::hd_1080p25(),
-						false,
-						cx,
-					)
-					.is_err());
+				assert!(
+					engine
+						.drop_transition_at("t", 0, Frame::ZERO, 25, cx)
+						.is_err()
+				);
+				assert!(
+					engine
+						.update_sequence_parameters(
+							1,
+							"n".into(),
+							VideoFormat::hd_1080p25(),
+							false,
+							cx,
+						)
+						.is_err()
+				);
 				engine.open_sequence_id(1, cx);
 
 				assert!(engine.proxy_generate(1, cx).is_err());
@@ -2182,9 +2527,11 @@ mod tests {
 				engine.multicam_enable_selected(Vec::new(), false, cx);
 				engine.multicam_switch_to(0, false, cx);
 				assert!(engine.multicam_angle_frame(0, cx).is_none());
-				assert!(engine
-					.multicam_create_sequence(Vec::new(), Vec::new(), "m".into(), cx)
-					.is_err());
+				assert!(
+					engine
+						.multicam_create_sequence(Vec::new(), Vec::new(), "m".into(), cx)
+						.is_err()
+				);
 
 				// Eyedropper mailbox round trip.
 				engine.set_eyedropper_armed(true, cx);

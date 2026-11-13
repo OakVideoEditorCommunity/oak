@@ -47,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       # Taste the disk before the toolchains land: Defender scans every
       # file the cargo/FFmpeg builds touch (tens of thousands of small
@@ -131,6 +133,13 @@ jobs:
           $inner = Get-ChildItem "$root\ffmpeg-extract" -Directory | Select-Object -First 1
           Move-Item $inner.FullName "$root\ffmpeg"
 
+      - name: Install pkg-config (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-pkgconf
+          "PKG_CONFIG=C:\msys64\ucrt64\bin\pkgconf.exe" >> $env:GITHUB_ENV
+
       # ------------------------------------------------------------------
       # FFmpeg + caches
       # ------------------------------------------------------------------
@@ -156,9 +165,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ffmpeg-shared-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ffmpeg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
+            ffmpeg-shared-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('tooling/ffmpeg/build-ffmpeg.sh', 'tooling/ffmpeg/build-deps.sh', 'tooling/install-deps.sh') }}-
 
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
@@ -168,7 +177,7 @@ jobs:
             echo "FFmpeg restored from cache; skipping the build"
           else
             rm -rf .cache/ffmpeg
-            tooling/ffmpeg/build-ffmpeg.sh
+            tooling/ffmpeg/build-ffmpeg.sh --shared
             # The cargo cache may hold ffmpeg-sys-next rlibs that bundled
             # the previous archives (cargo does not track archive
             # changes); flag a refresh so the build relinks the new one.
@@ -201,6 +210,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -212,6 +222,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'
@@ -272,12 +283,12 @@ jobs:
           restore-keys: |
             ocio-bundled-${{ runner.os }}-${{ matrix.arch }}-${{ steps.configure-env-windows.outputs.ocio_rev }}-
 
-      # A freshly built FFmpeg must not keep linking the archives the
-      # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
-      # track them); drop just that package so the link picks up the new
-      # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
-      - name: Refresh the FFmpeg binding
-        run: cargo clean -p ffmpeg-sys-next
+#      # A freshly built FFmpeg must not keep linking the archives the
+#      # cargo cache bundled in ffmpeg-sys-next's rlib (cargo does not
+#      # track them); drop just that package so the link picks up the new
+#      # .cache/ffmpeg. Skipped on cache hits and on Windows (prebuilt).
+#      - name: Refresh the FFmpeg binding
+#        run: cargo clean -p ffmpeg-sys-next
 
       # Drop the ocio-sys build unit whenever its recorded library is not
       # on disk: a restored cargo unit whose build script output predates
@@ -316,6 +327,9 @@ jobs:
       # ------------------------------------------------------------------
       # Build & test
       # ------------------------------------------------------------------
+      - name: SDK consumer guard (app/cli/worker/example)
+        run: python3 tooling/check_sdk_consumers.py
+
       # `cargo check` (not build): the Test step links the test binaries
       # anyway, and a full build would codegen every workspace crate twice
       # (once without and once with cfg(test)).
@@ -347,13 +361,12 @@ jobs:
             (
               sleep 1800
               echo "::warning::test suite exceeded 1800s; dumping hung-process stacks"
-              for p in $(pgrep -f 'target/debug/deps/|target/debug/oak-worker'); do
+              for p in $(pgrep -f 'target/debug/deps/'); do
                 echo "===== thread stacks of pid $p ($(readlink /proc/$p/exe 2>/dev/null)) ====="
                 gdb -batch -ex 'thread apply all bt' -p "$p" || true
               done
               pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) >/dev/null 2>&1 &
+                          ) >/dev/null 2>&1 &
             WATCHDOG_PID=$!
             wait $TEST_PID
             rc=$?
@@ -393,8 +406,7 @@ jobs:
                 sample "$p" 2 10 2>&1 | head -120 || true
               done
               pkill -9 -f 'target/debug/deps/' || true
-              pkill -9 -f 'target/debug/oak-worker' || true
-            ) &
+                          ) &
             WATCHDOG_PID=$!
             wait $TEST_PID
             rc=$?
@@ -411,8 +423,10 @@ jobs:
         if: matrix.platform == 'windows'
         timeout-minutes: 40
         shell: pwsh
+        env:
+          OAK_DISABLE_AUDIO_DEVICE_ENUMERATION: 1
         run: |
-          cargo test --workspace --locked
+          cargo test --workspace --locked -- --test-threads=1 --nocapture
           if ($LASTEXITCODE -ne 0) {
             # Retry once: a few gpui keystroke tests flake on Windows CI —
             # a synthetic keystroke is occasionally never delivered (the
@@ -420,7 +434,7 @@ jobs:
             # each identically to its pass state). A real regression
             # fails both passes.
             Write-Host "first pass failed; retrying once for gpui keystroke flakes"
-            cargo test --workspace --locked
+            cargo test --workspace --locked -- --test-threads=1 --nocapture
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
@@ -480,27 +494,3 @@ jobs:
             head -c 6000 "$f"
             echo
           done
-
-      # ------------------------------------------------------------------
-      # OFX plugin discovery end-to-end (x64 Linux reference)
-      # ------------------------------------------------------------------
-      # Build a minimal but real OFX plugin into a .ofx.bundle, point
-      # OFX_PLUGIN_PATH at it and let the scan_probe example run the full
-      # host path (directory scan -> dlopen -> setHost -> load -> describe
-      # -> register). The assertion is the plugin's registration line; CI
-      # machines have no system-wide OFX plugins, so the fixture is the
-      # only discovery.
-      - name: Build OFX fixture plugin
-        if: matrix.distro == 'debian'
-        run: crates/oak-ofx-plugin/tests/fixtures/build_fixture.sh .cache/ofx-fixture
-
-      - name: Probe OFX plugin discovery
-        if: matrix.distro == 'debian'
-        run: |
-          OFX_PLUGIN_PATH="$PWD/.cache/ofx-fixture" \
-            cargo run --locked -p oak-ofx-plugin --example scan_probe > probe.log 2>&1
-          grep -q 'type_id=rs.oak.CiTestPlugin' probe.log
-          # A project carrying a plugin node must survive save/load (the
-          # serializer resolves plugin types via the dynamic factory).
-          OAK_OFX_FIXTURE_DIR="$PWD/.cache/ofx-fixture" \
-            cargo test --locked -p oak-ofx-plugin --test ofx_roundtrip

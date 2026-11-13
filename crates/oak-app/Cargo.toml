@@ -38,6 +38,9 @@ name = "oak-editor"
 path = "src/main.rs"
 
 [dependencies]
+# Keep the gpui-fast platform/renderer family at 0.1.7 in Cargo.lock: 0.1.11
+# pulls wgpu 30 while Oak and Quercus use wgpu 29, and that mixed graph crashes
+# the Windows UI tests. Revisit only when the whole workspace moves to wgpu 30.
 # gpui-kit: the GPU-accelerated UI framework (registry: gpui-pre +
 # gpui-base + gpui-component). The fork's custom widget modules live in
 # oak-widgets (folding into this crate as `crate::widgets` when the
@@ -67,7 +70,15 @@ keyring = "4"
 # fetch runs on the gpui background executor, never on the UI thread.
 ureq = "3"
 # T8.1: the frozen 22-tool face (schemas, dispatch, hooks gate, mock).
-oak-ai-tools = { path = "../../ai/oak-ai-tools" }
+#
+# NOTE (P7 merge): this is the one path dependency outside the workspace.
+# It used to point at `crates/oak-engine-rust-sdk` (the old in-repo SDK),
+# which upstream deleted when the engine moved into the `quercus-engine`
+# submodule; the optional `sdk` feature of `oak-ai-tools` still names that
+# crate and is therefore **not buildable from this workspace anymore**
+# (its own tests run the default features only — see `ai/oak-ai-tools/README.md`).
+# The app links the default (mock-capable) feature set only.
+oak-ai-tools = { path = "../../ai/oak-ai-tools", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The gpui/wgpu stack logs through the `log` facade; the app installs the
@@ -76,16 +87,7 @@ serde_json = "1"
 log = "0.4"
 
 
-oak-audio = { path = "../oak-audio" }
-oak-codec = { path = "../oak-codec" }
-oak-core = { path = "../oak-core" }
-oak-node = { path = "../oak-node" }
-oak-ofx-plugin = { path = "../oak-ofx-plugin" }
-oak-render = { path = "../oak-render" }
-oak-storage = { path = "../oak-storage" }
-oak-task = { path = "../oak-task" }
-oak-timeline = { path = "../oak-timeline" }
-oak-undo = { path = "../oak-undo" }
+quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-engine-rs", features = ["ffmpeg-static"] }
 # OPP/1 host services (T7.2 P1.2): the app-side `HostServices`
 # implementation routes plugin calls into the engine through this crate's
 # trait and protocol types. One-way dependency — `oak-extensions` never
@@ -119,7 +121,7 @@ image = "0.25"
 # https://docs.crabnebula.dev/packager/configuration/).
 #
 # Binaries are resolved relative to `target/<profile>` (oak-editor is the
-# main binary; oak-cli / oak-worker are bundled alongside). They must exist
+# main binary; oak-cli is bundled alongside). They must exist
 # before packaging runs — `cargo packager` does NOT build the app itself, so
 # CD builds with `cargo build --release` first.
 #
@@ -159,5 +161,4 @@ resources = [
 binaries = [
     { path = "oak-editor", main = true },
     { path = "oak-cli", main = false },
-    { path = "oak-worker", main = false },
 ]

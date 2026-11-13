@@ -6,9 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
   schedule:
-    # 02:23 UTC (10:23 CST): daily nightly build, off the top-of-hour
+    # 00:00 UTC (08:00 CST): daily nightly build, off the top-of-hour
     # peak when scheduled workflows get delayed for tens of minutes.
-    - cron: '23 2 * * *'
+    - cron: '0 0 * * *'
 
 permissions:
   contents: write
@@ -55,14 +55,14 @@ jobs:
             triplet: x64-linux
             artifact: linux-fedora
             container: '{"image":"fedora:43","options":"--shm-size=8g"}'
-          - name: Arch
-            platform: linux
-            distro: arch
-            arch: x64
-            runner: ubuntu-24.04
-            triplet: x64-linux
-            artifact: linux-arch
-            container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
+          # - name: Arch
+          #   platform: linux
+          #   distro: arch
+          #   arch: x64
+          #   runner: ubuntu-24.04
+          #   triplet: x64-linux
+          #   artifact: linux-arch
+          #   container: '{"image":"archlinux:latest","options":"--shm-size=8g"}'
           - name: openKylin x64
             platform: linux
             distro: openkylin
@@ -106,12 +106,14 @@ jobs:
         run: |
           case "${{ matrix.distro }}" in
             fedora) dnf install -y --setopt=install_weak_deps=False --setopt=max_parallel_downloads=16 git curl wget which ;;
-            arch) pacman -Sy --noconfirm git curl wget which ;;
+            arch) pacman -Syu --noconfirm git curl wget which ;;
             debian|openkylin) apt-get update && apt-get install -y git curl ca-certificates wget ;;
           esac
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       # Defender's real-time scanning slows the MSVC build down
       # badly; disable it for the job and keep exclusions as the fallback
@@ -175,40 +177,23 @@ jobs:
         shell: bash
         run: tooling/install-deps.sh
 
-      # Windows uses BtbN's prebuilt FFmpeg (GPL, shared): the archive
-      # ships include/, MSVC import libs (.lib), pkg-config files and the
-      # runtime DLLs, built from FFmpeg's release/8.1 branch by BtbN's
-      # public GitHub Actions (BtbN is an FFmpeg developer and ffmpeg.org
-      # links these builds). Downloaded from his release page and
-      # verified against the checksums.sha256 published in the same
-      # release; nothing is mirrored here, so provenance stays upstream.
-      # The alternative — a source build — costs ~40 minutes per run on
-      # this platform.
-      - name: Install prebuilt FFmpeg (Windows)
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          export PATH="/c/msys64/usr/bin:$PATH"
+          tooling/install-deps.sh
+
+      - name: Install pkg-config (Windows)
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          $base = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
-          $asset = "ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip"
-          $dir = Join-Path $env:RUNNER_TEMP "ffmpeg-prebuilt"
-          New-Item -ItemType Directory -Force $dir | Out-Null
-          Invoke-WebRequest -Uri "$base/checksums.sha256" -OutFile "$dir\checksums.sha256"
-          $line = Select-String -Path "$dir\checksums.sha256" -Pattern ([regex]::Escape($asset) + "\s*$") |
-            Select-Object -First 1
-          if (-not $line) { throw "no checksum for $asset in the release's checksums.sha256" }
-          $expected = $line.Line.Split()[0].ToLowerInvariant()
-          Invoke-WebRequest -Uri "$base/$asset" -OutFile "$dir\$asset"
-          $actual = (Get-FileHash "$dir\$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "FFmpeg checksum mismatch: expected $expected, got $actual" }
-          $root = "$env:GITHUB_WORKSPACE\.cache"
-          Remove-Item "$root\ffmpeg", "$root\ffmpeg-extract" -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive -Path "$dir\$asset" -DestinationPath "$root\ffmpeg-extract" -Force
-          $inner = Get-ChildItem "$root\ffmpeg-extract" -Directory | Select-Object -First 1
-          Move-Item $inner.FullName "$root\ffmpeg"
+          C:\msys64\usr\bin\pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-pkgconf
+          "PKG_CONFIG=C:\msys64\ucrt64\bin\pkgconf.exe" >> $env:GITHUB_ENV
 
       # ------------------------------------------------------------------
-      # FFmpeg — built from source, every codec library included
-      # statically (Linux/macOS), or the prebuilt archive (Windows);
+      # FFmpeg — built from source on every platform, every codec library
+      # included statically;
       # no caches
       # ------------------------------------------------------------------
       # The Linux/macOS jobs follow the local-build path (install-deps.sh
@@ -218,7 +203,48 @@ jobs:
       - name: Build FFmpeg
         if: matrix.platform != 'windows'
         shell: bash
-        run: tooling/ffmpeg/build-ffmpeg.sh
+        run: tooling/ffmpeg/build-ffmpeg.sh --shared
+
+      - name: Build static FFmpeg (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compile static FFmpeg with MSVC
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          export PATH="/c/msys64/usr/bin:$PATH"
+          tooling/ffmpeg/build-ffmpeg.sh --msvc
+
+      - name: Verify hardware codec support
+        shell: bash
+        run: |
+          config=".cache/ffmpeg/ffbuild/config.mak"
+          case "${{ matrix.platform }}" in
+            linux)
+              required="CONFIG_VAAPI CONFIG_LIBVPL"
+              ;;
+            macos)
+              required="CONFIG_VIDEOTOOLBOX"
+              ;;
+            windows)
+              required="CONFIG_D3D11VA CONFIG_DXVA2 CONFIG_MEDIAFOUNDATION CONFIG_LIBVPL"
+              ;;
+          esac
+          for flag in $required; do
+            grep -q "^${flag}=1" "$config" || {
+              echo "missing required hardware codec flag: $flag"
+              exit 1
+            }
+          done
+          grep -E '^CONFIG_(NVENC|NVDEC|QSV|AMF|VAAPI|LIBVPL|D3D11VA|DXVA2|MEDIAFOUNDATION|VIDEOTOOLBOX)=' "$config" || true
+
+      - name: Verify static FFmpeg linkage (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          ! ldd target/release/libquercus_engine.so | grep -E 'libav(codec|format|device|util|filter|swscale|swresample)'
 
       # ------------------------------------------------------------------
       # Build environment
@@ -240,6 +266,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -251,6 +278,7 @@ jobs:
           ffmpeg="$PWD/.cache/ffmpeg"
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'
@@ -346,8 +374,6 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force target/pkg/win-dlls | Out-Null
-          # FFmpeg + codec DLLs from the prebuilt archive (see above).
-          Copy-Item "$env:GITHUB_WORKSPACE\.cache\ffmpeg\bin\*.dll" target/pkg/win-dlls/
           # The MSVC runtime: the build keeps the default dynamic CRT (see
           # the Build step), so ship the redistributable DLLs app-locally.
           $crt = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue |

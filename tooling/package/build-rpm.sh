@@ -35,7 +35,7 @@ mkdir -p "$STAGE/usr/bin" "$STAGE/usr/share/applications" \
 	"$STAGE/usr/share/icons/hicolor/512x512/apps" "$STAGE/usr/share/oak/i18n" \
 	"$STAGE/usr/share/oak/icons" \
 	"$STAGE/usr/share/icons/hicolor/scalable/apps"
-install -m755 target/release/oak-editor target/release/oak-cli target/release/oak-worker \
+install -m755 target/release/oak-editor target/release/oak-cli \
 	"$STAGE/usr/bin/"
 install -m644 packaging/oak.desktop "$STAGE/usr/share/applications/oak.desktop"
 install -m644 icons/icon.png "$STAGE/usr/share/icons/hicolor/512x512/apps/oak.png"

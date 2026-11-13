@@ -133,7 +133,7 @@ Windows 构建目标是 **x86_64-pc-windows-msvc**（rustup 在 Windows 上的
 | Windows | vendored 2.5.2（同一个 `bundled` 特性） | 静态 | 需要 VS Build Tools（MSVC C++ + CMake）；设置 `OCIO_RS_ENABLE_REAL=1`、`OCIO_RS_LINK=static` |
 
 既没有 `bundled` 特性也没有 `OCIO_RS_ENABLE_REAL=1` 时，`ocio-sys`
-构建为 stub，所有色彩测试直接跳过。`oak-render` 无条件启用 bundled
+构建为 stub，所有色彩测试直接跳过。`quercus-render`（外部 crate）无条件启用 bundled
 特性，因此直接 `cargo build` 就会得到真实 OCIO。
 
 ## 打包

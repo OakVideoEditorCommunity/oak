@@ -28,6 +28,12 @@ pub fn set_resolver(resolver: IconResolver, cx: &mut App) {
 }
 
 /// The file path of the named icon in the current theme, if resolvable.
+///
+/// `name` is the icon's logical name (e.g. `"play"`); `cx` supplies the global
+/// resolver installed by [`set_resolver`], which knows the active theme. Returns
+/// `None` when no resolver was registered (widgets then fall back to a text or
+/// glyph label) or when the resolver has no file for `name`. The returned path
+/// is owned and is not checked for existence here.
 pub fn path(name: &str, cx: &App) -> Option<PathBuf> {
 	cx.try_global::<IconResolverGlobal>()
 		.and_then(|global| (global.0)(name, cx))

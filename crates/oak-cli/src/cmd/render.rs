@@ -38,14 +38,19 @@
 //! project/sequence/argument failures exit 1; bad seconds exit 64
 //! (usage). Frame progress goes to stderr (`frame N: T s`).
 
-use oak_core::TimeRange;
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_RENDER_UNAVAILABLE, EXIT_USAGE};
 use crate::engine;
 use crate::ppm;
 use crate::wav;
 
-/// Run `render` with the validated (or rejected) seconds arguments.
+/// Validate the CLI seconds arguments and dispatch to [`run_render`].
+///
+/// `project` is the project file path; `start_seconds`/`end_seconds` are the
+/// raw CLI strings parsed as `f64` seconds; `out_dir` is the output directory.
+/// Prints an error and returns [`EXIT_USAGE`] when either value is not a number
+/// or `end <= start`; otherwise returns the exit code from [`run_render`].
 pub fn run(project: String, start_seconds: &str, end_seconds: &str, out_dir: &str) -> i32 {
 	let start: f64 = match start_seconds.parse() {
 		Ok(v) => v,
@@ -69,7 +74,16 @@ pub fn run(project: String, start_seconds: &str, end_seconds: &str, out_dir: &st
 	run_render(&project, start, end, out_dir)
 }
 
-/// The render body.
+/// Render the first sequence of a project to PPM frames plus a WAV file.
+///
+/// `project` is the project path (made absolute; the process chdirs to its
+/// parent so relative footage paths resolve); `start`/`end` are timeline
+/// seconds; `out_dir` is created if missing and receives `frame_%05d.ppm` plus
+/// the audio WAV. Returns an exit code: [`EXIT_OK`] on success, [`EXIT_ERROR`]
+/// for a bad project, path, geometry or frame write, and
+/// [`EXIT_RENDER_UNAVAILABLE`] when the render manager, a frame, or the audio
+/// render is unavailable. The render manager is always shut down before
+/// returning.
 fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	// Absolute project path first — the C++ CLI chdirs into the project
 	// directory so relative footage paths resolve during rendering.
@@ -84,7 +98,7 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		let _ = std::env::set_current_dir(dir);
 	}
 
-	let project_ref = match engine::load_project(&abs.to_string_lossy()) {
+	let loaded = match engine::load_project(&abs.to_string_lossy()) {
 		Ok(p) => p,
 		Err(detail) => {
 			if detail.is_empty() {
@@ -103,10 +117,8 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		return EXIT_RENDER_UNAVAILABLE;
 	}
 
-	let sequences = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		engine::sequence_ids(&guard)
-	};
+	let project_ref = &loaded.project;
+	let sequences = engine::sequence_ids(project_ref);
 	let seq_id = match sequences.first() {
 		Some(id) => *id,
 		None => {
@@ -117,10 +129,9 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	};
 
 	let (fr_num, fr_den, width, height) = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		let fr = engine::sequence_frame_rate(&guard, seq_id);
-		let (w, h) = engine::sequence_geometry(&guard, seq_id);
-		(fr.numerator() as i32, fr.denominator() as i32, w, h)
+		let fr = engine::sequence_frame_rate(project_ref, seq_id);
+		let (w, h) = engine::sequence_geometry(project_ref, seq_id);
+		(fr.num as i32, fr.den as i32, w, h)
 	};
 	if fr_num <= 0 || fr_den <= 0 {
 		eprintln!("error: render: invalid sequence frame rate {fr_num}/{fr_den}");
@@ -148,9 +159,8 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		if time >= end {
 			break;
 		}
-		let time_r = oak_core::Rational::new(index * i64::from(fr_den), i64::from(fr_num));
-		let montage = engine::video_montage(&project_ref, seq_id, time_r);
-		let frame = match engine::render_frame(seq_id, time_r, montage, width, height) {
+		let time_r = Rational::new(index * i64::from(fr_den), i64::from(fr_num));
+		let frame = match engine::render_frame(project_ref, seq_id, time_r, width, height) {
 			Ok(f) => f,
 			Err(e) => {
 				let msg = if e.is_empty() {
@@ -183,14 +193,13 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	let start_ts = (start * fr_num as f64 / fr_den as f64).round() as i64;
 	let length_ts = ((end - start) * fr_num as f64 / fr_den as f64).round() as i64;
 	let range = TimeRange::new(
-		oak_core::Rational::new(start_ts * i64::from(fr_den), i64::from(fr_num)),
-		oak_core::Rational::new(
+		Rational::new(start_ts * i64::from(fr_den), i64::from(fr_num)),
+		Rational::new(
 			(start_ts + length_ts) * i64::from(fr_den),
 			i64::from(fr_num),
 		),
 	);
-	let montage = engine::audio_montage(&project_ref, seq_id, range);
-	let code = match engine::render_audio(seq_id, range, montage) {
+	let code = match engine::render_audio(project_ref, seq_id, range) {
 		Ok(audio) => write_audio_wav(&audio, out_dir),
 		Err(e) => {
 			let msg = if e.is_empty() {

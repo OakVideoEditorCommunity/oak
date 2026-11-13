@@ -67,19 +67,35 @@ impl TransportState {
 		self.frame
 	}
 
-	/// Set the loop-in point at the current frame.
+	/// Set the loop-in point at the current frame and enable the loop range.
+	///
+	/// `length` is the sequence length in frames; the stored frame is clamped
+	/// to `[0, length - 1]`, so an empty sequence (`length.0 == 0`) stores
+	/// `-1` and callers must guard that case. With `loop_range` enabled,
+	/// [`TransportState::advance`] wraps back to this point after the
+	/// out-point.
 	pub fn set_in_point(&mut self, length: Frame) {
 		self.in_point = Some(Frame(self.frame.0.min(length.0 - 1)));
 		self.loop_range = true;
 	}
 
-	/// Set the loop-out point at the current frame.
+	/// Set the loop-out point at the current frame and enable the loop range.
+	///
+	/// `length` is the sequence length in frames; the stored frame is clamped
+	/// to `[0, length - 1]`, so an empty sequence (`length.0 == 0`) stores
+	/// `-1` and callers must guard that case. Setting a point enables
+	/// `loop_range` but does not validate the in/out ordering — the wrap in
+	/// [`TransportState::advance`] uses whatever points are set.
 	pub fn set_out_point(&mut self, length: Frame) {
 		self.out_point = Some(Frame(self.frame.0.min(length.0 - 1)));
 		self.loop_range = true;
 	}
 
 	/// Clear the loop range.
+	///
+	/// Drops both loop points (back to `None`) and disables `loop_range`, so
+	/// playback stops at the sequence length again instead of wrapping. Does
+	/// not move the playhead.
 	pub fn clear_range(&mut self) {
 		self.in_point = None;
 		self.out_point = None;

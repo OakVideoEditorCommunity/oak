@@ -187,6 +187,10 @@ impl FrameRange {
 	}
 
 	/// Whether two ranges share at least one frame.
+	///
+	/// Half-open semantics: abutting ranges (`self.end == other.start`, or
+	/// the reverse) do not overlap, and an empty range never overlaps
+	/// anything. The check is symmetric in `self`/`other`.
 	pub fn overlaps(&self, other: &FrameRange) -> bool {
 		self.start < other.end && other.start < self.end
 	}

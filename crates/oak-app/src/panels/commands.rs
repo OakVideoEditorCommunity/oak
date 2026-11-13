@@ -148,6 +148,11 @@ pub trait PanelCommandHandler: Sized {
 		false
 	}
 	/// 编辑 → 嵌套: group the selection into a nested sequence.
+	///
+	/// Trait default: not handled (`false`), so the shell's global handler
+	/// runs. A panel that can nest clips overrides this, groups the selection
+	/// into a new nested sequence and returns `true` to stop the fallback;
+	/// `_cx` is unused by the default.
 	fn nest(&mut self, _cx: &mut Context<Self>) -> bool {
 		false
 	}

@@ -25,70 +25,81 @@
 
 use crate::widgets::project_explorer::ProjectEntry;
 
-use oak_node::folder::FolderBehavior;
-use oak_node::id::NodeId;
+use crate::oakui::graphops::ProjectRef;
 
-use crate::oakui::graphops::{self, ProjectRef};
-
-/// One child entry of a folder with its identity.
-fn child_entry(g: &oak_node::graph::Graph, child: NodeId) -> Option<ProjectEntry> {
-	let entry = g.get(child)?;
-	let mut name = entry.core.label.clone();
-	if name.is_empty() {
-		name = entry.behavior.name().to_string();
-	}
-	Some(ProjectEntry::new(
-		child.identity(),
-		name,
-		graphops::is_folder(g, child),
-	))
+/// Converts one graph child, `snapshot`, into a project browser row.
+///
+/// The row id is the node's stable identity (`snapshot.id.raw()`), its label
+/// is `snapshot.name`, and it is marked as a folder only when
+/// `snapshot.kind` is [`quercus_engine_rs::node::NodeKind::Folder`]; a node
+/// with no kind therefore renders as a leaf.
+fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEntry {
+	ProjectEntry::new(
+		snapshot.id.raw(),
+		snapshot.name.clone(),
+		snapshot.kind == Some(quercus_engine_rs::node::NodeKind::Folder),
+	)
 }
 
-/// The children of a folder node.
-fn folder_children(g: &oak_node::graph::Graph, folder: NodeId) -> Vec<ProjectEntry> {
-	let Some(f) = g
-		.get(folder)
-		.and_then(|e| e.behavior.as_any())
-		.and_then(|a| a.downcast_ref::<FolderBehavior>())
-	else {
-		return Vec::new();
-	};
-	f.children
+/// Maps each child of the folder node `snapshot` to a [`ProjectEntry`].
+///
+/// `snapshot` must be a folder from the project graph; its `children` are the
+/// entries directly beneath it, in graph order. The folder's own identity and
+/// name are not included in the result.
+fn folder_children(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> Vec<ProjectEntry> {
+	snapshot
+		.children
 		.iter()
-		.filter_map(|&child| child_entry(g, child))
+		.map(child_entry)
 		.collect()
 }
 
-/// The top-level entries: the project root folder's children.
-pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
-	let guard = graphops::lock(project);
-	if !guard.root.valid() {
-		return Vec::new();
+fn find_snapshot<'a>(
+	entry: &'a quercus_engine_rs::editor::EntrySnapshot,
+	identity: u64,
+) -> Option<&'a quercus_engine_rs::editor::EntrySnapshot> {
+	if entry.id.raw() == identity {
+		return Some(entry);
 	}
-	folder_children(&guard.graph, guard.root)
+	entry
+		.children
+		.iter()
+		.find_map(|child| find_snapshot(child, identity))
+}
+
+/// Lists the project browser's top-level entries for `project`.
+///
+/// The entries are the children of the project graph's root folder, in graph
+/// order; each [`ProjectEntry`] carries the node's stable identity as its id,
+/// the display name, and whether it is a folder. `project` is resolved to an
+/// editor session; when that fails (for example the project is not open) an
+/// empty vector is returned rather than an error.
+pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
+	let Ok(session) = super::real::editor_session_for_project(project) else {
+		return Vec::new();
+	};
+	folder_children(&session.snapshot().root)
 }
 
 /// The children of the folder whose identity is `parent_id` (empty when
 /// not found or not a folder).
 pub fn children(project: &ProjectRef, parent_id: u64) -> Vec<ProjectEntry> {
-	let Some(folder) = find_by_identity(project, parent_id) else {
+	let Ok(session) = super::real::editor_session_for_project(project) else {
 		return Vec::new();
 	};
-	let guard = graphops::lock(project);
-	if !graphops::is_folder(&guard.graph, folder) {
-		return Vec::new();
-	}
-	folder_children(&guard.graph, folder)
+	let snapshot = session.snapshot();
+	find_snapshot(&snapshot.root, parent_id)
+		.filter(|entry| entry.kind == Some(quercus_engine_rs::node::NodeKind::Folder))
+		.map(folder_children)
+		.unwrap_or_default()
 }
 
 /// The project node with `identity` (validated against the graph), or
 /// `None`.
-pub fn find_by_identity(project: &ProjectRef, identity: u64) -> Option<NodeId> {
-	let id = graphops::id_of(identity)?;
-	let guard = graphops::lock(project);
-	if guard.graph.is_valid(id) {
-		Some(id)
-	} else {
-		None
-	}
+pub fn find_by_identity(
+	project: &ProjectRef,
+	identity: u64,
+) -> Option<quercus_engine_rs::node::NodeId> {
+	let session = super::real::editor_session_for_project(project).ok()?;
+	find_snapshot(&session.snapshot().root, identity).map(|entry| entry.id)
 }

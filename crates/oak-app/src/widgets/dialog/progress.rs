@@ -15,7 +15,12 @@ pub struct ProgressContent {
 }
 
 impl ProgressContent {
-	/// Create a progress content view.
+	/// Creates the content view with a label and an initial progress value.
+	///
+	/// `label` is shown above the bar (already-localized text) and `fraction`
+	/// is the starting progress in `0.0..=1.0`, clamped so an out-of-range
+	/// caller cannot overflow the bar. The dialog builder always starts at
+	/// `0.0` and updates through [`ProgressContent::set_progress`].
 	pub fn new(label: impl Into<gpui_kit::SharedString>, fraction: f32) -> Self {
 		Self {
 			label: label.into(),
@@ -23,7 +28,11 @@ impl ProgressContent {
 		}
 	}
 
-	/// Update the progress and repaint.
+	/// Updates the progress and repaints.
+	///
+	/// `fraction` is clamped to `0.0..=1.0` before being stored, so an
+	/// out-of-range driver value cannot overflow the bar; `cx` is notified so
+	/// the bar and the percentage label repaint on the next frame.
 	pub fn set_progress(&mut self, fraction: f32, cx: &mut Context<Self>) {
 		self.fraction = fraction.clamp(0.0, 1.0);
 		cx.notify();
@@ -67,9 +76,17 @@ impl Render for ProgressContent {
 	}
 }
 
-/// Build a progress dialog with a Cancel button (index `1`) and an implicit
-/// primary "Run" button (index `0`). Returns the modal and its content so the
-/// host can drive the bar.
+/// Builds a progress dialog: a modal with a label, a bar and Run/Cancel.
+///
+/// `control` is the host-assigned stable id carried by every
+/// [`super::ModalEvent`] from this dialog; `title` is the modal title; `label`
+/// is the text above the bar (the operation description); `window`/`cx` create
+/// the views. The buttons are `DialogButton::primary("Run")` at index `0` and
+/// `DialogButton::cancel("Cancel")` at index `1`. The content starts at 0% —
+/// the host drives the bar with [`ProgressContent::set_progress`] and reacts to
+/// the button events itself.
+///
+/// Returns the modal entity and its content.
 pub fn progress_dialog(
 	control: usize,
 	title: impl Into<gpui_kit::SharedString>,

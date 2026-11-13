@@ -14,10 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Windowed peak envelopes over the cached clip waveforms, the input of
-//! `oak_audio::waveformsync`'s offset / stretch correlation (the app-side
-//! mirror of the C++ `extract_waveform_cache_envelope` in
-//! `timelinewidgetwaveformsync.cpp`).
+//! Windowed peak envelopes over the cached clip waveforms, the input of the
+//! SDK's offset / stretch correlation (the app-side mirror of the C++
+//! `extract_waveform_cache_envelope` in `timelinewidgetwaveformsync.cpp`).
 //!
 //! Two deliberate Rust-side adaptations:
 //!

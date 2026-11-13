@@ -34,6 +34,7 @@ use gpui_kit::{
 };
 use gpui_kit::base::input::InputState;
 use gpui_kit::component::input::InputEvent;
+use quercus_engine_rs::state::Config;
 
 use crate::i18n;
 use crate::oakui::effectchain::group_label;
@@ -69,6 +70,16 @@ impl<E: AppEngine> EffectLibraryPanel<E> {
 	}
 
 	/// Builds the panel over `engine`'s addable-effect table.
+	///
+	/// `engine` is the shared engine entity (borrowed, not owned); its
+	/// `addable_effects` table drives the list and its selection hint decides
+	/// which row is highlighted, so the panel re-renders on every engine
+	/// notify.
+	/// `window` is needed to create the search box input, and `cx` supplies
+	/// the panel's focus handle. The collapsed-group set is read from the
+	/// config once here (see `COLLAPSED_CONFIG_KEY`), not on every render.
+	/// The engine and search subscriptions are detached, so they live as long
+	/// as the entity.
 	pub fn new(engine: Entity<E>, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		// Re-read the effect table whenever the engine notifies (the table
 		// itself is static, but the selection hint depends on the target).
@@ -94,8 +105,7 @@ impl<E: AppEngine> EffectLibraryPanel<E> {
 /// simply starts with every group expanded).
 fn load_collapsed() -> HashSet<String> {
 	parse_collapsed(
-		&oak_core::configstore::ConfigStore::instance()
-			.get(None, COLLAPSED_CONFIG_KEY)
+		&Config::global().get(COLLAPSED_CONFIG_KEY)
 			.unwrap_or_default(),
 	)
 }
@@ -122,11 +132,7 @@ fn format_collapsed(collapsed: &HashSet<String>) -> String {
 /// pattern: the config store is the source of truth, read once at panel
 /// construction).
 fn store_collapsed(collapsed: &HashSet<String>) {
-	oak_core::configstore::ConfigStore::instance().set(
-		None,
-		COLLAPSED_CONFIG_KEY,
-		&format_collapsed(collapsed),
-	);
+	let _ = Config::global().set(COLLAPSED_CONFIG_KEY, &format_collapsed(collapsed));
 }
 
 /// Flips the collapsed state of `group_key`, returning the new state
@@ -490,7 +496,7 @@ mod tests {
 	}
 
 	/// The panel renders one row per addable effect of the engine (the
-	/// mock exposes the real factory's video-effect table).
+	/// mock exposes a deterministic app-local effect table).
 	#[gpui_kit::test]
 	async fn lists_every_addable_effect(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
@@ -505,7 +511,7 @@ mod tests {
 		cx.run_until_parked();
 		let cx = VisualTestContext::from_window(window.into(), cx).into_mut();
 
-		let expected = crate::oakui::effectchain::addable_effects();
+		let expected = crate::oakui::MockEngine::demo_effect_library();
 		assert!(!expected.is_empty());
 		for entry in &expected {
 			let type_id = &entry.type_id;
@@ -522,7 +528,7 @@ mod tests {
 	async fn collapsing_a_group_hides_its_rows(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
 
-		let entries = crate::oakui::effectchain::addable_effects();
+		let entries = crate::oakui::MockEngine::demo_effect_library();
 		let group = entries
 			.first()
 			.and_then(|entry| entry.group.clone())
@@ -578,7 +584,7 @@ mod tests {
 	async fn clicking_a_group_header_collapses_and_persists_it(cx: &mut TestAppContext) {
 		let _guard = collapsed_config_lock();
 
-		let entries = crate::oakui::effectchain::addable_effects();
+		let entries = crate::oakui::MockEngine::demo_effect_library();
 		let group = entries
 			.first()
 			.and_then(|entry| entry.group.clone())

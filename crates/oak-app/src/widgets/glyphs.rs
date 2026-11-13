@@ -12,6 +12,14 @@ pub enum Glyph {
 	ChevronDown,
 }
 
+/// Paint a vector glyph and return it as a 16×16 element.
+///
+/// `glyph` selects the drawing ([`Glyph`]) and `color` is the fill/stroke
+/// color. The element is a `canvas` sized 16×16 px and flex-shrinking to
+/// zero, so it belongs inside buttons and rows rather than as a standalone
+/// view; shapes are painted relative to the element's own top-left corner,
+/// so no extra positioning is needed. Used by the dialog close button and
+/// other widget chrome.
 pub fn icon(glyph: Glyph, color: Rgba) -> impl IntoElement {
 	canvas(
 		move |_bounds, _window, _cx| (),
@@ -72,6 +80,13 @@ pub fn icon(glyph: Glyph, color: Rgba) -> impl IntoElement {
 	.flex_shrink_0()
 }
 
+/// Stroke a polyline through `points` at the glyph's 1.5 px line weight.
+///
+/// `points` are `(x, y)` offsets in glyph pixels (a 16×16 icon grid),
+/// translated by `bounds`' top-left; `color` is the stroke color. Fewer than
+/// two points paints nothing; a path the builder rejects is skipped
+/// silently. `window` receives the paint and must be in a paint phase —
+/// call this from a canvas paint callback, as [`icon`] does.
 fn stroke(
 	window: &mut gpui_kit::Window,
 	color: Rgba,

@@ -54,7 +54,24 @@ pub struct SourceViewerPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> SourceViewerPanel<E> {
+	pub(crate) fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
+		self.viewer.update(cx, |viewer, cx| {
+			viewer.set_video_fullscreen(fullscreen, cx)
+		});
+	}
+
 	/// Builds a viewer over `clock` (the source monitor's clock).
+	///
+	/// `engine` is the app engine entity, `clock` the source monitor's clock
+	/// (shared with the viewer widget so transport commands can read the playing
+	/// state), and `window` / `cx` the construction context. It creates the
+	/// [`ViewerWidget`] with control id 2, subscribes to its events — transport
+	/// requests go to the engine's source monitor while loop-range and full-screen
+	/// requests are re-emitted for the shell as [`menu::ViewerPanelEvent`]s — and
+	/// builds the local context menu, whose items are routed through
+	/// [`Self::on_local_menu_item`]. The panel starts with no cached CPU frame.
+	///
+	/// No OFX interact events are handled: the source monitor hosts no interact.
 	pub fn new(
 		engine: Entity<E>,
 		clock: Entity<E::Clock>,
@@ -104,6 +121,10 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 	/// resolving them into [`menu::ViewerMenuAction`] and applying the action
 	/// (the id resolution and the menu construction are shared with the program
 	/// viewer, so both monitors behave identically).
+	///
+	/// `item` is the menu item id the widget reported; an unknown id is logged and
+	/// ignored. `cx` is the panel context; the resolved action is applied through
+	/// [`Self::apply_viewer_action`].
 	fn on_local_menu_item(&mut self, item: usize, cx: &mut Context<Self>) {
 		let Some(action) = menu::viewer_menu_action(item) else {
 			println!("[source viewer] context-menu item {item} (not handled)");
@@ -186,8 +207,15 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 		}
 	}
 
-	/// Routes a transport command to the engine's source monitor through
-	/// the shared viewer transport helper.
+	/// Routes a transport command to the engine's source monitor through the
+	/// shared viewer transport helper.
+	///
+	/// `action` is the command id; the helper drives the source monitor's clock and
+	/// engine (play/pause, step and the other transport commands) for
+	/// `Monitor::Source`, exactly as the program viewer does for its monitor. `cx`
+	/// is the panel context. Returns whether the helper handled the action — `false`
+	/// means the caller should fall through to its other command routes, and
+	/// unhandled actions are not logged here.
 	fn transport(&mut self, action: ActionId, cx: &mut Context<Self>) -> bool {
 		let engine = self.engine.clone();
 		let clock = self.clock.clone();
@@ -254,6 +282,7 @@ impl<E: AppEngine> Render for SourceViewerPanel<E> {
 					};
 					this.context_menu
 						.show(event.position, menu::viewer_menu(&state), cx);
+					cx.stop_propagation();
 				})
 			})
 			.child(

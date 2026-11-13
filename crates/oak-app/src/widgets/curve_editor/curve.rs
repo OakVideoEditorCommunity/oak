@@ -11,7 +11,11 @@ pub struct CurveVec2 {
 }
 
 impl CurveVec2 {
-	/// Create a vector.
+	/// Creates a point at (`x`, `y`) in normalized curve space.
+	///
+	/// Both coordinates are expected in `0..1` (x = input position, y = output
+	/// value) but are stored verbatim — nothing is clamped or validated. Being a
+	/// `const fn`, it can initialise constants and `static` keyframe tables.
 	pub const fn new(x: f64, y: f64) -> Self {
 		Self { x, y }
 	}
@@ -41,7 +45,13 @@ pub struct CurvePoint {
 }
 
 impl CurvePoint {
-	/// Create a point with no handles (linear segments).
+	/// Creates a keyframe at (`x`, `y`) with no control handles.
+	///
+	/// `x` is the input position and `y` the output value, both normalized to
+	/// `0..1` and stored verbatim (no clamping). Without handles the neighbouring
+	/// segments are linear: `segment_controls` falls back to midpoint x control
+	/// points. Use `with_handles` for a curved keyframe; both constructors are
+	/// `const fn`.
 	pub const fn new(x: f64, y: f64) -> Self {
 		Self {
 			x,
@@ -51,7 +61,12 @@ impl CurvePoint {
 		}
 	}
 
-	/// Create a point with both handles set to `offset`.
+	/// Creates a keyframe at (`x`, `y`) with both handles set to `offset`.
+	///
+	/// `offset` is relative to the point, in normalized units, so the in and out
+	/// handles start coincident and symmetric (a smooth keyframe) and the editor can
+	/// move each side independently afterwards. `x`/`y` are stored verbatim.
+	/// Counterpart of `CurvePoint::new`, which leaves the handles absent.
 	pub const fn with_handles(x: f64, y: f64, offset: CurveVec2) -> Self {
 		Self {
 			x,
@@ -62,7 +77,13 @@ impl CurvePoint {
 	}
 }
 
-/// Evaluate a cubic bezier at `t` in `0..1`.
+/// Evaluates one cubic bezier segment at parameter `t`.
+///
+/// `p0`/`p1` are the segment endpoints and `c1`/`c2` the control points, all in
+/// normalized curve space. `t` is the bezier parameter, not an x coordinate: `0`
+/// returns `p0`, `1` returns `p1`, and values outside `0..1` extrapolate along
+/// the polynomial. Callers that need the output at a given x should go through
+/// `sample_curve`, which inverts x numerically, instead of choosing `t`.
 pub fn cubic_bezier(
 	p0: CurveVec2,
 	c1: CurveVec2,
@@ -158,7 +179,14 @@ pub fn polyline(points: &[CurvePoint], samples: usize) -> Vec<CurveVec2> {
 	out
 }
 
-/// Find the point closest to `pos` within `threshold` (normalized units).
+/// Finds the index of the point nearest to `pos` within `threshold`.
+///
+/// Distance is Euclidean in normalized curve space, so `threshold` is in the
+/// same units (an editor pixel tolerance divided by the canvas size). Returns
+/// `None` when no point is within reach, and always `None` for an empty slice.
+/// Ties resolve to the later point scanned, i.e. the highest index among
+/// equidistant candidates. Pair with `hit_test_handle`, which prefers handles
+/// when both are in reach.
 pub fn hit_test_point(points: &[CurvePoint], pos: CurveVec2, threshold: f64) -> Option<usize> {
 	let mut best = None;
 	let mut best_dist = threshold;

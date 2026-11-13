@@ -34,6 +34,12 @@ pub struct Histogram<D: LumaDataSource> {
 
 impl<D: LumaDataSource> Histogram<D> {
 	/// Create a histogram over `data`.
+	///
+	/// `data` is the luma source sampled on every frame (one `0..1` value per
+	/// pixel); `cx` supplies the focus handle so the panel can be focused
+	/// like the other dock panels. `_control` and `_window` are unused — the
+	/// scope is built by the panel factory with the same signature as its
+	/// siblings.
 	pub fn new(
 		_control: usize,
 		data: Entity<D>,
@@ -46,7 +52,13 @@ impl<D: LumaDataSource> Histogram<D> {
 		}
 	}
 
-	/// The current histogram bins (for tests and hosts).
+	/// The current histogram bins for the frame, always 64 of them.
+	///
+	/// `cx` provides the data source; each luma sample (`0..1`, clamped) is
+	/// counted into one of 64 equal bins and the counts are returned in
+	/// ascending luma order. An empty source yields 64 zero counts rather
+	/// than an empty vector, so the render pass and hosts can index it
+	/// directly. Also used by tests to assert the mapping.
 	pub fn bins(&self, cx: &App) -> Vec<u32> {
 		histogram_bins(&self.data.read(cx).luma_samples(), 64)
 	}
@@ -93,7 +105,13 @@ pub struct Waveform<D: LumaDataSource> {
 }
 
 impl<D: LumaDataSource> Waveform<D> {
-	/// Create a waveform scope.
+	/// Create a waveform scope over `data`.
+	///
+	/// `data` is the luma source sampled on every frame (one `0..1` value per
+	/// pixel); `cx` supplies the focus handle so the panel can be focused
+	/// like the other dock panels. `_control` and `_window` are unused — the
+	/// scope is built by the panel factory with the same signature as its
+	/// siblings.
 	pub fn new(
 		_control: usize,
 		data: Entity<D>,
@@ -106,7 +124,12 @@ impl<D: LumaDataSource> Waveform<D> {
 		}
 	}
 
-	/// The current envelope columns.
+	/// The current envelope columns, one `(min, max)` luma pair per column.
+	///
+	/// `cx` provides the data source; the frame's samples are split into 128
+	/// equal runs and each run is reduced to its min and max in `0..1`. Both
+	/// values are 0 for an empty source or an empty run, so the render pass
+	/// can draw every column unconditionally.
 	pub fn envelope(&self, cx: &App) -> Vec<(f32, f32)> {
 		waveform_envelope(&self.data.read(cx).luma_samples(), 128)
 	}
@@ -154,7 +177,12 @@ pub struct Vectorscope<D: ChromaDataSource> {
 }
 
 impl<D: ChromaDataSource> Vectorscope<D> {
-	/// Create a vectorscope.
+	/// Create a vectorscope over `data`.
+	///
+	/// `data` is the chroma source the scope samples on every frame; `cx`
+	/// supplies the focus handle so the panel can be focused like the other
+	/// dock panels. `_control` and `_window` are unused — the scope is built
+	/// by the panel factory with the same signature as its siblings.
 	pub fn new(
 		_control: usize,
 		data: Entity<D>,
@@ -167,7 +195,12 @@ impl<D: ChromaDataSource> Vectorscope<D> {
 		}
 	}
 
-	/// The projected chroma points.
+	/// The projected chroma points for the current frame, centered on 0.
+	///
+	/// `cx` provides the data source. Each source `(u, v)` sample (already in
+	/// `0..1`, centered on `0.5`) becomes a point in `-0.5..0.5` after
+	/// subtracting the 0.5 center and clamping; the render pass maps these
+	/// onto the canvas. Empty when the source has no samples.
 	pub fn points(&self, cx: &App) -> Vec<(f32, f32)> {
 		vectorscope_points(&self.data.read(cx).chroma_samples())
 	}

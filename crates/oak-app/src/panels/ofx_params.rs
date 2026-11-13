@@ -67,7 +67,7 @@ use gpui_kit::{
 use gpui_kit::base::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::input::Textarea;
 
-use oak_node::value::{NodeValue, ValueType};
+use crate::oakui::engine::{EffectValue as NodeValue, EffectValueType as ValueType};
 
 use crate::oakui::{AppEngine, EffectParam};
 
@@ -99,6 +99,11 @@ enum TextEditor {
 
 impl TextEditor {
 	/// The current text.
+	///
+	/// `cx` is only used to read the inner [`InputState`] /
+	/// [`TextareaState`], so no update handle is required. Returns the field's
+	/// live text (which may be uncommitted user input); compare it against the
+	/// engine value before deciding to call [`Self::set_text`].
 	fn value(&self, cx: &App) -> String {
 		match self {
 			TextEditor::Line(e) => e.read(cx).value().to_string(),
@@ -117,6 +122,11 @@ impl TextEditor {
 
 	/// Whether the field is focused (a re-sync must not wipe an
 	/// in-progress edit).
+	///
+	/// `window` is required because focus is tracked per window; `cx` reads
+	/// the underlying [`InputState`] / [`TextareaState`]. Both editor variants
+	/// answer through their own focus handle, so callers can test focus
+	/// without knowing which variant a text param uses.
 	fn is_focused(&self, window: &Window, cx: &App) -> bool {
 		match self {
 			TextEditor::Line(e) => e.read(cx).focus_handle(cx).is_focused(window),
@@ -126,6 +136,12 @@ impl TextEditor {
 
 	/// Re-sync the field from the engine snapshot (never mid-edit; the
 	/// caller checks [`TextEditor::is_focused`]).
+	///
+	/// `text` is the engine value to display, `window` is needed by the
+	/// underlying `set_value` layout and `cx` updates the inner state. Both
+	/// the single-line and multi-line variants are handled; the field does not
+	/// check focus itself, and a programmatic `set_value` does not emit an
+	/// input change, so this cannot loop back into an engine write.
 	fn set_text(&self, text: &str, window: &mut Window, cx: &mut App) {
 		let text = text.to_string();
 		match self {
@@ -179,6 +195,17 @@ pub struct OfxParamsView<E: AppEngine> {
 
 impl<E: AppEngine> OfxParamsView<E> {
 	/// Builds the control set from the engine's current parameter snapshot.
+	///
+	/// `effect` is the effect node whose inputs are shown, `engine` is the
+	/// engine entity the controls read from and write back to, `window` is
+	/// needed to construct the widget entities and `cx` is the view's context
+	/// (also used for the entity subscriptions). One [`ParamControl`] is built
+	/// per visible parameter via [`build_control`], except that a three-way
+	/// corrector's three colour inputs collapse into a single wheel group
+	/// ([`build_wheel_group`]); hidden (`HIDDEN`-flagged) inputs are skipped
+	/// here as well as in the facade. Control ids are allocated in snapshot
+	/// order, then [`wire_controls`] subscribes every widget to the engine and
+	/// an engine observer re-renders the view on external changes.
 	pub fn new(
 		effect: EffectId,
 		engine: Entity<E>,
@@ -199,7 +226,7 @@ impl<E: AppEngine> OfxParamsView<E> {
 			// or mock engine's snapshot can carry them; a secret input must
 			// never reach the inspector, so filter here as well (the params
 			// view is the last stop before a control is built).
-			.filter(|param| param.flags & oak_node::input::flags::HIDDEN == 0)
+			.filter(|param| param.flags & crate::oakui::engine::input_flags::HIDDEN == 0)
 		{
 			if let Some(ids) = &wheel_ids {
 				if ids.iter().any(|(id, _)| id == &param.input_id) {
@@ -237,6 +264,18 @@ impl<E: AppEngine> OfxParamsView<E> {
 
 	/// Applies the engine's current values to every control (called each
 	/// render so external edits / undo / redo land on the controls).
+	///
+	/// Reads a fresh parameter snapshot for `self.effect` and matches controls
+	/// by `input_id`; a control whose param disappeared is left alone. `window`
+	/// is needed for focus checks and for the deferred text writes (render
+	/// cannot lay text out itself); `cx` is the view's context, used to read
+	/// and update the child entities. Re-sync is suppressed exactly where it
+	/// would fight the user: a dragging slider, a focused text field, a
+	/// dragging curve editor, and a curve whose points already match. The
+	/// wheel group syncs each wheel from its own band param, colour pickers
+	/// also receive the committed value and drain a viewer eyedropper pick
+	/// into the draft, and text fields are re-synced only when their current
+	/// text differs.
 	fn sync_values(&mut self, window: &Window, cx: &mut Context<Self>) {
 		let params = self
 			.engine
@@ -359,7 +398,7 @@ impl<E: AppEngine> OfxParamsView<E> {
 					// an identical curve (sync_values runs per render).
 					let curves = match &param.value {
 						NodeValue::Text(json) => {
-							oak_ofx_plugin::param_curve::curves_from_json(json).unwrap_or_default()
+							quercus_engine_rs::ofx::curves_from_json(json).unwrap_or_default()
 						}
 						_ => Vec::new(),
 					};
@@ -390,12 +429,22 @@ impl<E: AppEngine> OfxParamsView<E> {
 /// parametric parameter: the key range from the `parametric_range`
 /// property (default 0..1); the value domain is 0..1 when everything fits
 /// (LUT-style params), else the data extent with a 10% pad.
+///
+/// `param` supplies the `("parametric_range", Vec2)` property (the key axis,
+/// defaulting to 0..1; a degenerate or inverted range becomes `lo..lo+1`);
+/// `curves` supplies every point of every dimension, whose values decide the
+/// value axis: if all are inside 0..1 the axis stays 0..1, otherwise it is
+/// the data extent padded by 10% and widened to at least 1.0. Returns
+/// `(key_lo, key_hi, value_min, value_max)`, consumed by
+/// [`curve_point_to_editor`] and `curve_from_editor` to map between real and
+/// normalized editor coordinates. An empty `curves` yields 0..1 for both
+/// axes.
 fn curve_domain(
 	param: &EffectParam,
-	curves: &[oak_ofx_plugin::param_curve::Curve],
+	curves: &[quercus_engine_rs::ofx::Curve],
 ) -> (f64, f64, f64, f64) {
 	let (mut lo, mut hi) = (0.0, 1.0);
-	if let Some((_, oak_node::value::NodeValue::Vec2(v))) = param
+	if let Some((_, NodeValue::Vec2(v))) = param
 		.properties
 		.iter()
 		.find(|(k, _)| k == "parametric_range")
@@ -435,9 +484,18 @@ fn curve_domain(
 /// Real curve point → normalized editor point (slopes become bezier
 /// handle offsets; a point without an explicit slope edits gets linear
 /// handles).
+///
+/// `p` is the real control point; `points` is the whole curve in key order,
+/// used to place `p`'s handles from its neighbours (the index is found by
+/// matching keys, falling back to the first point); `domain` is the
+/// `(key_lo, key_hi, value_min, value_max)` mapping from [`curve_domain`].
+/// The returned [`CurvePoint`] has normalized `x`/`y` in 0..1 and a
+/// `handle_in` / `handle_out` computed from the point's slope
+/// (`m_norm = m_real * sx / sy`); the first / last point has no handle on the
+/// missing side (edited as a linear end). Inverse of `curve_from_editor`.
 fn curve_point_to_editor(
-	p: &oak_ofx_plugin::param_curve::ControlPoint,
-	points: &[oak_ofx_plugin::param_curve::ControlPoint],
+	p: &quercus_engine_rs::ofx::ControlPoint,
+	points: &[quercus_engine_rs::ofx::ControlPoint],
 	domain: (f64, f64, f64, f64),
 ) -> crate::widgets::curve_editor::CurvePoint {
 	use crate::widgets::curve_editor::{CurvePoint, CurveVec2};
@@ -473,11 +531,11 @@ fn curve_point_to_editor(
 fn curve_from_editor(
 	points: &[crate::widgets::curve_editor::CurvePoint],
 	domain: (f64, f64, f64, f64),
-) -> oak_ofx_plugin::param_curve::Curve {
+) -> quercus_engine_rs::ofx::Curve {
 	let (lo, hi, vmin, vmax) = domain;
 	let (sx, sy) = (hi - lo, vmax - vmin);
 	let n = points.len();
-	let mut out = oak_ofx_plugin::param_curve::Curve::empty();
+	let mut out = quercus_engine_rs::ofx::Curve::empty();
 	for (i, p) in points.iter().enumerate() {
 		let key = lo + p.x * sx;
 		let value = vmin + p.y * sy;
@@ -532,7 +590,7 @@ fn curve_from_editor(
 				_ => 0.0,
 			}
 		});
-		out.points.push(oak_ofx_plugin::param_curve::ControlPoint {
+		out.points.push(quercus_engine_rs::ofx::ControlPoint {
 			key,
 			value,
 			slope: m_norm * sy / sx,
@@ -543,6 +601,13 @@ fn curve_from_editor(
 
 /// Cheap curve equality for the per-render re-sync (epsilon on
 /// coordinates; handles compared too).
+///
+/// `a` and `b` are two normalized point lists, e.g. the editor's current
+/// points versus the ones re-derived from the engine snapshot. Returns
+/// `true` only for equal lengths and every point matching within `1e-6` on
+/// `x`/`y` and on both handles (`None` matches only `None`). The per-render
+/// sync uses this to skip `set_points` when nothing changed, which keeps an
+/// in-progress drag from being reset.
 fn curve_points_close(
 	a: &[crate::widgets::curve_editor::CurvePoint],
 	b: &[crate::widgets::curve_editor::CurvePoint],
@@ -662,6 +727,12 @@ fn numeric_range(param: &EffectParam) -> (f64, f64) {
 /// The `("min", _)` / `("max", _)` property of a parameter as a finite
 /// number: a NaN or infinite bound would make the slider's arithmetic
 /// meaningless, so it is ignored.
+///
+/// `param` is the parameter whose `properties` are searched; `key` is the
+/// property name (`"min"`, `"max"`, and also `"base"` from
+/// `component_range_and_step`). Returns the first matching float or integer
+/// property, or `None` when it is absent, not numeric, or not finite.
+/// Callers fall back to their own default bound; see [`numeric_range`].
 fn range_property(param: &EffectParam, key: &str) -> Option<f64> {
 	param
 		.properties
@@ -851,8 +922,6 @@ fn scale_by_pow10(m: f64, exp: i32) -> f64 {
 	v
 }
 
-/// Builds one [`ParamControl`] for `param`, creating the control entities
-/// (each consuming one control id from `next_id`).
 /// The three-way corrector's colour input ids (oak-node's
 /// `threewaycolor` module is private; these are its stable C++ ids).
 const THREE_WAY_COLOR_IDS: [&str; 3] = [
@@ -877,6 +946,17 @@ fn three_way_color_ids(
 
 /// Build the wheel group control for a three-way corrector: one grading
 /// wheel per band, labelled with the param's (localized) display name.
+///
+/// `params` is the effect's full parameter snapshot, used to seed each
+/// wheel's colour from the band's current value (defaulting to mid-grey for
+/// a missing or short value); `ids` are the three `(input id, label)` pairs in
+/// band order (shadows, midtones, highlights); `next_id` is the control-id
+/// allocator, advanced once per wheel; `section` is the UI section assigned to
+/// the returned control; `window` and `cx` are needed to create the widgets
+/// and are the params view's context. The returned [`ParamControl`] carries
+/// the *first* band's input id and display name (the group owns the row) and
+/// `ControlKind::WheelGroup` with all three wheels. Counterpart of
+/// [`three_way_color_ids`], which detects the layout.
 fn build_wheel_group<E: AppEngine>(
 	params: &[crate::oakui::engine::EffectParam],
 	ids: &[(String, String); 3],
@@ -908,6 +988,25 @@ fn build_wheel_group<E: AppEngine>(
 	}
 }
 
+/// Builds one [`ParamControl`] for `param`, creating the control entities
+/// (each consuming one control id from `next_id`).
+///
+/// `param` is the engine's parameter snapshot (its `value_type` picks the
+/// widget, its `value` seeds it and its `input_id` / `display_name` become
+/// the control's identity); `next_id` is the view's monotonic control-id
+/// allocator, advanced once per entity so element ids stay unique across
+/// rebuilds; `window` is needed to construct the widgets; `cx` is the params
+/// view's context and owns the created entities. Returned [`ParamControl`]
+/// gets its `section` from `crate::oakui::effectchain::ui_section_of`, and
+/// `curve_domain` is only set for parametric (curve) params.
+///
+/// Dispatch: int/float → slider over the param's range and step; boolean →
+/// checkbox; combo / string combo → combobox, or a read-only line when the
+/// param has no option list; text → single-line input or textarea according
+/// to `is_multiline`; vec2/vec3/vec4 → one spinbox per component (vec4
+/// honours per-component `min`/`max`/`base`); colour → [`OfxColorPicker`];
+/// parametric → one curve editor per curve dimension; push buttons and
+/// everything else without an editable control → a button or read-only line.
 fn build_control<E: AppEngine>(
 	param: &EffectParam,
 	next_id: &mut usize,
@@ -1045,7 +1144,7 @@ fn build_control<E: AppEngine>(
 			// JSON mirror of the curves (the input's Text value).
 			let curves = match &param.value {
 				NodeValue::Text(json) => {
-					oak_ofx_plugin::param_curve::curves_from_json(json).unwrap_or_default()
+					quercus_engine_rs::ofx::curves_from_json(json).unwrap_or_default()
 				}
 				_ => Vec::new(),
 			};
@@ -1087,6 +1186,21 @@ fn build_control<E: AppEngine>(
 
 /// Wires every control's events to the engine's `set_effect_param` /
 /// `effect_push_button`.
+///
+/// Subscribes each [`ParamControl`] in `view` to its widget's event type and
+/// routes the event to [`AppEngine::set_effect_param`] for `view.effect`, so
+/// widget editors become engine writes. `view` supplies the controls, the
+/// effect id and the engine handle (cloned per subscription); `cx` owns the
+/// subscriptions, which are detached and live as long as the view.
+///
+/// Per kind: wheels wrap a drag in `begin_param_drag` / `end_param_drag` so a
+/// whole drag is one undo entry; sliders / checkboxes / combos / spinboxes
+/// write one value (spinboxes re-read and patch just their component);
+/// colour pickers only write on [`OfxColorEvent::Committed`] and forward the
+/// eyedropper arming to the engine; curves rebuild the whole JSON mirror on
+/// any edit; text fields and push buttons have no subscription here. A failed
+/// set is logged rather than propagated, and the next value sync re-reads the
+/// engine value, so the widget snaps back to the authoritative state.
 fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxParamsView<E>>) {
 	for control in &view.controls {
 		let input_id = control.input_id.clone();
@@ -1297,14 +1411,14 @@ fn wire_controls<E: AppEngine>(view: &OfxParamsView<E>, cx: &mut Context<OfxPara
 								| E::HandleMoved { .. }
 								| E::PointAdded { .. } => {}
 							}
-							let curves: Vec<oak_ofx_plugin::param_curve::Curve> = editors_all
+							let curves: Vec<quercus_engine_rs::ofx::Curve> = editors_all
 								.iter()
 								.map(|e| {
 									let points = e.read(cx).points().to_vec();
 									curve_from_editor(&points, domain)
 								})
 								.collect();
-							let json = oak_ofx_plugin::param_curve::curves_to_json(&curves);
+							let json = quercus_engine_rs::ofx::curves_to_json(&curves);
 							engine.update(cx, |engine, cx| {
 								if let Err(err) = engine.set_effect_param(
 									effect,
@@ -1675,6 +1789,15 @@ pub enum ColorMode {
 
 impl OfxColorPicker {
 	/// Create a picker for `control` showing `color`.
+	///
+	/// `control` is the stable control id embedded in the element / slider
+	/// ids (it must be unique per parameter); `color` becomes both the
+	/// committed colour (what the swatch shows) and the initial draft.
+	/// `window` is needed to build the hex field's [`InputState`] and the four
+	/// sliders, which start in RGB mode over 0..1 with a 0.01 step and are
+	/// bound to [`Self::on_slider`]; the hex field is subscribed to
+	/// `InputEvent::Change`, which only fires for user edits. The popup starts
+	/// closed at the default anchor position. `cx` is this entity's context.
 	pub(crate) fn new(
 		control: usize,
 		color: Rgba,
@@ -1778,6 +1901,12 @@ impl OfxColorPicker {
 	}
 
 	/// Set the draft RGB from a computed colour and refresh the hex field.
+	///
+	/// `r`, `g` and `b` are the new channels in 0..1; they are stored as-is
+	/// (not clamped) because callers already produce in-range values from
+	/// [`hsv_to_rgb`] or the sliders. The alpha is untouched. `cx` is notified
+	/// through [`Self::refresh_hex`]. Used by the palette, hue bar and slider
+	/// handlers; nothing is committed until [`Self::commit`].
 	fn apply_draft_rgb(&mut self, r: f32, g: f32, b: f32, cx: &mut Context<Self>) {
 		self.draft.r = r;
 		self.draft.g = g;
@@ -1786,6 +1915,10 @@ impl OfxColorPicker {
 	}
 
 	/// Set the draft alpha and refresh the hex field.
+	///
+	/// `a` is the new alpha in 0..1 (already clamped by the caller); `cx` is
+	/// notified through [`Self::refresh_hex`]. No commit happens here — the
+	/// value only lands when [`Self::commit`] emits the colour.
 	fn apply_draft_alpha(&mut self, a: f32, cx: &mut Context<Self>) {
 		self.draft.a = a;
 		self.refresh_hex(cx);
@@ -1813,6 +1946,13 @@ impl OfxColorPicker {
 
 	/// Hue bar click / drag: keep the draft's saturation / value, take the
 	/// picked hue, write the result back into the draft.
+	///
+	/// `h` is the hue in degrees from [`hue_from_point`] (0..360); the
+	/// current saturation and value are recovered from the draft via
+	/// [`rgb_to_hsv`] and the derived RGB is stored through
+	/// [`Self::apply_draft_rgb`], which also re-formats the hex field. Nothing
+	/// is committed until [`Self::commit`]. `cx` is notified so the palette,
+	/// swatch and sliders repaint.
 	fn on_hue(&mut self, h: f32, cx: &mut Context<Self>) {
 		let (_, s, v) = rgb_to_hsv(self.draft.r, self.draft.g, self.draft.b);
 		let rgb = hsv_to_rgb(h, s, v);
@@ -1931,6 +2071,20 @@ impl OfxColorPicker {
 	/// Apply a committed colour from the engine (called every frame from
 	/// the params view's value sync). While the popup is open the draft is
 	/// left alone so an in-progress edit is not clobbered by re-syncs.
+	pub(crate) fn committed(&self) -> Rgba {
+		self.committed
+	}
+
+	/// Re-sync the committed colour from the engine (called every frame from
+	/// the params view's value sync, so undo / redo / external edits land on
+	/// the swatch).
+	///
+	/// `color` is the engine's current value. A no-op when it equals the
+	/// stored committed colour. While the popup is open only `committed`
+	/// changes: the draft is left alone so an in-progress edit is not
+	/// clobbered by re-syncs. With the popup closed the draft is reset to
+	/// `color` and the sliders / hex field are re-synced. `cx` is notified on
+	/// any change. Counterpart of [`Self::committed`].
 	pub(crate) fn set_committed(&mut self, color: Rgba, cx: &mut Context<Self>) {
 		if self.committed == color {
 			return;
@@ -1947,6 +2101,12 @@ impl OfxColorPicker {
 	/// the pixel under the cursor on click; the params view routes the
 	/// toggle to the engine and polls [`AppEngine::take_eyedropper_result`]
 	/// every frame, so this picker stays in sync with the armed state.
+	///
+	/// Flips the local `picking` flag, emits
+	/// [`OfxColorEvent::PickViewerToggle`] with the new state (the only way
+	/// the engine learns about the toggle) and notifies `cx` so the button
+	/// repaints. The sampled colour comes back through
+	/// [`Self::apply_viewer_pick`].
 	fn toggle_viewer_pick(&mut self, cx: &mut Context<Self>) {
 		self.picking = !self.picking;
 		cx.emit(OfxColorEvent::PickViewerToggle {
@@ -1971,6 +2131,14 @@ impl OfxColorPicker {
 		}
 	}
 
+	/// Open the popup anchored at `position` (window-space, usually the
+	/// swatch's bottom-left) and reset the draft to the committed colour.
+	///
+	/// No-op when the popup is already open, so a repeated press cannot
+	/// reset an in-progress edit. On opening it also clears `hex_error` and
+	/// `swallow_next_outside_up`, re-syncs the sliders and hex field, and
+	/// emits [`OfxColorEvent::Opened`]. `cx` is notified so the deferred
+	/// popup and the live swatch repaint. Counterpart of [`Self::close_menu`].
 	fn open_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
 		if !self.open {
 			self.open = true;
@@ -2010,6 +2178,13 @@ impl OfxColorPicker {
 	/// programmatic refresh could not land); an in-progress invalid hex
 	/// edit keeps the popup open and commits nothing. Also disarms a
 	/// viewer eyedropper that was left armed.
+	///
+	/// On success the popup closes, the draft becomes the committed colour,
+	/// the sliders/hex field are re-synced and
+	/// [`OfxColorEvent::Committed`] is emitted for the params view to push
+	/// through [`AppEngine::set_effect_param`] (one undo row). On invalid hex
+	/// the popup stays open, only `cx` is notified so the error hint
+	/// repaints, and no event is emitted.
 	fn commit(&mut self, cx: &mut Context<Self>) {
 		if self.picking {
 			self.picking = false;
@@ -2028,6 +2203,19 @@ impl OfxColorPicker {
 	}
 
 	/// The popup's anchored subtree (deferred, above the card).
+	///
+	/// Builds the full picker popup: RGB/HSV mode tabs, the S/V palette and
+	/// hue bar (both record their paint bounds each frame so a click maps to a
+	/// colour), the three mode-specific sliders, the preview swatch + hex
+	/// field, the invalid-hex hint, the Cancel/OK buttons and the "pick from
+	/// viewer" toggle. `cx` supplies the click / drag / key listeners that
+	/// call back into [`Self::on_palette`], [`Self::on_hue`],
+	/// [`Self::on_slider`] and [`Self::commit`]; `colors` is the active theme
+	/// palette used for every colour in the popup. The layer occludes the
+	/// card underneath (so clicks on its padding do not press controls
+	/// behind it), closes on an outside mouse-up unless that click was the
+	/// viewer pick, and closes on Escape after disarming a pending pick.
+	/// `Deferred` priority 1 keeps it above the card's own layers.
 	fn popup_anchored(
 		&self,
 		cx: &mut Context<Self>,
@@ -2569,6 +2757,11 @@ impl Render for HueBarDragGhost {
 
 /// Convert RGB (0..1 components) to HSV: hue in degrees (0..360, 0 when
 /// the colour is achromatic), saturation 0..1, value 0..1.
+///
+/// `r`, `g` and `b` are the colour's channels, expected in 0..1. Returns
+/// `(hue, saturation, value)`; hue is 0 for greys and the value is the largest
+/// channel, so a black input yields `(0.0, 0.0, 0.0)`. Feeds [`hsv_to_rgb`]
+/// when a colour is round-tripped through the picker.
 fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 	let max = r.max(g).max(b);
 	let min = r.min(g).min(b);
@@ -2587,6 +2780,11 @@ fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 }
 
 /// Convert HSV (hue in degrees) back to an opaque RGB [`Rgba`].
+///
+/// `h` is wrapped into 0..360 first, so negative or >360 hues are accepted;
+/// `s` and `v` are expected in 0..1 but are not clamped here. The returned
+/// [`Rgba`] always has `a == 1.0`. Used by the palette and hue-bar painters;
+/// exact inverse of [`rgb_to_hsv`] for in-gamut components.
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Rgba {
 	let h = h.rem_euclid(360.0);
 	let c = v * s;
@@ -2619,6 +2817,10 @@ fn sv_from_point(bounds: Bounds<Pixels>, pos: Point<Pixels>) -> (f32, f32) {
 }
 
 /// Inverse of [`sv_from_point`] — the palette position of a (s, v) pair.
+///
+/// `bounds` is the palette rectangle; `s` and `v` are saturation and value,
+/// both clamped to 0..1, with `v` measured upwards from the bottom edge.
+/// Returns the screen-space point for that colour inside `bounds`.
 // Only the unit tests below call this helper (the lib build sees it as dead
 // code), so it is kept with an explicit allow.
 #[allow(dead_code)]
@@ -2633,6 +2835,11 @@ fn point_from_sv(bounds: Bounds<Pixels>, s: f32, v: f32) -> Point<Pixels> {
 
 /// Map a cursor position on the hue bar to a hue in degrees (0..360, top
 /// to bottom, clamped).
+///
+/// `bounds` is the hue bar's rectangle and `pos` is the hit position in the
+/// same coordinate space; only the vertical offset matters. The result is
+/// clamped to the bar, so positions above it yield 0° and below it 360°. Exact
+/// inverse of the layout painted by [`paint_hue_bar`].
 fn hue_from_point(bounds: Bounds<Pixels>, pos: Point<Pixels>) -> f32 {
 	let height = f32::from(bounds.size.height).max(1.0);
 	let t = ((f32::from(pos.y) - f32::from(bounds.top())) / height).clamp(0.0, 1.0);
@@ -2676,7 +2883,14 @@ fn paint_sv_palette(bounds: Bounds<Pixels>, hue: f32, window: &mut Window, _cx: 
 	}
 }
 
-/// Paint the hue bar: 36 vertical stripes spanning the full hue circle.
+/// Paint the hue bar: 36 full-width bands stacked from hue 0° at the top to
+/// 360° at the bottom, at full saturation and value.
+///
+/// `bounds` is the bar's paint rectangle; each band is one thirty-sixth of its
+/// height and is drawn one pixel taller so neighbouring bands do not leave
+/// seams. `window` receives the quads; `_cx` is unused (kept for the gpui
+/// paint signature). Counterpart of [`hue_from_point`], which inverts the same
+/// top-to-bottom mapping.
 fn paint_hue_bar(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) {
 	const STRIPES: u32 = 36;
 	let width = f32::from(bounds.size.width);
@@ -3968,7 +4182,7 @@ mod tests {
 	/// with a 10% pad (a unit span for flat data).
 	#[test]
 	fn curve_domain_defaults_to_unit_and_pads_non_unit_data() {
-		use oak_ofx_plugin::param_curve::{ControlPoint, Curve};
+		use quercus_engine_rs::ofx::{ControlPoint, Curve};
 		let cp = |key: f64, value: f64| ControlPoint { key, value, slope: 0.0 };
 		let curve = |points: Vec<ControlPoint>| Curve { points };
 		let text = || NodeValue::Text(String::new());
@@ -4028,7 +4242,7 @@ mod tests {
 	/// to the first control point for the handle lookup.
 	#[test]
 	fn curve_point_to_editor_normalizes_keys_values_and_slopes() {
-		use oak_ofx_plugin::param_curve::ControlPoint;
+		use quercus_engine_rs::ofx::ControlPoint;
 		let real = |key: f64, value: f64, slope: f64| ControlPoint { key, value, slope };
 		let points = vec![
 			real(0.0, 0.0, 0.0),
@@ -4927,8 +5141,8 @@ mod tests {
 			mk_param(
 				"curves_in",
 				ValueType::Parametric,
-				NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
-					oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
+				NodeValue::Text(quercus_engine_rs::ofx::curves_to_json(&[
+					quercus_engine_rs::ofx::Curve::identity(0.0, 1.0),
 				])),
 				vec![
 					("parametric_range", NodeValue::Vec2([0.0, 1.0])),
@@ -5354,9 +5568,9 @@ mod tests {
 			mk_param(
 				"render_curves_in",
 				ValueType::Parametric,
-				NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
-					oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
-					oak_ofx_plugin::param_curve::Curve::from_pairs(&[(0.0, 0.0), (1.0, 0.5)]),
+				NodeValue::Text(quercus_engine_rs::ofx::curves_to_json(&[
+					quercus_engine_rs::ofx::Curve::identity(0.0, 1.0),
+					quercus_engine_rs::ofx::Curve::from_pairs(&[(0.0, 0.0), (1.0, 0.5)]),
 				])),
 				vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
 			),
@@ -5529,8 +5743,8 @@ mod tests {
 				mk_param(
 					"wire_curves_in",
 					ValueType::Parametric,
-					NodeValue::Text(oak_ofx_plugin::param_curve::curves_to_json(&[
-						oak_ofx_plugin::param_curve::Curve::identity(0.0, 1.0),
+					NodeValue::Text(quercus_engine_rs::ofx::curves_to_json(&[
+						quercus_engine_rs::ofx::Curve::identity(0.0, 1.0),
 					])),
 					vec![("parametric_range", NodeValue::Vec2([0.0, 1.0]))],
 				),

@@ -75,7 +75,13 @@ pub struct ProjectManager<E: AppEngine> {
 }
 
 impl<E: AppEngine> ProjectManager<E> {
-	/// Builds the view and loads the library.
+	/// Builds the manager view and performs the initial library load.
+	///
+	/// `engine` is the shared engine entity the app also mutates, so the list
+	/// reflects library changes after a [`Self::reload`]; `_window` is unused by
+	/// the view but kept for the GPUI constructor signature; `cx` is the new
+	/// view's context. The initial load goes through [`Self::reload`], which
+	/// records an engine error in `status` instead of panicking.
 	pub fn new(engine: Entity<E>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let mut this = Self {
 			engine,
@@ -107,7 +113,12 @@ impl<E: AppEngine> ProjectManager<E> {
 		cx.notify();
 	}
 
-	/// The selected row's uuid, if any.
+	/// The uuid of the selected row, cloned.
+	///
+	/// Returns `None` when nothing is selected or the stored index no longer
+	/// matches a row. [`Self::reload`] uses it to keep the selection on the same
+	/// project across a library refresh, and the app uses it to re-select a row
+	/// after an action.
 	pub fn selected_uuid(&self) -> Option<String> {
 		self.selected
 			.and_then(|index| self.rows.get(index))
@@ -121,8 +132,12 @@ impl<E: AppEngine> ProjectManager<E> {
 			.map(|row| row.name.clone())
 	}
 
-	/// Shows an operation error under the list (the host reports engine
-	/// failures here so a failed action is visible in the dialog).
+	/// Shows, replaces or clears the error line under the list.
+	///
+	/// `status` is `Some(message)` for a failed engine operation (the app's
+	/// `manager_status` forwards the engine error here so the failure stays
+	/// visible inside the dialog) and `None` to clear it. The view repaints
+	/// immediately so the text appears or disappears without another event.
 	pub fn set_status(&mut self, status: Option<String>, cx: &mut Context<Self>) {
 		self.status = status;
 		cx.notify();
@@ -141,13 +156,22 @@ impl<E: AppEngine> ProjectManager<E> {
 		cx.notify();
 	}
 
-	/// Emits the event through the view's subscribers.
+	/// Emits a [`ManagerEvent`] to the view's subscribers and repaints.
+	///
+	/// The app shell is the subscriber and routes the request through the
+	/// engine. Ownership of `event` moves to `cx.emit`; the view keeps no copy,
+	/// so emit before mutating state that the handler may rely on.
 	fn emit(&mut self, event: ManagerEvent, cx: &mut Context<Self>) {
 		cx.emit(event);
 		cx.notify();
 	}
 
-	/// A click on row `index`: select, or open on a double click.
+	/// Handles a click on the library row at `index`.
+	///
+	/// `clicks` is the click count reported by the UI: one selects the row, two
+	/// or more also emits [`ManagerEvent::Open`] for it. Out-of-range indices
+	/// are ignored, so a stale row element cannot select or open the wrong
+	/// project.
 	fn row_clicked(&mut self, index: usize, clicks: usize, cx: &mut Context<Self>) {
 		if index >= self.rows.len() {
 			return;
@@ -161,7 +185,12 @@ impl<E: AppEngine> ProjectManager<E> {
 		}
 	}
 
-	/// An action-row button targeting the selection.
+	/// Emits the action event for the currently selected row.
+	///
+	/// `action` is a constructor such as `ManagerEvent::Rename` or
+	/// `ManagerEvent::Delete`; it is only called when a row is selected, and its
+	/// result is emitted through [`Self::emit`]. With no selection the call is a
+	/// silent no-op (no event, no repaint).
 	fn selected_action(
 		&mut self,
 		action: impl FnOnce(String) -> ManagerEvent,
@@ -400,19 +429,34 @@ pub struct NamePrompt {
 }
 
 impl NamePrompt {
-	/// Builds the prompt seeded with `initial`.
+	/// Builds the prompt with its single text field.
+	///
+	/// `initial` seeds the field (the project's current name when renaming, an
+	/// empty string or a default factor for the other prompts); `window` and
+	/// `cx` are the usual GPUI construction context. Read the edited text back
+	/// with [`Self::value`].
 	pub fn new(initial: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
 		let editor = cx.new(|cx| InputState::new(window, cx));
 		editor.update(cx, |editor, cx| editor.set_value(initial, window, cx));
 		Self { editor }
 	}
 
-	/// The name currently entered (trimmed).
+	/// The text currently entered, with leading/trailing whitespace trimmed.
+	///
+	/// `app` is only needed to read the inner input entity, so this can be
+	/// called without the view's own context. Returns an empty string when the
+	/// field is empty or whitespace-only; the app treats that as "cancel" rather
+	/// than an invalid name.
 	pub fn value(&self, app: &App) -> String {
 		self.editor.read(app).value().trim().to_string()
 	}
 
-	/// Replaces the entered name (tests / prefill).
+	/// Replaces the text currently in the prompt's field.
+	///
+	/// `value` overwrites the whole field (it is not appended); `window` and
+	/// `cx` are forwarded to the inner input state, and the view repaints so the
+	/// new text is visible. Used by tests to fill the prompt; the normal host
+	/// flow only seeds the initial value through [`Self::new`].
 	pub fn set_value(&mut self, value: &str, window: &mut Window, cx: &mut Context<Self>) {
 		self.editor
 			.update(cx, |editor, cx| editor.set_value(value, window, cx));
@@ -457,7 +501,12 @@ pub struct ConfirmContent {
 }
 
 impl ConfirmContent {
-	/// Builds the confirmation with `text`.
+	/// Builds the delete-confirmation body around `text`.
+	///
+	/// `text` is the warning shown in the modal (the app passes the already
+	/// localized "delete project {name}?" message); anything convertible into a
+	/// `SharedString` is accepted and rendered verbatim by this type's `Render`
+	/// impl.
 	pub fn new(text: impl Into<SharedString>) -> Self {
 		Self { text: text.into() }
 	}

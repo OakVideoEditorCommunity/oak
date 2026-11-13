@@ -36,8 +36,7 @@
 //!
 //! Switch requests during playback are queued (the C++ `play_queue_`
 //! semantics) and applied when the program playhead reaches the target
-//! time. Every switch goes through `oak_timeline::multicam::multicam_switch`
-//! on the global undo stack.
+//! time. Every switch goes through the SDK multicam session commands.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -52,7 +51,7 @@ use gpui_kit::{
 };
 use crate::widgets::viewer::PlaybackClock;
 
-use oak_node::nodes::multicamnode::MultiCamNode;
+use quercus_engine_rs::editor::multicam::{rows_and_columns, rows_cols_to_index};
 
 use crate::oakui::timecode::format_timecode;
 use crate::oakui::{AppEngine, MulticamState};
@@ -121,7 +120,16 @@ pub struct MulticamPanel<E: AppEngine> {
 }
 
 impl<E: AppEngine> MulticamPanel<E> {
-	/// Builds a panel over the program monitor's clock `clock`.
+	/// Builds the multicam panel over the program monitor's clock.
+	///
+	/// `engine` is the app's engine facade (queried for the detected
+	/// multicam state and rendered angle frames), and `clock` supplies the
+	/// program playhead and playing state that drive switching and the
+	/// refresh throttle. `_window` is unused; `_cx` is the panel context and
+	/// only provides the focus handle here.
+	///
+	/// The panel starts with no cached frames and requests a full refresh on
+	/// its first render.
 	pub fn new(
 		engine: Entity<E>,
 		clock: Entity<E::Clock>,
@@ -174,8 +182,19 @@ impl<E: AppEngine> MulticamPanel<E> {
 		}
 	}
 
-	/// Requests every angle; throttles to a round-robin subset during
-	/// playback (the rest keep their last frame).
+	/// Requests fresh frames for the multicam angles, throttled during
+	/// playback.
+	///
+	/// At rest, after a playhead jump of more than one frame, or when
+	/// `full_refresh` is set (first render / after a switch), every source
+	/// is requested. During playback it advances a round-robin cursor and
+	/// requests at most `PLAYBACK_REFRESH_PER_TICK` sources once per
+	/// `PLAYBACK_REFRESH_STRIDE` ticks, so each angle refreshes in turn while
+	/// the others keep their last image.
+	///
+	/// `cx` is the panel context used to read the clock and call the engine;
+	/// frames that are not ready yet are simply not cached. No-op when no
+	/// multicam is detected or it has no sources.
 	fn refresh_frames(&mut self, cx: &mut Context<Self>) {
 		let Some(state) = self.state else {
 			return;
@@ -250,7 +269,14 @@ impl<E: AppEngine> MulticamPanel<E> {
 		}
 	}
 
-	/// Applies a switch immediately and schedules the full angle refresh.
+	/// Switches the multicam to `source` immediately and schedules a full
+	/// angle refresh.
+	///
+	/// `source` is the zero-based angle index, and `split_clip` asks the
+	/// engine to split the multicam clip at the playhead before switching.
+	/// The cached frames are dropped because the program output changed, so
+	/// the next `refresh_frames` pass re-requests every angle. `cx` is the
+	/// panel context forwarded to the engine update.
 	fn apply_switch(&mut self, source: i32, split_clip: bool, cx: &mut Context<Self>) {
 		self.engine
 			.update(cx, |engine, cx| engine.multicam_switch_to(source, split_clip, cx));
@@ -258,8 +284,16 @@ impl<E: AppEngine> MulticamPanel<E> {
 		self.full_refresh = true;
 	}
 
-	/// Converts a click inside the grid container to a source index and
-	/// switches to it (the C++ `display_clicked`).
+	/// Converts a click in window coordinates to a grid cell and switches the
+	/// multicam to that source.
+	///
+	/// `window_position` is in window pixels; it is translated by
+	/// `grid_bounds` (recorded during layout) and divided into the current
+	/// rows×cols cell size, so clicks outside the grid, in padding cells, or
+	/// on an out-of-range cell are ignored. A valid cell requests a switch
+	/// with splitting enabled (see `request_switch`: immediate at rest,
+	/// queued once the playhead reaches it during playback). `cx` is the
+	/// panel context.
 	fn handle_grid_click(&mut self, window_position: Point<Pixels>, cx: &mut Context<Self>) {
 		let Some(state) = self.state else {
 			return;
@@ -275,7 +309,7 @@ impl<E: AppEngine> MulticamPanel<E> {
 		{
 			return;
 		}
-		let (rows, cols) = MultiCamNode::rows_and_columns(state.source_count);
+		let (rows, cols) = rows_and_columns(state.source_count);
 		let multi = rows.max(cols).max(1);
 		let cell_w = f32::from(self.grid_bounds.size.width) / multi as f32;
 		let cell_h = f32::from(self.grid_bounds.size.height) / multi as f32;
@@ -287,14 +321,19 @@ impl<E: AppEngine> MulticamPanel<E> {
 		if c >= cols || r >= rows {
 			return;
 		}
-		let source = MultiCamNode::rows_cols_to_index(r, c, rows, cols);
+		let source = rows_cols_to_index(r, c, rows, cols);
 		if (0..state.source_count).contains(&source) {
 			self.request_switch(source, true, cx);
 		}
 	}
 
-	/// One grid cell: the angle frame (or a placeholder) with a yellow box
-	/// around the current source.
+	/// Builds one angle cell for the grid.
+	///
+	/// `source` is the zero-based source index (also the key into the frame
+	/// cache), `cell_w`/`cell_h` the cell size in pixels, and `colors` the
+	/// theme palette. The cell shows the cached frame scaled to fit, or a
+	/// `CAM n` placeholder while that source's frame is still rendering, and
+	/// draws a yellow border when `source` is the current multicam source.
 	fn cell(&mut self, source: i32, cell_w: f32, cell_h: f32, colors: &Colors) -> AnyElement {
 		let is_current = self.state.is_some_and(|s| s.current_source == source);
 		let content: AnyElement = match self.frames.get(&source) {
@@ -333,9 +372,15 @@ impl<E: AppEngine> MulticamPanel<E> {
 			.into_any_element()
 	}
 
-	/// The angle grid: rows×cols cells filling the container.
+	/// Builds the rows×cols angle grid that fills the panel body.
+	///
+	/// `state` is the detected multicam (source count and current source) and
+	/// `colors` the theme palette. Cell size is derived from `grid_bounds`
+	/// divided by the larger grid dimension (clamped to at least 1px), using
+	/// the same layout as `handle_grid_click` so clicks map back to cells.
+	/// The container is a wrapping flex row; each cell is built by `cell`.
 	fn grid(&mut self, state: MulticamState, colors: &Colors) -> AnyElement {
-		let (rows, cols) = MultiCamNode::rows_and_columns(state.source_count);
+		let (rows, cols) = rows_and_columns(state.source_count);
 		let multi = rows.max(cols).max(1);
 		let cell_w = f32::from(self.grid_bounds.size.width) / multi as f32;
 		let cell_h = f32::from(self.grid_bounds.size.height) / multi as f32;
@@ -498,7 +543,7 @@ mod tests {
 	/// The grid conversion helpers used by the panel (rows/cols from the
 	/// node, index round-trips) plus the panel's click math.
 	fn rows_cols(sources: i32) -> (i32, i32) {
-		MultiCamNode::rows_and_columns(sources)
+		rows_and_columns(sources)
 	}
 
 	/// Click-point → source index with the same math [`MulticamPanel`]
@@ -520,7 +565,7 @@ mod tests {
 		if c >= cols || r >= rows {
 			return None;
 		}
-		let source = MultiCamNode::rows_cols_to_index(r, c, rows, cols);
+		let source = rows_cols_to_index(r, c, rows, cols);
 		(0..sources).contains(&source).then_some(source)
 	}
 

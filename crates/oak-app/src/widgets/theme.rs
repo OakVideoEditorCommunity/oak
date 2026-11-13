@@ -64,7 +64,13 @@ impl OakTheme {
 		}
 	}
 
-	/// The olive-light palette.
+	/// The olive-light palette: light neutral surfaces (`base` near-white,
+	/// `window` light grey), black primary text and the shared blue accent for
+	/// links and selection.
+	///
+	/// Same fields and consumers as [`OakTheme::olive_dark`]; pass it to
+	/// [`apply_theme`] to switch the app (and the gpui-kit component theme) to
+	/// light mode.
 	pub fn olive_light() -> Self {
 		Self {
 			name: "Olive Light".into(),
@@ -147,10 +153,19 @@ pub fn apply_theme(cx: &mut App, theme: &OakTheme) {
 		colors.caret = theme.text.into();
 		colors.selection = theme.accent.into();
 		colors.input = theme.base.into();
+		colors.tab_foreground = theme.text.into();
+		colors.tab_active_foreground = theme.text.into();
+		colors.tab_active = theme.window.into();
 	});
 }
 
-/// The current theme, or olive-dark if none was applied.
+/// The full theme last installed by [`apply_theme`], or the
+/// [`OakTheme::olive_dark`] default when none has been applied.
+///
+/// `cx` is only read — no global is created — so this is safe before any theme
+/// is applied; in that case a fresh default `Arc` is returned on every call.
+/// For the gpui color structs (what widgets actually paint with) read
+/// `cx.default_colors()` instead.
 pub fn current_theme(cx: &App) -> Arc<OakTheme> {
 	cx.try_global::<ThemeGlobal>()
 		.map(|global| global.0.clone())
@@ -162,6 +177,14 @@ fn relative_luminance(color: Rgba) -> f32 {
 	0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
 }
 
+/// Multiply the RGB channels of `color` by `factor`, clamping each result to
+/// `[0, 1]`; alpha is left unchanged.
+///
+/// `factor` above 1.0 lightens (hover tones, light-theme borders), below 1.0
+/// darkens (dark-theme borders). The scale is applied per channel without
+/// gamma/luma weighting, so the perceived shift follows the stored sRGB
+/// values. Used by [`OakTheme::border`], [`accent_hover`] and
+/// [`neutral_hover`].
 fn scale_luma(color: Rgba, factor: f32) -> Rgba {
 	let scale = |channel: f32| (channel * factor).clamp(0.0, 1.0);
 	Rgba {

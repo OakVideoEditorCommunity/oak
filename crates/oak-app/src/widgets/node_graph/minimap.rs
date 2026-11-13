@@ -55,7 +55,13 @@ impl GraphMinimap {
 		Self::default()
 	}
 
-	/// Shows or hides the minimap.
+	/// Shows or hides the minimap overlay.
+	///
+	/// `visible = false` makes the minimap render nothing and ignore input;
+	/// `true` restores the passive viewport indicator. The flag is plain
+	/// state (defaults to visible via [`Self::default`]) — callers must
+	/// notify/redraw the node-graph view themselves after flipping it, as the
+	/// view menu does. Paired with [`Self::is_visible`].
 	pub fn set_visible(&mut self, visible: bool) {
 		self.visible = visible;
 	}

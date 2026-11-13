@@ -14,31 +14,39 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# Root manifest: the Cargo workspace only — every package lives under
-# crates/ (the GUI app in oak-app, the CLI in oak-cli, the render worker
-# in oak-worker, the module rlibs in oak-*) or examples/ (standalone
-# integration crates, each with its own Cargo.toml).
+# Root manifest: the Cargo workspace only. The editor app lives in
+# crates/oak-app, the CLI in oak-cli and the extension host in
+# oak-extensions. Rendering runs in-process (no worker binary). The engine and the Rust SDK are
+# external: consumers depend on `quercus-engine-rs` with BOTH a pinned
+# version and a path into the `quercus-engine` git submodule (the Cargo
+# "version + path" form: the path wins locally, the version is what a
+# crates.io consumer would resolve).
 #
 # crates/oakengine.bk is the legacy C++-era backup; not a package.
 [workspace]
 members = ["crates/*", "examples/*"]
-exclude = ["crates/oakengine.bk", "ai/oak-ai-tools"]  # T8.1: oak-app path-depends on the standalone ai/ root (lead-approved, one line)
-# NOTE: oak-storage is a workspace member but NOT a default member (it
-# stays out of the default-members test matrix to keep `cargo test` at
-# the root fast; the app links it as a normal path dependency, so it
-# builds with the app). Build/test it explicitly with `cargo test -p oak-storage`.
+# P7 merge: `crates/oak-otio` and `crates/oak-task` are excluded — upstream
+# deleted both crates (their sources live in the `quercus-engine` submodule
+# now); the two directories only hold merge leftovers and a local-only
+# excluded test. `ai/*` stays out of the upstream build entirely
+# (standalone workspace roots with their own Cargo.toml/lock).
+exclude = ["crates/oakengine.bk", "quercus-engine", "ai/oak-ai-tools", "crates/oak-otio", "crates/oak-task"]  # quercus-engine is upstream's submodule engine (root manifest, version+path); ai/ is our standalone T8.1 root that oak-app path-depends on (lead-approved)
 # NOTE: `crates/oakengine` (the frozen C-ABI facade cdylib) is retired:
 # every consumer (app/cli/worker/plugins) links the module rlibs
 # directly, so nothing in the workspace referenced it. The sources are
 # kept at crates/oakengine.bk (excluded from the workspace) as a
 # reference snapshot; git history is the authoritative backup.
-default-members = ["crates/oak-app", "crates/oak-cli", "crates/oak-worker"]
+default-members = ["crates/oak-app", "crates/oak-cli"]
 resolver = "2"
 
 [workspace.package]
 # Single source of truth for the release version: the app package
 # inherits it, and with it cargo-packager and the CD packaging scripts.
 version = "0.5.2"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/OakVideoEditorCommunity/oak"
+authors = ["Oak Team"]
+rust-version = "1.85"
 
 [profile.release]
 # FFI discipline: every module crate exports an `extern "C"` ABI whose
@@ -91,6 +99,7 @@ opt-level = 1
 # The fork carries all three fixes; return to the crates.io release once it
 # does (the ocio-rs patch pulls the fork's `ocio-sys` path dependency too).
 [patch.crates-io]
+gpu-allocator = { path = "vendor/gpu-allocator" }
 # 10-bit display path (docs/zh/gpui-kit-migration.md): minimal renderer
 # patches vendored from the registry snapshots. gpui-pre gains
 # `SurfaceSource::Texture` + `Window::gpu_context`, gpui-pre-linux exposes

@@ -17,8 +17,7 @@
 //! M12 P4: timeline audio waveforms.
 //!
 //! The [`WaveformCache`] holds per-clip min/max peak data extracted
-//! through `oak_audio::waveform::extract` (the real FFmpeg-backed
-//! extraction; M14 R3: a direct module call, no facade); the engine
+//! through the SDK's engine-backed audio analysis API; the engine
 //! refreshes it when the timeline rebuilds. The [`OakClipDecorator`] draws
 //! the peaks into the timeline's clip body.
 //!
@@ -34,16 +33,7 @@ use crate::widgets::timeline::ClipId;
 use crate::widgets::timeline::FrameRange;
 use gpui_kit::{Bounds, Hsla, Pixels, Window};
 
-/// One min/max amplitude pair (mirror of the oakaudio waveform C ABI
-/// `MinMax`: two f32s).
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MinMax {
-	/// Minimum amplitude in the window.
-	pub min: f32,
-	/// Maximum amplitude in the window.
-	pub max: f32,
-}
+pub use quercus_engine_rs::audio_analysis::MinMax;
 
 /// The cached waveform of one clip.
 #[derive(Debug, Clone)]
@@ -74,7 +64,14 @@ pub struct WaveformCache {
 }
 
 impl WaveformCache {
-	/// Create an empty cache at the given frame rate.
+	/// Creates an empty cache for a timeline running at `fps` frames per second.
+	///
+	/// A non-positive `fps` falls back to 25.0 so downstream frame-to-time arithmetic
+	/// cannot divide by zero; the value is only forwarded to `extract` today, which
+	/// ignores it (peaks are addressed in source samples). The cache is returned in
+	/// an `Arc` because the clip decorator and the background extraction share it.
+	/// Fill it with [`WaveformCache::refresh`], read it back with
+	/// [`WaveformCache::get`].
 	pub fn new(fps: f32) -> Arc<WaveformCache> {
 		Arc::new(WaveformCache {
 			map: Mutex::new(HashMap::new()),
@@ -88,7 +85,13 @@ impl WaveformCache {
 		self.version.load(std::sync::atomic::Ordering::Relaxed)
 	}
 
-	/// The cached waveform of `clip`, if extracted.
+	/// The cached waveform of `clip`, if one has been extracted.
+	///
+	/// `clip` is the numeric clip id (`ClipId.0`). Returns a shared handle to the
+	/// immutable peaks, or `None` when nothing is extracted yet — the usual answer
+	/// while the background extraction is still running, so callers draw no
+	/// waveform rather than blocking. Takes only the map lock; the decode itself
+	/// happens in [`WaveformCache::refresh`].
 	pub fn get(&self, clip: u64) -> Option<Arc<ClipWaveform>> {
 		self.map
 			.lock()
@@ -117,68 +120,68 @@ impl WaveformCache {
 	}
 }
 
-/// Extract a clip's waveform (first channel) via oakaudio's waveform
-/// extractor.
+/// Extracts a clip's waveform (first channel) through the SDK.
+///
+/// `filename` is the clip's media path, `duration_frames` the clip length in
+/// timeline frames stored alongside the peaks, and `_fps` is unused (the
+/// extractor works in source samples). Peaks summarise 256 source samples per
+/// point. The caller is already on a media worker, so the blocking decode does
+/// not stall GPUI.
+///
+/// Returns `None` when the file cannot be decoded or the stream reports no
+/// channels/points; the clip is then drawn without a waveform.
 fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
-	let cname = std::ffi::CString::new(filename).ok()?;
 	const SAMPLES_PER_POINT: i32 = 256;
-	// Audio-stream index 0 (probe numbering).
-	let outcome = oak_audio::waveform::extract(&cname, 0, SAMPLES_PER_POINT).ok()?;
-	if outcome.channels <= 0 || outcome.points.is_empty() {
+	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
+		filename,
+		0,
+		SAMPLES_PER_POINT,
+	)?;
+	let info = waveform.info();
+	if info.channels <= 0 || info.point_count == 0 {
 		return None;
 	}
-	// Keep only the first channel: the points are channel-interleaved
-	// (point i channel c at index i * channels + c).
-	let channel_count = outcome.channels.max(1) as usize;
-	let count = outcome.points.len() / channel_count;
-	let mut peaks = Vec::with_capacity(count);
-	peaks.extend((0..count).map(|i| {
-		let p = outcome.points[i * channel_count];
-		MinMax {
-			min: p.min,
-			max: p.max,
-		}
-	}));
+	let peaks = waveform.peaks(0);
 	Some(ClipWaveform {
 		peaks,
-		channel_count: outcome.channels.max(1),
-		sample_rate: 48000,
+		channel_count: info.channels,
+		sample_rate: info.sample_rate,
 		samples_per_point: SAMPLES_PER_POINT,
 		duration_frames,
 	})
 }
 
-/// Extract an audio RMS peak envelope directly from a media file's
-/// audio stream — the multicam wizard's sync correlation input. Uses
-/// the oakaudio waveform extractor's min/max points (per 256 source
-/// samples), keeps the first channel, and maps each point onto a tiny
-/// norm that the envelope correlator can compare across angles (the
-/// point's peak = max(|min|, |max|), windowed 1/10 s).
+/// Extracts an audio RMS peak envelope straight from a media file's audio
+/// stream — the multicam wizard's sync-correlation input.
 ///
-/// Returns `None` when the file has no decodable audio (the wizard then
-/// falls back to timecode alignment).
+/// `filename` is the media path and `stream_index` the 0-based audio stream to
+/// decode (negative values are rejected by the extractor). Points summarise 256
+/// source samples each and only channel 0 is used; each point contributes
+/// `max(|min|, |max|)`. Those per-point peaks are then folded into windows of
+/// about 1/10 s (rounded, at least one point), giving a rate-independent
+/// envelope the correlator can compare across angles.
+///
+/// Returns `None` when the file has no decodable audio (the wizard then falls
+/// back to timecode alignment).
 pub fn extract_audio_envelope(filename: &str, stream_index: i32) -> Option<Vec<f64>> {
-	let cname = std::ffi::CString::new(filename).ok()?;
 	const SAMPLES_PER_POINT: i32 = 256;
-	const WINDOW_POINTS: usize = 10; // ~100 ms windows at 48 kHz
-	let outcome = oak_audio::waveform::extract(&cname, stream_index, SAMPLES_PER_POINT).ok()?;
-	if outcome.channels <= 0 || outcome.points.is_empty() {
+	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
+		filename,
+		stream_index,
+		SAMPLES_PER_POINT,
+	)?;
+	let info = waveform.info();
+	if info.channels <= 0 || info.point_count == 0 {
 		return None;
 	}
-	let channel_count = outcome.channels.max(1) as usize;
-	let count = outcome.points.len() / channel_count;
-	// Peaks of the first channel.
-	let mut peaks: Vec<f64> = (0..count)
-		.map(|i| {
-			let p = outcome.points[i * channel_count];
-			f64::max(f64::from(p.min).abs(), f64::from(p.max).abs())
-		})
-		.collect();
-	// Window: every WINDOW_POINTS points collapses to one max (the
-	// envelope the correlator slides).
-	let mut envelope = Vec::with_capacity(count.div_ceil(WINDOW_POINTS));
-	for chunk in peaks.chunks_mut(WINDOW_POINTS) {
-		envelope.push(chunk.iter().copied().fold(0.0, f64::max));
+	let window_points =
+		(f64::from(info.sample_rate) * 0.1 / f64::from(SAMPLES_PER_POINT)).round().max(1.0) as usize;
+	let peaks = waveform.peaks(0);
+	let mut envelope = Vec::with_capacity(peaks.len().div_ceil(window_points));
+	for chunk in peaks.chunks(window_points) {
+		envelope.push(chunk.iter().fold(0.0f64, |acc, point| {
+			acc.max(f64::from(point.min).abs()).max(f64::from(point.max).abs())
+		}));
 	}
 	Some(envelope)
 }
@@ -263,7 +266,11 @@ mod tests {
 			std::process::id()
 		));
 		if media {
-			oak_codec::testmedia::write_test_clip(&path, 64, 64, 10, 10).expect("test media");
+			std::fs::copy(
+				std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/demo.mp4"),
+				&path,
+			)
+			.expect("copy test media");
 		} else {
 			std::fs::write(&path, b"not media").expect("write");
 		}

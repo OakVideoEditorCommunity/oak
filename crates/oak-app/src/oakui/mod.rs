@@ -27,14 +27,14 @@
 //!   [`MockClock`](mock::MockClock), the demo implementation feeding every
 //!   widget's data-source trait.
 //! * [`real`] — [`RealEngine`](real::RealEngine) and
-//!   [`RealClock`](real::RealClock), the real engine. M14 R3: it calls the
-//!   oak* module crates' Rust APIs directly (oaknode / oaktimeline /
-//!   oakundo / oakrender / oaktask / oakcodec / oakaudio / oak_core /
-//!   oakstorage — no `liboakengine` dylib, no C ABI) behind the same
-//!   [`EngineGateway`](engine::EngineGateway) seam the mock implements.
-//! * [`graphops`] / [`effectchain`] / [`renderops`] — the app's assembly
-//!   layer over the module crates: project/timeline/storage helpers, the
-//!   effect-chain composition, and montage/render/export drivers.
+//!   [`RealClock`](real::RealClock), the real engine. It is a pure
+//!   `quercus-engine-rs` consumer: a live `EditorSession` owns the
+//!   project and its semantic edits, and the app links no internal module
+//!   crate. It implements the same
+//!   [`EngineGateway`](engine::EngineGateway) seam as the mock.
+//! * [`graphops`] / [`effectchain`] / [`renderops`] — SDK adapters:
+//!   project/timeline commands and queries, effect-chain DTOs, and the
+//!   video/audio/export task drivers.
 //! * [`transport`] — the play/pause/step/seek state machine (pure, unit
 //!   tested).
 //! * [`timecode`] — timecode / duration / fps / resolution formatting (pure,
@@ -43,7 +43,6 @@
 //!   nodes: the measure/render hooks they call through (`install`), and the
 //!   system font list feeding their font-family combo.
 
-pub mod audio_thread;
 pub mod component;
 pub mod displaycolor;
 pub mod effectchain;
@@ -53,13 +52,13 @@ pub mod graphops;
 pub mod gpu;
 pub mod icons;
 pub mod mock;
-pub mod multicam;
 pub mod nodegraph;
 pub mod ofx;
 pub mod projectbrowser;
 pub mod real;
 pub mod renderops;
 pub mod scopes;
+pub(crate) mod settings;
 pub mod textengine;
 pub mod timecode;
 pub mod transport;

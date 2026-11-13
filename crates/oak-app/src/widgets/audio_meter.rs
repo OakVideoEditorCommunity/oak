@@ -60,7 +60,15 @@ pub struct AudioLevelMeter<D: AudioMeterDataSource> {
 }
 
 impl<D: AudioMeterDataSource> AudioLevelMeter<D> {
-	/// Create a meter over `data`.
+	/// Creates a meter that visualizes `data`.
+	///
+	/// `data` is the shared entity the meter reads channel levels from on
+	/// every render; the meter only caches the peak-hold state, it never
+	/// mutates the source. `_control` is currently ignored; callers pass a
+	/// numeric control id for it. `_window` is unused, and `cx`
+	/// supplies the focus handle. The meter starts as horizontal with an
+	/// empty peak vector; `data` is not read until the first render or
+	/// [`Self::update`].
 	pub fn new(
 		_control: usize,
 		data: Entity<D>,
@@ -75,18 +83,37 @@ impl<D: AudioMeterDataSource> AudioLevelMeter<D> {
 		}
 	}
 
-	/// Set the orientation (builder-style, callable after `new`).
+	/// Builder-style setter for the meter's layout orientation.
+	///
+	/// `orientation` chooses how channels and lit segments are arranged (see
+	/// [`MeterOrientation`]); the default set by [`Self::new`] is
+	/// horizontal. Consumes `self` and returns it, so it can be chained onto
+	/// the constructor: `AudioLevelMeter::new(..).with_orientation(
+	/// MeterOrientation::Vertical)`. The field is read on the next render;
+	/// nothing is repainted or notified here.
 	pub fn with_orientation(mut self, orientation: MeterOrientation) -> Self {
 		self.orientation = orientation;
 		self
 	}
 
-	/// The current orientation.
+	/// Returns the orientation the meter is currently laid out in.
+	///
+	/// Defaults to [`MeterOrientation::Horizontal`]; the value is set with
+	/// [`Self::with_orientation`] and read when rendering to decide whether
+	/// channels stack vertically with left-to-right segments, or sit side by
+	/// side with bottom-to-top segments.
 	pub fn orientation(&self) -> MeterOrientation {
 		self.orientation
 	}
 
-	/// The current per-channel levels.
+	/// Reads the current per-channel levels from the data source.
+	///
+	/// `cx` is only used to borrow the [`AudioMeterDataSource`] entity. The
+	/// result has one linear value per channel in `0..1` (the same values
+	/// the render path lights); it may be empty when the source reports no
+	/// channels, so callers should not index it blindly. This is a read-only
+	/// query: it does not advance the peak-hold state, which only
+	/// [`Self::update`] does.
 	pub fn levels(&self, cx: &App) -> Vec<f32> {
 		self.data.read(cx).levels()
 	}

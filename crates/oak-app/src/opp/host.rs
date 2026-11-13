@@ -3,7 +3,7 @@
 //! `oak-extensions` declares the trait against pure data types only and
 //! never depends on this crate (notes §2); this module is the other half of
 //! that split: every method the OPP/1 catalog maps onto the engine is routed
-//! to the real `oakui::graphops` / `renderops` / `effectchain` / `oak_undo`
+//! to the real `oakui::graphops` / `renderops` / `effectchain` / undo
 //! entry points, and everything the spec marks 🆕 (needs-new-code) answers a
 //! structured `Unsupported` instead of pretending to succeed.
 //!
@@ -36,8 +36,8 @@ use serde_json::{json, Value};
 use crate::oakui::effectchain;
 use crate::oakui::graphops::{self, ProjectRef};
 use crate::oakui::renderops::{self, RenderedFrame};
-use oak_node::id::NodeId;
-use oak_node::track::TrackType;
+use quercus_engine_rs::node::NodeId;
+use quercus_engine_rs::editor::TrackKind;
 
 /// The six-domain host: the current project plus the single-holder
 /// transaction state (OPP §6 rule 1: one open transaction per host).
@@ -63,7 +63,13 @@ struct TxnState {
 /// `NodeId` has no `Display`; the wire id is the stable identity integer
 /// (`graphops::id_of` is its inverse).
 fn id_string(id: NodeId) -> String {
-	id.identity().to_string()
+	identity(id).to_string()
+}
+
+/// The stable identity of a node id (pre-P7 `NodeId::identity`; the SDK
+/// id's identity IS its raw value — `graphops::id_of` round-trips it).
+fn identity(id: NodeId) -> u64 {
+	id.raw()
 }
 
 fn parse_id(s: &str) -> Result<NodeId, HostError> {
@@ -73,11 +79,11 @@ fn parse_id(s: &str) -> Result<NodeId, HostError> {
 		.ok_or_else(|| HostError::entity_not_found(s))
 }
 
-fn parse_track_type(kind: &str) -> Result<TrackType, HostError> {
+fn parse_track_type(kind: &str) -> Result<TrackKind, HostError> {
 	match kind {
-		"video" => Ok(TrackType::Video),
-		"audio" => Ok(TrackType::Audio),
-		"subtitle" => Ok(TrackType::Subtitle),
+		"video" => Ok(TrackKind::Video),
+		"audio" => Ok(TrackKind::Audio),
+		"subtitle" => Ok(TrackKind::Subtitle),
 		other => Err(HostError::with_data(
 			INVALID_PARAMS,
 			format!("unknown track kind {other:?}"),
@@ -86,11 +92,11 @@ fn parse_track_type(kind: &str) -> Result<TrackType, HostError> {
 	}
 }
 
-fn track_type_str(kind: TrackType) -> &'static str {
+fn track_type_str(kind: TrackKind) -> &'static str {
 	match kind {
-		TrackType::Video => "video",
-		TrackType::Audio => "audio",
-		TrackType::Subtitle => "subtitle",
+		TrackKind::Video => "video",
+		TrackKind::Audio => "audio",
+		TrackKind::Subtitle => "subtitle",
 	}
 }
 
@@ -127,8 +133,7 @@ impl OppHost {
 		reason: &str,
 	) -> HostError {
 		let available = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			let mut ids: Vec<String> = effectchain::addable_effects_for(&g.graph, host)
+				let mut ids: Vec<String> = effectchain::addable_effects_for(&p, host)
 				.into_iter()
 				.map(|e| e.type_id)
 				.collect();
@@ -188,8 +193,7 @@ impl OppHost {
 	/// The sequence id (wire string) the request names, defaulting to the
 	/// project's first sequence when the caller omits it (`null` = current).
 	fn sequence_of(&self, p: &ProjectRef, seq: &Option<EntityId>) -> Result<NodeId, HostError> {
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		let ids = graphops::sequence_ids(&g);
+		let ids = graphops::sequence_ids(&p);
 		match seq {
 			Some(want) => ids
 				.iter()
@@ -211,11 +215,10 @@ impl OppHost {
 
 	/// The wire form of a sequence's settings.
 	fn settings_of(&self, p: &ProjectRef, seq: NodeId) -> Result<SequenceSettings, HostError> {
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
 		let (name, width, height, rate, interlaced) =
-			graphops::sequence_settings(&g.graph, seq)
+			graphops::sequence_settings(&p, seq)
 				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?;
-		let duration = graphops::sequence_length(&g.graph, seq);
+		let duration = graphops::sequence_length(&p, seq);
 		Ok(SequenceSettings {
 			id: id_string(seq),
 			name,
@@ -229,8 +232,7 @@ impl OppHost {
 
 	/// `(num, den)` frame timebase of `seq` (`graphops::sequence_time_base`).
 	fn timebase(&self, p: &ProjectRef, seq: NodeId) -> Result<(i64, i64), HostError> {
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		graphops::sequence_time_base(&g.graph, seq).ok_or_else(|| {
+		graphops::sequence_time_base(&p, seq).ok_or_else(|| {
 			HostError::invalid_state("the sequence has no valid frame rate")
 		})
 	}
@@ -241,8 +243,8 @@ impl OppHost {
 // ---------------------------------------------------------------------------
 
 /// Host rational → engine rational (rejects a zero denominator up front:
-/// `oak_core::Rational` treats `den = 0` as unusable).
-fn core_rational(r: &Rational) -> Result<oak_core::Rational, HostError> {
+/// the SDK `Rational` treats `den = 0` as unusable).
+fn core_rational(r: &Rational) -> Result<quercus_engine_rs::types::Rational, HostError> {
 	if r.den == 0 {
 		return Err(HostError::with_data(
 			INVALID_PARAMS,
@@ -250,11 +252,11 @@ fn core_rational(r: &Rational) -> Result<oak_core::Rational, HostError> {
 			json!({ "time": r }),
 		));
 	}
-	Ok(oak_core::Rational::new(r.num, r.den))
+	Ok(quercus_engine_rs::types::Rational::new(r.num, r.den))
 }
 
-fn host_rational(r: &oak_core::Rational) -> Rational {
-	Rational::new(r.numerator(), r.denominator())
+fn host_rational(r: &quercus_engine_rs::types::Rational) -> Rational {
+	Rational::new(r.num, r.den)
 }
 
 /// A seconds-rational → frame timestamp on the sequence's timebase
@@ -291,23 +293,23 @@ fn unsupported(method: &str, reason: &str, spec: &str) -> HostError {
 impl HostServices for OppHost {
 	fn project_get_info(&self) -> Result<ProjectInfo, HostError> {
 		let p = self.project()?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		let name = graphops::project_name(&g);
-		let path = if g.filename.is_empty() {
+		let name = graphops::project_name(&p);
+		let filename = p.filename();
+		let path = if filename.is_empty() {
 			None
 		} else {
-			Some(g.filename.clone())
+			Some(filename)
 		};
-		let sequences = graphops::sequence_ids(&g)
+		let sequences = graphops::sequence_ids(&p)
 			.into_iter()
 			.map(|id| {
-				let (width, height, fps) = graphops::sequence_video_params(&g.graph, id)
+				let (width, height, fps) = graphops::sequence_video_params(&p, id)
 					.map(|(w, h, rate)| (w as u32, h as u32, host_rational(&rate)))
 					.unwrap_or((0, 0, Rational::new(30, 1)));
 				SequenceInfo {
 					id: id_string(id),
-					name: graphops::node_label(&g.graph, id),
-					length: host_rational(&graphops::sequence_length(&g.graph, id)),
+					name: graphops::node_label(&p, id),
+					length: host_rational(&graphops::sequence_length(&p, id)),
 					fps,
 					width,
 					height,
@@ -318,13 +320,13 @@ impl HostServices for OppHost {
 			name,
 			path,
 			sequences,
-			dirty: g.modified,
+			dirty: p.modified(),
 		})
 	}
 
 	/// Open a project file. Per notes §1 this **does not enter the undo
 	/// stack**: the token serializes the call and carries the confirmation
-	/// gate, and the tree swap leaves `oak_undo` untouched — no
+	/// gate, and the tree swap leaves the SDK undo stack untouched — no
 	/// `group_begin`/`group_end` is opened for a swap.
 	fn project_open(&self, path: &str, txn: Option<&str>) -> Result<ProjectInfo, HostError> {
 		self.require_txn(txn)?;
@@ -340,11 +342,11 @@ impl HostServices for OppHost {
 		let target = match path {
 			Some(s) if !s.is_empty() => Path::new(s).to_path_buf(),
 			_ => {
-				let g = p.lock().unwrap_or_else(|e| e.into_inner());
-				if g.filename.is_empty() {
+						let filename = p.filename();
+				if filename.is_empty() {
 					return Err(HostError::invalid_state("the project has no path to save to"));
 				}
-				PathBuf::from(g.filename.clone())
+				PathBuf::from(filename)
 			}
 		};
 		graphops::save_ove(&p, &target)
@@ -362,14 +364,13 @@ impl HostServices for OppHost {
 
 	fn media_list_footage(&self) -> Result<Vec<FootageInfo>, HostError> {
 		let p = self.project()?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		Ok(graphops::footage_ids(&g)
+		Ok(graphops::footage_ids(&p)
 			.into_iter()
 			.map(|id| FootageInfo {
 				id: id_string(id),
-				name: graphops::node_label(&g.graph, id),
+				name: graphops::node_label(&p, id),
 				path: None,
-				duration: graphops::footage_duration_seconds(&g.graph, id)
+				duration: graphops::footage_duration_seconds(&p, id)
 					.map(secs_rational),
 			})
 			.collect())
@@ -390,23 +391,22 @@ impl HostServices for OppHost {
 	fn timeline_get_structure(&self) -> Result<TimelineStructure, HostError> {
 		let p = self.project()?;
 		let seq = self.first_sequence(&p)?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
 		let mut tracks = Vec::new();
-		for kind in [TrackType::Video, TrackType::Audio, TrackType::Subtitle] {
+		for kind in [TrackKind::Video, TrackKind::Audio, TrackKind::Subtitle] {
 			let kind_str = track_type_str(kind);
-			for tid in graphops::track_ids(&g.graph, seq, kind) {
-				let clips = graphops::clip_ids(&g.graph, tid)
+			for tid in graphops::track_ids(&p, seq, kind) {
+				let clips = graphops::clip_ids(&p, tid)
 					.into_iter()
 					.map(|cid| {
-						let (in_p, out_p, _) = graphops::clip_range(&g.graph, cid)
+						let (in_p, out_p, _) = graphops::clip_range(&p, cid)
 							.unwrap_or((
-							oak_core::Rational::new(0, 1),
-							oak_core::Rational::new(0, 1),
-							oak_core::Rational::new(0, 1),
+							quercus_engine_rs::types::Rational::new(0, 1),
+							quercus_engine_rs::types::Rational::new(0, 1),
+							quercus_engine_rs::types::Rational::new(0, 1),
 						));
 						ClipInfo {
 							id: id_string(cid),
-							footage: graphops::find_input_footage(&g.graph, cid).map(id_string),
+							footage: graphops::find_input_footage(&p, cid).map(id_string),
 							in_point: host_rational(&in_p),
 							out_point: host_rational(&out_p),
 						}
@@ -415,7 +415,7 @@ impl HostServices for OppHost {
 				tracks.push(TrackInfo {
 					id: id_string(tid),
 					kind: kind_str.to_string(),
-					name: graphops::node_label(&g.graph, tid),
+					name: graphops::node_label(&p, tid),
 					clips,
 				});
 			}
@@ -437,8 +437,7 @@ impl HostServices for OppHost {
 		let kind = parse_track_type(&req.kind)?;
 		let index = graphops::add_track(&p, seq, kind)
 			.map_err(|e| HostError::internal(format!("add track failed: {e}")))?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		let ids = graphops::track_ids(&g.graph, seq, kind);
+		let ids = graphops::track_ids(&p, seq, kind);
 		// `add_track` returns the fresh track's position; the id is read back
 		// from the list so the caller gets a real entity, not a guess.
 		ids.get(index)
@@ -459,25 +458,24 @@ impl HostServices for OppHost {
 		let footage = parse_id(&req.footage)?;
 		let track = parse_id(&req.track)?;
 		let (kind, index, tb, in_ts, out_ts) = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			// The wire carries a track id; the engine wants (kind, index).
+				// The wire carries a track id; the engine wants (kind, index).
 			let mut found = None;
-			for kind in [TrackType::Video, TrackType::Audio, TrackType::Subtitle] {
-				let ids = graphops::track_ids(&g.graph, seq, kind);
+			for kind in [TrackKind::Video, TrackKind::Audio, TrackKind::Subtitle] {
+				let ids = graphops::track_ids(&p, seq, kind);
 				if let Some(pos) = ids.iter().position(|&t| t == track) {
 					found = Some((kind, pos));
 					break;
 				}
 			}
 			let (kind, index) = found.ok_or_else(|| HostError::entity_not_found(&req.track))?;
-			let tb = graphops::sequence_time_base(&g.graph, seq)
+			let tb = graphops::sequence_time_base(&p, seq)
 				.ok_or_else(|| HostError::invalid_state("sequence has no frame rate"))?;
 			let in_ts = to_ts(&req.at, tb)?;
 			// The wire carries no duration: the clip ends where the footage
 			// ends (media in = 0). When the engine cannot probe a duration
 			// there is no honest default — guessing a length would fabricate
 			// a cut, so the call fails with a structured reason instead.
-			let dur = graphops::footage_duration_seconds(&g.graph, footage).ok_or_else(|| {
+			let dur = graphops::footage_duration_seconds(&p, footage).ok_or_else(|| {
 				HostError::with_data(
 					INVALID_PARAMS,
 					"footage duration is not probeable; refusing to guess a clip length",
@@ -529,8 +527,7 @@ impl HostServices for OppHost {
 		let seq = self.first_sequence(&p)?;
 		let tb = self.timebase(&p, seq)?;
 		let (old_in, old_out) = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			graphops::clip_range(&g.graph, clip)
+				graphops::clip_range(&p, clip)
 				.map(|(i, o, _)| (i, o))
 				.ok_or_else(|| HostError::entity_not_found(&req.clip))?
 		};
@@ -557,8 +554,7 @@ impl HostServices for OppHost {
 		let tb = self.timebase(&p, seq)?;
 		let at = to_ts(&req.to_at, tb)?;
 		let same_track = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			graphops::clip_track(&g.graph, clip) == Some(dest)
+				graphops::clip_track(&p, clip) == Some(dest)
 		};
 		let result = if same_track {
 			graphops::move_clip(&p, clip, at)
@@ -640,26 +636,34 @@ impl HostServices for OppHost {
 // ---------------------------------------------------------------------------
 
 	fn node_list_types(&self) -> Result<Vec<NodeTypeInfo>, HostError> {
-		Ok(oak_node::factory::Factory::global()
-			.entries()
-			.iter()
+		// The SDK's built-in factory table plus the runtime-registered
+		// (OpenFX) table — the pre-P7 `oak_node::Factory` split into these
+		// two reads.
+		let mut out: Vec<NodeTypeInfo> = quercus_engine_rs::effect::factory_entries()
+			.into_iter()
 			.map(|m| NodeTypeInfo {
-				type_id: m.type_id.to_string(),
-				label: m.name.to_string(),
+				type_id: m.type_id,
+				label: m.name,
 				category: m
-					.categories
-					.first()
+					.category
 					.map(|c| format!("{c:?}"))
 					.unwrap_or_default(),
 			})
-			.collect())
+			.collect();
+		out.extend(quercus_engine_rs::effect::dynamic_factory_entries().into_iter().map(|m| {
+			NodeTypeInfo {
+				type_id: m.type_id,
+				label: m.name,
+				category: m.sub_category,
+			}
+		}));
+		Ok(out)
 	}
 
 	fn node_get_params(&self, node: &EntityId) -> Result<Vec<ParamInfo>, HostError> {
 		let p = self.project()?;
 		let id = parse_id(node)?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		let params = effectchain::effect_params(&g.graph, id)
+		let params = effectchain::effect_params(&p, id)
 			.ok_or_else(|| HostError::entity_not_found(node))?;
 		Ok(params
 			.into_iter()
@@ -743,29 +747,32 @@ impl HostServices for OppHost {
 			None,
 		)
 		.map_err(|e| HostError::internal(format!("render failed: {e}")))?;
-		let (width, height, png) = match frame {
-			RenderedFrame::CpuF32 {
-				width,
-				height,
-				linesize,
-				ref data,
-			} => {
-				let png = encode_png_rgba_f32(width, height, linesize, data)?;
-				(width, height, png)
+		// P7 merge: upstream's pure-SDK `RenderedFrame` has a single `Sdk`
+		// variant; the pre-P7 `CpuF32 { linesize, data }` payload is gone
+		// (the SDK frame owns its bytes). `to_display` is the one surviving
+		// read path: F32 frames come back as tightly packed display
+		// samples, BGRA8 frames as a display-transformed image.
+		let (width, height, png) = match frame.to_display() {
+			Some((_image, _scope, Some(samples))) => {
+				let w = frame.width();
+				let h = frame.height();
+				let png = encode_png_rgba_f32_samples(w, h, &samples)?;
+				(w, h, png)
 			}
-			other => {
+			Some((image, _scope, None)) => {
+				let w = frame.width();
+				let h = frame.height();
+				let bytes = image
+					.as_bytes(0)
+					.ok_or_else(|| HostError::internal("display image has no bytes"))?;
+				let png = encode_png_bgra8(w, h, &bytes)?;
+				(w, h, png)
+			}
+			None => {
 				return Err(unsupported(
 					"render.get_frame",
-					&format!(
-						"the active render backend returned a non-CPU frame ({}); reading \
-						 shm slots / GPU textures needs the attachment path P1.2 does not \
-						 have",
-						match other {
-							RenderedFrame::Shm(_) => "shm",
-							RenderedFrame::Gpu(_) => "gpu texture",
-							RenderedFrame::CpuF32 { .. } => unreachable!(),
-						}
-					),
+					"the frame could not be converted for display (invalid geometry \
+					 or a conversion failure)",
 					"opp-spec.md §1.6",
 				));
 			}
@@ -795,8 +802,7 @@ impl HostServices for OppHost {
 		for clip in req.clips.iter().take(count) {
 			let cid = parse_id(clip)?;
 			let (in_p, _, _) = {
-				let g = p.lock().unwrap_or_else(|e| e.into_inner());
-				graphops::clip_range(&g.graph, cid)
+						graphops::clip_range(&p, cid)
 					.ok_or_else(|| HostError::entity_not_found(clip))?
 			};
 			let ts = graphops::rational_to_ts(in_p, tb);
@@ -810,31 +816,38 @@ impl HostServices for OppHost {
 				None,
 			)
 			.map_err(|e| HostError::internal(format!("thumbnail render failed: {e}")))?;
-			match frame {
-				RenderedFrame::CpuF32 {
-					width,
-					height,
-					linesize,
-					ref data,
-				} => out.push(FrameResult {
+			// Same single-variant read path as `render_get_frame` (P7).
+			match frame.to_display() {
+				Some((_image, _scope, Some(samples))) => out.push(FrameResult {
 					frame: json!({
-						"inline_base64": encode_png_rgba_f32(width, height, linesize, data)?,
-						"width": width,
-						"height": height,
+						"inline_base64": encode_png_rgba_f32_samples(
+							frame.width(),
+							frame.height(),
+							&samples
+						)?,
+						"width": frame.width(),
+						"height": frame.height(),
 						"format": "png",
 					}),
 				}),
-				other => {
+				Some((image, _scope, None)) => out.push(FrameResult {
+					frame: json!({
+						"inline_base64": encode_png_bgra8(
+							frame.width(),
+							frame.height(),
+							&image.as_bytes(0).ok_or_else(|| {
+								HostError::internal("display image has no bytes")
+							})?
+						)?,
+						"width": frame.width(),
+						"height": frame.height(),
+						"format": "png",
+					}),
+				}),
+				None => {
 					return Err(unsupported(
 						"render.get_thumbnails",
-						&format!(
-							"backend returned a non-CPU frame ({})",
-							if matches!(other, RenderedFrame::Shm(_)) {
-								"shm"
-							} else {
-								"gpu texture"
-							}
-						),
+						"the frame could not be converted for display",
 						"opp-spec.md §1.6",
 					));
 				}
@@ -852,8 +865,7 @@ impl HostServices for OppHost {
 		let tb = self.timebase(&p, seq)?;
 		let clip = parse_id(&req.clip)?;
 		let (in_p, out_p) = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			graphops::clip_range(&g.graph, clip)
+				graphops::clip_range(&p, clip)
 				.map(|(i, o, _)| (i, o))
 				.ok_or_else(|| HostError::entity_not_found(&req.clip))?
 		};
@@ -909,8 +921,11 @@ impl HostServices for OppHost {
 		if t.holder.is_some() {
 			return Err(HostError::transaction_conflict());
 		}
-		oak_undo::global::group_begin(label)
-			.map_err(|e| HostError::internal(format!("group_begin failed: {e}")))?;
+		if !graphops::undo_group_begin(label) {
+			return Err(HostError::internal(
+				"group_begin failed: a group is already open (stack busy)",
+			));
+		}
 		t.next += 1;
 		let token = format!("opp-txn-{}", t.next);
 		t.holder = Some(token.clone());
@@ -922,30 +937,34 @@ impl HostServices for OppHost {
 		// An empty group (only `project.open`/`save` ran) is discarded by the
 		// stack itself (`push_pre_executed` drops an empty multi command), so
 		// no blank undo row is left behind (notes §1).
-		oak_undo::global::group_end()
-			.map_err(|e| HostError::internal(format!("group_end failed: {e}")))?;
+		if !graphops::undo_group_end() {
+			return Err(HostError::internal("group_end failed: no group is open"));
+		}
 		self.release_txn(txn);
 		Ok(())
 	}
 
 	fn edit_abort(&self, txn: &str) -> Result<(), HostError> {
 		self.require_txn_str(txn)?;
-		oak_undo::global::group_abort()
-			.map_err(|e| HostError::internal(format!("group_abort failed: {e}")))?;
+		if !graphops::undo_group_abort() {
+			return Err(HostError::internal("group_abort failed: no group is open"));
+		}
 		self.release_txn(txn);
 		Ok(())
 	}
 
 	fn edit_undo(&self) -> Result<bool, HostError> {
-		oak_undo::global::undo()
-			.map_err(|e| HostError::internal(format!("undo failed: {e}")))?;
-		Ok(oak_undo::global::can_redo())
+		if !graphops::undo_undo() {
+			return Err(HostError::internal("undo failed: the stack is empty"));
+		}
+		Ok(graphops::undo_can_redo())
 	}
 
 	fn edit_redo(&self) -> Result<bool, HostError> {
-		oak_undo::global::redo()
-			.map_err(|e| HostError::internal(format!("redo failed: {e}")))?;
-		Ok(oak_undo::global::can_undo())
+		if !graphops::undo_redo() {
+			return Err(HostError::internal("redo failed: nothing to redo"));
+		}
+		Ok(graphops::undo_can_undo())
 	}
 
 // ---------------------------------------------------------------------------
@@ -987,13 +1006,12 @@ impl HostServices for OppHost {
 	fn node_addable_effects(&self, clip: &EntityId) -> Result<Vec<EffectTypeInfo>, HostError> {
 		let p = self.project()?;
 		let host = parse_id(clip)?;
-		let g = p.lock().unwrap_or_else(|e| e.into_inner());
-		if g.graph.get(host).is_none() {
+		if p.node_kind(host).is_none() {
 			return Err(HostError::entity_not_found(clip));
 		}
 		// Filtered by the host's own media kind: the list a caller gets is
 		// exactly the set `insert` would accept.
-		Ok(effectchain::addable_effects_for(&g.graph, host)
+		Ok(effectchain::addable_effects_for(&p, host)
 			.into_iter()
 			.map(|e| EffectTypeInfo {
 				type_id: e.type_id,
@@ -1012,7 +1030,7 @@ impl HostServices for OppHost {
 		// must not pre-apply, and must not wrap it — that is the T9.2
 		// double-row trap in reverse.
 		match effectchain::insert_at_effect_index(&p, host, req.index, &req.type_id) {
-			Ok(id) => Ok(id.identity().to_string()),
+			Ok(id) => Ok(identity(id).to_string()),
 			Err(reason) => Err(self.effect_error(&p, host, &req.type_id, &reason)),
 		}
 	}
@@ -1050,8 +1068,7 @@ impl HostServices for OppHost {
 		let seam_next = match req.side {
 			TransitionSide::In => None,
 			TransitionSide::Out => {
-				let g = p.lock().unwrap_or_else(|e| e.into_inner());
-				graphops::next_contiguous_clip(&g.graph, clip)
+						graphops::next_contiguous_clip(&p, clip)
 			}
 		};
 
@@ -1075,7 +1092,7 @@ impl HostServices for OppHost {
 				)
 				.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
 				Ok(TransitionPlaced {
-					id: id.identity().to_string(),
+					id: identity(id).to_string(),
 					placement: "seam".to_string(),
 					// An odd frame count cannot split; the value reported is
 					// the one the engine actually used, never the requested one.
@@ -1094,7 +1111,7 @@ impl HostServices for OppHost {
 				)
 				.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
 				Ok(TransitionPlaced {
-					id: id.identity().to_string(),
+					id: identity(id).to_string(),
 					placement: "edge".to_string(),
 					half: None,
 				})
@@ -1114,8 +1131,7 @@ impl HostServices for OppHost {
 		// the caller supplied, then write the whole tuple back as ONE undo
 		// row (changing the rate reinterprets every block's time base).
 		let (name, width, height, rate, interlaced) = {
-			let g = p.lock().unwrap_or_else(|e| e.into_inner());
-			graphops::sequence_settings(&g.graph, seq)
+				graphops::sequence_settings(&p, seq)
 				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?
 		};
 		let rate = match req.rate {
@@ -1131,7 +1147,7 @@ impl HostServices for OppHost {
 				json!({ "width": width, "height": height }),
 			));
 		}
-		if rate.numerator() <= 0 || rate.denominator() <= 0 {
+		if rate.num <= 0 || rate.den <= 0 {
 			return Err(HostError::with_data(
 				INVALID_PARAMS,
 				"fps must be a positive rational",
@@ -1157,7 +1173,11 @@ impl HostServices for OppHost {
 
 /// Encode an F32 RGBA frame as a base64 PNG. The stride (`linesize`) may
 /// exceed `width * 16`; only the live bytes of each row are copied.
-fn encode_png_rgba_f32(width: i32, height: i32, linesize: i32, data: &[u8]) -> Result<String, HostError> {
+/// Tightly packed display samples (F32 RGBA) → base64 PNG.
+///
+/// P7: `RenderedFrame::to_display` hands back repacked, display-transformed
+/// samples (no `linesize` anymore), so the old row-stride reader is gone.
+fn encode_png_rgba_f32_samples(width: i32, height: i32, samples: &[f32]) -> Result<String, HostError> {
 	use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 	if width <= 0 || height <= 0 {
 		return Err(HostError::internal(format!(
@@ -1165,23 +1185,35 @@ fn encode_png_rgba_f32(width: i32, height: i32, linesize: i32, data: &[u8]) -> R
 		)));
 	}
 	let (w, h) = (width as u32, height as u32);
-	let stride = linesize.max(0) as usize;
-	let row_bytes = w as usize * 16; // 4 channels × f32
-	// Four little-endian f32 per pixel (F32 RGBA frame).
-	let mut pixels: Vec<f32> = Vec::with_capacity(w as usize * h as usize * 4);
-	for y in 0..h as usize {
-		let start = y * stride;
-		let row = data.get(start..start + row_bytes).ok_or_else(|| {
-			HostError::internal(format!("frame row {y} out of bounds"))
-		})?;
-		for px in row.chunks_exact(4) {
-			pixels.push(f32::from_le_bytes([px[0], px[1], px[2], px[3]]));
-		}
-	}
-	let buf = ImageBuffer::<Rgba<f32>, _>::from_raw(w, h, pixels)
+	let buf = ImageBuffer::<Rgba<f32>, _>::from_raw(w, h, samples.to_vec())
 		.ok_or_else(|| HostError::internal("frame buffer shape mismatch"))?;
 	let mut png = Vec::new();
 	DynamicImage::ImageRgba32F(buf)
+		.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
+		.map_err(|e| HostError::internal(format!("png encode failed: {e}")))?;
+	Ok(b64_encode(&png))
+}
+
+/// Display-ready BGRA8 bytes → base64 PNG (the `to_display` image path).
+fn encode_png_bgra8(width: i32, height: i32, bgra: &[u8]) -> Result<String, HostError> {
+	use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+	if width <= 0 || height <= 0 {
+		return Err(HostError::internal(format!(
+			"bad frame size {width}x{height}"
+		)));
+	}
+	let (w, h) = (width as u32, height as u32);
+	if bgra.len() < (w as usize) * (h as usize) * 4 {
+		return Err(HostError::internal("frame buffer shape mismatch"));
+	}
+	let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
+	for px in bgra.chunks_exact(4) {
+		rgba.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+	}
+	let buf = ImageBuffer::<Rgba<u8>, _>::from_raw(w, h, rgba)
+		.ok_or_else(|| HostError::internal("frame buffer shape mismatch"))?;
+	let mut png = Vec::new();
+	DynamicImage::ImageRgba8(buf)
 		.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
 		.map_err(|e| HostError::internal(format!("png encode failed: {e}")))?;
 	Ok(b64_encode(&png))
@@ -1222,12 +1254,12 @@ mod tests {
 
 	/// Every test takes the crate-wide engine test lock (the same one
 	/// `graphops` / `effectchain` / `displaycolor` tests use) and zeroes the
-	/// global undo stack first: `oak_undo` is process-global, so without
+	/// global undo stack first: the SDK stack is process-global, so without
 	/// this the four tests would race each other on `group_begin` and on
 	/// `count()`.
 	fn setup() -> (OppHost, NodeId) {
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Seq");
 		let host = OppHost::new();
@@ -1241,14 +1273,14 @@ mod tests {
 	#[test]
 	fn timeline_add_track_reaches_the_engine() {
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Seq");
 		let host = OppHost::new();
 		host.attach_project(project);
 
 		let before = host.timeline_get_structure().unwrap().tracks.len();
-		let before_count = oak_undo::global::count().expect("undo count");
+		let before_count = graphops::undo_count();
 
 		let token = host.edit_begin("opp: add track").unwrap();
 		let id = host
@@ -1267,7 +1299,7 @@ mod tests {
 		);
 		assert_eq!(after.sequence, id_string(seq), "structure reports another sequence");
 		assert!(
-			oak_undo::global::count().expect("undo count") > before_count,
+			graphops::undo_count() > before_count,
 			"add_track did not push an undo row"
 		);
 	}
@@ -1278,7 +1310,7 @@ mod tests {
 	#[test]
 	fn unmapped_method_answers_structured_unsupported() {
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let project = graphops::create_project();
 		let _seq = graphops::create_sequence(&project, "Seq");
 		let host = OppHost::new();
@@ -1314,7 +1346,7 @@ mod tests {
 	#[test]
 	fn project_open_never_enters_the_undo_stack() {
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let dir = std::env::temp_dir().join(format!("opp-open-{}", std::process::id()));
 		std::fs::create_dir_all(&dir).expect("temp dir");
 		let file = dir.join("p.ove");
@@ -1328,7 +1360,7 @@ mod tests {
 		host.timeline_add_track(AddTrackReq { kind: "video".into(), name: None }, Some(&t))
 			.unwrap();
 		host.edit_commit(&t).unwrap();
-		let before = oak_undo::global::count().expect("undo count");
+		let before = graphops::undo_count();
 		assert!(before >= 1, "setup edit did not land on the stack");
 
 		// Save + open both need a transaction token (confirmation class);
@@ -1341,7 +1373,7 @@ mod tests {
 			"open should report the loaded project's name"
 		);
 		assert_eq!(
-			oak_undo::global::count().expect("undo count"),
+			graphops::undo_count(),
 			before,
 			"project.open pushed an undo row"
 		);
@@ -1349,7 +1381,7 @@ mod tests {
 		// Committing a group that only did open/save must leave no blank row.
 		host.edit_commit(&t2).expect("commit");
 		assert_eq!(
-			oak_undo::global::count().expect("undo count"),
+			graphops::undo_count(),
 			before,
 			"the empty transaction left an undo row"
 		);
@@ -1361,7 +1393,7 @@ mod tests {
 	#[test]
 	fn transaction_is_single_holder() {
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let project = graphops::create_project();
 		let _seq = graphops::create_sequence(&project, "Seq");
 		let host = OppHost::new();

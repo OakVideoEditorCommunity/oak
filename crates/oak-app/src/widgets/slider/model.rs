@@ -59,7 +59,13 @@ impl SliderModel {
 		self
 	}
 
-	/// Override the fine-adjust increment.
+	/// Overrides the fine-adjust increment.
+	///
+	/// `fine_step` replaces the default derived in [`Self::new`]
+	/// (`step / 10`) and is the increment used while a fine-adjust modifier is
+	/// held. The value is stored as given: zero or negative makes fine
+	/// snapping a no-op (the position is only clamped). Consumes and returns
+	/// `self` so it can be chained onto [`Self::new`].
 	pub fn with_fine_step(mut self, fine_step: f64) -> Self {
 		self.fine_step = fine_step;
 		self
@@ -78,12 +84,26 @@ impl SliderModel {
 		}
 	}
 
-	/// True if `v` is within `[min, max]` (and finite).
+	/// Whether `v` lies within `[min, max]`.
+	///
+	/// Both bounds are inclusive and `v` must be finite, so NaN and ±infinity
+	/// are always reported as out of range. Used to vet externally supplied
+	/// values (typed input, algebra results) before they are snapped and
+	/// stored.
 	pub fn in_range(&self, v: f64) -> bool {
 		v.is_finite() && v >= self.min && v <= self.max
 	}
 
-	/// Clamp a raw position to `[min, max]`.
+	/// Clamps a raw position into `[min, max]`.
+	///
+	/// Both bounds are inclusive, and values outside the range come back as
+	/// exactly the bound. Used by [`Self::snap_with_step`] and by the drag and
+	/// wheel handlers before a position is committed.
+	///
+	/// # Panics
+	///
+	/// Panics (like `f64::clamp`) when `min > max` or either bound is NaN;
+	/// [`Self::new`] does not validate the bounds.
 	pub fn clamp(&self, raw: f64) -> f64 {
 		raw.clamp(self.min, self.max)
 	}

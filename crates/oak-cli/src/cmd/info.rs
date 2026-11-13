@@ -34,14 +34,46 @@ use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::engine;
 use crate::fmt;
 
-/// Run `info`. `project` is the .ove path from the command line.
+/// Runs the `info` command for one project file.
+///
+/// This is the CLI entry point: it owns the command-line path and delegates
+/// loading, formatting and exit-code selection to the implementation
+/// below.
+///
+/// # Arguments
+///
+/// * `project` - Path to the `.ove` project file exactly as typed on the
+///   command line; owned by this function.
+///
+/// # Returns
+///
+/// `EXIT_OK` when the project summary was printed, `EXIT_ERROR` when the
+/// project could not be loaded.
 pub fn run(project: String) -> i32 {
 	run_info(&project)
 }
 
-/// The info body.
+/// Loads a project and prints its `info` summary to stdout.
+///
+/// Prints the project name (falling back to the `.ove` file stem when the
+/// stored name is empty or "(untitled)"), the project filename, the
+/// modified flag, then a `Sequences:` count with one block per sequence and
+/// a `Footage:` count with one line per footage item. Footage paths stored
+/// relative to the project are resolved against the project directory before
+/// the online/offline check.
+///
+/// # Arguments
+///
+/// * `project` - `.ove` path (absolute or relative to the current working
+///   directory); a path that cannot be canonicalized is used as-is for the
+///   name/filename fallbacks.
+///
+/// # Returns
+///
+/// `EXIT_OK` on success; `EXIT_ERROR` after printing an `error: info: ...`
+/// message when the project cannot be loaded.
 fn run_info(project: &str) -> i32 {
-	let project_ref = match engine::load_project(project) {
+	let loaded = match engine::load_project(project) {
 		Ok(p) => p,
 		Err(detail) => {
 			if detail.is_empty() {
@@ -58,9 +90,9 @@ fn run_info(project: &str) -> i32 {
 	// filename the CLI falls back to the path it loaded — the C++ CLI's own
 	// project filename convention.
 	let abs = std::fs::canonicalize(project).unwrap_or_else(|_| Path::new(project).to_path_buf());
+	let project_ref = &loaded.project;
 	let name = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		let n = engine::project_name(&guard);
+		let n = engine::project_name(project_ref);
 		if n.is_empty() || n == "(untitled)" {
 			abs.file_name()
 				.map(|f| f.to_string_lossy().into_owned())
@@ -71,18 +103,14 @@ fn run_info(project: &str) -> i32 {
 		}
 	};
 	let filename = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		let f = engine::project_filename(&guard);
+		let f = engine::project_filename(project_ref);
 		if f.is_empty() {
 			abs.to_string_lossy().into_owned()
 		} else {
 			f
 		}
 	};
-	let modified = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		engine::project_modified(&guard)
-	};
+	let modified = engine::project_modified(project_ref);
 
 	println!("{}", fmt::project_line(&name));
 	println!("{}", fmt::file_line(&filename));
@@ -92,25 +120,16 @@ fn run_info(project: &str) -> i32 {
 	// resolve them for the online check (the C++ project-dir convention).
 	let project_dir = Path::new(project).parent().map(|p| p.to_path_buf());
 
-	let sequences = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		engine::sequence_ids(&guard)
-	};
+	let sequences = engine::sequence_ids(project_ref);
 	println!("{}", fmt::sequences_line(sequences.len() as i64));
 	for (index, seq_id) in sequences.iter().enumerate() {
-		print_sequence(&project_ref, *seq_id, index as i64);
+		print_sequence(project_ref, *seq_id, index as i64);
 	}
 
-	let footage = {
-		let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-		engine::footage_ids(&guard)
-	};
+	let footage = engine::footage_ids(project_ref);
 	println!("{}", fmt::footage_line(footage.len() as i64));
 	for (index, footage_id) in footage.iter().enumerate() {
-		let stored = {
-			let guard = project_ref.lock().unwrap_or_else(|e| e.into_inner());
-			engine::footage_filename(&guard, *footage_id)
-		};
+		let stored = engine::footage_filename(project_ref, *footage_id);
 		let resolved = resolve_footage(&stored, project_dir.as_deref());
 		let online = resolved.is_file();
 		println!(
@@ -122,39 +141,46 @@ fn run_info(project: &str) -> i32 {
 	EXIT_OK
 }
 
-/// Print one sequence block (`print_sequence` in cli/main.cpp) through the
-/// module sequence queries.
-fn print_sequence(project: &engine::ProjectRef, seq_id: oak_node::id::NodeId, index: i64) {
-	let (name, length, frame_rate, track_counts, playhead) = {
-		let guard = project.lock().unwrap_or_else(|e| e.into_inner());
-		(
-			engine::node_label(&guard.graph, seq_id),
-			engine::sequence_length(&guard, seq_id),
-			engine::sequence_frame_rate(&guard, seq_id),
-			engine::sequence_track_counts(&guard, seq_id),
-			engine::sequence_playhead(&guard, seq_id),
-		)
-	};
+/// Prints one sequence block of the `info` output.
+///
+/// Emits the line built by [`crate::fmt::sequence`] from the sequence name,
+/// length (both as seconds and as a `num/den` rational), frame rate, video/
+/// audio/subtitle track counts, and the playhead converted to a frame
+/// timestamp in the sequence timebase (round-half-up). A zero denominator in
+/// the stored length, rate or playhead is treated as zero.
+///
+/// # Arguments
+///
+/// * `project` - Loaded project the sequence belongs to.
+/// * `seq_id` - Sequence node id to query.
+/// * `index` - Zero-based position in the sequence list, printed as the
+///   block's ordinal.
+fn print_sequence(project: &engine::ProjectRef, seq_id: quercus_engine_rs::node::NodeId, index: i64) {
+	let name = engine::node_label(project, seq_id);
+	let length = engine::sequence_length(project, seq_id);
+	let frame_rate = engine::sequence_frame_rate(project, seq_id);
+	let track_counts = engine::sequence_track_counts(project, seq_id);
+	let playhead = engine::sequence_playhead(project, seq_id);
 
-	let length_secs = if length.denominator() != 0 {
-		length.numerator() as f64 / length.denominator() as f64
+	let length_secs = if length.den != 0 {
+		length.num as f64 / length.den as f64
 	} else {
 		0.0
 	};
-	let playhead_secs = if playhead.denominator() != 0 {
-		playhead.numerator() as f64 / playhead.denominator() as f64
+	let playhead_secs = if playhead.den != 0 {
+		playhead.num as f64 / playhead.den as f64
 	} else {
 		0.0
 	};
 	// The playhead is printed as a frame timestamp in the sequence frame-rate
-	// timebase (round-half-up, like the facade's `rational_to_ts`).
+	// timebase (round-half-up, like the engine's rational_to_ts).
 	let playhead_ts = {
 		let fr = frame_rate;
-		if fr.denominator() == 0 {
+		if fr.den == 0 {
 			0
 		} else {
-			let n = playhead.numerator() as i128 * fr.denominator() as i128;
-			let d = playhead.denominator() as i128 * fr.numerator() as i128;
+			let n = playhead.num as i128 * fr.den as i128;
+			let d = playhead.den as i128 * fr.num as i128;
 			if d == 0 {
 				0
 			} else {
@@ -172,10 +198,10 @@ fn print_sequence(project: &engine::ProjectRef, seq_id: oak_node::id::NodeId, in
 			index,
 			&name,
 			length_secs,
-			length.numerator(),
-			length.denominator(),
-			frame_rate.numerator(),
-			frame_rate.denominator(),
+			length.num,
+			length.den,
+			frame_rate.num,
+			frame_rate.den,
 			track_counts.0,
 			track_counts.1,
 			track_counts.2,

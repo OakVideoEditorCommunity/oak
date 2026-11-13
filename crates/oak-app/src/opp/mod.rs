@@ -1,7 +1,7 @@
 //! OPP/1 host wiring, app side (T7.2 P1.2).
 //!
 //! [`host`] implements `oak_extensions::HostServices` against the real
-//! engine (`graphops` / `renderops` / `effectchain` / `oak_undo`), routing
+//! engine (`graphops` / `renderops` / `effectchain` / the SDK undo stack), routing
 //! six domains of plugin calls into Oak and answering a structured
 //! `Unsupported` for everything the spec marks 🆕. [`dispatch`] turns one
 //! wire request into that call, falling through to the P1 protocol handler

@@ -91,6 +91,11 @@ pub enum ColorWheelEvent {
 }
 
 /// The hue (degrees, 0 = red) of an RGB color; 0 for grays.
+///
+/// `r`, `g`, `b` are the color's channels (any equal scale works: the result is
+/// scale-invariant). Returns `0..360` degrees, or `0` when the channels are
+/// equal within `1e-6` — a gray has no hue, so it folds to the red axis. Pairs
+/// with `hsv_to_rgb`.
 fn hue_of(r: f32, g: f32, b: f32) -> f32 {
 	let max = r.max(g).max(b);
 	let min = r.min(g).min(b);
@@ -109,6 +114,11 @@ fn hue_of(r: f32, g: f32, b: f32) -> f32 {
 }
 
 /// HSV (degrees, 0..1, 0..1) → RGB (0..1 channels).
+///
+/// `h` is the hue in degrees and is wrapped into `0..360` (negative and
+/// over-range values are accepted); `s` and `v` are saturation and value in
+/// `0..1` and are not clamped. Returns `(r, g, b)` with alpha implied at 1.
+/// Pairs with `hue_of`; `wheel_to_color` calls it at full saturation/value.
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 	let h = h.rem_euclid(360.0) / 60.0;
 	let c = v * s;
@@ -172,6 +182,12 @@ pub struct ColorWheel {
 
 impl ColorWheel {
 	/// A wheel showing `value`.
+	///
+	/// `control` is the control's stable id (embedded in every emitted event and
+	/// used to route drags to the right wheel); `value` is the initial param color.
+	/// `_cx` is accepted for the widget-constructor convention but unused: no state
+	/// is registered. The painted bounds are captured by the first canvas prepaint,
+	/// so pointer mapping before that frame is a no-op.
 	pub fn new(control: usize, value: Rgba, _cx: &mut Context<Self>) -> Self {
 		Self {
 			control,
@@ -221,6 +237,12 @@ impl ColorWheel {
 	}
 
 	/// Apply a pointer position as the new value (click or drag move).
+	///
+	/// `position` is window-space; it is mapped by `position_to_wheel` to the
+	/// wheel's angle/radius and then by `wheel_to_color`. Positions before the first
+	/// painted bounds are ignored. Value, `ColorWheelEvent::Changed` and a notify
+	/// are only produced when the resulting color differs, so a move inside the same
+	/// painted cell stays quiet.
 	fn apply_pointer(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
 		let Some((angle, radius)) = self.position_to_wheel(position) else {
 			return;
@@ -237,6 +259,11 @@ impl ColorWheel {
 	}
 
 	/// Complete an in-flight drag (no-op otherwise).
+	///
+	/// Clears `dragging`, emits `ColorWheelEvent::DragFinished` for the control and
+	/// notifies, which lets the host close the undo group opened by `DragStarted`.
+	/// Called on mouse-up; a mouse-up with no drag in flight changes and emits
+	/// nothing.
 	fn finish_drag(&mut self, cx: &mut Context<Self>) {
 		if self.dragging {
 			self.dragging = false;
@@ -247,7 +274,15 @@ impl ColorWheel {
 		}
 	}
 
-	/// Reset to neutral (double-click).
+	/// Reset the value to neutral (the double-click handler).
+	///
+	/// Computes neutral through the same mapping (`wheel_to_color(0.0, 0.0)`, the
+	/// three-way corrector's no-op gray) and, when the value actually changes, emits
+	/// `DragStarted`, `Changed` and `DragFinished` in that order around the update,
+	/// so the host records the reset as one undoable gesture, then notifies.
+	///
+	/// `cx` is the wheel's context. A double-click while already neutral emits
+	/// nothing.
 	fn reset(&mut self, cx: &mut Context<Self>) {
 		let neutral = wheel_to_color(0.0, 0.0);
 		if self.value == neutral {

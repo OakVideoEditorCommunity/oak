@@ -266,7 +266,11 @@ pub enum WaveformMode {
 }
 
 impl WaveformMode {
-	/// The persisted config value (`0`/`1`/`2`).
+	/// Returns the persisted configuration code for this waveform mode.
+	///
+	/// The codes are `0` (Automatic), `1` (Only) and `2` (Both);
+	/// [`WaveformMode::from_config_value`] is the inverse. The value is stored
+	/// in the viewer preferences.
 	pub fn config_value(self) -> i32 {
 		self as i32
 	}
@@ -307,7 +311,17 @@ impl FpsCounter {
 		}
 	}
 
-	/// Record a new frame at `now` and update the smoothed rate.
+	/// Records that a frame was presented at `now` and updates the smoothed
+	/// rate.
+	///
+	/// The first call only starts the clock. Later calls derive an instant rate
+	/// from the elapsed time and apply 0.9/0.1 exponential smoothing;
+	/// non-positive intervals (a repeated timestamp) are ignored. Call once per
+	/// painted frame while measuring.
+	///
+	/// # Arguments
+	///
+	/// * `now` - Monotonic timestamp of the frame (usually `Instant::now()`).
 	pub fn record(&mut self, now: std::time::Instant) {
 		if let Some(last) = self.last {
 			let dt = now.duration_since(last).as_secs_f32();
@@ -378,10 +392,28 @@ pub struct ViewerWidget<C: PlaybackClock> {
 	/// click samples the pixel under it instead of forwarding an interact
 	/// pointer event.
 	eyedropper_armed: bool,
+	video_fullscreen: bool,
+	controls_visible: bool,
+	previous_zoom: Option<ViewerZoom>,
+	last_pointer_move: Option<std::time::Instant>,
 }
 
 impl<C: PlaybackClock> ViewerWidget<C> {
-	/// Create a viewer driven by `clock`.
+	/// Creates a viewer widget driven by `clock`.
+	///
+	/// Seeds the local frame-rate mirror from the clock and spawns a 16 ms
+	/// timer that polls the clock and repaints on change. Initial state: `Fit`
+	/// zoom, safe margins off, FPS overlay hidden, controls visible and no frame
+	/// source.
+	///
+	/// # Arguments
+	///
+	/// * `control` - Stable control id reported in viewer events and used in
+	///   element ids.
+	/// * `clock` - Playback clock the viewer follows; stored and polled for the
+	///   current frame and playing state.
+	/// * `window` - Window used to spawn the polling timer.
+	/// * `cx` - Context used to create the focus handle.
 	pub fn new(
 		control: usize,
 		clock: Entity<C>,
@@ -421,7 +453,29 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 			fps: FpsCounter::new(),
 			picture_bounds: Rc::new(Cell::new(None)),
 			eyedropper_armed: false,
+			video_fullscreen: false,
+			controls_visible: true,
+			previous_zoom: None,
+			last_pointer_move: None,
 		}
+	}
+
+	pub fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
+		if self.video_fullscreen == fullscreen {
+			return;
+		}
+		self.video_fullscreen = fullscreen;
+		if fullscreen {
+			self.previous_zoom = Some(self.zoom);
+			self.zoom = ViewerZoom::Level(4);
+			self.controls_visible = true;
+			self.last_pointer_move = Some(std::time::Instant::now());
+		} else {
+			self.zoom = self.previous_zoom.take().unwrap_or(ViewerZoom::Fit);
+			self.controls_visible = true;
+			self.last_pointer_move = None;
+		}
+		cx.notify();
 	}
 
 	/// The current transport state.
@@ -488,8 +542,16 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		self.eyedropper_armed
 	}
 
-	/// Arm / disarm the eyedropper and repaint. No-op when unchanged, so
-	/// calling this every frame from a host poll is cheap.
+	/// Arms or disarms the eyedropper and repaints when the state changes.
+	///
+	/// While armed, a click in the picture samples the pixel and emits
+	/// [`ViewerEvent::EyedropperPick`] instead of forwarding an interact pointer
+	/// event. An identical call is a no-op, so a host may poll this every frame.
+	///
+	/// # Arguments
+	///
+	/// * `armed` - `true` to arm the eyedropper, `false` to disarm it.
+	/// * `cx` - Context notified only when the value changes.
 	pub fn set_eyedropper_armed(&mut self, armed: bool, cx: &mut Context<Self>) {
 		if self.eyedropper_armed == armed {
 			return;
@@ -503,7 +565,13 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		self.safe_margins
 	}
 
-	/// Set the safe-margin overlay state and repaint.
+	/// Sets the safe-margin overlay and repaints.
+	///
+	/// # Arguments
+	///
+	/// * `margins` - Overlay state: off, the standard 90% x 80% margins, or a
+	///   custom horizontal/vertical fraction pair.
+	/// * `cx` - Context notified after the change.
 	pub fn set_safe_margins(&mut self, margins: SafeMargins, cx: &mut Context<Self>) {
 		self.safe_margins = margins;
 		cx.notify();
@@ -514,7 +582,14 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		self.zoom
 	}
 
-	/// Set the zoom state and repaint.
+	/// Sets the picture zoom and repaints.
+	///
+	/// # Arguments
+	///
+	/// * `zoom` - [`ViewerZoom::Fit`] to fit the frame, or
+	///   [`ViewerZoom::Level`]`(index)` for a fixed multiple of native
+	///   resolution (index into [`VIEWER_ZOOM_LEVELS`]).
+	/// * `cx` - Context notified after the change.
 	pub fn set_zoom(&mut self, zoom: ViewerZoom, cx: &mut Context<Self>) {
 		self.zoom = zoom;
 		cx.notify();
@@ -525,7 +600,12 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		self.show_fps
 	}
 
-	/// Toggle the frame-rate overlay and repaint.
+	/// Shows or hides the frame-rate overlay and repaints.
+	///
+	/// # Arguments
+	///
+	/// * `show` - `true` to draw the smoothed FPS counter over the picture.
+	/// * `cx` - Context notified after the change.
 	pub fn set_show_fps(&mut self, show: bool, cx: &mut Context<Self>) {
 		self.show_fps = show;
 		cx.notify();
@@ -545,6 +625,20 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		}
 	}
 
+	/// Emits a pointer event for the OFX interact forwarding path.
+	///
+	/// Converts the `Pixels` position to `f32` picture-local pixels and emits
+	/// [`ViewerEvent::InteractPointer`] with the same kind, button and pressed
+	/// state. The host forwards it to the active interact's pen actions.
+	///
+	/// # Arguments
+	///
+	/// * `kind` - Move, press or release.
+	/// * `position` - Pointer position in the picture area's local pixels
+	///   (top-left origin).
+	/// * `button` - Button for a press/release, `None` for a move.
+	/// * `pressed` - Whether a button is held (the pen-down state for a move).
+	/// * `cx` - Context that receives the event.
 	fn emit_interact_pointer(
 		&mut self,
 		kind: InteractPointerKind,
@@ -596,6 +690,14 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		let clock = self.clock.read(cx);
 		let frame = clock.current_frame();
 		let playing = clock.is_playing();
+		if self.video_fullscreen
+			&& self
+				.last_pointer_move
+				.is_some_and(|last| last.elapsed().as_secs() >= 2)
+		{
+			self.controls_visible = false;
+			cx.notify();
+		}
 		if frame != self.transport.frame || playing != self.transport.playing {
 			self.fps.record(std::time::Instant::now());
 			self.transport.frame = frame;
@@ -604,6 +706,15 @@ impl<C: PlaybackClock> ViewerWidget<C> {
 		}
 	}
 
+	/// Emits `event` to the viewer's observers and schedules a repaint.
+	///
+	/// Used by the input and render paths so hosts receive pointer, key,
+	/// eyedropper and playback events from a single place.
+	///
+	/// # Arguments
+	///
+	/// * `event` - Event to broadcast to [`ViewerEvent`] subscribers.
+	/// * `cx` - Context that emits the event and is notified.
 	fn emit(&mut self, event: ViewerEvent, cx: &mut Context<Self>) {
 		cx.emit(event);
 		cx.notify();
@@ -691,6 +802,11 @@ impl<C: PlaybackClock> Render for ViewerWidget<C> {
 			// picture (the panel decides what an active interact consumes).
 			.focusable()
 			.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+				if this.video_fullscreen {
+					this.controls_visible = true;
+					this.last_pointer_move = Some(std::time::Instant::now());
+					cx.notify();
+				}
 				// While armed the pointer is a crosshair; the eyedropper
 				// only reacts to a click, so moves are swallowed.
 				if this.eyedropper_armed {
@@ -1037,14 +1153,31 @@ impl<C: PlaybackClock> Render for ViewerWidget<C> {
 				}),
 			));
 
-		div()
+		let root = div()
 			.size_full()
 			.flex()
 			.flex_col()
 			.min_w_0()
 			.overflow_hidden()
-			.child(picture)
-			.child(transport_bar)
+			.child(picture);
+		if !self.video_fullscreen || self.controls_visible {
+			if self.video_fullscreen {
+				root
+					.child(
+						div()
+							.absolute()
+							.left_0()
+							.right_0()
+							.bottom_0()
+							.child(transport_bar),
+					)
+					.into_any_element()
+			} else {
+				root.child(transport_bar).into_any_element()
+			}
+		} else {
+			root.into_any_element()
+		}
 	}
 }
 

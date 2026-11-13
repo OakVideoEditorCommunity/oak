@@ -1542,6 +1542,9 @@ impl<E: AppEngine> Panel for AiAssistantPanel<E> {
 mod tests {
 	use super::*;
 	use crate::ai::ToolLogEntry;
+	// P7 merge: the graphops helpers moved into `crate::oakui::graphops`;
+	// import them once for the whole test module instead of per-test.
+	use crate::oakui::graphops;
 
 	/// The T13B DeadStore flake (1 red in 9 full runs): `OAK_AI_API_KEY`
 	/// is shared process state, and every test here constructs a panel
@@ -2446,7 +2449,7 @@ mod tests {
 	fn real_insert_is_one_row_with_and_without_an_enclosing_group() {
 		use crate::oakui::{effectchain, graphops};
 		let _g = graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
 		let types = adapter.host().node_addable_effects(&clip).expect("list");
 		let type_id = types[0].type_id.clone();
@@ -2455,30 +2458,30 @@ mod tests {
 		// (a) Direct path: no enclosing group. It must go through the same
 		// effect-index mapping — a raw `insert(…, 0, …)` targets the source
 		// node (the chain includes it) and fails with `connect: no input ""`.
-		let before = oak_undo::global::count().expect("count");
+		let before = graphops::undo_count();
 		let direct = effectchain::insert_at_effect_index(&project, host, None, &type_id)
 			.expect("direct insert");
 		assert_eq!(
-			oak_undo::global::count().expect("count"),
+			graphops::undo_count(),
 			before + 1,
 			"a direct insert opens and closes its own row"
 		);
 		// The chain starts with the node feeding the first effect (footage).
 		assert_eq!(
 			real_chain(&project, &clip).last().map(String::as_str),
-			Some(direct.identity().to_string().as_str()),
+			Some(direct.raw().to_string().as_str()),
 			"the direct insert really wired the chain: {:?}",
 			real_chain(&project, &clip)
 		);
 
 		// (b) OPP path: an enclosing transaction group is already open.
-		let before = oak_undo::global::count().expect("count");
+		let before = graphops::undo_count();
 		let id = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
 			ops.node_add_effect(&json!({"clip": clip, "effect": type_id}))
 		})
 		.expect("opp insert");
 		assert_eq!(
-			oak_undo::global::count().expect("count"),
+			graphops::undo_count(),
 			before + 1,
 			"joining the transaction group still yields exactly one row"
 		);
@@ -2494,7 +2497,7 @@ mod tests {
 	#[test]
 	fn real_addable_effects_is_empty_for_a_node_that_cannot_host() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (adapter, _project, seq, _clip, _other) = real_clip_pair();
 
 		let listed = adapter
@@ -2519,23 +2522,24 @@ mod tests {
 		String,
 	) {
 		use crate::oakui::graphops;
+		use quercus_engine_rs::editor::TrackKind;
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Clips");
 		let media = std::env::temp_dir().join(format!("oak_t10a_{}.mp4", std::process::id()));
-		oak_codec::testmedia::write_test_clip(&media, 64, 64, 20, 10).expect("generate media");
+		crate::testmedia::write_test_clip(&media, 64, 64, 20, 10).expect("generate media");
 		let footage = graphops::import_footage(&project, &media).expect("import");
-		let a = graphops::place_footage_clip(&project, seq, footage, oak_node::track::TrackType::Video, 0, 0, 10, 0)
+		let a = graphops::place_footage_clip(&project, seq, footage, TrackKind::Video, 0, 0, 10, 0)
 			.expect("place first");
-		let b = graphops::place_footage_clip(&project, seq, footage, oak_node::track::TrackType::Video, 0, 10, 20, 0)
+		let b = graphops::place_footage_clip(&project, seq, footage, TrackKind::Video, 0, 10, 20, 0)
 			.expect("place second");
 		let host = OppHost::new();
 		host.attach_project(project.clone());
 		(
 			HostAdapter::new(host),
 			project,
-			seq.identity().to_string(),
-			a.identity().to_string(),
-			b.identity().to_string(),
+			seq.raw().to_string(),
+			a.raw().to_string(),
+			b.raw().to_string(),
 		)
 	}
 
@@ -2544,10 +2548,9 @@ mod tests {
 	fn real_chain(project: &crate::oakui::graphops::ProjectRef, node: &str) -> Vec<String> {
 		use crate::oakui::{effectchain, graphops};
 		let id = graphops::id_of(node.parse().expect("numeric id")).expect("id");
-		let g = project.lock().unwrap_or_else(|e| e.into_inner());
-		effectchain::chain(&g.graph, id)
+		effectchain::chain(project, id)
 			.into_iter()
-			.map(|n| n.identity().to_string())
+			.map(|n| n.raw().to_string())
 			.collect()
 	}
 
@@ -2557,15 +2560,15 @@ mod tests {
 	#[test]
 	fn real_node_add_effect_applies_and_is_one_undo_row() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
 
 		let types = adapter.host().node_addable_effects(&clip).expect("list");
 		assert!(!types.is_empty(), "the factory must offer effect types");
 		let type_id = types[0].type_id.clone();
 
-		let before = oak_undo::global::count().expect("count");
-		let before_index = oak_undo::global::index().expect("index");
+		let before = graphops::undo_count();
+		let before_index = graphops::undo_index();
 		// `txn::run` is the production wrapper: begin → call → commit on
 		// success, begin → call → **abort** on failure. Using it here means a
 		// failing assertion can never leave an undo group open and poison the
@@ -2582,17 +2585,17 @@ mod tests {
 			real_chain(&project, &clip)
 		);
 		assert_eq!(
-			oak_undo::global::count().expect("count"),
+			graphops::undo_count(),
 			before + 1,
 			"exactly one undo row"
 		);
 		assert_eq!(
-			oak_undo::global::index().expect("index"),
+			graphops::undo_index(),
 			before_index + 1,
 			"the row is on top of the stack"
 		);
 
-		oak_undo::global::undo().expect("undo");
+		assert!(graphops::undo_undo(), "undo must step the stack");
 		assert!(
 			!real_chain(&project, &clip).contains(&new_id),
 			"the undo really detaches the effect: {:?}",
@@ -2604,7 +2607,7 @@ mod tests {
 	#[test]
 	fn real_node_add_effect_honours_the_index() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, project, _seq, clip, _other) = real_clip_pair();
 		let types = adapter.host().node_addable_effects(&clip).expect("list");
 		let first_type = types[0].type_id.clone();
@@ -2641,10 +2644,10 @@ mod tests {
 	#[test]
 	fn real_add_transition_in_takes_the_edge_path() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq, clip, _other) = real_clip_pair();
 
-		let before = oak_undo::global::count().expect("count");
+		let before = graphops::undo_count();
 		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
 			ops.timeline_add_transition(&json!({
 				"clip": clip,
@@ -2662,7 +2665,7 @@ mod tests {
 		);
 		assert!(placed.get("id").is_some(), "it reports the new block: {placed}");
 		assert_eq!(
-			oak_undo::global::count().expect("count") - before,
+			graphops::undo_count() - before,
 			1,
 			"the transition and its shader kind are one row"
 		);
@@ -2674,10 +2677,10 @@ mod tests {
 	#[test]
 	fn real_add_transition_out_at_a_cut_takes_the_seam_path() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq, clip, _other) = real_clip_pair();
 
-		let before = oak_undo::global::count().expect("count");
+		let before = graphops::undo_count();
 		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
 			ops.timeline_add_transition(&json!({
 				"clip": clip,
@@ -2699,7 +2702,7 @@ mod tests {
 			"the half is a rational frame count, not the requested total: {half}"
 		);
 		assert_eq!(
-			oak_undo::global::count().expect("count") - before,
+			graphops::undo_count() - before,
 			1,
 			"one undo row for the seam transition"
 		);
@@ -2710,7 +2713,7 @@ mod tests {
 	#[test]
 	fn real_add_transition_out_without_a_cut_takes_the_edge_path() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq, _clip, last) = real_clip_pair();
 
 		let placed = oak_ai_tools::txn::run(&mut adapter, "timeline.add_transition", |ops| {
@@ -2741,7 +2744,7 @@ mod tests {
 	#[test]
 	fn real_effect_errors_are_actionable_and_leave_the_project_untouched() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, project, seq, clip, _other) = real_clip_pair();
 
 		let cases = [
@@ -2751,7 +2754,7 @@ mod tests {
 			json!({"clip": seq, "effect": "oak.solid_color"}),
 		];
 		for args in cases {
-			let before = oak_undo::global::count().expect("count");
+			let before = graphops::undo_count();
 			let chain_before = real_chain(&project, &clip);
 			let err = oak_ai_tools::txn::run(&mut adapter, "node.add_effect", |ops| {
 				ops.node_add_effect(&args)
@@ -2763,7 +2766,7 @@ mod tests {
 				"the error must be actionable: {message}"
 			);
 			assert_eq!(
-				oak_undo::global::count().expect("count"),
+				graphops::undo_count(),
 				before,
 				"a refused call must not add an undo row"
 			);
@@ -2778,7 +2781,7 @@ mod tests {
 	fn real_tool_fixture() -> (HostAdapter<OppHost>, crate::oakui::graphops::ProjectRef, String) {
 		let project = crate::oakui::graphops::create_project();
 		let seq = crate::oakui::graphops::create_sequence(&project, "Seq");
-		let seq_id = seq.identity().to_string();
+		let seq_id = seq.raw().to_string();
 		let host = OppHost::new();
 		host.attach_project(project.clone());
 		(HostAdapter::new(host), project, seq_id)
@@ -2791,7 +2794,7 @@ mod tests {
 	#[test]
 	fn real_overview_is_project_info_verbatim() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, seq_id) = real_tool_fixture();
 
 		let info = adapter.host().project_get_info().expect("info");
@@ -2820,11 +2823,11 @@ mod tests {
 	#[test]
 	fn real_timeline_add_track_executes() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq_id) = real_tool_fixture();
 
 		let before = adapter.host().timeline_get_structure().unwrap().tracks.len();
-		let before_count = oak_undo::global::count().expect("undo count");
+		let before_count = graphops::undo_count();
 
 		adapter.txn_begin("timeline.add_track").expect("begin");
 		let id = adapter
@@ -2836,7 +2839,7 @@ mod tests {
 		assert_eq!(after, before + 1, "the track reaches the real structure");
 		assert!(id.as_str().is_some_and(|s| !s.is_empty()), "empty id: {id}");
 		assert!(
-			oak_undo::global::count().expect("undo count") > before_count,
+			graphops::undo_count() > before_count,
 			"the command must land on the real undo stack"
 		);
 	}
@@ -2847,7 +2850,7 @@ mod tests {
 	#[test]
 	fn real_media_list_footage_is_empty_not_fake() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq_id) = real_tool_fixture();
 
 		let list = adapter
@@ -2863,7 +2866,7 @@ mod tests {
 	#[test]
 	fn real_time_rate_reads_the_sequence_grid() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (adapter, project, seq_id) = real_tool_fixture();
 
 		let rate = adapter
@@ -2880,10 +2883,15 @@ mod tests {
 		let seq24 = crate::oakui::graphops::create_sequence_with_params(
 			&project,
 			"Seq24",
-			Some((1920, 1080, oak_core::Rational::new(24, 1), false)),
+			Some((
+				1920,
+				1080,
+				quercus_engine_rs::types::Rational::new(24, 1),
+				false,
+			)),
 		);
 		let rate24 = adapter
-			.time_rate(TimeContext::Sequence(seq24.identity().to_string()))
+			.time_rate(TimeContext::Sequence(seq24.raw().to_string()))
 			.expect("rate for the explicit sequence");
 		assert_eq!((rate24.num, rate24.den), (24, 1));
 	}
@@ -2894,7 +2902,7 @@ mod tests {
 	#[test]
 	fn real_rational_at_defaults_to_the_rate_grid() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (adapter, _project, seq_id) = real_tool_fixture();
 
 		let ctx = TimeContext::Sequence(seq_id);
@@ -2914,7 +2922,7 @@ mod tests {
 	#[test]
 	fn unsupported_render_tools_refuse_structurally() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, _seq_id) = real_tool_fixture();
 
 		let levels = adapter
@@ -2943,7 +2951,7 @@ mod tests {
 	#[test]
 	fn panel_backend_forwards_both_variants() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (adapter, project, _seq_id) = real_tool_fixture();
 
 		let mut real = PanelBackend::Real(adapter);
@@ -3074,7 +3082,7 @@ mod tests {
 	#[test]
 	fn real_sequence_get_settings_reads_the_live_grid() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (adapter, _project, seq_id) = real_tool_fixture();
 
 		let settings = adapter
@@ -3095,7 +3103,7 @@ mod tests {
 	#[test]
 	fn real_sequence_set_format_is_one_undo_row_that_reverts() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, seq_id) = real_tool_fixture();
 
 		let before = adapter
@@ -3122,8 +3130,8 @@ mod tests {
 		// is owned by the transaction group, and the row assertion here
 		// guards the other direction: a push that escaped the group, or a
 		// second group being opened for one tool call.
-		let depth = oak_undo::global::count().expect("undo count");
-		let index = oak_undo::global::index().expect("undo index");
+		let depth = graphops::undo_count();
+		let index = graphops::undo_index();
 
 		// An edit needs the OPP transaction the dispatcher opens; here the
 		// test opens it directly (the group becomes the one undo row).
@@ -3134,12 +3142,12 @@ mod tests {
 		adapter.txn_commit().expect("commit");
 
 		assert_eq!(
-			oak_undo::global::count().expect("undo count"),
+			graphops::undo_count(),
 			depth + 1,
 			"the format change must add exactly ONE undo row"
 		);
 		assert_eq!(
-			oak_undo::global::index().expect("undo index"),
+			graphops::undo_index(),
 			index + 1,
 			"the edit must be the top of the history, not a buried row"
 		);
@@ -3149,9 +3157,9 @@ mod tests {
 			"24 is exact: {after}"
 		);
 		assert_eq!(after["undoable"], json!(true), "the reply says it can be taken back");
-		assert!(oak_undo::global::undoable(), "the edit entered the undo stack");
+		assert!(graphops::undo_can_undo(), "the edit entered the undo stack");
 
-		oak_undo::global::undo().expect("undo the format change");
+		assert!(graphops::undo_undo(), "undo must step the stack");
 		let reverted = adapter
 			.sequence_get_settings(json!({ "sequence": seq_id }))
 			.expect("after undo");
@@ -3167,7 +3175,7 @@ mod tests {
 	#[test]
 	fn real_sequence_set_format_only_touches_the_given_fields() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, seq_id) = real_tool_fixture();
 
 		let before = adapter
@@ -3199,7 +3207,7 @@ mod tests {
 	#[test]
 	fn real_sequence_ntsc_rate_round_trips_exactly() {
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		let (mut adapter, _project, seq_id) = real_tool_fixture();
 
 		adapter.txn_begin("sequence.set_format").expect("begin");
@@ -3263,7 +3271,7 @@ mod tests {
 	async fn e2e_panel_runs_sequence_set_format_against_the_real_engine(cx: &mut TestAppContext) {
 		let _env = env_lock();
 		let _g = crate::oakui::graphops::test_lock();
-		oak_undo::global::clear().expect("clear undo stack");
+		graphops::undo_clear();
 		unsafe { std::env::set_var("OAK_AI_API_KEY", "stub-key-not-a-secret") };
 		cx.update(|cx| {
 			gpui_kit::init(cx);

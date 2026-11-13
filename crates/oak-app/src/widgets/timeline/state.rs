@@ -160,6 +160,11 @@ impl TimelineState {
 	}
 
 	/// Replaces the selection with exactly `id`.
+	///
+	/// Any previous selection is cleared first, so this models a plain
+	/// click (not shift/ctrl-click, which use [`Self::add_to_selection`] and
+	/// [`Self::toggle`]). Pure view-state: it neither moves the playhead nor
+	/// informs the engine.
 	pub fn select(&mut self, id: ClipId) {
 		self.selection.clear();
 		self.selection.insert(id);
@@ -178,6 +183,13 @@ impl TimelineState {
 	}
 
 	/// Empties the selection.
+	///
+	/// Drops every clip id from the view state (and therefore every selection
+	/// outline), without touching the engine's selection or emitting a
+	/// [`TimelineEvent::SelectionChanged`](super::TimelineEvent) — callers
+	/// that need those do it themselves, as
+	/// [`TimelinePanel`](crate::panels::timeline::TimelinePanel) does when it
+	/// mirrors an engine selection into the view.
 	pub fn clear_selection(&mut self) {
 		self.selection.clear();
 	}
@@ -192,6 +204,10 @@ impl TimelineState {
 	}
 
 	/// Whether `id` is currently selected.
+	///
+	/// A `ClipId` membership test against [`Self::selection`]; it does not
+	/// consult the engine, so a clip deleted behind the view's back can still
+	/// test as selected until the view resyncs. `O(log n)` on the ordered set.
 	pub fn is_selected(&self, id: ClipId) -> bool {
 		self.selection.contains(&id)
 	}

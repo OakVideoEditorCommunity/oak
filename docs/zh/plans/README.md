@@ -7,11 +7,25 @@
 
 | 文档 | 内容 | 启动前提 |
 |---|---|---|
+| [`audio-ffmpeg-removal.md`](audio-ffmpeg-removal.md) | **音频链路完全脱离 FFmpeg**：独立音频后端，逐格式替换解封装、编解码、重采样、变速与 mux；保留播放/同步 ABI，含 A0–A7 阶段、格式矩阵和依赖守卫 | 待评审；A0 基线与 A1 PCM/WAV/FLAC 先行 |
+| [`ofx-animation-completion.md`](ofx-animation-completion.md) | **OFX 动态参数与动画补全**：复用现有关键帧内核，打通动画快照、worker 协议、OFX Suite、撤销事务、Inspector 曲线 UX，后续扩展循环与音频驱动 | 待评审；M0–M3 先形成最小可用闭环 |
 | [`ai-agent-design.md`](ai-agent-design.md) | **AI Agent 插件设计**（已按 OPP/1 重写）：多模态 LLM 作为外部插件经策展工具面自动剪辑，`render.*` 取帧回喂形成"编辑→看图→再编辑"视觉闭环；事务化编辑、双层确认、声明式 AI 面板、Mock LLM/回放夹具测试、A1–A5 里程碑 | external-plugin-system P1–P3 完成（面板需 P4） |
+| [`completed/app-pure-sdk-and-engine-facade.md`](completed/app-pure-sdk-and-engine-facade.md) | **oak-app 纯 SDK 化与引擎门面补全**：领域逻辑迁入 oak-engine，Rust SDK 提供完整安全封装；分阶段清除 app 对内部 crate 的直调，并以独立 sdk_editor 重建完整剪辑工作流验收 | 已解锁，按 P0–P8 推进 |
+| [`completed/p0-app-engine-call-ledger.md`](completed/p0-app-engine-call-ledger.md) | **P0 调用台账与行为基线**：AppEngine 全方法映射、剩余直调文件归属、DTO/Mock 边界清理、冻结测试与只减不增的 CI 守卫 | 已完成，作为 P1–P7 迁移对照 |
+| [`completed/p1-editor-session-implementation.md`](completed/p1-editor-session-implementation.md) | **P1 EditorSession、项目库与只读快照**：同实例 write-through、拥有型工程/时间线 DTO、项目库全生命周期、全局配置与文本初始化；实时工程采用与 P2 原子切换 | 已完成，P2 接续删除实时绑定和双 store shim |
+| [`completed/p2a-semantic-editing.md`](completed/p2a-semantic-editing.md) | **P2A 语义编辑与原生 ABI**：全量编辑命令迁入 engine，强类型 EditCommand/Result、无 JSON 的 repr(C) 数据面、全变体与 undo/重开验证；RealEngine 采用留待 P2B | P2A 已完成；P2B 历史统一完成，其余收口转入 P7 |
+| [`completed/p3-node-graph-and-effects.md`](completed/p3-node-graph-and-effects.md) | **P3 节点图、效果与参数体系**：会话效果链、静态参数、图快照、关键帧/曲线与 app 切换；不依赖 P2B | 已完成，P3A–P3D 与历史统一验收通过 |
+| [`completed/p4-media-and-multicam.md`](completed/p4-media-and-multicam.md) | **P4 素材、代理、波形、同步与多机位**：素材生命周期、代理、异步媒体任务、同步和多机位 | 已完成，P4A–P4E 验收通过 |
+| [`completed/p5-render-preview-and-export.md`](completed/p5-render-preview-and-export.md) | **P5 渲染、预览与导出**：统一导出任务、source/program 预览、音频与 worker 拓扑 | P5A–P5D 已完成；P6 接续 |
+| [`completed/p6-ofx-and-advanced-interaction.md`](completed/p6-ofx-and-advanced-interaction.md) | **P6 OFX 与高级交互**：插件生命周期、进度/取消、interact、overlay 与参数曲线 DTO | 已完成；P7 接续 |
+| [`completed/p10-engine-consolidation.md`](completed/p10-engine-consolidation.md) | **P10 私有 crate 合并进 engine（可行性计划）**：依赖/规模/测试/构建脚本盘点，目标结构、路径迁移规则、分阶段执行与风险控制 | 待评审，未执行 |
+| [`completed/p9-worker-cli-and-sdk-docs.md`](completed/p9-worker-cli-and-sdk-docs.md) | **P9 worker/CLI 收口与 SDK 文档**：worker 运行时迁入 engine、CLI 改 SDK、消费者守卫、missing_docs 清零与 docs.rs 发布 | 已完成 |
+| [`completed/p8-sdk-editor-example.md`](completed/p8-sdk-editor-example.md) | **P8 独立 SDK 消费者**：`examples/sdk_editor` headless 全流程 + 终端前端、C 头文件生成/校验、SDK 文档与发布元数据 | 已完成 |
+| [`completed/p7-app-dependency-elimination.md`](completed/p7-app-dependency-elimination.md) | **P7 app 依赖清零**：删除兼容实现和重复领域测试，收缩到 SDK DTO 与命令 | 已完成；边界 0 引用 / 0 内部依赖 |
+| [`completed/p1-p6-audit.md`](completed/p1-p6-audit.md) | **P1–P6 完成度静态审计**：逐阶段核对 engine/SDK 能力、app 切换与出口条件，列出 P7 收口清单 | 审计快照 2026-10-30；P7 已完成收口 |
+| [`external-plugin-system.md`](external-plugin-system.md) | **外部功能插件系统**：插件=独立进程（非库加载），JSON-RPC over stdio 控制面 + shm 数据面（泛化 M15 render-worker 传输）；策展宿主 API（事务化可撤销编辑、取帧回喂 AI）、声明式/像素面双 UI 路径、能力位与确认模式；含与 ai-agent-design.md 的关系与 P1–P6 里程碑 | 已解锁（RIIR + M15 完成），随时启动 |
 | [`ai-editing-feature-plan.md`](ai-editing-feature-plan.md) | **AI 剪辑开发规划（ai-feature 分支）**：tools→hooks→MCP 次序——工具 schema 先冻结（对齐 OPP §8、SDK 直连）、适配层 hooks（确认门/回读断言/失败回喂）、MCP 后置薄封装；agent 核（pi + AGENTS.md 链）与 memlite 两档记忆（工程级仓外 data-dir）；T0–T6 里程碑 | 无（SDK 直连先行，不等 OPP 宿主） |
-| [`app-pure-sdk-and-engine-facade.md`](app-pure-sdk-and-engine-facade.md) | **oak-app 纯 SDK 化与引擎门面补全**：领域逻辑迁入 oak-engine，Rust SDK 提供完整安全封装；分阶段清除 app 对内部 crate 的直调，并以独立 sdk_editor 重建完整剪辑工作流验收 | 已解锁，按 P0–P8 推进 |
-| [`completed/external-plugin-system.md`](completed/external-plugin-system.md) | **外部功能插件系统**：插件=独立进程（非库加载），JSON-RPC over stdio 控制面 + shm 数据面（泛化 M15 render-worker 传输）；策展宿主 API（事务化可撤销编辑、取帧回喂 AI）、声明式/像素面双 UI 路径、能力位与确认模式；含与 ai-agent-design.md 的关系与 P1–P6 里程碑 | 已解锁（RIIR + M15 完成），随时启动 |
-| [`completed/external-plugin-protocol.md`](completed/external-plugin-protocol.md) | **插件协议规范 OPP/1**：NDJSON 分帧 + JSON-RPC 2.0 双向信封、握手/心跳/关闭、全量方法/事件/错误码、编辑事务协议、shm 数据面（无头部无锁）、声明式与像素面 UI 协议、限流配额、版本演进规则、AI 粗剪报文示例 | 随 external-plugin-system 启动 |
+| [`external-plugin-protocol.md`](external-plugin-protocol.md) | **插件协议规范 OPP/1**：NDJSON 分帧 + JSON-RPC 2.0 双向信封、握手/心跳/关闭、全量方法/事件/错误码、编辑事务协议、shm 数据面（无头部无锁）、声明式与像素面 UI 协议、限流配额、版本演进规则、AI 粗剪报文示例 | 随 external-plugin-system 启动 |
 | [`completed/render-pipeline-threads.md`](completed/render-pipeline-threads.md) | **渲染管线改造**：单解码线程 + 单渲染线程 + 主进程上屏（GPU 单队列，多进程无意义）；解码硬解优先且零拷贝（FFmpeg hwaccel 经 DMA-BUF/DXGI/IOSurface/CUDA 导入，CPU 解码上传仅 fallback，手写 GPU 解码为次选）；OpenFX 收编进唯一隔离进程；decode→render→present 三队列流水线；内置效果全 GPU 零拷贝；resolve 重写为 match+Job 单循环并升级为 Job 图（GraphInput/GraphOutput 虚拟端点可见、禁删，从输入节点 Kahn 形态 BFS 至全部分支汇聚输出节点）；M0a–M5 里程碑 | 已解锁，随时启动（M0a 独立先行） |
 | [`completed/test-coverage-90-80.md`](completed/test-coverage-90-80.md) | **测试覆盖率提升（行 ≥90% / 分支 ≥80%）**：测试分两层——单元测试 + 模块边界集成测试；层 2 要求每个模块边界 API 都有正常/异常全矩阵；层 1 可豁免过于简单的函数但仍覆盖正常/异常；覆盖率进 CI（cargo-llvm-cov + nightly `--branch`，逐 crate 地板 + PR diff coverage ratchet）；M0 度量基建 → M1 单测 → M2 边界 → M3 app → M4 平台 → M5 收官 | render-pipeline-threads M5 完成（已有基线留档 `completed/render-pipeline-threads-m5-branch-coverage.txt`） |
 

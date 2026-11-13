@@ -32,40 +32,45 @@
 
 use std::sync::Mutex;
 
+use quercus_engine_rs::render::gpu_set_display_transform_required;
+
 /// The window's wgpu device/queue, registered by the app's window builder
 /// (the same pair gpui's renderer draws with, so textures created here are
 /// visible to it). `None` before the first window opens — uploads no-op.
 static GPU_CONTEXT: Mutex<Option<(std::sync::Arc<wgpu::Device>, std::sync::Arc<wgpu::Queue>)>> =
 	Mutex::new(None);
 
-/// The cached CPU-baked display LUT (M2): keyed by the display/color
-/// generation so a settings or monitor change rebuilds it, and
-/// re-installed whenever the engine context does not have it.
-static DISPLAY_LUT: Mutex<Option<(String, oak_core::lut::Lut3d)>> = Mutex::new(None);
+/// CPU-baked display LUT used by the wgpu display path.
+struct Lut3d {
+	edge: u32,
+	data: Vec<f32>,
+}
 
 /// A key covering every input of the display chain: the displaycolor
 /// generation (policy + monitor ICC) and the project's working/output
 /// color settings.
+#[cfg(test)]
 fn display_lut_key() -> String {
 	format!(
-		"{}|{:?}|{:?}",
+		"{}|{}|{}|{}",
 		crate::oakui::displaycolor::generation(),
-		oak_core::color::pipeline_working_space(),
-		oak_core::color::pipeline_output_spec()
+		quercus_engine_rs::state::color_working_space(),
+		quercus_engine_rs::state::color_output_gamut(),
+		quercus_engine_rs::state::color_output_transfer()
 	)
 }
 
 /// Build the working-space → display-device 3D LUT with the exact CPU
 /// reference implementation: the output node
-/// ([`oak_core::colormath::working_to_display_target`]) followed by the
+/// ([`quercus_engine_rs::utils::working_to_display_target`]) followed by the
 /// display ICC chain ([`super::displaycolor::apply_f32_rgba`]). This is
 /// what makes the GPU present path color-managed: every per-pixel step the
 /// CPU path performs runs here once per settings change, on the GPU's
 /// behalf, at full precision.
-fn build_display_lut() -> oak_core::lut::Lut3d {
-	let edge = oak_core::lut::Lut3d::DISPLAY_EDGE;
-	let lo = oak_core::lut::Lut3d::DISPLAY_LO;
-	let hi = oak_core::lut::Lut3d::DISPLAY_HI;
+fn build_display_lut() -> Lut3d {
+	let edge = quercus_engine_rs::core::DISPLAY_EDGE;
+	let lo = quercus_engine_rs::core::DISPLAY_LO;
+	let hi = quercus_engine_rs::core::DISPLAY_HI;
 	let n = (edge as usize).pow(3);
 	let mut samples = vec![0.0f32; n * 4];
 	let step = |i: usize, axis: usize| -> f32 {
@@ -83,38 +88,18 @@ fn build_display_lut() -> oak_core::lut::Lut3d {
 			}
 		}
 	}
-	oak_core::colormath::working_to_display_target(
+	quercus_engine_rs::utils::working_to_display_target(
 		&mut samples,
-		oak_core::color::pipeline_working_space(),
-		oak_core::color::pipeline_output_spec(),
+		&quercus_engine_rs::state::color_working_space(),
+		&quercus_engine_rs::state::color_output_gamut(),
+		&quercus_engine_rs::state::color_output_transfer(),
 	);
 	super::displaycolor::apply_f32_rgba(&mut samples, n as i64);
 	let mut data = Vec::with_capacity(n * 3);
 	for px in samples.as_chunks::<4>().0 {
 		data.extend_from_slice(&px[..3]);
 	}
-	oak_core::lut::Lut3d { edge, lo, hi, data }
-}
-
-/// Install the display LUT on the engine context when missing or stale.
-fn ensure_display_lut(ctx: &oak_core::backend::GpuContext) {
-	let key = display_lut_key();
-	let mut cache = DISPLAY_LUT.lock().unwrap_or_else(|e| e.into_inner());
-	let fresh = cache.as_ref().is_some_and(|(k, _)| *k == key);
-	if fresh && ctx.has_display_lut() {
-		return;
-	}
-	let lut = if fresh {
-		cache
-			.as_ref()
-			.map(|(_, l)| l.clone())
-			.unwrap_or_else(build_display_lut)
-	} else {
-		build_display_lut()
-	};
-	if ctx.set_display_lut(&lut).is_ok() {
-		*cache = Some((key, lut));
-	}
+	Lut3d { edge, data }
 }
 
 /// Register the window's wgpu device/queue for the 10-bit display path
@@ -125,38 +110,78 @@ fn ensure_display_lut(ctx: &oak_core::backend::GpuContext) {
 /// [`present_gpu_frame`] reports `None` and the caller stages through the
 /// CPU as before).
 pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::Arc<wgpu::Queue>) {
+	// Hand the presenter's device to the engine before it creates its own
+	// context. The engine's render textures then live on this device and can
+	// be sampled directly by the viewer (zero-copy presentation).
+	let backend = match device.adapter_info().backend {
+		wgpu::Backend::Metal => quercus_engine_rs::render::GpuBackend::Metal,
+		wgpu::Backend::Gl => quercus_engine_rs::render::GpuBackend::Gl,
+		wgpu::Backend::Vulkan => quercus_engine_rs::render::GpuBackend::Vulkan,
+		// Dx12 is not a separate engine backend discriminant; the engine's
+		// external-memory import gates on Vulkan anyway, so use Auto.
+		_ => quercus_engine_rs::render::GpuBackend::Auto,
+	};
+	// Keep the engine on its own wgpu device/queue by default. Sharing the
+	// window queue made a driver-level stall in the render thread (VAAPI /
+	// GL import, submit, or present) block the UI's surface acquisition on
+	// the same fence lock. The zero-copy handoff is opt-in for machines where
+	// the shared path is known-good.
+	let shared = std::env::var("OAK_GPU_SHARED")
+		.map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+		.unwrap_or(false);
+	if shared {
+		unsafe {
+			quercus_engine_rs::render::gpu_install(
+				std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
+				std::sync::Arc::as_ptr(&queue) as *const std::ffi::c_void,
+				backend,
+			);
+		}
+	} else {
+		eprintln!(
+			"[gpu] {} backend: engine keeps its own context (no shared wgpu queue)",
+			format!("{backend:?}")
+		);
+	}
+	let zero_copy = shared
+		&& device
+			.features()
+			.contains(wgpu::Features::FLOAT32_FILTERABLE)
+		&& install_display_lut();
+	gpu_set_display_transform_required(!zero_copy);
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
 	}
-	let adopted =
-		oak_core::backend::GpuContext::adopt(device, queue, oak_core::backend::BackendKind::Auto);
-	if !oak_core::backend::GpuContext::install_shared(Some(adopted)) {
-		// The engine context was already used for GPU work before the
-		// window opened: it cannot be replaced, so present falls back to
-		// the single staging readback. Log once — this is the only silent
-		// degradation of the M2 zero-copy path.
-		static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-		if oak_core::backend::GpuContext::shared().is_some_and(|c| !c.is_adopted())
-			&& !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed)
-		{
-			log::error!(
-				"GPU device adoption refused: the engine created and used a device before the \
-				 window opened; preview presentation falls back to a staging readback"
-			);
-		}
-	}
 }
 
-/// Declare the engine's shared GPU context as the host's render device
-/// (M5) on platforms where gpui does not expose the window device
-/// (macOS/Windows): there the engine-created shared context is what the
-/// render thread renders on, so the decoder's zero-copy hardware import
-/// must treat it as the host device. Same rationale as
-/// [`register_context`]'s adoption on Linux/FreeBSD. No-op result is
-/// reported for diagnostics only.
-#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-pub fn register_engine_context() -> bool {
-	oak_core::backend::GpuContext::mark_host_context()
+/// Installs the CPU-baked working-space → display 3D LUT on the GPU present
+/// path.
+///
+/// Bakes the table with [`build_display_lut`] — the output-node transform
+/// followed by the display ICC chain, i.e. exactly what
+/// [`super::displaycolor::apply_f32_rgba`] does per pixel — and uploads it to
+/// the adopted engine context, replacing any previous table, so frames
+/// presented zero-copy are color-managed like the CPU path. Call it after
+/// [`register_context`] adopted the device and again after any setting that
+/// changes the transform.
+///
+/// # Returns
+///
+/// `false` when no engine context is adopted, or when the upload is rejected;
+/// the CPU display transform then stays authoritative (see
+/// `displaycolor::apply_to_window`, which derives
+/// `gpu_set_display_transform_required` from this result).
+pub fn install_display_lut() -> bool {
+	if !quercus_engine_rs::render::gpu_is_adopted() {
+		return false;
+	}
+	let lut = build_display_lut();
+	quercus_engine_rs::render::gpu_set_display_lut(
+		lut.edge,
+		&quercus_engine_rs::core::DISPLAY_LO,
+		&quercus_engine_rs::core::DISPLAY_HI,
+		&lut.data,
+	)
 }
 
 /// Whether a GPU context is registered (a window is open). The viewer uses
@@ -165,36 +190,11 @@ pub fn context_ready() -> bool {
 	GPU_CONTEXT.lock().map(|ctx| ctx.is_some()).unwrap_or(false)
 }
 
-/// Present an engine-rendered GPU texture (M2): apply the display LUT on
-/// the shared device and return the raw `wgpu::Texture` gpui samples.
-/// `None` when the texture is CPU-resident, the engine device is not the
-/// adopted one, or the LUT pass is unavailable — the caller then falls
-/// back to the CPU display path.
-pub fn present_gpu_frame(
-	texture: &oak_core::texture::Texture,
-) -> Option<std::sync::Arc<wgpu::Texture>> {
-	let oak_core::texture::Texture::Gpu { token, ctx, .. } = texture else {
-		return None;
-	};
-	let concrete = ctx
-		.as_any()?
-		.downcast_ref::<oak_core::backend::GpuContext>()?;
-	if !concrete.is_adopted() {
-		return None;
-	}
-	ensure_display_lut(concrete);
-	let dst = concrete.present_texture(*token).ok()?;
-	let handle = concrete.texture_handle(dst);
-	// gpui's `Arc` owns the texture now; release the engine registry entry.
-	concrete.destroy_texture(dst);
-	handle
-}
-
 /// Upload F32 RGBA samples (tightly packed, `width * height * 4` values) as
 /// a half-float RGBA16F GPU texture for the 10-bit display path. Returns
 /// `None` when no context is registered or the samples are malformed — the
 /// caller then falls back to the BGRA8 CPU-frame path.
-pub fn upload_rgba16f(
+pub fn upload_rgba32f(
 	width: u32,
 	height: u32,
 	samples: &[f32],
@@ -206,9 +206,15 @@ pub fn upload_rgba16f(
 		let ctx = GPU_CONTEXT.lock().ok()?;
 		ctx.as_ref().map(|(d, q)| (d.clone(), q.clone()))?
 	};
-	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_16f_bytes(width, height, samples)?;
+	if !device
+		.features()
+		.contains(wgpu::Features::FLOAT32_FILTERABLE)
+	{
+		return None;
+	}
+	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_32f_bytes(width, height, samples)?;
 	let texture = device.create_texture(&wgpu::TextureDescriptor {
-		label: Some("oak_display_rgba16f"),
+		label: Some("oak_display_rgba32f"),
 		size: wgpu::Extent3d {
 			width,
 			height,
@@ -217,7 +223,7 @@ pub fn upload_rgba16f(
 		mip_level_count: 1,
 		sample_count: 1,
 		dimension: wgpu::TextureDimension::D2,
-		format: wgpu::TextureFormat::Rgba16Float,
+		format: wgpu::TextureFormat::Rgba32Float,
 		usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
 		view_formats: &[],
 	});
@@ -228,7 +234,7 @@ pub fn upload_rgba16f(
 			origin: wgpu::Origin3d::ZERO,
 			aspect: wgpu::TextureAspect::All,
 		},
-		&bytes,
+		bytes.as_ref(),
 		wgpu::TexelCopyBufferLayout {
 			offset: 0,
 			// Multi-row copies require an explicit, 256-aligned pitch; a
@@ -250,7 +256,7 @@ pub fn upload_rgba16f(
 /// 10-bit surface path. Best-effort: without a registered context it's a
 /// no-op and the viewer keeps the BGRA8 CPU-frame fallback.
 pub fn register_display_frame(image_id: usize, width: u32, height: u32, samples: &[f32]) {
-	let Some(texture) = upload_rgba16f(width, height, samples) else {
+	let Some(texture) = upload_rgba32f(width, height, samples) else {
 		return;
 	};
 	register_texture(image_id, width, height, texture);
@@ -285,16 +291,16 @@ mod tests {
 	#[test]
 	fn rgba16f_upload_rejects_malformed_arguments() {
 		// Zero dimensions.
-		assert!(upload_rgba16f(0, 1, &[]).is_none());
-		assert!(upload_rgba16f(1, 0, &[]).is_none());
+		assert!(upload_rgba32f(0, 1, &[]).is_none());
+		assert!(upload_rgba32f(1, 0, &[]).is_none());
 		// Wrong sample counts: short, long and empty for a 2x1 frame.
-		assert!(upload_rgba16f(2, 1, &[]).is_none());
-		assert!(upload_rgba16f(2, 1, &[0.0; 7]).is_none());
-		assert!(upload_rgba16f(2, 1, &[0.0; 9]).is_none());
+		assert!(upload_rgba32f(2, 1, &[]).is_none());
+		assert!(upload_rgba32f(2, 1, &[0.0; 7]).is_none());
+		assert!(upload_rgba32f(2, 1, &[0.0; 9]).is_none());
 		// Valid arguments without a registered window context decline
 		// cleanly (the boolean is context-dependent, so only the
 		// no-panic contract is asserted here).
-		let _ = upload_rgba16f(2, 1, &[0.0; 8]);
+		let _ = upload_rgba32f(2, 1, &[0.0; 8]);
 	}
 
 	/// The half-float packer clamps to [0, 1], writes little-endian f16
@@ -327,7 +333,7 @@ mod tests {
 		let _lock = crate::oakui::graphops::test_lock();
 		let key = display_lut_key();
 		let lut = build_display_lut();
-		assert_eq!(lut.edge, oak_core::lut::Lut3d::DISPLAY_EDGE);
+		assert_eq!(lut.edge, quercus_engine_rs::core::DISPLAY_EDGE);
 		let n = (lut.edge as usize).pow(3);
 		assert_eq!(lut.data.len(), n * 3, "three channels per grid point");
 		assert!(
@@ -354,7 +360,8 @@ mod tests {
 			key.starts_with(&crate::oakui::displaycolor::generation().to_string()),
 			"the generation is the first key component: {key}"
 		);
-		assert!(key.contains(&format!("{:?}", oak_core::color::pipeline_working_space())));
-		assert!(key.contains(&format!("{:?}", oak_core::color::pipeline_output_spec())));
+		assert!(key.contains(&quercus_engine_rs::state::color_working_space()));
+		assert!(key.contains(&quercus_engine_rs::state::color_output_gamut()));
+		assert!(key.contains(&quercus_engine_rs::state::color_output_transfer()));
 	}
 }

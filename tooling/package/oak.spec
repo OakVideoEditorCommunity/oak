@@ -38,7 +38,6 @@ cp -a %{_oak_stage}/usr %{buildroot}/
 %files
 /usr/bin/oak-editor
 /usr/bin/oak-cli
-/usr/bin/oak-worker
 /usr/share/applications/oak.desktop
 /usr/share/icons/hicolor/512x512/apps/oak.png
 /usr/share/icons/hicolor/scalable/apps/oak.svg

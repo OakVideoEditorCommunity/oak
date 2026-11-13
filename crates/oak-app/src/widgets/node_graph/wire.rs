@@ -50,6 +50,13 @@ pub struct Wire {
 impl Wire {
 	/// Creates a wire between two screen-space anchor points, tinted with the
 	/// connection's data-type color.
+	///
+	/// `edge` is the stable edge id (returned by [`Self::edge`]); `from` and
+	/// `to` are the already-resolved screen anchors of the source output and
+	/// target input (the view computes them per frame); `data_type` is the
+	/// connection's wire type — only its `color` is stored; `state` selects the
+	/// stroke styling in [`Self::paint`]. No validation of the endpoints or of
+	/// the connection itself happens here.
 	pub fn new(
 		edge: EdgeId,
 		from: Point<Pixels>,
@@ -85,6 +92,13 @@ impl Wire {
 
 	/// Paints the wire with [`Window::paint_path`], applying the stroke width
 	/// and color adjustments implied by its [`WireVisualState`].
+	///
+	/// `window` is the paint target and `zoom` is the node graph's zoom factor,
+	/// which scales the bezier curvature (not the stroke width). Style per
+	/// state: `Normal` draws the data-type colour at 60% opacity and 2px,
+	/// `Hovered` the full colour at 2.5px, `Selected` the full colour at 3px,
+	/// and `InvalidDrag` a red 6/4 dashed 2px stroke. Nothing is painted when
+	/// the path cannot be built for this frame.
 	pub fn paint(&self, window: &mut Window, zoom: f32) {
 		let (color, width, dash) = match self.state {
 			WireVisualState::Normal => (self.color.opacity(0.6), px(2.0), None),
@@ -213,6 +227,12 @@ impl GhostWire {
 
 	/// Paints the ghost wire using the same bezier shape as [`Wire`], with
 	/// its state styling.
+	///
+	/// `window` is the paint target and `zoom` scales the bezier curvature.
+	/// The endpoints are ordered by `from_output`, so the tangents always leave
+	/// the source horizontally even when the drag started at an input; the
+	/// stroke itself comes from [`paint_ghost`] (solid data-type tint for a
+	/// valid drop, red dashed otherwise).
 	pub fn paint(&self, window: &mut Window, zoom: f32) {
 		let (from, to) = if self.from_output {
 			(self.source, self.free_end)

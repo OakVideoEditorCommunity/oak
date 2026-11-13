@@ -15,44 +15,28 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //! `oak-cli transcode <input_media> <out> [width] [--format ppm|mp4]` —
-//! "media in, renders out" round trip (port of `cmd_transcode()` in
-//! cli/main.cpp), entirely through the module crates (M14 R2).
+//! "media in, renders out" round trip, entirely through the Rust SDK.
 //!
-//! The source is probed with an [`oak_node::footage::FootageBehavior`]
-//! (geometry / frame rate / duration), then a temporary sequence is
-//! assembled the same way the facade did: a scratch project holds the
-//! sequence (the facade's documented `oakengine_sequence_new` deviation),
-//! [`crate::engine::set_sequence_video_params`] sets the output geometry
-//! and frame rate, tracks are added with the module's
-//! `TimelineAddTrackCommand`, and clips are placed with the
-//! `TrackPlaceBlockCommand` (scratch footage connected to each clip —
-//! the facade's `oakengine_sequence_add_footage_clip_ex` semantics).
+//! The source is probed with the SDK's codec decoder registry, a temporary
+//! `EditorSession` assembles a one-clip sequence, frames/audio are rendered
+//! through the SDK task/preview surface, and `--format mp4` exports through
+//! the unified task API (H.264/AAC).
 //!
-//!   - `--format ppm` (and the image/still path): renders the frame range
-//!     through [`crate::engine::render_frame`] into P6 PPM frames via
-//!     [`crate::ppm`], plus the audio range through
-//!     [`crate::engine::render_audio`] into a PCM s16 WAV via
-//!     [`crate::wav`] when the source has audio streams.
-//!   - `--format mp4` (default): H.264/AAC through
-//!     [`crate::engine::export_sequence`] (the module export task, the
-//!     facade's `oakengine_export_render` equivalent).
-//!
-//! The module probe records the decoder id but drops the codec's stream
-//! descriptions (module gap), so when the stream info is unavailable the
-//! CLI falls back to `[width]` (or 1920), a 16:9 height, 25 fps and a
-//! single-frame range — the still-image contract the C++ CLI used for
-//! duration-less sources. Failures exit 1 (general error); bad arguments
-//! exit 64.
+//! `--format ppm` renders the frame range into P6 PPM frames plus a PCM s16
+//! WAV when the source has audio streams.
 
-use oak_node::footage::FootageBehavior;
-use oak_node::track::TrackType;
+use quercus_engine_rs::codec;
+use quercus_engine_rs::editor::{EditorSession, TrackKind};
+use quercus_engine_rs::edit::EditCommand;
+use quercus_engine_rs::node::{NodeId, Project};
+use quercus_engine_rs::types::{Rational, TimeRange};
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_USAGE};
 use crate::engine;
 use crate::ppm;
 use crate::wav;
 
-/// Source description distilled from the probe (through the module).
+/// Source description distilled from the probe.
 struct SourceInfo {
 	width: i32,
 	height: i32,
@@ -62,8 +46,13 @@ struct SourceInfo {
 	audio_streams: i32,
 }
 
-/// Run `transcode`. `width`/`format` are validated exactly like the C++
-/// loop over `argv[4..]`.
+/// Runs `transcode`: validates `width` (a positive decimal integer) and `format`
+/// (`"ppm"` or `"mp4"`, defaulting to mp4), then delegates to
+/// [`run_transcode`].
+///
+/// Returns `EXIT_USAGE` after printing the offending option when `width` is not a
+/// positive integer or `format` is unknown; otherwise returns the
+/// `EXIT_OK`/`EXIT_ERROR` code from the transcode body.
 pub fn run(input_media: String, out: String, width: Option<String>, format: Option<String>) -> i32 {
 	if let Some(w) = &width {
 		match w.parse::<i64>() {
@@ -85,7 +74,14 @@ pub fn run(input_media: String, out: String, width: Option<String>, format: Opti
 	run_transcode(&input_media, &out, width.as_deref(), is_ppm)
 }
 
-/// The transcode body.
+/// The transcode body: probes the source, derives the output geometry and frame
+/// rate, assembles a temporary sequence, then dispatches to PPM or MP4 output.
+///
+/// `width` is the requested output width as a decimal string (already validated;
+/// `None` keeps the source width); height preserves the source aspect ratio and
+/// falls back to 16:9 when the probe has no video dimensions. Frame rate falls back
+/// to 25/1 for stills. Returns an `EXIT_*` code and shuts the render manager down
+/// before returning.
 fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i32 {
 	let src = match probe_source(input) {
 		Ok(s) => s,
@@ -109,10 +105,6 @@ fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i
 	let frames = (src.duration * fr_num as f64 / fr_den as f64).round() as i64;
 	let frames = frames.max(1);
 
-	// The temporary sequence both output paths share. The facade kept
-	// created sequences in their own scratch project (documented
-	// deviation); the CLI does the same, so only the scratch project holds
-	// the sequence and its clips.
 	let assembly = match assemble_sequence(input, out_w, out_h, fr_num, fr_den, frames, src.audio_streams) {
 		Ok(a) => a,
 		Err(msg) => {
@@ -130,15 +122,22 @@ fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i
 	code
 }
 
-/// The assembled temporary sequence: the scratch project + the sequence
-/// node (with one video track/clip and, when the source has audio
-/// streams, one audio track/clip).
+/// The assembled temporary sequence: the session (which owns the project)
+/// and the sequence node.
 struct Assembly {
-	project: engine::ProjectRef,
-	sequence: oak_node::id::NodeId,
+	session: EditorSession,
+	project: Project,
+	sequence: NodeId,
 }
 
-/// Build the temporary sequence for the render/export stage.
+/// Builds the temporary one-clip sequence used by the render/export stage.
+///
+/// Initializes the render manager, creates an [`EditorSession`] and a sequence
+/// named `transcode`, sets its video params to `out_w`x`out_h` at
+/// `fr_num`/`fr_den`, imports `input` as footage, and places one video clip
+/// covering `frames` (plus an audio clip when `audio_streams > 0`, so the mix has
+/// something to render). Returns the owning [`Assembly`]; failures produce a
+/// human-readable message.
 fn assemble_sequence(
 	input: &str,
 	out_w: i32,
@@ -148,53 +147,61 @@ fn assemble_sequence(
 	frames: i64,
 	audio_streams: i32,
 ) -> Result<Assembly, String> {
-	if let Err(e) = engine::render_manager_init() {
-		return Err(format!("cannot initialize the render manager: {e}"));
+	engine::render_manager_init()?;
+	let session = EditorSession::new().map_err(|e| e.to_string())?;
+	let sequence = session
+		.create_sequence("transcode")
+		.map_err(|e| e.to_string())?;
+	let project = session.project();
+	if !project.sequence_set_video_params(sequence, out_w, out_h, fr_num, fr_den) {
+		return Err("cannot set the sequence video parameters".to_string());
 	}
-	let project = oak_node::project::Project::new();
-	let sequence = engine::create_sequence(&project, "transcode");
-	engine::set_sequence_video_params(&project, sequence, out_w, out_h, fr_num, fr_den);
+	let _ = session.set_current_sequence(sequence);
 
-	let video_track = engine::add_track(&project, sequence, TrackType::Video)
-		.map_err(|e| format!("cannot add video track: {e}"))?;
-	engine::place_footage_clip(
-		&project,
-		sequence,
-		input,
-		TrackType::Video,
-		video_track,
-		0,
-		frames,
-		0,
-		fr_num,
-		fr_den,
-	)
-	.map_err(|e| format!("cannot place video clip: {e}"))?;
-
+	let footage = session
+		.execute(EditCommand::ImportFootage {
+			path: input.to_string(),
+		})
+		.map_err(|e| format!("cannot import the source: {e}"))?
+		.primary
+		.ok_or_else(|| "the import returned no footage".to_string())?;
+	session
+		.execute(EditCommand::PlaceFootageClip {
+			footage,
+			kind: TrackKind::Video,
+			track_index: 0,
+			in_ts: 0,
+			out_ts: frames,
+			media_in_ts: 0,
+		})
+		.map_err(|e| format!("cannot place the video clip: {e}"))?;
 	if audio_streams > 0 {
-		let audio_track = engine::add_track(&project, sequence, TrackType::Audio)
-			.map_err(|e| format!("cannot add audio track: {e}"))?;
-		engine::place_footage_clip(
-			&project,
-			sequence,
-			input,
-			TrackType::Audio,
-			audio_track,
-			0,
-			frames,
-			0,
-			fr_num,
-			fr_den,
-		)
-		.map_err(|e| format!("cannot place audio clip: {e}"))?;
+		session
+			.execute(EditCommand::PlaceFootageClip {
+				footage,
+				kind: TrackKind::Audio,
+				track_index: 0,
+				in_ts: 0,
+				out_ts: frames,
+				media_in_ts: 0,
+			})
+			.map_err(|e| format!("cannot place the audio clip: {e}"))?;
 	}
 
-	Ok(Assembly { project, sequence })
+	Ok(Assembly {
+		session,
+		project,
+		sequence,
+	})
 }
 
-/// `--format ppm`: render the frame range through the module ticket arena
-/// into PPM frames (+ the audio range into a WAV when the source has
-/// audio).
+/// `--format ppm`: renders the frame range as `frame_%05d.ppm` files in `out` and,
+/// when `audio` is true, also writes the audio range as `audio.wav`.
+///
+/// `frames` frames are rendered at `out_w`x`out_h` with frame rate
+/// `fr_num`/`fr_den`; frame `i` is sampled at `i * fr_den / fr_num` seconds. The
+/// output directory is created first. Returns `EXIT_ERROR` on directory creation,
+/// render, PPM write, or WAV failure; `EXIT_OK` otherwise.
 fn transcode_ppm(
 	assembly: &Assembly,
 	out: &str,
@@ -211,9 +218,8 @@ fn transcode_ppm(
 	}
 
 	for i in 0..frames {
-		let time = oak_core::Rational::new(i * i64::from(fr_den), i64::from(fr_num));
-		let montage = engine::video_montage(&assembly.project, assembly.sequence, time);
-		let frame = match engine::render_frame(assembly.sequence, time, montage, out_w, out_h) {
+		let time = Rational::new(i * i64::from(fr_den), i64::from(fr_num));
+		let frame = match engine::render_frame(&assembly.project, assembly.sequence, time, out_w, out_h) {
 			Ok(f) => f,
 			Err(e) => {
 				let msg = if e.is_empty() {
@@ -240,9 +246,12 @@ fn transcode_ppm(
 	EXIT_OK
 }
 
-/// `--format mp4`: H.264/AAC through the module export task (codec-default
-/// bit rates, 48 kHz stereo — the facade's `oakengine_export_render`
-/// defaults).
+/// `--format mp4`: exports the assembled sequence as H.264/AAC through the unified
+/// export task.
+///
+/// `out` is the destination file, `frames` the frame count, and
+/// `fr_num`/`fr_den` the frame rate. Returns `EXIT_OK` on success, or `EXIT_ERROR`
+/// after printing the export message on failure.
 fn transcode_mp4(assembly: &Assembly, out: &str, fr_num: i32, fr_den: i32, frames: i64) -> i32 {
 	match engine::export_sequence(&assembly.project, assembly.sequence, out, fr_num, fr_den, frames) {
 		Ok(()) => EXIT_OK,
@@ -258,8 +267,8 @@ fn transcode_mp4(assembly: &Assembly, out: &str, fr_num: i32, fr_den: i32, frame
 	}
 }
 
-/// Write a rendered frame as `frame_%05d.ppm` in `out` (the rendered
-/// frames are always in the internal RGBA layout, 4 channels).
+/// Write a rendered frame as `frame_%05d.ppm` in `out` (RGBA F32, 4
+/// channels).
 fn write_frame_ppm(frame: &engine::RenderedFrame, out: &str, index: i64) -> Result<(), String> {
 	if frame.data.is_empty() || frame.width <= 0 || frame.height <= 0 || frame.linesize <= 0 {
 		return Err(format!(
@@ -280,22 +289,19 @@ fn write_frame_ppm(frame: &engine::RenderedFrame, out: &str, index: i64) -> Resu
 	.map_err(|e| format!("cannot write \"{}\": {e}", path.display()))
 }
 
-/// Render the audio range and write it as `audio.wav` in `out`. The
-/// assembled clips span `[0, frames)` sequence timestamps, so the range
-/// length is `frames` time-base ticks.
-fn write_audio_wav(
-	assembly: &Assembly,
-	out: &str,
-	frames: i64,
-	fr_num: i32,
-	fr_den: i32,
-) -> i32 {
-	let range = oak_core::TimeRange::new(
-		oak_core::Rational::new(0, 1),
-		oak_core::Rational::new(frames * i64::from(fr_den), i64::from(fr_num)),
+/// Renders the assembled sequence's audio over the whole frame range and writes it
+/// as `audio.wav` in the output directory `out`.
+///
+/// The range is `[0, frames * fr_den / fr_num)` seconds; `frames` is the frame
+/// count and `fr_num`/`fr_den` the sequence frame rate. Prints an error and returns
+/// `EXIT_ERROR` when the audio render fails, the buffer is empty, or the WAV cannot
+/// be written; `EXIT_OK` on success.
+fn write_audio_wav(assembly: &Assembly, out: &str, frames: i64, fr_num: i32, fr_den: i32) -> i32 {
+	let range = TimeRange::new(
+		Rational::new(0, 1),
+		Rational::new(frames * i64::from(fr_den), i64::from(fr_num)),
 	);
-	let montage = engine::audio_montage(&assembly.project, assembly.sequence, range);
-	let audio = match engine::render_audio(assembly.sequence, range, montage) {
+	let audio = match engine::render_audio(&assembly.project, assembly.sequence, range) {
 		Ok(a) => a,
 		Err(e) => {
 			eprintln!("error: transcode: audio render failed: {e}");
@@ -315,70 +321,35 @@ fn write_audio_wav(
 	EXIT_OK
 }
 
-/// Probe the source media into a [`SourceInfo`].
-///
-/// The module probe records the decoder but (currently) drops the codec's
-/// stream descriptions, so a successful probe still reports zero streams /
-/// unavailable stream info. The CLI then falls back to the documented
-/// defaults: `[width]` or 1920, 16:9 height, 25 fps, duration 0 (a single
-/// frame — the still-image contract). A missing file is a hard error.
+/// Probe the source media into a [`SourceInfo`] through the SDK codec
+/// registry.
 fn probe_source(path: &str) -> Result<SourceInfo, String> {
 	if !std::path::Path::new(path).exists() {
 		return Err(format!("file does not exist: {path}"));
 	}
-	let mut footage = FootageBehavior::new(path);
-	if let Err(e) = footage.probe() {
-		// The module probe failure keeps the node usable (like the facade's
-		// footage create); the fallback below applies.
-		let _ = e;
-	}
-
-	let duration = footage.duration();
-	let duration = if duration.denominator() != 0 {
-		duration.numerator() as f64 / duration.denominator() as f64
-	} else {
-		0.0
-	};
+	let footage = codec::decoder_probe(None, path, None)
+		.ok_or_else(|| format!("could not probe \"{path}\""))?;
+	let duration = footage
+		.duration()
+		.map(|range| range.length().to_f64())
+		.unwrap_or(0.0);
 	let audio_streams = footage.audio_stream_count() as i32;
-	let video_streams = footage.video_stream_count() as i32;
-
-	let info = if video_streams > 0 {
-		footage.video_params(0)
-	} else {
-		None
+	let video = footage.video_stream(0);
+	let (width, height, fr_num, fr_den) = match video {
+		Some(params) if params.width > 0 && params.height > 0 => (
+			params.width,
+			params.height,
+			params.frame_rate_num,
+			params.frame_rate_den,
+		),
+		_ => (1920, 1080, 25, 1),
 	};
-
-	let src = if let Some(v) = info {
-		if v.width > 0 && v.height > 0 {
-			SourceInfo {
-				width: v.width,
-				height: v.height,
-				fr_num: v.frame_rate.numerator() as i32,
-				fr_den: v.frame_rate.denominator() as i32,
-				duration,
-				audio_streams,
-			}
-		} else {
-			// Module gap fallback (see the docs above).
-			SourceInfo {
-				width: 1920,
-				height: 1080,
-				fr_num: 25,
-				fr_den: 1,
-				duration,
-				audio_streams,
-			}
-		}
-	} else {
-		// Module gap fallback (see the docs above).
-		SourceInfo {
-			width: 1920,
-			height: 1080,
-			fr_num: 25,
-			fr_den: 1,
-			duration,
-			audio_streams,
-		}
-	};
-	Ok(src)
+	Ok(SourceInfo {
+		width,
+		height,
+		fr_num,
+		fr_den,
+		duration,
+		audio_streams,
+	})
 }

@@ -183,18 +183,17 @@ pub trait EffectStackDataSource: 'static {
 		None
 	}
 
-	/// Whether dropping the given effect at `new_index` (an index into the
-	/// list returned by [`effects`](EffectStackDataSource::effects)) would
-	/// be a valid reorder.
+	/// Whether dropping effect `id` at `new_index` — an index into the list
+	/// returned by [`effects`](EffectStackDataSource::effects) — would be a
+	/// valid reorder.
 	///
-	/// Called continuously during a drag to drive the insertion indicator;
-	/// invalid positions render as "not allowed". The default
-	/// implementation allows any position between the source and output
-	/// cards. Apps override this to reject reorders that would produce
-	/// invalid signal chains (e.g. a node that requires two inputs).
+	/// `id` is the effect being dragged and `new_index` the target slot. Called
+	/// continuously during a drag to drive the insertion indicator; invalid
+	/// positions render as "not allowed". The default implementation allows
+	/// every position; apps override it to reject reorders that would produce
+	/// an invalid signal chain (e.g. a node that requires two inputs).
 	///
-	/// Note this is advisory UI feedback only — the app re-validates when
-	/// the actual
+	/// Advisory UI feedback only — the app re-validates when the actual
 	/// [`ReorderRequested`](crate::widgets::effect_stack::EffectStackEvent::ReorderRequested)
 	/// event arrives.
 	fn can_reorder(&self, _id: EffectId, _new_index: usize) -> bool {

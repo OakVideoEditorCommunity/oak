@@ -39,12 +39,20 @@ set -euo pipefail
 # Bump when the dependency set, a version or a build flag changes: every
 # consumer (including the CI FFmpeg cache) rebuilds from scratch.
 DEPS_STAMP="3"
+if [ "$MSVC" = 1 ]; then
+	DEPS_STAMP="${DEPS_STAMP}-msvc"
+fi
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PREFIX="$ROOT/.cache/ffmpeg"
 DEPS_SRC="$ROOT/.cache/ffmpeg-deps-src"
 JOBS="$( (nproc 2>/dev/null) || sysctl -n hw.ncpu)"
 OS="$(uname -s)"
+MSVC="${MSVC:-0}"
+
+if [ "${1:-}" = "--msvc" ]; then
+	MSVC=1
+fi
 
 # --- Stamp gate ---------------------------------------------------------------
 
@@ -68,11 +76,18 @@ export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PAT
 
 : "${CFLAGS:=-O2}"
 : "${CXXFLAGS:=-O2}"
-export CFLAGS="$CFLAGS -fPIC" CXXFLAGS="$CXXFLAGS -fPIC"
+if [ "$MSVC" = 1 ]; then
+	export CC=cl CXX=cl LD=link AR=lib RANLIB=:
+	export CFLAGS CXXFLAGS
+	export CPPFLAGS="${CPPFLAGS:-} /I$PREFIX/include"
+	export LDFLAGS="${LDFLAGS:-} /LIBPATH:$PREFIX/lib"
+else
+	export CFLAGS="$CFLAGS -fPIC" CXXFLAGS="$CXXFLAGS -fPIC"
+	export CPPFLAGS="${CPPFLAGS:-} -I$PREFIX/include"
+	export LDFLAGS="${LDFLAGS:-} -L$PREFIX/lib"
+fi
 # Autotools probes resolve sibling deps (ogg for vorbis/theora, freetype
 # for libass) through these as well as through pkg-config.
-export CPPFLAGS="${CPPFLAGS:-} -I$PREFIX/include"
-export LDFLAGS="${LDFLAGS:-} -L$PREFIX/lib"
 
 if [ "$OS" = Darwin ]; then
 	# Match the Rust link line (-mmacosx-version-min); honored by clang,
@@ -219,6 +234,12 @@ meson_build() {
 }
 
 # --- Subtitle / text stack -----------------------------------------------------
+
+# xz/liblzma is part of FFmpeg's static closure. In particular, openKylin's
+# system liblzma.a is not PIC and cannot be linked into libquercus_engine.so;
+# the shared configure_build flags above compile this private copy with -fPIC.
+configure_build xz \
+	https://github.com/tukaani-project/xz/releases/download/v5.8.2/xz-5.8.2.tar.gz
 
 # freetype WITHOUT its optional integrations: each of zlib/bzip2/png/
 # brotli/harfbuzz would leak into freetype2.pc's Libs.private and onto

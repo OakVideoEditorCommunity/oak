@@ -32,7 +32,17 @@ which maintained by TUST OpenAtom Open Source Club.
 
 ## Build Instructions
 
-See the [Build Guide](docs/build.md).
+The editor consumes Quercus as a git submodule (`quercus-engine/`), with every
+consumer declaring both the pinned version and the submodule path
+(`quercus-engine-rs = { version = "=0.6.1", path = "../../quercus-engine/crates/quercus-engine-rs" }`).
+Clone with `git clone --recurse-submodules` (or run `git submodule update --init --recursive`)
+before building. **The project FFmpeg build is mandatory**: run
+`tooling/install-deps.sh` and `tooling/ffmpeg/build-ffmpeg.sh` before the first
+`cargo build`, and do not point `FFMPEG_DIR` at a system/Homebrew/distro
+FFmpeg — that produces link errors or loads the wrong libraries.
+
+See the [Build Guide](docs/build.md) and the
+[Quercus engine repository](https://github.com/OakVideoEditorCommunity/quercus-engine).
 
 ## Roadmap
 
