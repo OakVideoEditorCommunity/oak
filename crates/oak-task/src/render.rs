@@ -434,10 +434,20 @@ impl RenderTask {
 
 	/// Flatten the audio tracks of `sequence` into an audio montage
 	/// (track order is irrelevant — the mixer accumulates gains).
+	#[cfg(test)]
 	fn audio_montage(
 		project: &ProjectRef,
 		sequence: oak_node::id::NodeId,
 		time: Rational,
+	) -> Vec<MontageClip> {
+		Self::audio_montage_in(project, sequence, time, time + Rational::new(1, 1_000_000))
+	}
+
+	fn audio_montage_in(
+		project: &ProjectRef,
+		sequence: oak_node::id::NodeId,
+		range_in: Rational,
+		range_out: Rational,
 	) -> Vec<MontageClip> {
 		let guard = project.lock().unwrap_or_else(|e| e.into_inner());
 		let Some(entry) = guard.graph.get(sequence) else {
@@ -480,7 +490,7 @@ impl RenderTask {
 					let Some(core) = crate::nodeops::block_core_of(&guard.graph, *block_id) else {
 						continue;
 					};
-					if time < core.in_() || time >= core.out() {
+					if core.out() <= range_in || core.in_() >= range_out {
 						continue;
 					}
 					let Some(footage_id) = find_input_footage(&guard.graph, *block_id) else {
@@ -595,7 +605,7 @@ impl RenderTask {
 		let (project, viewer_id) = &self.viewer;
 		let (sample_rate, channel_layout) =
 			crate::nodeops::sequence_audio_params(project, *viewer_id);
-		let montage = Self::audio_montage(project, *viewer_id, range.in_());
+		let montage = Self::audio_montage_in(project, *viewer_id, range.in_(), range.out());
 		Ok(AudioTicketParams {
 			viewer: viewer_id.identity(),
 			range,
@@ -1679,6 +1689,53 @@ mod tests {
 		assert!(RenderTask::audio_montage(&project, sequence, Rational::new(5, 1)).is_empty());
 		assert!(RenderTask::audio_montage(&project, NodeId::INVALID, Rational::new(0, 1)).is_empty());
 		assert!(RenderTask::audio_montage(&project, folder, Rational::new(0, 1)).is_empty());
+	}
+
+	#[test]
+	fn audio_montage_in_includes_clips_overlapping_the_range() {
+		let project = project();
+		let sequence = add_sequence(&project);
+		let footage = add_footage(&project, "audio.mp4");
+		let at_start = add_clip(
+			&project,
+			Some(footage),
+			TimeRange::new(Rational::new(0, 1), Rational::new(2, 1)),
+		);
+		let later = add_clip(
+			&project,
+			Some(footage),
+			TimeRange::new(Rational::new(5, 1), Rational::new(7, 1)),
+		);
+		let at_range_end = add_clip(
+			&project,
+			Some(footage),
+			TimeRange::new(Rational::new(10, 1), Rational::new(12, 1)),
+		);
+		let track = track_with(
+			&project,
+			TrackType::Audio,
+			vec![at_start, later, at_range_end],
+		);
+		let audio_list = track_list_with(&project, TrackType::Audio, vec![track]);
+		push_track_list(&project, sequence, audio_list);
+
+		let montage = RenderTask::audio_montage_in(
+			&project,
+			sequence,
+			Rational::new(0, 1),
+			Rational::new(10, 1),
+		);
+		let starts: Vec<Rational> = montage.iter().map(|clip| clip.in_time).collect();
+		assert_eq!(starts, vec![Rational::new(0, 1), Rational::new(5, 1)]);
+		assert_eq!(
+			RenderTask::audio_montage(&project, sequence, Rational::new(0, 1)).len(),
+			1
+		);
+		assert_eq!(
+			RenderTask::audio_montage(&project, sequence, Rational::new(6, 1)).len(),
+			1
+		);
+		assert!(RenderTask::audio_montage(&project, sequence, Rational::new(3, 1)).is_empty());
 	}
 
 	#[test]
