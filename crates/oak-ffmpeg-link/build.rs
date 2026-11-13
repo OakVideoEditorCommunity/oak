@@ -175,10 +175,12 @@ fn main() {
 					"ass", "unibreak", "harfbuzz", "fribidi", "fontconfig", "expat", "freetype",
 				];
 				if WHOLE_ARCHIVE.contains(&lib) {
-					// New rustc rejects `-bundle` when command-line
-					// modifiers override the crate's default bundle setting.
-					// `+whole-archive` alone has the intended force-include
-					// behavior and remains accepted by older stable releases.
+					#[cfg(target_os = "macos")]
+					// Use ld64's native force-load spelling instead of a
+					// `static:+whole-archive` link modifier. New rustc rejects
+					// command-line modifier overrides for this crate.
+					println!("cargo:rustc-link-arg=-Wl,-force_load,{}", archive.display());
+					#[cfg(not(target_os = "macos"))]
 					println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
 				} else {
 					println!("cargo:rustc-link-lib=static={lib}");
