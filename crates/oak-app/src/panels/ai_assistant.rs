@@ -2288,7 +2288,7 @@ mod tests {
 	/// reverts either half.
 	#[test]
 	fn header_strip_yields_and_buttons_never_shrink() {
-		let source = include_str!("ai_assistant.rs");
+		let source = include_str!("ai_assistant.rs").replace("\r\n", "\n");
 		let strip_fn = source
 			.split("fn status_strip(")
 			.nth(1)

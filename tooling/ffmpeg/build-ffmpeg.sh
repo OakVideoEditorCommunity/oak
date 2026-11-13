@@ -99,7 +99,7 @@ FLAGS=(
 	--enable-version3
 	--disable-doc
 	--disable-debug
-	--disable-programs
+	--enable-programs
 	# An editor has no network inputs; --disable-network removes every
 	# network protocol and with it any need for a TLS library (gnutls).
 	--disable-network

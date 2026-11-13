@@ -991,12 +991,13 @@ mod tests {
 
 		let root = std::env::temp_dir().join(format!("oak-mem-probe-{}", std::process::id()));
 		let _ = std::fs::remove_dir_all(&root);
+		let bin = super::super::memory::MemoryTools::from_env().config().bin().to_path_buf();
+		if !bin.is_file() {
+			eprintln!("skipping: memlite binary not installed");
+			return;
+		}
 		let memory = super::super::memory::MemoryTools::new(
-			super::super::memory::MemoryConfig::new(
-				super::super::memory::MemoryTools::from_env().config().bin(),
-				&root,
-				Some("p".into()),
-			),
+			super::super::memory::MemoryConfig::new(bin, &root, Some("p".into())),
 		);
 		let llm = ScriptedLlm::new(vec![
 			ScriptedLlm::tool_call("memory.remember", json!({"content": "把这段的帧率改成 24", "title": "剪辑事实"})),

@@ -267,6 +267,7 @@ jobs:
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
+          echo "$ffmpeg/bin" >> "$GITHUB_PATH"
 
       - name: Configure build environment (macOS)
         if: matrix.platform == 'macos'
@@ -279,6 +280,7 @@ jobs:
           echo "FFMPEG_DIR=$ffmpeg" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$ffmpeg/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "DYLD_LIBRARY_PATH=$ffmpeg/lib" >> "$GITHUB_ENV"
+          echo "$ffmpeg/bin" >> "$GITHUB_PATH"
 
       - name: Configure build environment (Windows)
         if: matrix.platform == 'windows'
