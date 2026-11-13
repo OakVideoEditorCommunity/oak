@@ -20,9 +20,10 @@ jsonschema = "0.60"
 # f32 frame -> PNG bytes for render.get_frame feedback.
 png = "0.17"
 thiserror = "2"
-# The real engine backend. Optional: the default feature set must build and
-# test on a machine without the project FFmpeg (see README "Feature gates").
-oak-engine-rust-sdk = { path = "../../crates/oak-engine-rust-sdk", optional = true }
+# The real engine backend. Use the published SDK so Cargo can resolve the
+# default feature set without the retired in-repo SDK or the engine submodule.
+# The alias keeps the existing sdk backend's crate paths unchanged.
+oak-engine-rust-sdk = { package = "quercus-engine-rs", version = "=0.7.1", optional = true, features = ["ffmpeg-static"] }
 
 [features]
 default = []

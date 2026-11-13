@@ -72,12 +72,8 @@ ureq = "3"
 # T8.1: the frozen 22-tool face (schemas, dispatch, hooks gate, mock).
 #
 # NOTE (P7 merge): this is the one path dependency outside the workspace.
-# It used to point at `crates/oak-engine-rust-sdk` (the old in-repo SDK),
-# which upstream deleted when the engine moved into the `quercus-engine`
-# submodule; the optional `sdk` feature of `oak-ai-tools` still names that
-# crate and is therefore **not buildable from this workspace anymore**
-# (its own tests run the default features only — see `ai/oak-ai-tools/README.md`).
-# The app links the default (mock-capable) feature set only.
+# Its optional sdk feature uses the published quercus-engine-rs package;
+# the app links the default (mock-capable) feature set only.
 oak-ai-tools = { path = "../../ai/oak-ai-tools", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
