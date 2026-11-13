@@ -267,7 +267,7 @@ fn clean_shutdown_needs_no_kill() {
 	);
 	let exit = host.exit_summary().expect("exit status recorded");
 	assert!(
-		exit.contains("exit status: 0"),
+		exit.contains("exit status: 0") || exit.contains("exit code: 0"),
 		"plugin must exit 0, got {exit:?}"
 	);
 	assert_eq!(host.failure(), None, "no failure on a clean stop");
