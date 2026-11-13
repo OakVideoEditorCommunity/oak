@@ -175,7 +175,11 @@ fn main() {
 					"ass", "unibreak", "harfbuzz", "fribidi", "fontconfig", "expat", "freetype",
 				];
 				if WHOLE_ARCHIVE.contains(&lib) {
-					println!("cargo:rustc-link-lib=static:-bundle,+whole-archive={lib}");
+					// New rustc rejects `-bundle` when command-line
+					// modifiers override the crate's default bundle setting.
+					// `+whole-archive` alone has the intended force-include
+					// behavior and remains accepted by older stable releases.
+					println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
 				} else {
 					println!("cargo:rustc-link-lib=static={lib}");
 				}
