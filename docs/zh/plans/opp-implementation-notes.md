@@ -1,6 +1,6 @@
 # OPP/1 实施偏差注记
 
-> 本文记录实现 OPP/1（[`external-plugin-protocol.md`](../plans/completed/external-plugin-protocol.md)，**冻结，不改**）时的**有意偏差与实施口径**。协议本身不动；凡是与协议字面不一致的落地决定，逐条记在这里，附依据与复评条件。
+> 本文记录实现 OPP/1（[`external-plugin-protocol.md`](external-plugin-protocol.md)，**冻结，不改**）时的**有意偏差与实施口径**。协议本身不动；凡是与协议字面不一致的落地决定，逐条记在这里，附依据与复评条件。
 >
 > 配套规格：`/tmp/oak-reviews/opp-spec.md`（备份 `~/.oak-reviews/opp-spec.md`）。
 > 首裁日期：2026-11-11（四条架构裁断 + 一条日志方案，首辅定）。

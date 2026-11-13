@@ -2,7 +2,7 @@
 
 > 本文是 `ai/schema/` 冻结产物的一部分：工具 JSON Schema（`tools/*.json`，22 个，
 > JSON Schema draft-07）、合法/非法样本（`samples/`）、防漂移测试（`test_schema.py`）。
-> 权威来源：`docs/zh/plans/completed/external-plugin-protocol.md` §8（宿主 API 方法，
+> 权威来源：`docs/zh/plans/external-plugin-protocol.md` §8（宿主 API 方法，
 > v1 全量）与 §5/§6（公共数据类型、编辑事务）；设计依据
 > `docs/zh/plans/ai-agent-design.md` §3（工具面是契约、事务编排不暴露给 LLM）。
 > 方法名与字段名一律英文，正文说明用中文。

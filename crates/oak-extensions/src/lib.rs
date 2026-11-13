@@ -10,7 +10,7 @@
 //! - the declarative UI / panel shell — `ui.*` ships as typed placeholders only;
 //! - shm frame pools (P3).
 //!
-//! Frozen wire reference: `docs/zh/plans/completed/external-plugin-protocol.md`.
+//! Frozen wire reference: `docs/zh/plans/external-plugin-protocol.md`.
 
 pub mod host_services;
 pub mod lifecycle;

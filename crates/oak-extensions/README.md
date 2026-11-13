@@ -4,7 +4,7 @@
 `plugin.toml` 清单、11 态进程生命周期（有界重启 + 心跳 + stdout 纪律）、
 双向会话（in-flight 配对 + 派发串行化）。
 
-冻结线上参考：[`docs/zh/plans/completed/external-plugin-protocol.md`](../../../docs/zh/plans/completed/external-plugin-protocol.md)
+冻结线上参考：[`docs/zh/plans/external-plugin-protocol.md`](../../docs/zh/plans/external-plugin-protocol.md)
 （§1 分帧 / §2 信封 / §3 错误码 / §4 生命周期 / §7 能力位 / §8 方法目录）。
 
 **本 crate 不含**（后续里程碑）：

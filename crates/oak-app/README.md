@@ -9,7 +9,7 @@ engine, or a `.ove` path to open a project at startup).
 
 ## OPP/1 plugin host (T7.2 P1.2)
 
-`src/opp/` wires the [OPP/1](../zh/plans/completed/external-plugin-protocol.md)
+`src/opp/` wires the [OPP/1](../../docs/zh/plans/external-plugin-protocol.md)
 external-plugin protocol into the real engine: `src/opp/host.rs` implements
 `oak_extensions::HostServices` (declared in the frozen
 `crates/oak-extensions/src/host_services.rs`), `src/opp/dispatch.rs` maps one

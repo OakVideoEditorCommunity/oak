@@ -1,6 +1,6 @@
 //! OPP/1 message envelope, error codes and NDJSON framing.
 //!
-//! Frozen reference: `docs/zh/plans/completed/external-plugin-protocol.md`
+//! Frozen reference: `docs/zh/plans/external-plugin-protocol.md`
 //! §1 (framing), §2 (envelope), §3 (error codes), §4.1 (handshake).
 //! This module is the type layer only: no process handling, no I/O policy.
 

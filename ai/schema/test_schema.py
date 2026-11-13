@@ -37,7 +37,7 @@ TOOLS_DIR = ROOT / "tools"
 VALID_DIR = ROOT / "samples" / "valid"
 INVALID_DIR = ROOT / "samples" / "invalid"
 METHOD_MAP = ROOT / "method-map.md"
-PROTOCOL = REPO / "docs" / "zh" / "plans" / "completed" / "external-plugin-protocol.md"
+PROTOCOL = REPO / "docs" / "zh" / "plans" / "external-plugin-protocol.md"
 
 DRAFT7 = "http://json-schema.org/draft-07/schema#"
 TOOL_COUNT_BAND = (20, 24)  # T0 freezes "about 20" tools

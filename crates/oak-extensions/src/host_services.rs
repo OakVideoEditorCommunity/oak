@@ -3,7 +3,7 @@
 //! 首辅裁断 (T7.1): this crate must **not** depend on `oak-app` — the trait
 //! is declared here against pure data types only and implemented app-side
 //! (P1.2). Method names mirror the OPP method catalog
-//! (`docs/zh/plans/completed/external-plugin-protocol.md` §8); every `txn`
+//! (`docs/zh/plans/external-plugin-protocol.md` §8); every `txn`
 //! argument is the transaction token from [`HostServices::edit_begin`].
 //!
 //! 裁断 (T7.1): `project.open` does **not** enter the undo stack — its `txn`
