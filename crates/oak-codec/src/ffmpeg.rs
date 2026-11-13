@@ -1078,6 +1078,22 @@ impl DecoderState {
 			.take()
 			.expect("retrieve_frame requires a video session");
 
+		// Every early return must hand the video state back: it was moved out
+		// above, and a `?` that skipped the restore left `self.video` as None,
+		// so every later request on this decoder panicked with
+		// "retrieve_frame requires a video session".
+		macro_rules! keep {
+			($e:expr) => {
+				match $e {
+					Ok(value) => value,
+					Err(error) => {
+						self.video = Some(video);
+						return Err(error);
+					}
+				}
+			};
+		}
+
 		let mut target_ts = oak_rational(self.stream_time_base).time_to_timestamp(*time);
 		if self.format_start_time != AV_NOPTS_VALUE {
 			target_ts += unsafe {
@@ -1104,7 +1120,7 @@ impl DecoderState {
 				video.cache.clear();
 				video.cache_at_eof = false;
 
-				self.seek(seek_ts)?;
+				keep!(self.seek(seek_ts));
 				if seek_ts == MIN_SEEK {
 					video.cache_at_zero = true;
 				}
@@ -1124,15 +1140,17 @@ impl DecoderState {
 				break;
 			}
 
-			let frame = match self.pull()? {
+			let frame = match keep!(self.pull()) {
 				Pull::Frame(DecodedFrame::Video(f)) => {
 					// Hardware surfaces stay as they are: the import path
 					// (M5) and `scale_video_to_f32` decide between
 					// zero-copy GPU import and the CPU transfer. Keeping
 					// the raw frame in the cache lets an import attempt
 					// and a CPU fallback share one decode.
-					RefFrame::from_video(&f)
-						.ok_or_else(|| fail("frame reference allocation failed"))?
+					keep!(
+						RefFrame::from_video(&f)
+							.ok_or_else(|| fail("frame reference allocation failed"))
+					)
 				}
 				Pull::Frame(_) => unreachable!("video session yields only video frames"),
 				Pull::Eof => {
@@ -1143,7 +1161,7 @@ impl DecoderState {
 						if !retried_after_eof {
 							retried_after_eof = true;
 							video.cache.clear();
-							self.seek(MIN_SEEK)?;
+							keep!(self.seek(MIN_SEEK));
 							video.cache_at_zero = true;
 							still_seeking = true;
 							continue;
@@ -1175,7 +1193,7 @@ impl DecoderState {
 					break;
 				}
 				Pull::Eagain => {
-					self.feed_packet()?;
+					keep!(self.feed_packet());
 					continue;
 				}
 			};
@@ -1191,7 +1209,7 @@ impl DecoderState {
 				// (CPP-PARITY ffmpegdecoder.cpp:1028).
 				if !video.cache_at_zero && frame_pts > target_ts {
 					seek_ts = (seek_ts - video.second_ts).max(MIN_SEEK);
-					self.seek(seek_ts)?;
+					keep!(self.seek(seek_ts));
 					if seek_ts == MIN_SEEK {
 						video.cache_at_zero = true;
 					}
