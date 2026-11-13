@@ -651,7 +651,7 @@ impl HostServices for OppHost {
 
 	fn node_list_types(&self) -> Result<Vec<NodeTypeInfo>, HostError> {
 		// The SDK's built-in factory table plus the runtime-registered
-		// (OpenFX) table — the pre-P7 `oak_node::Factory` split into these
+		// (OpenFX) table — the pre-P7 `oak_node` `Factory` split into these
 		// two reads.
 		let mut out: Vec<NodeTypeInfo> = quercus_engine_rs::effect::factory_entries()
 			.into_iter()

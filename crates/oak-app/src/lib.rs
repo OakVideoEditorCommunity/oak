@@ -60,7 +60,7 @@ pub mod ai;
 
 /// Program-generated test media for the app's render/import tests
 /// (M12 P0 content contract, ported verbatim from the retired
-/// `oak_codec::testmedia` — upstream deleted that crate in the P7
+/// `oak_codec` crate's `testmedia` module — upstream deleted it in the P7
 /// migration and the SDK does not re-export it). Encodes through the
 /// system FFmpeg (`ffmpeg` on PATH, `tests/tone48k.mp4`-class assets are
 /// not touched). Test-only: compiled only under `cfg(test)`.

@@ -7814,6 +7814,10 @@ mod session_smoke_tests {
 	/// footage (known content, non-black).
 	#[test]
 	fn real_render_frame_e2e() {
+		// The render manager and `create_project` reach the same process-global
+		// undo stack every other engine test serialises on, so this test needs
+		// that lock too — `media_lock` only guards the temp media files.
+		let _engine = crate::oakui::graphops::test_lock();
 		let _media = media_lock();
 		if !crate::oakui::renderops::ensure_render_manager() {
 			panic!("the render manager failed to start");
@@ -7918,6 +7922,10 @@ mod session_smoke_tests {
 	/// project browser's real folder tree.
 	#[test]
 	fn real_project_browser_lists_imported_footage() {
+		// The render manager and `create_project` reach the same process-global
+		// undo stack every other engine test serialises on, so this test needs
+		// that lock too — `media_lock` only guards the temp media files.
+		let _engine = crate::oakui::graphops::test_lock();
 		let _media = media_lock();
 		let project = graphops::create_project();
 
@@ -7956,6 +7964,10 @@ mod session_smoke_tests {
 	async fn real_engine_import_footage_lists_in_the_project_browser(
 		cx: &mut gpui_kit::TestAppContext,
 	) {
+		// The render manager and `create_project` reach the same process-global
+		// undo stack every other engine test serialises on, so this test needs
+		// that lock too — `media_lock` only guards the temp media files.
+		let _engine = crate::oakui::graphops::test_lock();
 		let _media = media_lock();
 		let engine = cx.update(|cx| cx.new(RealEngine::create));
 		cx.update(|app| engine.update(app, |engine, cx| engine.new_project(cx)));
