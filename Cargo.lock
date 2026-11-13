@@ -5789,6 +5789,7 @@ dependencies = [
  "oak-ai-tools",
  "oak-extensions",
  "quercus-engine-rs",
+ "quercus-undo",
  "serde",
  "serde_json",
  "serde_yaml",

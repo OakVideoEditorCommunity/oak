@@ -60,6 +60,20 @@ struct TxnState {
 	next: u64,
 }
 
+/// Tools whose engine entry point groups its commands itself, so the OPP
+/// transaction must not open a second group (the undo stack cannot nest).
+///
+/// Only `node.add_effect` qualifies: `effect_chain_insert` wraps its own
+/// commands in `grouped("Add Effect")`. `timeline.add_transition` looks
+/// similar but does **not** group internally (measured 2026-11-13: dropping
+/// its outer group leaves zero undo rows), so it keeps the OPP group.
+const ENGINE_GROUPED_TOOLS: [&str; 1] = ["node.add_effect"];
+
+/// Prefix marking a transaction token that opened no undo group of its own
+/// (see [`ENGINE_GROUPED_TOOLS`]); `edit.commit`/`edit.abort` leave the
+/// engine's group alone for these.
+const JOINED_TXN_PREFIX: &str = "opp-txn-joined-";
+
 /// `NodeId` has no `Display`; the wire id is the stable identity integer
 /// (`graphops::id_of` is its inverse).
 fn id_string(id: NodeId) -> String {
@@ -921,13 +935,26 @@ impl HostServices for OppHost {
 		if t.holder.is_some() {
 			return Err(HostError::transaction_conflict());
 		}
-		if !graphops::undo_group_begin(label) {
+		// Tools whose engine entry point already wraps its own commands in one
+		// undo group — `effect_chain_insert` → `grouped("Add Effect")`, and the
+		// transition router's counterpart. The undo stack cannot nest groups:
+		// the engine's `group_begin` returns `Error::State` while one is open,
+		// which surfaces to the model as "the engine refused…". For these tools
+		// the grouping belongs to the engine, so we take the transaction token
+		// (keeping `require_txn` and the conflict checks intact) without
+		// opening a group of our own; the engine's group is the single row.
+		let engine_grouped = ENGINE_GROUPED_TOOLS.contains(&label);
+		if !engine_grouped && !graphops::undo_group_begin(label) {
 			return Err(HostError::internal(
 				"group_begin failed: a group is already open (stack busy)",
 			));
 		}
 		t.next += 1;
-		let token = format!("opp-txn-{}", t.next);
+		let token = if engine_grouped {
+			format!("{}{}", JOINED_TXN_PREFIX, t.next)
+		} else {
+			format!("opp-txn-{}", t.next)
+		};
 		t.holder = Some(token.clone());
 		Ok(token)
 	}
@@ -937,7 +964,8 @@ impl HostServices for OppHost {
 		// An empty group (only `project.open`/`save` ran) is discarded by the
 		// stack itself (`push_pre_executed` drops an empty multi command), so
 		// no blank undo row is left behind (notes §1).
-		if !graphops::undo_group_end() {
+		// A joined transaction opened no group: the engine closed its own.
+		if !txn.starts_with(JOINED_TXN_PREFIX) && !graphops::undo_group_end() {
 			return Err(HostError::internal("group_end failed: no group is open"));
 		}
 		self.release_txn(txn);
@@ -946,7 +974,7 @@ impl HostServices for OppHost {
 
 	fn edit_abort(&self, txn: &str) -> Result<(), HostError> {
 		self.require_txn_str(txn)?;
-		if !graphops::undo_group_abort() {
+		if !txn.starts_with(JOINED_TXN_PREFIX) && !graphops::undo_group_abort() {
 			return Err(HostError::internal("group_abort failed: no group is open"));
 		}
 		self.release_txn(txn);

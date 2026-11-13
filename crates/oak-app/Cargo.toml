@@ -88,6 +88,12 @@ log = "0.4"
 
 
 quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-engine-rs", features = ["ffmpeg-static"] }
+# The undo stack itself: `cargo` unifies this with the copy the engine links,
+# so `global::push` here lands on the *same* stack the engine's own commands
+# use. Needed because the SDK's sequence setters (`sequence_set_video_params`
+# and friends) are direct writes with no history of their own, so an undoable
+# "Set Sequence Format" has to be recorded from this side.
+quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-undo" }
 # OPP/1 host services (T7.2 P1.2): the app-side `HostServices`
 # implementation routes plugin calls into the engine through this crate's
 # trait and protocol types. One-way dependency — `oak-extensions` never

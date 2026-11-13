@@ -249,31 +249,61 @@ pub fn sequence_settings(p: &ProjectRef, seq: NodeId) -> Option<(String, i32, i3
 ///
 /// The frame rate is part of a sequence's time base: every block's
 /// duration is reinterpreted against it, so this is a destructive edit
-/// and must be revertible. The undoable form **is** the plain setter: the
-/// engine-side setter captures the before/after tuple and pushes ONE
-/// `Set Sequence Format` row (engine
-/// `editor_commands/project.rs::set_sequence_parameters`). Measured
-/// (2026-11-13, task-48): inside an OPP transaction that push joins the
-/// already-open group as a child (`can_undo` false, stack count
-/// unchanged — probe output) and `txn_commit` records it as the single
-/// row; with no group open the push lands as the row itself. Either way
-/// the stack ends at `depth + 1`. Kept as its own entry point because
-/// the OPP host and the `sequence.set_format` tool document the one-row
-/// guarantee.
+/// and must be revertible.
+///
+/// The SDK setters (`node_set_label`, `sequence_set_video_params`,
+/// `sequence_set_interlaced`) are **direct writes with no history of their
+/// own** — measured 2026-11-13: the stack count does not move across all
+/// three, which is why the engine's own `set_sequence_parameters` carries the
+/// before/after tuple and pushes the row itself. This entry point does the
+/// same from the app side, so the one-row guarantee holds without an engine
+/// release: capture the before tuple, hand the engine a closure pair that
+/// replays either direction, and let `global::push` run the redo (the write
+/// happens exactly once, inside the push). Inside an OPP transaction the row
+/// joins the open group and `txn_commit` closes it as the single row; with no
+/// group open it *is* the row.
 pub fn set_sequence_parameters_undoable(
 	project: &ProjectRef,
 	seq: NodeId,
 	after: (String, i32, i32, Rational, bool),
 ) -> Result<(), String> {
-	set_sequence_parameters(
-		project,
-		seq,
-		&after.0,
-		after.1,
-		after.2,
-		after.3,
-		after.4,
-	)
+	// Validate and read the before tuple *before* touching the stack: a
+	// rejected write must not leave an empty "Set Sequence Format" row.
+	if project.node_kind(seq) != Some(NodeKind::Sequence) {
+		return Err("entry is not a sequence".to_string());
+	}
+	let before = sequence_settings(project, seq)
+		.ok_or_else(|| "the sequence has no video stream".to_string())?;
+
+	let redo_project = project.clone();
+	let undo_project = project.clone();
+	let redo_tuple = after;
+	let undo_tuple = before;
+	let command = quercus_undo::undocommand::UndoCommand::from_closures(
+		move || {
+			let _ = set_sequence_parameters(
+				&redo_project,
+				seq,
+				&redo_tuple.0,
+				redo_tuple.1,
+				redo_tuple.2,
+				redo_tuple.3,
+				redo_tuple.4,
+			);
+		},
+		move || {
+			let _ = set_sequence_parameters(
+				&undo_project,
+				seq,
+				&undo_tuple.0,
+				undo_tuple.1,
+				undo_tuple.2,
+				undo_tuple.3,
+				undo_tuple.4,
+			);
+		},
+	);
+	quercus_undo::global::push(command, "Set Sequence Format").map_err(|e| e.to_string())
 }
 
 /// The label of a node (empty when the id is stale).
