@@ -67,7 +67,7 @@ fn quiet_config() -> LifecycleConfig {
 
 const HELLO: &str = r#"import sys, json
 def send(o):
-    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+    sys.stdout.buffer.write((json.dumps(o) + "\n").encode()); sys.stdout.flush()
 send({"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"api":1,"name":"fake","version":"0.0.1","capabilities":["project.read"],"panels":[],"subscribe":[]}})
 "#;
 
@@ -223,7 +223,7 @@ fn clean_shutdown_needs_no_kill() {
 			"    if m.get('method') == 'session.shutdown':\n",
 			"        sys.exit(0)\n",
 			"    if 'method' in m and 'id' in m:\n",
-			"        sys.stdout.write(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':{}}) + '\\n'); sys.stdout.flush()\n",
+			"        send({'jsonrpc':'2.0','id':m['id'],'result':{}})\n",
 		);
 	write_plugin(&dir, &src);
 	let host = PluginHost::start(
