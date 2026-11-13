@@ -26,8 +26,12 @@ fn test_dir(tag: &str) -> PathBuf {
 	dir
 }
 
-/// Manifest for `/usr/bin/python3 plugin.py` with the given restart policy.
+/// Manifest for the platform's Python interpreter with the given restart policy.
 fn manifest(_dir: &Path, tag: &str, max: u32, backoff_ms: u64) -> Manifest {
+	#[cfg(windows)]
+	let python = "python";
+	#[cfg(not(windows))]
+	let python = "/usr/bin/python3";
 	let text = format!(
 		r#"id = "test.{tag}"
 name = "T {tag}"
@@ -36,7 +40,7 @@ api = 1
 capabilities = ["project.read"]
 
 [process]
-command = ["/usr/bin/python3", "{{plugin_dir}}/plugin.py"]
+command = ["{python}", "{{plugin_dir}}/plugin.py"]
 
 [restart]
 max = {max}
