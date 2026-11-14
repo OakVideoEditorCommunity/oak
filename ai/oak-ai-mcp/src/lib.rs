@@ -6,7 +6,8 @@
 //! transaction implementation here — that is what keeps the MCP face
 //! from drifting from the direct execution layer.
 //!
-//! * [`rpc`] — JSON-RPC 2.0 envelope + NDJSON framing (stdio transport);
+//! * [`rmcp_server`] — the MCP SDK adapter (transport, framing, lifecycle);
+//! * [`rpc`] — JSON-RPC 2.0 response envelopes only;
 //! * [`server`] — lifecycle, `tools/list`, `tools/call`, error shaping;
 //! * [`backend_select`] — `--backend mock` / `--backend sdk` gating.
 //!

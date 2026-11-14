@@ -153,22 +153,13 @@ impl Default for LifecycleConfig {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum StartError {
+	#[error("invalid manifest: {0}")]
 	Manifest(String),
+	#[error("cannot start supervisor: {0}")]
 	Io(String),
 }
-
-impl fmt::Display for StartError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			StartError::Manifest(e) => write!(f, "invalid manifest: {e}"),
-			StartError::Io(e) => write!(f, "cannot start supervisor: {e}"),
-		}
-	}
-}
-
-impl std::error::Error for StartError {}
 
 // ---------------------------------------------------------------------------
 // Internal event plumbing

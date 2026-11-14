@@ -22,9 +22,10 @@ pub const ENV_MODEL: &str = "OAK_AI_MODEL";
 
 /// Missing/empty configuration. Structured on purpose: a missing key is a
 /// normal "not set up yet" state, never a panic.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
 	/// `OAK_AI_API_KEY` is unset or blank.
+	#[error("AI backend is not configured: set OAK_AI_API_KEY to use the agent")]
 	MissingApiKey,
 }
 
@@ -36,20 +37,6 @@ impl ConfigError {
 		}
 	}
 }
-
-impl fmt::Display for ConfigError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::MissingApiKey => write!(
-				f,
-				"AI backend is not configured: set {} to use the agent",
-				ENV_API_KEY
-			),
-		}
-	}
-}
-
-impl std::error::Error for ConfigError {}
 
 /// Loaded configuration.
 ///

@@ -4,7 +4,6 @@
 //! response shape, one error enum. [`LlmClient`] is the seam every test
 //! injects a scripted mock through, so the agent loop never needs a network.
 
-use std::fmt;
 
 use oak_ai_tools::schema::SchemaRegistry;
 use serde_json::{json, Value};
@@ -122,15 +121,19 @@ pub struct ChatRequest<'a> {
 
 /// Structured client failure. No variant carries the key; HTTP errors keep
 /// the URL but never the `Authorization` header.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LlmError {
 	/// Configuration is missing (propagated from [`crate::ai::config`]).
+	#[error("AI backend is not configured")]
 	NotConfigured,
 	/// Transport-level failure (DNS, TLS, timeout…).
+	#[error("AI request failed: {0}")]
 	Http(String),
 	/// Non-2xx response with a readable body.
+	#[error("AI API returned {status}: {message}")]
 	Api { status: u16, message: String },
 	/// The response body was not the documented shape.
+	#[error("AI response was not understood: {0}")]
 	Parse(String),
 }
 
@@ -144,21 +147,6 @@ impl LlmError {
 		}
 	}
 }
-
-impl fmt::Display for LlmError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::NotConfigured => write!(f, "AI backend is not configured"),
-			Self::Http(e) => write!(f, "AI request failed: {e}"),
-			Self::Api { status, message } => {
-				write!(f, "AI API returned {status}: {message}")
-			}
-			Self::Parse(e) => write!(f, "AI response was not understood: {e}"),
-		}
-	}
-}
-
-impl std::error::Error for LlmError {}
 
 /// The seam: anything that can answer one chat turn.
 pub trait LlmClient {

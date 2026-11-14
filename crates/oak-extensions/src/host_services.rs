@@ -12,7 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt;
 
 /// Opaque entity id (protocol §5: plugins must never parse its format).
 pub type EntityId = String;
@@ -335,7 +334,8 @@ pub struct ExportJob {
 // ---------------------------------------------------------------------------
 
 /// Host-side failure mapped 1:1 onto a JSON-RPC error object (protocol §3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, thiserror::Error)]
+#[error("[{code}] {message}")]
 pub struct HostError {
 	pub code: i32,
 	pub message: String,
@@ -384,14 +384,6 @@ impl HostError {
 		Self::new(crate::protocol::INTERNAL_ERROR, msg)
 	}
 }
-
-impl fmt::Display for HostError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "[{}] {}", self.code, self.message)
-	}
-}
-
-impl std::error::Error for HostError {}
 
 impl From<HostError> for crate::protocol::ErrorObject {
 	fn from(e: HostError) -> Self {

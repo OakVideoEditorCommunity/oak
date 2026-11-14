@@ -102,12 +102,14 @@ impl StallStop {
 pub const MAX_IDENTICAL_FAILURES: usize = 3;
 
 /// Loop failure. Both variants are structured (`code()`), never a panic.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AgentError {
 	/// Configuration missing (e.g. no `OAK_AI_API_KEY`).
-	Config(super::config::ConfigError),
+	#[error(transparent)]
+	Config(#[from] super::config::ConfigError),
 	/// The model call failed.
-	Llm(super::llm::LlmError),
+	#[error(transparent)]
+	Llm(#[from] super::llm::LlmError),
 }
 
 impl AgentError {
@@ -116,29 +118,6 @@ impl AgentError {
 			Self::Config(e) => e.code(),
 			Self::Llm(e) => e.code(),
 		}
-	}
-}
-
-impl std::fmt::Display for AgentError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::Config(e) => write!(f, "{e}"),
-			Self::Llm(e) => write!(f, "{e}"),
-		}
-	}
-}
-
-impl std::error::Error for AgentError {}
-
-impl From<super::config::ConfigError> for AgentError {
-	fn from(e: super::config::ConfigError) -> Self {
-		Self::Config(e)
-	}
-}
-
-impl From<super::llm::LlmError> for AgentError {
-	fn from(e: super::llm::LlmError) -> Self {
-		Self::Llm(e)
 	}
 }
 

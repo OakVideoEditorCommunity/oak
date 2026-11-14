@@ -29,7 +29,7 @@ use oak_ai_tools::backend::EngineBackend;
 use oak_ai_tools::dispatch;
 use oak_ai_tools::error::ToolError;
 
-use crate::rpc::{self, Inbound};
+use crate::rpc;
 
 /// `serverInfo.name` reported to clients.
 pub const SERVER_NAME: &str = "oak-ai-mcp";
@@ -109,22 +109,6 @@ impl Server {
 			}));
 		}
 		tools
-	}
-
-	/// Handles one inbound frame; `None` means "no response" (notifications,
-	/// and inbound responses, which never occur because this server sends
-	/// no requests of its own).
-	pub fn handle_inbound(&mut self, inbound: Inbound) -> Option<Value> {
-		match inbound {
-			Inbound::Message(message) => self.handle(&message),
-			Inbound::Malformed(detail) => Some(rpc::error(
-				Value::Null,
-				rpc::PARSE_ERROR,
-				format!("parse error: {detail}"),
-				None,
-			)),
-			Inbound::Eof => None,
-		}
 	}
 
 	/// Handles one parsed JSON-RPC document.
@@ -579,20 +563,5 @@ mod tests {
 		assert_eq!(error["step"], "lookup");
 	}
 
-	#[test]
-	fn malformed_frame_becomes_a_parse_error_with_null_id() {
-		let mut server = server();
-		init(&mut server);
-		let response = server
-			.handle_inbound(Inbound::Malformed("invalid JSON frame: boom".to_string()))
-			.unwrap();
-		assert_eq!(response["error"]["code"], rpc::PARSE_ERROR);
-		assert_eq!(response["id"], Value::Null);
-	}
 
-	#[test]
-	fn eof_produces_no_response() {
-		let mut server = server();
-		assert!(server.handle_inbound(Inbound::Eof).is_none());
-	}
 }

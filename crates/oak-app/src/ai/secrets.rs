@@ -22,7 +22,6 @@
 //!   an error code, never the value being stored.
 
 use std::collections::HashMap;
-use std::fmt;
 
 /// Secret Service collection key (the `service` argument of every entry).
 pub const SERVICE: &str = "oak-ai";
@@ -35,7 +34,8 @@ pub const ACCOUNT_MODEL: &str = "model";
 /// A storage failure. `code` is stable and machine-readable; `message`
 /// carries the underlying error text (the keyring never returns the
 /// secret itself in an error).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{code}: {message}")]
 pub struct SecretError {
 	code: &'static str,
 	message: String,
@@ -61,14 +61,6 @@ impl SecretError {
 		self.code
 	}
 }
-
-impl fmt::Display for SecretError {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}: {}", self.code, self.message)
-	}
-}
-
-impl std::error::Error for SecretError {}
 
 /// One configuration value's storage slot (a `service` + `account` pair).
 ///
