@@ -20,5 +20,8 @@ oak-ai-tools = { path = "../oak-ai-tools" }
 # MCP framing/server, exercised against the same binary the agent connects
 # to (zero-drift: one command builds everything from one source).
 oak-ai-mcp = { path = "../oak-ai-mcp" }
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

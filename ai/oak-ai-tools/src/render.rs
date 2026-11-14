@@ -11,7 +11,9 @@ use std::io::Cursor;
 use serde_json::{Value, json};
 
 use crate::error::ToolError;
-use crate::util::{base64_encode, fnv1a64};
+use std::hash::Hasher as _;
+
+use base64::Engine as _;
 
 /// A decoded/constructed frame: `width * height` pixels of RGBA F32 in
 /// `[0, 1]`.
@@ -176,7 +178,11 @@ impl Frame {
 			min,
 			max,
 			non_black_ratio: non_black as f64 / denom,
-			fnv64: fnv1a64(&self.quantised()),
+			fnv64: {
+				let mut hasher = fnv::FnvHasher::default();
+				hasher.write(&self.quantised());
+				hasher.finish()
+			},
 		}
 	}
 
@@ -265,7 +271,7 @@ pub fn frame_summary(frame: &Frame, format: &str) -> Value {
 	match format {
 		"png" => {
 			let png = frame.to_png().expect("PNG encoding");
-			out["png_base64"] = json!(base64_encode(&png));
+			out["png_base64"] = json!(base64::engine::general_purpose::STANDARD.encode(&png));
 			out["png_bytes"] = json!(png.len());
 		}
 		"bgra8" => {

@@ -16,6 +16,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedSub};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,25 +75,40 @@ impl Rat {
 		Rat { num: value, den: 1 }
 	}
 
-	/// `self + other`, checked for overflow.
+	/// The exact-value view the arithmetic runs on. The `Rat` invariants
+	/// (denominator positive, already in lowest terms) are what
+	/// `new_raw` needs, so this is a free reinterpretation.
+	fn ratio(self) -> num_rational::Rational64 {
+		num_rational::Rational64::new_raw(self.num, self.den)
+	}
+
+	fn from_ratio(value: num_rational::Rational64) -> Result<Rat, ToolError> {
+		let (num, den) = (*value.numer(), *value.denom());
+		Ok(Rat { num, den })
+	}
+
+	/// `self + other`, `None`-free: overflow is a `TIMECODE_INVALID`.
 	pub fn checked_add(self, other: Rat) -> Result<Rat, ToolError> {
-		rat_from_parts(
-			self.num as i128 * other.den as i128 + other.num as i128 * self.den as i128,
-			self.den as i128 * other.den as i128,
-		)
+		self.ratio()
+			.checked_add(&other.ratio())
+			.map(Rat::from_ratio)
+			.unwrap_or_else(|| Err(ToolError::timecode("rational addition overflow")))
 	}
 
 	/// `self - other`, checked for overflow.
 	pub fn checked_sub(self, other: Rat) -> Result<Rat, ToolError> {
-		rat_from_parts(
-			self.num as i128 * other.den as i128 - other.num as i128 * self.den as i128,
-			self.den as i128 * other.den as i128,
-		)
+		self.ratio()
+			.checked_sub(&other.ratio())
+			.map(Rat::from_ratio)
+			.unwrap_or_else(|| Err(ToolError::timecode("rational subtraction overflow")))
 	}
 
 	/// `self * factor` (integer factor), checked for overflow.
 	pub fn checked_mul_int(self, factor: i64) -> Result<Rat, ToolError> {
-		rat_from_parts(self.num as i128 * factor as i128, self.den as i128)
+		self.ratio()
+			.checked_mul(&num_rational::Rational64::from_integer(factor))
+			.map(Rat::from_ratio)
+			.unwrap_or_else(|| Err(ToolError::timecode("rational multiplication overflow")))
 	}
 
 	/// `self / factor` (integer divisor), checked; `factor == 0` is a
@@ -101,7 +117,10 @@ impl Rat {
 		if factor == 0 {
 			return Err(ToolError::timecode("rational division by zero"));
 		}
-		rat_from_parts(self.num as i128, self.den as i128 * factor as i128)
+		self.ratio()
+			.checked_div(&num_rational::Rational64::from_integer(factor))
+			.map(Rat::from_ratio)
+			.unwrap_or_else(|| Err(ToolError::timecode("rational division overflow")))
 	}
 
 	/// Whether the value is exactly zero.
@@ -123,15 +142,13 @@ impl Rat {
 
 impl PartialOrd for Rat {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		let lhs = self.num as i128 * other.den as i128;
-		let rhs = other.num as i128 * self.den as i128;
-		Some(lhs.cmp(&rhs))
+		Some(self.cmp(other))
 	}
 }
 
 impl Ord for Rat {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).expect("rational ordering")
+		self.ratio().cmp(&other.ratio())
 	}
 }
 

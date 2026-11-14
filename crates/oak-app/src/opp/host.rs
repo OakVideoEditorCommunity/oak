@@ -18,6 +18,7 @@
 //! (`export.*`, whose `ExportSession` carries a non-`Send` event receiver)
 //! are reported `Unsupported` with that exact reason — never faked.
 
+use base64::Engine as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
@@ -1219,7 +1220,7 @@ fn encode_png_rgba_f32_samples(width: i32, height: i32, samples: &[f32]) -> Resu
 	DynamicImage::ImageRgba32F(buf)
 		.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
 		.map_err(|e| HostError::internal(format!("png encode failed: {e}")))?;
-	Ok(b64_encode(&png))
+	Ok(base64::engine::general_purpose::STANDARD.encode(&png))
 }
 
 /// Display-ready BGRA8 bytes → base64 PNG (the `to_display` image path).
@@ -1244,32 +1245,9 @@ fn encode_png_bgra8(width: i32, height: i32, bgra: &[u8]) -> Result<String, Host
 	DynamicImage::ImageRgba8(buf)
 		.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
 		.map_err(|e| HostError::internal(format!("png encode failed: {e}")))?;
-	Ok(b64_encode(&png))
+	Ok(base64::engine::general_purpose::STANDARD.encode(&png))
 }
 
-fn b64_encode(data: &[u8]) -> String {
-	const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-	for chunk in data.chunks(3) {
-		let b0 = chunk[0];
-		let b1 = *chunk.get(1).unwrap_or(&0);
-		let b2 = *chunk.get(2).unwrap_or(&0);
-		let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
-		out.push(T[(n >> 18) as usize & 63] as char);
-		out.push(T[(n >> 12) as usize & 63] as char);
-		out.push(if chunk.len() > 1 {
-			T[(n >> 6) as usize & 63] as char
-		} else {
-			'='
-		});
-		out.push(if chunk.len() > 2 {
-			T[n as usize & 63] as char
-		} else {
-			'='
-		});
-	}
-	out
-}
 
 // ---------------------------------------------------------------------------
 // Tests (run with `cargo test -p oak-app opp::`)

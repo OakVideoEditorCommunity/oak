@@ -22,6 +22,7 @@
 //! test therefore compares **run against run**, never against a golden
 //! constant committed to the repo.
 
+use base64::Engine as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -202,7 +203,7 @@ fn run_fixture(fixture: &str) -> (String, Vec<FrameLog>, usize) {
 					let height = frame["height"].as_u64().expect("height") as u32;
 					assert!(width > 0 && height > 0, "zero-sized frame: {frame}");
 					let decoded = oak_ai_tools::render::Frame::from_png(
-						&oak_ai_tools::util::base64_decode(
+						&base64::engine::general_purpose::STANDARD.decode(
 							frame["png_base64"].as_str().expect("png payload"),
 						)
 						.expect("base64"),

@@ -30,7 +30,7 @@ use crate::timecode::{Rat, TimeContext, TimeValue};
 use crate::tools;
 use crate::tools::timeline::{Side, TransitionType};
 use crate::txn::TxnOps;
-use crate::util::fnv1a64;
+use std::hash::Hasher as _;
 
 /// Synthetic geometry the mock reports for every probed/imported file.
 pub const MOCK_WIDTH: u32 = 640;
@@ -1366,7 +1366,9 @@ fn footage_json(footage: &Footage) -> Value {
 /// Public so tests can assert a rendered pixel without re-deriving the
 /// rule; the mock never decodes the file.
 pub fn footage_rgb(path: &str) -> [f32; 4] {
-	let hash = fnv1a64(path.as_bytes());
+	let mut hasher = fnv::FnvHasher::default();
+		hasher.write(path.as_bytes());
+		let hash = hasher.finish();
 	let r = ((hash >> 16) & 0xff) as u8;
 	let g = ((hash >> 8) & 0xff) as u8;
 	let b = (hash & 0xff) as u8;

@@ -12,7 +12,7 @@ use oak_ai_tools::hooks::{
 };
 use oak_ai_tools::mock::{MockBackend, footage_rgb};
 use oak_ai_tools::render::Frame;
-use oak_ai_tools::util::base64_decode;
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 /// Records every trigger, optionally checks the pixels itself, and then
@@ -59,7 +59,7 @@ impl RenderDone for Probe {
 					.get("png_base64")
 					.and_then(Value::as_str)
 					.expect("the event carries the PNG payload");
-				let bytes = base64_decode(encoded).expect("base64");
+				let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).expect("base64");
 				let decoded = Frame::from_png(&bytes).expect("PNG");
 				let centre = decoded.pixel(decoded.width / 2, decoded.height / 2);
 				for channel in 0..3 {

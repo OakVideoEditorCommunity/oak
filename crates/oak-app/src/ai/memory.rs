@@ -1002,19 +1002,13 @@ fn wait_with_deadline(
 	timeout: Duration,
 	bin: &Path,
 ) -> Result<CliOutput, ToolError> {
-	let deadline = Instant::now() + timeout;
-	loop {
-		match child.try_wait() {
-			Ok(Some(_)) => break,
-			Ok(None) => {}
-			Err(e) => {
-				return Err(ToolError::new(
-					oak_ai_tools::error::CODE_BACKEND,
-					format!("等待 memlite 退出时出错：{e}"),
-				))
-			}
-		}
-		if Instant::now() >= deadline {
+	// `wait-timeout` owns the "poll until the deadline" part; a hung CLI is
+	// killed here so it cannot freeze the panel's turn. The status stays
+	// cached on `Child`, so `wait_with_output` still drains the pipes.
+	use wait_timeout::ChildExt as _;
+	match child.wait_timeout(timeout) {
+		Ok(Some(_)) => {}
+		Ok(None) => {
 			let _ = child.kill();
 			let _ = child.wait();
 			return Err(ToolError::new(
@@ -1026,7 +1020,12 @@ fn wait_with_deadline(
 				),
 			));
 		}
-		std::thread::sleep(Duration::from_millis(10));
+		Err(e) => {
+			return Err(ToolError::new(
+				oak_ai_tools::error::CODE_BACKEND,
+				format!("等待 memlite 退出时出错：{e}"),
+			))
+		}
 	}
 	let output = child.wait_with_output().map_err(|e| {
 		ToolError::new(oak_ai_tools::error::CODE_BACKEND, format!("读取 memlite 输出失败：{e}"))

@@ -89,7 +89,7 @@ use crate::error::{
 };
 use crate::render::Frame;
 use crate::txn::{self, GroupOutcome, Verdict};
-use crate::util::base64_decode;
+use base64::Engine as _;
 
 // ---------------------------------------------------------------------------
 // hook-layer codes
@@ -673,7 +673,7 @@ fn check_frame(value: &Value, min_non_black: f64) -> Result<(), String> {
 		.ok_or_else(|| "missing or zero `height`".to_string())?;
 
 	if let Some(encoded) = value.get("png_base64").and_then(Value::as_str) {
-		let bytes = base64_decode(encoded).ok_or_else(|| "`png_base64` is not valid base64".to_string())?;
+		let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok().ok_or_else(|| "`png_base64` is not valid base64".to_string())?;
 		if let Some(declared) = value.get("png_bytes").and_then(Value::as_u64) {
 			if declared != bytes.len() as u64 {
 				return Err(format!(

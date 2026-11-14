@@ -95,6 +95,8 @@ quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus
 # implementation routes plugin calls into the engine through this crate's
 # trait and protocol types. One-way dependency — `oak-extensions` never
 # depends on `oak-app` (notes §2).
+base64 = "0.22"
+wait-timeout = "0.2"
 oak-extensions = { path = "../oak-extensions" }
 
 [features]

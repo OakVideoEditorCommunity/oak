@@ -5769,7 +5769,11 @@ dependencies = [
 name = "oak-ai-tools"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "fnv",
  "jsonschema",
+ "num-rational 0.4.2",
+ "num-traits 0.2.19",
  "png 0.17.16",
  "serde",
  "serde_json",
@@ -5780,6 +5784,7 @@ dependencies = [
 name = "oak-app"
 version = "0.5.2"
 dependencies = [
+ "base64 0.22.1",
  "embed-resource",
  "gpui-kit",
  "half",
@@ -5796,6 +5801,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.21",
  "ureq",
+ "wait-timeout",
  "wgpu",
 ]
 

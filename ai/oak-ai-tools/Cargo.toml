@@ -13,6 +13,10 @@ license = "GPL-3.0-or-later"
 [workspace]
 
 [dependencies]
+base64 = "0.22"
+fnv = "1"
+num-rational = "0.4"
+num-traits = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Runtime JSON Schema (draft-07) validation for the frozen T0 tool face.
