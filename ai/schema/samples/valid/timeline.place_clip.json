@@ -1,0 +1,12 @@
+{
+  "track": "track-v1",
+  "footage": "footage-1",
+  "in": {
+    "num": 0,
+    "den": 1
+  },
+  "media_in": {
+    "num": 10,
+    "den": 1
+  }
+}

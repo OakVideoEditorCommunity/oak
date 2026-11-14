@@ -25,7 +25,17 @@
 # crates/oakengine.bk is the legacy C++-era backup; not a package.
 [workspace]
 members = ["crates/*", "examples/*"]
-exclude = ["crates/oakengine.bk", "quercus-engine"]
+# P7 merge: `crates/oak-otio` and `crates/oak-task` are excluded — upstream
+# deleted both crates (their sources live in the `quercus-engine` submodule
+# now); the two directories only hold merge leftovers and a local-only
+# excluded test. `ai/*` stays out of the upstream build entirely
+# (standalone workspace roots with their own Cargo.toml/lock).
+exclude = ["crates/oakengine.bk", "quercus-engine", "ai/oak-ai-tools", "crates/oak-otio", "crates/oak-task"]  # quercus-engine is upstream's submodule engine (root manifest, version+path); ai/ is our standalone T8.1 root that oak-app path-depends on (lead-approved)
+# NOTE: `crates/oakengine` (the frozen C-ABI facade cdylib) is retired:
+# every consumer (app/cli/worker/plugins) links the module rlibs
+# directly, so nothing in the workspace referenced it. The sources are
+# kept at crates/oakengine.bk (excluded from the workspace) as a
+# reference snapshot; git history is the authoritative backup.
 default-members = ["crates/oak-app", "crates/oak-cli"]
 resolver = "2"
 

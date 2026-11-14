@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/media.probe.json",
+  "title": "media.probe",
+  "type": "object",
+  "description": "Probe a media file (duration, streams, codec, resolution, frame rate) without importing it. 1:1 mapping to OPP/1 section 8.3 media.probe.",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path of the media file to probe."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

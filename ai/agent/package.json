@@ -1,0 +1,9 @@
+{
+  "name": "oak-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "oak AI 剪辑 agent 核：pi CLI（@earendil-works/pi-coding-agent）+ AGENTS.md 三层上下文链 + memlite 两档记忆",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.3"
+  }
+}

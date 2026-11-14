@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/edit.undo.json",
+  "title": "edit.undo",
+  "type": "object",
+  "description": "Undo the top entry of the global UndoStack. Maps to OPP/1 section 6 edit.undo (not section 8): no transaction is required, and it also covers the user's own operations - call it only when the user explicitly asks. No parameters, matching the protocol; the legacy 'count' argument was dropped.",
+  "properties": {},
+  "additionalProperties": false
+}

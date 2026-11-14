@@ -1,0 +1,46 @@
+{
+  "schema": "oak.prescan.cutlist.v1",
+  "media": {
+    "width": 640,
+    "height": 360,
+    "fps": {
+      "num": 30,
+      "den": 1
+    },
+    "duration": {
+      "num": 14,
+      "den": 1
+    },
+    "total_frames": 420
+  },
+  "params": {
+    "channel_a": "ffmpeg_scene_score",
+    "channel_b": "phash_dct_32_8_hamming_norm63",
+    "high": 0.4,
+    "low": 0.15,
+    "sample_fps": 2.0,
+    "phash_margin_bits": 12,
+    "merge_window": {
+      "num": 3,
+      "den": 20
+    },
+    "spike_baseline_window": {
+      "num": 1,
+      "den": 1
+    }
+  },
+  "cuts": [
+    {
+      "frame": 180,
+      "kind": "hard",
+      "scene_score": 0.7391,
+      "phash_norm": 0.4762
+    },
+    {
+      "frame": 360,
+      "kind": "soft",
+      "scene_score": 0.0018,
+      "phash_norm": 0.4444
+    }
+  ]
+}

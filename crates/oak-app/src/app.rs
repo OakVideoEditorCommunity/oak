@@ -64,6 +64,7 @@ use crate::dialogs::{
     DropSequenceChoice, ExportDialogContent, PreferencesDialogContent, SequenceFormatSeed,
 };
 use crate::oakui::{AppEngine, ExportSession, MockEngine, Monitor, RealEngine};
+use crate::panels::ai_assistant::AiAssistantPanel;
 use crate::panels::commands as panel_commands;
 use crate::panels::effect_library::EffectLibraryPanel;
 use crate::panels::history::HistoryPanel;
@@ -114,6 +115,7 @@ pub(crate) mod menu_ids {
 	pub const FOCUS_TIMELINE: usize = ActionId::FocusTimeline.menu_id();
 	pub const FOCUS_EFFECT_LIBRARY: usize = ActionId::FocusEffectLibrary.menu_id();
 	pub const FOCUS_MULTICAM: usize = ActionId::FocusMulticam.menu_id();
+	pub const FOCUS_AI_ASSISTANT: usize = ActionId::FocusAiAssistant.menu_id();
 	pub const RESET_DEFAULT_LAYOUT: usize = ActionId::ResetDefaultLayout.menu_id();
 }
 
@@ -472,6 +474,7 @@ struct ShellPanels<E: AppEngine> {
 	timeline: Entity<TimelinePanel<E>>,
 	effect_library: Entity<EffectLibraryPanel<E>>,
 	multicam: Entity<MulticamPanel<E>>,
+	ai_assistant: Entity<AiAssistantPanel<E>>,
 }
 
 impl<E: AppEngine> Clone for ShellPanels<E> {
@@ -486,6 +489,7 @@ impl<E: AppEngine> Clone for ShellPanels<E> {
 			timeline: self.timeline.clone(),
 			effect_library: self.effect_library.clone(),
 			multicam: self.multicam.clone(),
+			ai_assistant: self.ai_assistant.clone(),
 		}
 	}
 }
@@ -553,6 +557,7 @@ impl<E: AppEngine> ShellPanels<E> {
 			TIMELINE => self.timeline.entity_id(),
 			EFFECT_LIBRARY => self.effect_library.entity_id(),
 			MULTICAM => self.multicam.entity_id(),
+			AI_ASSISTANT => self.ai_assistant.entity_id(),
 			_ => return None,
 		})
 	}
@@ -702,6 +707,8 @@ impl<E: AppEngine> OakApp<E> {
 			cx.new(|cx| TimelinePanel::new(engine.clone(), timeline.clone(), window, cx));
 		let multicam_panel =
 			cx.new(|cx| MulticamPanel::new(engine.clone(), program_clock.clone(), window, cx));
+		let ai_assistant_panel =
+			cx.new(|cx| AiAssistantPanel::new(engine.clone(), window, cx));
 
 		// Keep the panel entities for focused-panel command routing (the dock
 		// only hands back type-erased handles).
@@ -715,6 +722,7 @@ impl<E: AppEngine> OakApp<E> {
 			timeline: timeline_panel.clone(),
 			effect_library: effect_library.clone(),
 			multicam: multicam_panel.clone(),
+			ai_assistant: ai_assistant_panel.clone(),
 		};
 
 		// Wire each panel's right-click menu: registry-backed items come
@@ -1437,6 +1445,7 @@ impl<E: AppEngine> OakApp<E> {
 			A::FocusTimeline => self.toggle_panel(TIMELINE, cx),
 			A::FocusEffectLibrary => self.toggle_panel(EFFECT_LIBRARY, cx),
 			A::FocusMulticam => self.toggle_panel(MULTICAM, cx),
+			A::FocusAiAssistant => self.toggle_panel(AI_ASSISTANT, cx),
 			A::ResetDefaultLayout => self.reset_default_layout(cx),
 			// --- Tools -----------------------------------------------------
 			A::Snapping => {
@@ -1966,6 +1975,7 @@ impl<E: AppEngine> OakApp<E> {
 				HISTORY => toggle!(panels.history),
 				EFFECT_LIBRARY => toggle!(panels.effect_library),
 				MULTICAM => toggle!(panels.multicam),
+				AI_ASSISTANT => toggle!(panels.ai_assistant),
 				TIMELINE => unreachable!("handled above"),
 				_ => {}
 			}
@@ -1997,6 +2007,7 @@ impl<E: AppEngine> OakApp<E> {
 			remove!(panels.timeline);
 			remove!(panels.effect_library);
 			remove!(panels.multicam);
+			remove!(panels.ai_assistant);
 			Self::seed_default_layout(dock, &panels, window, cx);
 		});
 		self.timeline_visible = true;
@@ -2085,6 +2096,13 @@ impl<E: AppEngine> OakApp<E> {
 			panel_handle(panels.multicam.clone()),
 			DockPlacement::Center,
 			None,
+			window,
+			cx,
+		);
+		dock.add_panel_view(
+			panel_handle(panels.ai_assistant.clone()),
+			DockPlacement::Right,
+			Some(px(340.0)),
 			window,
 			cx,
 		);
@@ -4637,9 +4655,9 @@ impl Render for TimelineStripGhost {
 	}
 }
 
-/// The nine dockable panels in the 窗口 menu's order, each with the registry
+/// The ten dockable panels in the 窗口 menu's order, each with the registry
 /// action that toggles it.
-const WINDOW_PANELS: [(PanelId, crate::actions::ActionId); 9] = [
+const WINDOW_PANELS: [(PanelId, crate::actions::ActionId); 10] = [
 	(PROJECT, crate::actions::ActionId::FocusProject),
 	(SOURCE_VIEWER, crate::actions::ActionId::FocusSourceViewer),
 	(PROGRAM_VIEWER, crate::actions::ActionId::FocusProgramViewer),
@@ -4649,6 +4667,7 @@ const WINDOW_PANELS: [(PanelId, crate::actions::ActionId); 9] = [
 	(TIMELINE, crate::actions::ActionId::FocusTimeline),
 	(EFFECT_LIBRARY, crate::actions::ActionId::FocusEffectLibrary),
 	(MULTICAM, crate::actions::ActionId::FocusMulticam),
+	(AI_ASSISTANT, crate::actions::ActionId::FocusAiAssistant),
 ];
 
 /// The bit for panel `index` (the [`WINDOW_PANELS`] order) in
@@ -4673,7 +4692,7 @@ fn panel_bit_for(id: PanelId) -> u16 {
 fn default_dock_placement(id: PanelId) -> (DockPlacement, Option<gpui_kit::Pixels>) {
 	match id {
 		PROJECT | EFFECT_LIBRARY => (DockPlacement::Left, Some(px(280.0))),
-		INSPECTOR | HISTORY => (DockPlacement::Right, Some(px(340.0))),
+		INSPECTOR | HISTORY | AI_ASSISTANT => (DockPlacement::Right, Some(px(340.0))),
 		TIMELINE => (DockPlacement::Bottom, Some(px(320.0))),
 		_ => (DockPlacement::Center, None),
 	}

@@ -1,0 +1,12 @@
+{
+	"mcpServers": {
+		"oak": {
+			"command": "bash",
+			"args": ["./scripts/mcp-serve.sh"],
+			"cwd": ".",
+			"description": "oak AI 剪辑工具面：22 个已冻结工具（project/media/timeline/node/render/export/edit），经 ai/oak-ai-mcp 的 stdio MCP 暴露。工具清单由服务器 tools/list 动态给出，仓内不保留副本。",
+			"exposure": "direct",
+			"timeout": 600
+		}
+	}
+}

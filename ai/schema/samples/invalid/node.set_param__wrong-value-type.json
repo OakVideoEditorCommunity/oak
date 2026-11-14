@@ -1,0 +1,8 @@
+{
+  "node": "node-3",
+  "key": "temperature_in",
+  "value": {
+    "num": 1,
+    "den": 25
+  }
+}

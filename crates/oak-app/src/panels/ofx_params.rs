@@ -962,7 +962,7 @@ fn build_wheel_group<E: AppEngine>(
 	ids: &[(String, String); 3],
 	next_id: &mut usize,
 	section: Option<(String, String)>,
-	window: &mut Window,
+	_window: &mut Window,
 	cx: &mut Context<OfxParamsView<E>>,
 ) -> ParamControl {
 	let mut wheels = Vec::new();

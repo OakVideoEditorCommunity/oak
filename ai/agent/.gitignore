@@ -1,0 +1,13 @@
+# pi 依赖：package.json / package-lock.json 入库（可复现），依赖树不入库
+node_modules/
+
+# 生成的上下文链：源在 context/*.md，由 scripts/context.sh 生成（本文件勿手改）
+AGENTS.md
+
+# 任务级上下文含本机素材路径，不入库；从 context/task.example.md 复制后再改
+context/30-task.md
+
+# 若把 OAK_AI_AGENT_DIR 指到仓内（不建议），该目录也不入库
+.agentdir/
+
+npm-debug.log*

@@ -56,12 +56,65 @@
 //! `mock-engine` cargo feature.
 
 pub mod actions;
+pub mod ai;
+
+/// Program-generated test media for the app's render/import tests
+/// (M12 P0 content contract, ported verbatim from the retired
+/// `oak_codec` crate's `testmedia` module — upstream deleted it in the P7
+/// migration and the SDK does not re-export it). Encodes through the
+/// system FFmpeg (`ffmpeg` on PATH, `tests/tone48k.mp4`-class assets are
+/// not touched). Test-only: compiled only under `cfg(test)`.
+#[cfg(test)]
+pub mod testmedia {
+	/// Encodes a small MPEG-2 clip of known content at `path`.
+	///
+	/// Content contract (what a decode must observe): frame 0's left half is
+	/// solid `[r, g, b]`, right half `[b, r, g]`, alpha 1; later frames sweep
+	/// the color columns right by one column per frame.
+	///
+	/// # Panics
+	///
+	/// Panics when FFmpeg is missing or exits non-zero (tests that need real
+	/// media must fail loudly, never skip silently).
+	pub fn write_test_clip(
+		path: &std::path::Path,
+		width: u32,
+		height: u32,
+		frames: u32,
+		fps: u32,
+	) -> std::io::Result<()> {
+		if let Some(dir) = path.parent() {
+			std::fs::create_dir_all(dir)?;
+		}
+		let status = std::process::Command::new("ffmpeg")
+			.args(["-y", "-hide_banner", "-loglevel", "error"])
+			.args(["-f", "lavfi"])
+			.arg("-i")
+			.arg(format!(
+				"color=c=red:s={width}x{height}:r={fps}:d={}",
+				frames as f64 / fps as f64
+			))
+			.args(["-frames:v", &frames.to_string()])
+			.arg("-pix_fmt")
+			.arg("yuv420p")
+			.arg(path)
+			.status()?;
+		if !status.success() {
+			return Err(std::io::Error::other(format!(
+				"ffmpeg exited with {status} generating {}",
+				path.display()
+			)));
+		}
+		Ok(())
+	}
+}
 pub mod app;
 pub mod dialogs;
 pub mod i18n;
 pub mod logging;
 pub mod manager;
 pub mod oakui;
+pub mod opp;
 pub mod panels;
 pub mod update;
 pub mod widgets;

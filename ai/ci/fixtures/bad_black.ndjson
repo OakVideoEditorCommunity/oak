@@ -1,0 +1,5 @@
+# Ablation fixture: same chain, but the final frame is rendered black
+# (no clip covering t=0), so the golden-frame invariant must reject it.
+{"call": "project.open", "args": {"name": "ci-ablation", "fps": 30}}
+{"call": "timeline.add_track", "args": {"type": "video"}}
+{"call": "render.get_frame", "args": {"sequence": "sequence-1", "time": {"num": 0, "den": 1}, "format": "png", "max_size": {"width": 16, "height": 16}}}

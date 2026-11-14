@@ -60,10 +60,21 @@ half = "2.7.1"
 # English table as the fallback.
 serde_yaml = "0.9"
 thiserror = "2"
+# T13A: the system keyring (Secret Service) store for the AI API key —
+# the sovereign's ruling that the key lives in the OS keyring, not in an
+# env var only and never in a plaintext file. Tests inject their own
+# store and never touch the real keyring (see `ai/secrets.rs`).
+keyring = "4"
 # The startup update check and the external oakvideoeditor.org links: a
 # blocking, bounded HTTPS GET (rustls) plus JSON response parsing. The
 # fetch runs on the gpui background executor, never on the UI thread.
 ureq = "3"
+# T8.1: the frozen 22-tool face (schemas, dispatch, hooks gate, mock).
+#
+# NOTE (P7 merge): this is the one path dependency outside the workspace.
+# Its optional sdk feature uses the published quercus-engine-rs package;
+# the app links the default (mock-capable) feature set only.
+oak-ai-tools = { path = "../../ai/oak-ai-tools", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The gpui/wgpu stack logs through the `log` facade; the app installs the
@@ -73,6 +84,23 @@ log = "0.4"
 
 
 quercus-engine-rs = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-engine-rs", features = ["ffmpeg-static"] }
+# The undo stack itself: `cargo` unifies this with the copy the engine links,
+# so `global::push` here lands on the *same* stack the engine's own commands
+# use. Needed because the SDK's sequence setters (`sequence_set_video_params`
+# and friends) are direct writes with no history of their own, so an undoable
+# "Set Sequence Format" has to be recorded from this side.
+quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus-undo" }
+
+# OPP/1 host services (T7.2 P1.2): the app-side `HostServices`
+# implementation routes plugin calls into the engine through this crate's
+# trait and protocol types. One-way dependency — `oak-extensions` never
+# depends on `oak-app` (notes §2).
+base64 = "0.22"
+wait-timeout = "0.2"
+dirs = "5"
+which = "8"
+oak-extensions = { path = "../oak-extensions" }
+
 [features]
 default = []
 # Force the mock engine even though the real facade is linked. Off by

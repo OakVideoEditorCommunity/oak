@@ -1,0 +1,17 @@
+{
+	"description": "跨会话记忆 · 会话 1：经 pi 的 bash 工具写一条剪辑经验进工程级记忆库",
+	"steps": [
+		{
+			"calls": [
+				{
+					"name": "bash",
+					"arguments": {
+						"command": "scripts/oak-mem.sh remember --title '粗剪经验：双机位硬切点先跑 prescan' --tags '剪辑,切点,prescan' '双机位素材粗剪时，硬切点先跑 ai/prescan 出峰值表，再按峰值前后各看一帧确认；切点落在切换帧前一帧。'"
+					}
+				}
+			]
+		},
+		{ "say": "这条粗剪经验已写入工程级记忆库。" }
+	],
+	"final": { "say": "脚本已走完" }
+}

@@ -1,0 +1,71 @@
+name: AI headless CI
+
+on:
+  push:
+    paths:
+      - 'ai/**'
+      - '.github/workflows/ai-headless.yml'
+  pull_request:
+    paths:
+      - 'ai/**'
+      - '.github/workflows/ai-headless.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ai-headless-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: ai/ one command (no engine, no key)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Rust toolchain (default features only)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo (ai/ crates)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ai/oak-ai-tools
+            ai/oak-ai-mcp
+            ai/ci
+
+      - name: Node 24 (pi + stub model)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ai/agent/package-lock.json
+
+      - name: System deps (ffmpeg for prescan tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: pi dependencies (cached reproducible install)
+        run: npm ci --prefer-offline --no-audit --no-fund
+        working-directory: ai/agent
+
+      - name: Build MCP binary (default features, no engine)
+        run: bash ai/agent/scripts/build-mcp.sh
+
+      - name: Run the whole ai/ chain
+        run: bash ai/ci/run.sh
+
+      - name: Upload replay artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-ci-replay-logs
+          path: |
+            ai/ci/target/agent-replay-*/events.jsonl
+            ai/ci/target/agent-replay-*/stub-requests.jsonl
+            ai/ci/target/*.ndjson
+          if-no-files-found: ignore
+          retention-days: 7

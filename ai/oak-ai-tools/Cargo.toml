@@ -1,0 +1,44 @@
+[package]
+name = "oak-ai-tools"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "T1 tool execution layer for the Oak AI editing pipeline (schema validation + transaction orchestration + backend dispatch)"
+license = "GPL-3.0-or-later"
+
+# This crate is a standalone workspace root on purpose: the repository's
+# root workspace only lists `crates/*` and `examples/*`, so without this
+# empty table cargo would refuse to build the package ("believes it's in
+# a workspace"). ai/* stays out of the upstream build entirely.
+[workspace]
+
+[dependencies]
+base64 = "0.22"
+fnv = "1"
+num-rational = "0.4"
+num-traits = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Runtime JSON Schema (draft-07) validation for the frozen T0 tool face.
+jsonschema = "0.60"
+# f32 frame -> PNG bytes for render.get_frame feedback.
+png = "0.17"
+thiserror = "2"
+# The real engine backend. Use the published SDK so Cargo can resolve the
+# default feature set without the retired in-repo SDK or the engine submodule.
+# The alias keeps the existing sdk backend's crate paths unchanged.
+oak-engine-rust-sdk = { package = "quercus-engine-rs", version = "=0.7.1", optional = true, features = ["ffmpeg-static"] }
+
+[features]
+default = []
+sdk = ["dep:oak-engine-rust-sdk"]
+
+# This crate is a standalone workspace, so the repository root's
+# `[patch.crates-io]` does not apply here and the sdk feature would pull
+# the crates.io `ocio-rs`/`ocio-sys` release — whose vendored yaml-cpp
+# fails to compile on modern GCC (missing <cstdint>) and misdetects a
+# system zlib-ng. Mirror the root patch (same fork, same rev) so both
+# workspaces build the engine from identical sources; see the root
+# Cargo.toml for the full rationale.
+[patch.crates-io]
+ocio-rs = { git = "https://github.com/Mike-Solar/ocio-rs.git", rev = "30338c6a169bbbada862fb3ac256e79b656159cf" }

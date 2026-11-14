@@ -228,6 +228,84 @@ pub fn set_sequence_parameters(
 	Ok(())
 }
 
+/// The sequence's full editable settings `(name, width, height, rate,
+/// interlaced)` — the tuple [`set_sequence_parameters`] writes. `None`
+/// when `seq` is not a sequence or has no video stream.
+///
+/// Read through the SDK (project handle, no graph lock: the project is the
+/// shared refcounted handle upstream's P7 migration left in place of the
+/// old `Arc<Mutex<Graph>>`).
+pub fn sequence_settings(p: &ProjectRef, seq: NodeId) -> Option<(String, i32, i32, Rational, bool)> {
+	if p.node_kind(seq) != Some(NodeKind::Sequence) {
+		return None;
+	}
+	let name = p.node_label(seq);
+	let (width, height, rate) = sequence_video_params(p, seq)?;
+	let interlaced = p.sequence_interlaced(seq)?;
+	Some((name, width, height, rate, interlaced))
+}
+
+/// [`set_sequence_parameters`] as **one undo row** (`Set Sequence Format`).
+///
+/// The frame rate is part of a sequence's time base: every block's
+/// duration is reinterpreted against it, so this is a destructive edit
+/// and must be revertible.
+///
+/// The SDK setters (`node_set_label`, `sequence_set_video_params`,
+/// `sequence_set_interlaced`) are **direct writes with no history of their
+/// own** — measured 2026-11-13: the stack count does not move across all
+/// three, which is why the engine's own `set_sequence_parameters` carries the
+/// before/after tuple and pushes the row itself. This entry point does the
+/// same from the app side, so the one-row guarantee holds without an engine
+/// release: capture the before tuple, hand the engine a closure pair that
+/// replays either direction, and let `global::push` run the redo (the write
+/// happens exactly once, inside the push). Inside an OPP transaction the row
+/// joins the open group and `txn_commit` closes it as the single row; with no
+/// group open it *is* the row.
+pub fn set_sequence_parameters_undoable(
+	project: &ProjectRef,
+	seq: NodeId,
+	after: (String, i32, i32, Rational, bool),
+) -> Result<(), String> {
+	// Validate and read the before tuple *before* touching the stack: a
+	// rejected write must not leave an empty "Set Sequence Format" row.
+	if project.node_kind(seq) != Some(NodeKind::Sequence) {
+		return Err("entry is not a sequence".to_string());
+	}
+	let before = sequence_settings(project, seq)
+		.ok_or_else(|| "the sequence has no video stream".to_string())?;
+
+	let redo_project = project.clone();
+	let undo_project = project.clone();
+	let redo_tuple = after;
+	let undo_tuple = before;
+	let command = quercus_undo::undocommand::UndoCommand::from_closures(
+		move || {
+			let _ = set_sequence_parameters(
+				&redo_project,
+				seq,
+				&redo_tuple.0,
+				redo_tuple.1,
+				redo_tuple.2,
+				redo_tuple.3,
+				redo_tuple.4,
+			);
+		},
+		move || {
+			let _ = set_sequence_parameters(
+				&undo_project,
+				seq,
+				&undo_tuple.0,
+				undo_tuple.1,
+				undo_tuple.2,
+				undo_tuple.3,
+				undo_tuple.4,
+			);
+		},
+	);
+	quercus_undo::global::push(command, "Set Sequence Format").map_err(|e| e.to_string())
+}
+
 /// The label of a node (empty when the id is stale).
 ///
 /// The label is the user-visible name every node kind carries; empty when
@@ -970,6 +1048,165 @@ pub fn create_adjustment_layer(
 		out_ts,
 	})?;
 	primary(result)
+}
+
+/// The clip **immediately after** `clip` on the same track, when the two are
+/// strictly contiguous (`next.in == clip.out`). `None` when the clip is last
+/// on its track, has a gap after it, or is not on a track at all.
+///
+/// This is the deterministic seam test: the schema's `side` cannot name a
+/// seam, so a tail transition falls back to the seam path only when the cut
+/// is provably there (no guessing). Read through the SDK project handle
+/// (upstream P7: no `Arc<Mutex<Graph>>` anymore).
+pub fn next_contiguous_clip(p: &ProjectRef, clip: NodeId) -> Option<NodeId> {
+	let track = p.block_track(clip)?;
+	let index = (0..p.track_block_count(track)).position(|i| p.track_block_at(track, i) == clip)?;
+	let next = p.track_block_at(track, index + 1);
+	if !is_timeline_clip(p, next) {
+		return None;
+	}
+	(p.block_in(next) == p.block_out(clip)).then_some(next)
+}
+
+/// Clears the process-global undo history (SDK stack). Tests only: the
+/// stack is process-wide, so every crate-wide test starts from zero.
+pub fn undo_clear() {
+	quercus_engine_rs::node::undo_clear();
+}
+
+/// The number of committed undo rows (SDK stack; tests and the OPP
+/// `edit.*` domain read it).
+pub fn undo_count() -> i64 {
+	quercus_engine_rs::node::undo_count()
+}
+
+/// The current undo position — rows at or below it are undoable (SDK
+/// stack). Tests assert "the new row is on top" with this.
+pub fn undo_index() -> i64 {
+	quercus_engine_rs::node::undo_index()
+}
+
+/// One undo step; `false` when the stack is empty (SDK stack).
+pub fn undo_undo() -> bool {
+	quercus_engine_rs::node::undo()
+}
+
+/// One redo step; `false` when nothing is redoable (SDK stack).
+pub fn undo_redo() -> bool {
+	quercus_engine_rs::node::redo()
+}
+
+/// Whether an undo step is available (SDK stack).
+pub fn undo_can_undo() -> bool {
+	quercus_engine_rs::node::undo_can_undo()
+}
+
+/// Whether a redo step is available (SDK stack).
+pub fn undo_can_redo() -> bool {
+	quercus_engine_rs::node::undo_can_redo()
+}
+
+/// Opens a named undo group (SDK stack); `false` when one is already open
+/// — an enclosing transaction then owns the row and the caller joins it.
+pub fn undo_group_begin(name: &str) -> bool {
+	quercus_engine_rs::node::undo_group_begin(name)
+}
+
+/// Closes the open group as one history row; `false` when none is open.
+pub fn undo_group_end() -> bool {
+	quercus_engine_rs::node::undo_group_end()
+}
+
+/// Aborts the open group, rolling back its edits; `false` when none is
+/// open.
+pub fn undo_group_abort() -> bool {
+	quercus_engine_rs::node::undo_group_abort()
+}
+
+/// The combo index of a transition shader id (`crossdissolve` = 0 …), or
+/// `None` when the id is not one of the four frozen ids.
+///
+/// The four ids are the engine's frozen transition table
+/// (`quercus-node` `SHADER_IDS`); spelled out here because the SDK does not
+/// re-export them — the combo index is what the transition block's
+/// `type_in` input stores, which the typed placement writes below.
+pub fn transition_kind_index(kind: &str) -> Option<i64> {
+	const SHADER_IDS: [&str; 4] = ["crossdissolve", "fade", "wipe", "slide"];
+	SHADER_IDS.iter().position(|id| *id == kind).map(|i| i as i64)
+}
+
+/// Sets the transition block's shader combo (`type_in`) as one SDK undo
+/// row. The block is created by `AddTransitionAtSeam` / `AddTransitionAtEdge`
+/// with `type_in` = 0 (cross dissolve), so a non-default kind needs this
+/// extra edit — executed through the same session so the whole placement
+/// stays one history row when the caller opened an undo group around it.
+fn set_transition_kind(p: &ProjectRef, block: NodeId, kind_index: i64) -> Result<(), String> {
+	// Resolve the live session backing `p` first (the same lookup every
+	// SDK edit in this module does): no session means no history row, and
+	// failing loudly beats a silent raw project write.
+	let _session = super::real::editor_session_for_project(p)?;
+	let combo = quercus_engine_rs::node::NodeValue {
+		kind: 16, // combo: integer index
+		num: kind_index,
+		..Default::default()
+	};
+	if !p.set_standard_value(block, TYPE_IN, -1, combo) {
+		return Err("could not set the transition type".to_string());
+	}
+	Ok(())
+}
+
+/// The frozen transition-shader input id on a transition block
+/// (`quercus-node` `transitions::TYPE_INPUT`).
+const TYPE_IN: &str = "type_in";
+
+/// [`add_transition_at_edge`] plus the shader kind, still **one** undo row.
+pub fn add_transition_at_edge_typed(
+	p: &ProjectRef,
+	clip: NodeId,
+	start_edge: bool,
+	length: Rational,
+	kind_index: Option<i64>,
+) -> Result<NodeId, String> {
+	// Begin unconditionally (kind or not): it answers false when a group
+	// is already open — an enclosing transaction owns the row — and only a
+	// group we actually opened may be ended below (T9.2 one-edit-one-row).
+	let grouped = quercus_engine_rs::node::undo_group_begin("Add Transition");
+	let block = add_transition_at_edge(p, clip, start_edge, length);
+	if let Ok(block) = &block {
+		if let Some(index) = kind_index {
+			let _ = set_transition_kind(p, *block, index);
+		}
+	}
+	if grouped {
+		quercus_engine_rs::node::undo_group_end();
+	}
+	block
+}
+
+/// [`add_transition_at_seam`] plus the shader kind, still **one** undo row.
+pub fn add_transition_at_seam_typed(
+	p: &ProjectRef,
+	prev: NodeId,
+	next: NodeId,
+	half: Rational,
+	kind_index: Option<i64>,
+) -> Result<NodeId, String> {
+	// Upstream's SDK records every edit as one history row; the group keeps
+	// the placement and the optional kind edit a single row. Begin answers
+	// false when a group is already open (an enclosing transaction owns the
+	// row) — then `grouped` is false and we leave the open row alone.
+	let grouped = quercus_engine_rs::node::undo_group_begin("Add Transition");
+	let block = add_transition_at_seam(p, prev, next, half);
+	if let Ok(block) = &block {
+		if let Some(index) = kind_index {
+			let _ = set_transition_kind(p, *block, index);
+		}
+	}
+	if grouped {
+		quercus_engine_rs::node::undo_group_end();
+	}
+	block
 }
 
 /// Create a transition at the seam between two contiguous clips and push

@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.trim_clip.json",
+  "title": "timeline.trim_clip",
+  "type": "object",
+  "description": "Move one edge of a clip: side='in' moves the head (the media in-point follows), side='out' moves the tail. 1:1 mapping to OPP/1 section 8.4 timeline.trim_clip.",
+  "properties": {
+    "clip": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Clip to trim."
+    },
+    "side": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ],
+      "description": "Which edge to move (OPP/1 section 8.4)."
+    },
+    "time": {
+      "description": "New edge position on the sequence timeline.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "clip",
+    "side",
+    "time"
+  ]
+}

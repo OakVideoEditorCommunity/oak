@@ -1,0 +1,17 @@
+{
+	"description": "跨会话记忆 · 会话 2：新进程里按检索词召回会话 1 写入的经验",
+	"steps": [
+		{
+			"calls": [
+				{
+					"name": "bash",
+					"arguments": {
+						"command": "scripts/oak-mem.sh recall '双机位 硬切点 prescan' --format md"
+					}
+				}
+			]
+		},
+		{ "say": "已按上次的粗剪经验继续：先看 prescan 峰值表，再取帧确认。" }
+	],
+	"final": { "say": "脚本已走完" }
+}

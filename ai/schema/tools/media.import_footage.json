@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/media.import_footage.json",
+  "title": "media.import_footage",
+  "type": "object",
+  "description": "Import one or more media files into the project footage bin; failed entries are reported per path instead of failing the whole call. 1:1 mapping to OPP/1 section 8.3 media.import_footage (transactional, confirmation class); the legacy single 'path' parameter was widened to OPP's 'paths' array.",
+  "properties": {
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Media file paths to import."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "paths"
+  ]
+}

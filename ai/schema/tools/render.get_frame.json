@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/render.get_frame.json",
+  "title": "render.get_frame",
+  "type": "object",
+  "description": "Render a single frame of a sequence or of a raw footage file. 1:1 mapping to OPP/1 section 8.6 render.get_frame. The returned frame reference (shm slot or inline PNG) is released by the T1 adapter, never by the model - shm lifecycle is not part of the tool face.",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Timeline target (exactly one of sequence/footage)."
+    },
+    "footage": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw media target (exactly one of sequence/footage)."
+    },
+    "time": {
+      "description": "When to render: rational seconds or a frame index on the target's frame grid.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    },
+    "max_size": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "additionalProperties": false,
+      "description": "Downscale bound; exceeding the handshake slot capacity returns FRAME_TOO_LARGE (OPP/1 section 8.6). Rate limits: 8 frames/s, short side <= 1080."
+    },
+    "format": {
+      "type": "string",
+      "enum": [
+        "bgra8",
+        "png"
+      ],
+      "description": "Frame encoding (OPP/1 section 8.6); the adapter prefers inline PNG for model feedback."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "time"
+  ],
+  "allOf": [
+    {
+      "description": "Render target: exactly one of 'sequence' (timeline frame) or 'footage' (raw media frame). OPP/1 section 8.6 requires one of the two and returns INVALID_PARAMS when both are missing; T0 also rejects 'both present' because the protocol leaves that case unspecified (open item, see method-map.md).",
+      "oneOf": [
+        {
+          "required": [
+            "sequence"
+          ],
+          "not": {
+            "required": [
+              "footage"
+            ]
+          },
+          "description": "Timeline frame: render the composed sequence."
+        },
+        {
+          "required": [
+            "footage"
+          ],
+          "not": {
+            "required": [
+              "sequence"
+            ]
+          },
+          "description": "Raw media frame: render one footage file."
+        }
+      ]
+    }
+  ]
+}
