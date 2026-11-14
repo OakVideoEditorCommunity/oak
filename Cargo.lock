@@ -5785,6 +5785,7 @@ name = "oak-app"
 version = "0.5.2"
 dependencies = [
  "base64 0.22.1",
+ "dirs 5.0.1",
  "embed-resource",
  "gpui-kit",
  "half",
@@ -5803,6 +5804,7 @@ dependencies = [
  "ureq",
  "wait-timeout",
  "wgpu",
+ "which",
 ]
 
 [[package]]

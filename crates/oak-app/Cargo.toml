@@ -97,6 +97,8 @@ quercus-undo = { version = "=0.7.1", path = "../../quercus-engine/crates/quercus
 # depends on `oak-app` (notes §2).
 base64 = "0.22"
 wait-timeout = "0.2"
+dirs = "5"
+which = "8"
 oak-extensions = { path = "../oak-extensions" }
 
 [features]

@@ -1,51 +1,34 @@
 //! `oak-ai-mcp` — MCP stdio server for the Oak AI editing tool face.
 //!
-//! Usage: see [`USAGE`]. The process speaks JSON-RPC 2.0, one document per
+//! Usage: run with `--help`. The process speaks MCP over stdio (JSON-RPC 2.0, one document per
 //! NDJSON line, on stdin/stdout; human-readable diagnostics go to stderr
 //! only, so stdout stays a clean frame stream.
 
-use std::io::BufWriter;
+use clap::Parser as _;
 use std::process::ExitCode;
 
 use oak_ai_mcp::backend_select::{self, BackendKind};
-use oak_ai_mcp::rpc::{self, Inbound};
+use oak_ai_mcp::rmcp_server::OakMcp;
 use oak_ai_mcp::server::Server;
+use rmcp::ServiceExt as _;
 
-const USAGE: &str = "\
-oak-ai-mcp — MCP (stdio) server for the Oak AI editing tool face
-
-USAGE:
-    oak-ai-mcp [--backend mock|sdk]
-
-OPTIONS:
-    --backend <mock|sdk>   Execution backend. Default: mock (in-memory, no engine).
-                           'sdk' requires a build with --features sdk; without it the
-                           server refuses to start rather than degrading to mock.
-    -h, --help             Print this help.
-    -V, --version          Print the version.
-
-TRANSPORT:
-    JSON-RPC 2.0, one object per line (NDJSON) on stdin/stdout, UTF-8.
-    Methods: initialize, notifications/initialized, tools/list, tools/call, ping.
-    Exit code 0 when the client closes stdin, 2 on a usage/startup error.
-
-EXIT CODES:
-    0  normal shutdown (stdin closed)
-    2  bad arguments, unknown backend, or a backend that is not available
-";
+/// Command line. `--backend` defaults to mock; `sdk` needs the feature.
+#[derive(Debug, clap::Parser)]
+#[command(
+	name = "oak-ai-mcp",
+	version,
+	about = "MCP (stdio) server for the Oak AI editing tool face",
+	long_about = "Speaks JSON-RPC 2.0, one object per line (NDJSON) on stdin/stdout.\nMethods: initialize, notifications/initialized, tools/list, tools/call, ping."
+)]
+struct Cli {
+	/// Execution backend: mock (in-memory, no engine) or sdk (needs --features sdk).
+	#[arg(long, value_name = "mock|sdk", default_value = "mock", value_parser = BackendKind::parse)]
+	backend: BackendKind,
+}
 
 fn main() -> ExitCode {
-	let backend = match parse_args() {
-		Ok(Some(kind)) => kind,
-		Ok(None) => return ExitCode::SUCCESS,
-		Err(message) => {
-			eprintln!("oak-ai-mcp: {message}");
-			eprint!("{USAGE}");
-			return ExitCode::from(2);
-		}
-	};
-
-	let kind = backend;
+	// clap owns --help/--version and the exit-2 usage error path.
+	let kind = Cli::parse().backend;
 	let backend = match backend_select::build(kind) {
 		Ok(backend) => backend,
 		Err(message) => {
@@ -62,70 +45,29 @@ fn main() -> ExitCode {
 		oak_ai_tools::dispatch::registry().len(),
 	);
 
-	run(Server::new(backend, kind.label()))
-}
-
-/// `Ok(None)` means "handled, nothing to run" (`--help` / `--version`).
-fn parse_args() -> Result<Option<BackendKind>, String> {
-	let mut backend: Option<BackendKind> = None;
-	let mut args = std::env::args().skip(1);
-	while let Some(arg) = args.next() {
-		match arg.as_str() {
-			"-h" | "--help" => {
-				print!("{USAGE}");
-				return Ok(None);
-			}
-			"-V" | "--version" => {
-				println!("oak-ai-mcp {}", env!("CARGO_PKG_VERSION"));
-				return Ok(None);
-			}
-			"--backend" => {
-				let value = args
-					.next()
-					.ok_or("--backend requires a value (mock|sdk)".to_string())?;
-				backend = Some(BackendKind::parse(&value)?);
-			}
-			other => {
-				if let Some(value) = other.strip_prefix("--backend=") {
-					backend = Some(BackendKind::parse(value)?);
-				} else {
-					return Err(format!("unknown argument '{other}'"));
-				}
-			}
-		}
-	}
-	Ok(Some(backend.unwrap_or(BackendKind::Mock)))
-}
-
-fn run(mut server: Server) -> ExitCode {
-	let stdin = std::io::stdin();
-	let mut reader = std::io::BufReader::new(stdin.lock());
-	let stdout = std::io::stdout();
-	let mut writer = BufWriter::new(stdout.lock());
-
-	loop {
-		let inbound = match rpc::read_inbound(&mut reader) {
-			Ok(inbound) => inbound,
-			Err(err) => {
-				// The stream is unreadable (I/O failure or non-UTF-8 input);
-				// continuing would desynchronise the frame stream.
-				eprintln!("oak-ai-mcp: stdin read failed: {err}");
-				return ExitCode::from(1);
-			}
-		};
-		if inbound == Inbound::Eof {
-			return ExitCode::SUCCESS;
-		}
-		let Some(response) = server.handle_inbound(inbound) else {
-			continue;
-		};
-		if let Err(err) = rpc::write_frame(&mut writer, &response) {
-			if err.kind() == std::io::ErrorKind::BrokenPipe {
-				// The client went away mid-session; that is a normal end.
-				return ExitCode::SUCCESS;
-			}
-			eprintln!("oak-ai-mcp: stdout write failed: {err}");
+	let server = OakMcp::new(Server::new(backend, kind.label()));
+	// The SDK drives the stdio transport; a current-thread runtime is enough
+	// for a single-connection server.
+	let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+		Ok(runtime) => runtime,
+		Err(err) => {
+			eprintln!("oak-ai-mcp: cannot start the async runtime: {err}");
 			return ExitCode::from(1);
 		}
-	}
+	};
+	// `local` feature: the engine backend is not `Send`, so the handler runs on
+	// a LocalSet rather than a Send-requiring task.
+	let local = tokio::task::LocalSet::new();
+	runtime.block_on(local.run_until(async move {
+		match server.serve(rmcp::transport::stdio()).await {
+			Ok(service) => {
+				let _ = service.waiting().await;
+				ExitCode::SUCCESS
+			}
+			Err(err) => {
+				eprintln!("oak-ai-mcp: transport failed: {err}");
+				ExitCode::from(1)
+			}
+		}
+	}))
 }

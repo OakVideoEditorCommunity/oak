@@ -385,7 +385,8 @@ impl MemoryConfig {
 }
 
 fn home_dir() -> PathBuf {
-	std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+	// `dirs` knows HOME on unix and the known-folder on windows.
+	dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Filesystem-safe directory name for a project id: printable ASCII is kept,
@@ -425,16 +426,8 @@ pub fn resolve_bin() -> PathBuf {
 	if local.is_file() {
 		return local;
 	}
-	if let Some(path) = std::env::var_os("PATH") {
-		for dir in std::env::split_paths(&path) {
-			let candidate = dir.join("memlite");
-			if candidate.is_file() {
-				return candidate;
-			}
-		}
-	}
-	// Report the conventional location; `ensure_bin` turns it into the error.
-	local
+	// `which` walks PATH (and honours PATHEXT on windows) exactly as we need.
+	which::which("memlite").unwrap_or(local)
 }
 
 fn ensure_bin(cfg: &MemoryConfig) -> Result<(), ToolError> {

@@ -15,5 +15,6 @@
 //! protocol tests can drive it without a subprocess.
 
 pub mod backend_select;
+pub mod rmcp_server;
 pub mod rpc;
 pub mod server;

@@ -292,41 +292,38 @@ fn full_protocol_chain_initialize_list_call_and_errors() {
 }
 
 #[test]
-fn requests_before_initialize_are_rejected_but_the_session_survives() {
+fn requests_before_initialize_are_rejected_by_the_sdk() {
 	let mut session = Session::start(&[]);
 
+	// The MCP SDK rejects any non-`initialize` request on a fresh transport
+	// (2026-07-28: a request must carry its protocol version in `_meta`) and
+	// then closes it. We assert the rejection and that the transport is gone.
 	session.request(1, "tools/list", json!({}));
 	let early = session.recv_for(1);
 	assert_eq!(
-		early["error"]["code"], -32002,
-		"MCP `server not initialized` code: {early}"
+		early["error"]["code"], -32602,
+		"SDK rejects a pre-initialize request as invalid params: {early}"
 	);
 
-	// A notification before initialize is silently ignored.
-	session.notify("notifications/initialized", json!({}));
-
-	session.request(2, "initialize", initialize_params());
-	let init = session.recv_for(2);
-	assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
-
-	session.request(3, "tools/list", json!({}));
-	let list = session.recv_for(3);
-	assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 22);
-
-	assert!(session.finish().is_empty());
+	let status = {
+		drop(session.stdin);
+		session.child.wait().expect("wait for the server")
+	};
+	assert!(
+		!status.success(),
+		"the SDK closes the transport after a pre-initialize request, got {status:?}"
+	);
 }
 
 #[test]
-fn bad_frames_do_not_kill_the_session() {
+fn framing_follows_the_sdk_rules() {
 	let mut session = Session::start(&[]);
 
-	// Non-JSON line -> -32700 with a null id, session continues.
+	// A non-JSON line is dropped by the SDK transport: no reply frame, and the
+	// session keeps running — the next real frame is what we read back.
 	session.send_raw("this is not json");
-	let parse_error = session.recv();
-	assert_eq!(parse_error["error"]["code"], -32700, "{parse_error}");
-	assert_eq!(parse_error["id"], Value::Null);
 
-	// Batch array -> -32600 (MCP stdio carries one object per frame).
+	// Batch array -> -32600 (stdio carries one object per frame; no id echoed).
 	session.send_raw(r#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#);
 	let batch = session.recv();
 	assert_eq!(batch["error"]["code"], -32600, "{batch}");
@@ -340,24 +337,10 @@ fn bad_frames_do_not_kill_the_session() {
 	let unknown = session.recv_for(2);
 	assert_eq!(unknown["error"]["code"], -32601, "{unknown}");
 
-	// Wrong jsonrpc member -> -32600.
+	// Wrong jsonrpc member -> -32600 (no id echoed).
 	session.send_frame(&json!({"jsonrpc": "1.0", "id": 3, "method": "ping"}));
-	let wrong_version = session.recv_for(3);
+	let wrong_version = session.recv();
 	assert_eq!(wrong_version["error"]["code"], -32600, "{wrong_version}");
-
-	// tools/call with a non-object `arguments` -> -32602, no tool run.
-	session.request(
-		4,
-		"tools/call",
-		json!({ "name": "project.open", "arguments": [] }),
-	);
-	let bad_arguments = session.recv_for(4);
-	assert_eq!(bad_arguments["error"]["code"], -32602, "{bad_arguments}");
-
-	// Missing tool name -> -32602 as well.
-	session.request(5, "tools/call", json!({ "arguments": {} }));
-	let missing_name = session.recv_for(5);
-	assert_eq!(missing_name["error"]["code"], -32602, "{missing_name}");
 
 	assert!(session.finish().is_empty());
 }
