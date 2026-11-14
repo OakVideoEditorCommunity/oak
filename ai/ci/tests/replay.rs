@@ -124,7 +124,7 @@ fn fresh_media(tag: &str) -> PathBuf {
 /// the path hash, so two concurrent runs on the same file would race and mix
 /// colours). Returns the guard; dropping it releases the lock.
 fn chain_lock() -> std::fs::File {
-	use std::os::unix::io::AsRawFd;
+	use fs4::FileExt as _;
 	let path = std::env::temp_dir().join("oak_ci_replay_chain.lock");
 	let file = std::fs::OpenOptions::new()
 		.create(true)
@@ -132,16 +132,10 @@ fn chain_lock() -> std::fs::File {
 		.truncate(false)
 		.open(&path)
 		.expect("open chain lock");
-	// SAFETY: plain flock(2) on a plain file descriptor (Linux/macOS).
-	let rc = unsafe {
-		flock(file.as_raw_fd(), 2 /* LOCK_EX */)
-	};
-	assert_eq!(rc, 0, "flock failed");
+	// Blocking exclusive lock, released when `file` drops. `fs4` wraps flock
+	// on unix and LockFileEx on windows, so no `unsafe` and no cfg here.
+	file.lock().expect("flock failed");
 	file
-}
-
-unsafe extern "C" {
-	fn flock(fd: i32, operation: i32) -> i32;
 }
 
 fn read_steps(fixture: &str) -> Vec<ReplayEvent> {

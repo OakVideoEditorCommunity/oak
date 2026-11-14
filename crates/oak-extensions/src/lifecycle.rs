@@ -1019,8 +1019,11 @@ fn wait_for_exit(child: &mut Child, ev_rx: &Receiver<Ev>, dur: Duration) -> bool
 
 #[cfg(unix)]
 fn send_sigterm(child: &Child) {
-	// SAFETY: plain kill(2) against our own child pid.
-	unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+	// `nix` wraps kill(2) so the unsafe block and the raw signal number go away.
+	let _ = nix::sys::signal::kill(
+		nix::unistd::Pid::from_raw(child.id() as i32),
+		nix::sys::signal::Signal::SIGTERM,
+	);
 }
 
 #[cfg(not(unix))]

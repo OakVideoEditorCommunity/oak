@@ -5819,7 +5819,7 @@ dependencies = [
 name = "oak-extensions"
 version = "0.5.2"
 dependencies = [
- "libc",
+ "nix",
  "serde",
  "serde_json",
  "toml 0.8.23",
