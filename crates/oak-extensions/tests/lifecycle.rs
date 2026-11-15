@@ -326,19 +326,29 @@ time.sleep(60)
 "
 		),
 	);
+	// This test is about `call`, not about how fast the machine can start a
+	// Python interpreter: a 500 ms handshake budget (the compressed one the
+	// timeout tests use) makes a loaded macOS runner fail the handshake
+	// before the plugin can say hello. Give the handshake the same 10 s
+	// budget the timeout tests give a slow first message.
 	let host = PluginHost::start(manifest(&dir, "call", 0, 10), &dir, LifecycleConfig {
-		handshake_timeout: Duration::from_millis(500),
+		handshake_timeout: Duration::from_secs(10),
 		heartbeat_interval: Duration::from_secs(30),
 		heartbeat_timeout: Duration::from_secs(30),
 		..LifecycleConfig::default()
 	})
 	.expect("start");
 	// Before Ready: NotReady.
-	let deadline = Instant::now() + Duration::from_secs(5);
+	let deadline = Instant::now() + Duration::from_secs(10);
 	while host.state() != PluginState::Ready && Instant::now() < deadline {
 		std::thread::sleep(Duration::from_millis(10));
 	}
-	assert_eq!(host.state(), PluginState::Ready, "plugin must reach Ready");
+	assert_eq!(
+		host.state(),
+		PluginState::Ready,
+		"plugin must reach Ready (failure: {:?})",
+		host.failure()
+	);
 	let err = host
 		.call("project.get_info", serde_json::json!({}), Duration::from_millis(50))
 		.expect_err("plugin never answers → timeout");
