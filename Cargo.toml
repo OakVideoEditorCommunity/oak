@@ -82,12 +82,11 @@ debug-assertions = false
 [profile.dev]
 opt-level = 1
 
-# ocio-sys 0.2.1's vendored sources fail to build on GCC >= 16 (yaml-cpp
-# misses <cstdint>) and misdetect a system zlib-ng (minizip-ng then emits
-# zng_* symbols the vendored zlib cannot satisfy); upstream also hard-codes
-# `char*` as `*const i8`, which does not compile on aarch64 (c_char = u8).
-# The fork carries all three fixes; return to the crates.io release once it
-# does (the ocio-rs patch pulls the fork's `ocio-sys` path dependency too).
+# ocio-rs: no patch. Quercus 0.7.2 requires ocio-rs 0.3, whose crates.io
+# release carries the GCC >= 16 (yaml-cpp <cstdint>), zlib-ng and aarch64
+# `c_char` fixes that the 0.2.1 fork used to backport. A patch here would
+# shadow nothing (the old fork rev is 0.2.1) and silently route the build
+# back to that stale release.
 [patch.crates-io]
 gpu-allocator = { path = "vendor/gpu-allocator" }
 # 10-bit display path (docs/zh/gpui-kit-migration.md): minimal renderer
@@ -98,7 +97,6 @@ gpu-allocator = { path = "vendor/gpu-allocator" }
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
-ocio-rs = { git = "https://github.com/Mike-Solar/ocio-rs.git", rev = "30338c6a169bbbada862fb3ac256e79b656159cf" }
 # pipewire-rs 0.10's build scripts run bindgen with `clang_macro_fallback`
 # using *cwd-relative* scratch paths (.macro_eval.c / *.pch); with clang >= 23
 # the fallback evaluation silently fails and cast-valued macros

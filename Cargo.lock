@@ -5925,8 +5925,9 @@ dependencies = [
 
 [[package]]
 name = "ocio-rs"
-version = "0.2.1"
-source = "git+https://github.com/Mike-Solar/ocio-rs.git?rev=30338c6a169bbbada862fb3ac256e79b656159cf#30338c6a169bbbada862fb3ac256e79b656159cf"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "618c07d5d666139deb1c3032b9de5f6b4ffb3203e102716ad87cacf6455107e6"
 dependencies = [
  "ocio-sys",
  "thiserror 1.0.69",
@@ -5934,8 +5935,9 @@ dependencies = [
 
 [[package]]
 name = "ocio-sys"
-version = "0.2.1"
-source = "git+https://github.com/Mike-Solar/ocio-rs.git?rev=30338c6a169bbbada862fb3ac256e79b656159cf#30338c6a169bbbada862fb3ac256e79b656159cf"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eb7fc9fb0d5b255278fc7b6d68dcc85150fc8b86a9deab85d92246b74016b39"
 dependencies = [
  "cc",
  "cmake",
@@ -6554,7 +6556,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-audio"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cpal",
  "ffmpeg-next",
@@ -6565,10 +6567,11 @@ dependencies = [
 
 [[package]]
 name = "quercus-codec"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "ffmpeg-next",
  "quercus-core",
+ "quercus-ffmpeg-link",
  "subparse",
  "thiserror 2.0.21",
  "windows 0.62.2",
@@ -6576,7 +6579,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "ash",
  "half",
@@ -6597,7 +6600,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "libc",
  "quercus-audio",
@@ -6617,15 +6620,19 @@ dependencies = [
 
 [[package]]
 name = "quercus-engine-rs"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "quercus-engine",
  "thiserror 2.0.21",
 ]
 
 [[package]]
+name = "quercus-ffmpeg-link"
+version = "0.7.2"
+
+[[package]]
 name = "quercus-node"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6635,7 +6642,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-ofx-plugin"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cc",
  "libc",
@@ -6650,7 +6657,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-otio"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "quercus-core",
  "quick-xml",
@@ -6661,7 +6668,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-render"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cosmic-text",
  "libc",
@@ -6678,7 +6685,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-storage"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "chrono",
  "quercus-core",
@@ -6694,7 +6701,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-task"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "quercus-codec",
  "quercus-core",
@@ -6707,7 +6714,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-timeline"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "quercus-core",
  "quercus-node",
@@ -6717,7 +6724,7 @@ dependencies = [
 
 [[package]]
 name = "quercus-undo"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "thiserror 2.0.21",
 ]
