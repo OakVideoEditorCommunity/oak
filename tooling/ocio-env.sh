@@ -20,9 +20,9 @@
 # or eval locally.
 #
 # Policy: VENDORED OpenColorIO, statically linked, everywhere it builds.
-# The [patch.crates-io] ocio-sys tracks shaloong/ocio-rs main, whose
-# vendored yaml-cpp carries the <cstdint> include the 0.2.1 crate is
-# missing (without it the vendored build fails on GCC >= 16).
+# ocio-rs 0.3 (crates.io, required by Quercus 0.7.2) builds its vendored
+# OpenColorIO/yaml-cpp on GCC >= 16; the old 0.2.1 <cstdint> backport fork
+# is no longer patched in.
 # Windows/MinGW is the exception: the vendored OCIO source needs
 # MSVC-only constructs, so the MSYS2 system package is used instead —
 # statically when it ships libOpenColorIO.a, dynamically otherwise (the

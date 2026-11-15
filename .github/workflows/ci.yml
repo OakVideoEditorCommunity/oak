@@ -195,9 +195,8 @@ jobs:
       # ------------------------------------------------------------------
       # ocio-sys builds a stub bridge unless these are set; the oak-core
       # ocioutils tests need the real library.
-      # tooling/ocio-env.sh: vendored static OCIO (the [patch.crates-io]
-      # ocio-sys tracks shaloong/ocio-rs main, whose vendored sources build
-      # on GCC >= 16).
+      # tooling/ocio-env.sh: vendored static OCIO (ocio-rs 0.3 from
+      # crates.io builds its vendored sources on GCC >= 16).
       - name: Configure build environment (Linux)
         if: matrix.platform == 'linux'
         shell: bash
