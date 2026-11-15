@@ -1,0 +1,12 @@
+{
+	"mcpServers": {
+		"oak": {
+			"command": "bash",
+			"args": ["../agent/scripts/mcp-serve.sh"],
+			"cwd": ".",
+			"description": "oak AI 剪辑工具面（T5 MCP，22 个冻结工具）。清单由服务器 tools/list 动态给出，仓内不保留副本。",
+			"exposure": "direct",
+			"timeout": 600
+		}
+	}
+}

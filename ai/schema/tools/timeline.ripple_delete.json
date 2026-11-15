@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.ripple_delete.json",
+  "title": "timeline.ripple_delete",
+  "type": "object",
+  "description": "Delete a clip and close the gap by shifting every later clip on the same track left. 1:1 mapping to OPP/1 section 8.4 timeline.ripple_delete.",
+  "properties": {
+    "clip": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Clip to remove with ripple."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "clip"
+  ]
+}

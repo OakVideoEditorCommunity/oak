@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/project.save.json",
+  "title": "project.save",
+  "type": "object",
+  "description": "Save the active project. 1:1 (renamed) mapping to OPP/1 section 8.2 project.save; 'path' is optional and defaults to the location the project was opened from.",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Destination path; omit to save in place."
+    }
+  },
+  "additionalProperties": false
+}

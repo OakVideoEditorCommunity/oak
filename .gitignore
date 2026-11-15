@@ -123,6 +123,7 @@ tarpaulin-out/
 /*.dmg
 perf.data
 
-# Python bytecode from the tooling scripts
+# Python bytecode from the tooling scripts (and anywhere else)
+__pycache__/
 tooling/__pycache__/
 *.pyc

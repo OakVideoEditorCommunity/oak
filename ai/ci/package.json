@@ -1,0 +1,9 @@
+{
+	"name": "oak-ai-ci",
+	"version": "0.1.0",
+	"private": true,
+	"description": "T6 agent 回放：pi 本地连 oak MCP，模型 stub 按 fixture 回放（无 key 无网络）",
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "^1.0.3"
+	}
+}

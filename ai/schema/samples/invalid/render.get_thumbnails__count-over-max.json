@@ -1,0 +1,14 @@
+{
+  "sequence": "seq-1",
+  "range": {
+    "in": {
+      "num": 0,
+      "den": 1
+    },
+    "out": {
+      "num": 10,
+      "den": 1
+    }
+  },
+  "count": 65
+}

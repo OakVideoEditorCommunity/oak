@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/media.list_footage.json",
+  "title": "media.list_footage",
+  "type": "object",
+  "description": "List the footage currently in the project bin (id, name, path, duration). 1:1 mapping to OPP/1 section 8.3 media.list_footage.",
+  "properties": {},
+  "additionalProperties": false
+}

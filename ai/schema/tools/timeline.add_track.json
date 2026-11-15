@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.add_track.json",
+  "title": "timeline.add_track",
+  "type": "object",
+  "description": "Add a video or audio track. 1:1 mapping to OPP/1 section 8.4 timeline.add_track; the legacy 'kind' field was renamed to OPP's 'type'. 'sequence' is optional at the tool surface and defaults to the active sequence (T1 adapter default; OPP/1 always passes it explicitly).",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque entity id (OPP/1 section 5 EntityId): footage / sequence / track / clip / node id. Never parse its format; ids are invalidated on project reload. Defaults to the active sequence."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "video",
+        "audio"
+      ],
+      "description": "Track type (OPP/1 section 8.4)."
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Insert position; omit to append at the end."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "type"
+  ]
+}

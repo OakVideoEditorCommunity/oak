@@ -24,6 +24,7 @@
 //! to "the engine", and never mutate engine state directly — every edit is a
 //! widget request event that the panel forwards through the gateway.
 
+pub mod ai_assistant;
 pub mod commands;
 pub mod effect_library;
 pub mod history;
@@ -67,6 +68,8 @@ pub mod ids {
 	pub const EFFECT_LIBRARY: PanelId = "effect-library";
 	/// The multicam panel (多机位).
 	pub const MULTICAM: PanelId = "multicam";
+	/// The AI assistant panel (AI 助手).
+	pub const AI_ASSISTANT: PanelId = "ai-assistant";
 }
 
 /// A small info chip used in viewer headers and the status bar: muted

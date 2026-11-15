@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/render.get_audio_levels.json",
+  "title": "render.get_audio_levels",
+  "type": "object",
+  "description": "Peak/mean audio levels for a sequence TimeRange. 1:1 mapping to OPP/1 section 8.6 render.get_audio_levels; used for silence and loudness analysis before cutting.",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Sequence to analyse (required by OPP/1 section 8.6)."
+    },
+    "range": {
+      "type": "object",
+      "description": "Analysis interval on the sequence timeline.",
+      "properties": {
+        "in": {
+          "description": "Time value. Exactly two accepted forms: (a) rational seconds {num, den} (OPP/1 section 5 Rational - the only wire form of the protocol), or (b) a non-negative integer frame index on the target frame grid. Bare floating-point seconds such as 1.5 are rejected by design; a frame rate like 29.97 must be written as {num: 30000, den: 1001}.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "num": {
+                  "type": "integer",
+                  "description": "Numerator, in seconds (may be negative)."
+                },
+                "den": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+                }
+              },
+              "required": [
+                "num",
+                "den"
+              ],
+              "additionalProperties": false,
+              "description": "Rational seconds {num, den}, den > 0."
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+            }
+          ]
+        },
+        "out": {
+          "description": "Time value. Exactly two accepted forms: (a) rational seconds {num, den} (OPP/1 section 5 Rational - the only wire form of the protocol), or (b) a non-negative integer frame index on the target frame grid. Bare floating-point seconds such as 1.5 are rejected by design; a frame rate like 29.97 must be written as {num: 30000, den: 1001}.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "num": {
+                  "type": "integer",
+                  "description": "Numerator, in seconds (may be negative)."
+                },
+                "den": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+                }
+              },
+              "required": [
+                "num",
+                "den"
+              ],
+              "additionalProperties": false,
+              "description": "Rational seconds {num, den}, den > 0."
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+            }
+          ]
+        }
+      },
+      "required": [
+        "in",
+        "out"
+      ],
+      "additionalProperties": false
+    },
+    "resolution": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Samples per channel window; defaults to 100 (OPP/1 section 8.6)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "sequence",
+    "range"
+  ]
+}

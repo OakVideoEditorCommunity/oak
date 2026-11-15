@@ -39,6 +39,12 @@ pub const PIXEL_FORMAT_F32: i32 = 4;
 pub const SLOT_FORMAT_BGRA8: i32 = 100;
 
 /// Brings up the in-process render manager through the SDK.
+///
+/// Backend: the in-process Pipeline backend — Oak removed the separate
+/// render worker in `4d6883f55` ("render manager now initializes the
+/// in-process Pipeline backend … no ProcessDispatcher, no shared-memory
+/// staging, no worker binary requirement"), so frames arrive as
+/// `TicketPayload::Video` → `FrameOrigin::Cpu`, never as shm slots.
 pub fn ensure_render_manager() -> bool {
 	if quercus_engine_rs::render::manager_is_initialized() {
 		return true;

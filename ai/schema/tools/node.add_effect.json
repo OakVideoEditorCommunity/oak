@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/node.add_effect.json",
+  "title": "node.add_effect",
+  "type": "object",
+  "description": "Attach an effect node to a clip. 1:1 mapping to OPP/1 section 8.5 node.add_effect. 'effect' is a node type id such as 'org.olivevideoeditor.Olive.blur' or an OFX identifier; OFX types are dynamic, so the id set is deliberately open - discover it with node.list_types.",
+  "properties": {
+    "clip": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Clip receiving the effect."
+    },
+    "effect": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Node type id (built-in example ids: org.olivevideoeditor.Olive.blur, .saturation, .volume, .opacity, .gamma, .whitebalance, .chromakey, .sharpen, .noise, .crop, .dissolve) or an OFX identifier. Open set: not an enum, because OPP/1 section 8.5 exposes OFX types dynamically."
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Insert position inside the clip's effect chain."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "clip",
+    "effect"
+  ]
+}

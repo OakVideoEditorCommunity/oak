@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/project.open.json",
+  "title": "project.open",
+  "type": "object",
+  "description": "Open an existing project file, or create a new empty project when 'path' is omitted. Renamed 1:1 from the legacy 'open_project' tool to OPP/1 section 8.2 project.open. The transaction token is supplied by the T1 adapter; tool callers never see 'txn'.",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to an existing project file. Omit to create a new empty project (tool-level extension: OPP/1 v1 always passes a path)."
+    },
+    "fps": {
+      "description": "Frame rate: a positive integer frames-per-second value (e.g. 30) or a rational {num, den} (e.g. {num: 30000, den: 1001} for 29.97). Bare floats such as 29.97 are rejected. Only used when creating a new project.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the sequence created for a new project."
+    }
+  },
+  "additionalProperties": false
+}

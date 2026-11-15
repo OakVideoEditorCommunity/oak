@@ -1,0 +1,30 @@
+[package]
+name = "oak-ci-replay"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "T6 headless CI: one command for the whole ai/ chain (schema, prescan, oak-ai-tools, oak-ai-mcp, agent replay)"
+license = "GPL-3.0-or-later"
+
+# Standalone workspace root, same reasoning as `../oak-ai-tools/Cargo.toml`:
+# the repository root workspace only lists `crates/*` and `examples/*`, so
+# without this empty table cargo would refuse to build the package. `ai/*`
+# stays out of the upstream build entirely.
+[workspace]
+
+[dependencies]
+# The frozen tool face + execution layer (registry, schema validation,
+# transaction orchestration, hooks, MockBackend). Default features: no
+# engine, no FFmpeg.
+oak-ai-tools = { path = "../oak-ai-tools" }
+# MCP framing/server, exercised against the same binary the agent connects
+# to (zero-drift: one command builds everything from one source).
+oak-ai-mcp = { path = "../oak-ai-mcp" }
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+fs4 = { version = "1", features = ["sync"] }

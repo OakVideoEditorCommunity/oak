@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.move_clip.json",
+  "title": "timeline.move_clip",
+  "type": "object",
+  "description": "Move a clip to a new start time and/or onto another track of the same type; the clip length is preserved and overlapping targets are rejected. 1:1 mapping to OPP/1 section 8.4 timeline.move_clip (legacy 'new_in'/'to_index' renamed to OPP's 'in'/'track').",
+  "properties": {
+    "clip": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Clip to move."
+    },
+    "in": {
+      "description": "New start time on the sequence timeline (required by OPP/1 section 8.4; re-send the current start for a track-only move).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    },
+    "track": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional destination track id (same track type)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "clip",
+    "in"
+  ]
+}

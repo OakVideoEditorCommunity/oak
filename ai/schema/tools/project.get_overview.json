@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/project.get_overview.json",
+  "title": "project.get_overview",
+  "type": "object",
+  "description": "One-shot context read: project info plus the complete timeline structure (sequences, tracks, clips with in/out/media-in, enabled flags). Maps 1:2 to OPP/1 section 8.2 project.get_info + section 8.4 timeline.get_structure; call it before the first edit of a session.",
+  "properties": {},
+  "additionalProperties": false
+}

@@ -222,6 +222,7 @@ define_actions! {
 	FocusTimeline { cpp: "focustimeline", i18n: "menu.window.timeline", keys: [], route: Global, menu_id: 607 };
 	FocusEffectLibrary { cpp: "focuseffectlibrary", i18n: "menu.window.effect_library", keys: [], route: Global, menu_id: 608 };
 	FocusMulticam { cpp: "focusmulticam", i18n: "menu.window.multicam", keys: [], route: Global, menu_id: 609 };
+	FocusAiAssistant { cpp: "focusaiassistant", i18n: "menu.window.ai_assistant", keys: [], route: Global, menu_id: 631 };
 	// The multicam wizard was cut from the v0.5 surface: the menu item and
 	// the action-search entry are gone (menu_id 0 = hidden, like the
 	// panel-context hotkeys), the engine pathway stays for a future

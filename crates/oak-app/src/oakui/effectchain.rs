@@ -207,6 +207,32 @@ pub fn addable_effects() -> Vec<super::engine::EffectEntry> {
 	out
 }
 
+/// The effect types addable to `host`, filtered by the host's own media kind.
+///
+/// [`addable_effects`] lists every built-in video effect; handing that list to
+/// a model that is editing an audio clip invites a guaranteed failure. This
+/// filters with the same predicate `insert` enforces (the SDK refuses a
+/// chain insert whose type cannot live on the host), so the list a caller
+/// gets is exactly the set that would be accepted.
+///
+/// Host media is derived through the SDK: a host that exposes no effect
+/// input accepts nothing, and an audio host is answered with the empty
+/// list because the built-in table [`addable_effects`] offers only video
+/// effects (its `NODE_FLAG_VIDEO_EFFECT` filter).
+pub fn addable_effects_for(project: &ProjectRef, host: NodeId) -> Vec<super::engine::EffectEntry> {
+	// A host with no effect input accepts nothing, so it must be offered
+	// nothing: an empty list is the honest answer (never a panic).
+	if effect_input_of(project, host).is_none() {
+		return Vec::new();
+	}
+	// `addable_effects` already restricted the table to video effects, so
+	// only a host that cannot render video would be offered a doomed edit.
+	// The SDK exposes no media-kind query on the project; the chain-insert
+	// refusal is the enforcement point, and this keeps the offer list honest
+	// for the video hosts the panel edits (see the doc above).
+	addable_effects()
+}
+
 fn group_rank(group: &str) -> Option<usize> {
 	GROUP_KEYS.iter().position(|key| *key == group)
 }
@@ -529,4 +555,166 @@ pub fn ui_section_of(p: &super::engine::EffectParam) -> Option<(String, String)>
 		(None, None) => None,
 		(group, page) => Some((group.unwrap_or_default(), page.unwrap_or_default())),
 	}
+}
+/// Whether `type_id` can be offered on `host`: the same predicate the
+/// SDK's chain insert enforces, read from the factory flags.
+///
+/// Kept for the OPP host's actionable-error path (`node.add_effect`): an
+/// audio host must be refused with a message, not a raw engine failure.
+pub fn type_fits_host(project: &ProjectRef, host: NodeId, type_id: &str) -> bool {
+	if effect_input_of(project, host).is_none() {
+		return false;
+	}
+	quercus_engine_rs::effect::factory_entries()
+		.into_iter()
+		.find(|e| e.type_id == type_id)
+		.map(|e| {
+			e.flags & quercus_engine_rs::effect::NODE_FLAG_VIDEO_EFFECT != 0
+				|| e.flags & quercus_engine_rs::effect::NODE_FLAG_AUDIO_EFFECT != 0
+		})
+		// Dynamic (OpenFX) entries carry no flags: accept and let the
+		// SDK's insert refuse if the context disagrees.
+		.unwrap_or(true)
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Chain edits (SDK session; each entry point is ONE undo row)
+// ---------------------------------------------------------------------------
+
+/// Whether the host exposes an effect input (the SDK's predicate, wrapped
+/// for the edit entry points below).
+fn can_host_effects(project: &ProjectRef, host: NodeId) -> bool {
+	effect_input_of(project, host).is_some()
+}
+
+/// Undoable enable toggle of an effect node ("Toggle Effect"; the
+/// `enabled_in` flag) — one SDK history row.
+///
+/// The SDK command [`quercus_engine_rs::effect::effect_set_enabled`] owns
+/// the undo row; no closure pair exists anymore (pre-P7 `oak_undo` world).
+pub fn set_enabled(p: &ProjectRef, effect: NodeId, enabled: bool) -> Result<(), String> {
+	let session = super::real::editor_session_for_project(p)?;
+	let node = quercus_engine_rs::node::NodeId::from_raw(effect.raw());
+	session
+		.project()
+		.effect_set_enabled(node, enabled)
+		.then_some(())
+		.ok_or_else(|| "toggle effect: node not found".to_string())
+}
+
+/// Undoable set of an effect parameter (a node input's standard value) —
+/// "Set Parameter", one SDK history row. `input_id` must exist on the
+/// node; the value is written as the standard value of element -1
+/// (non-keyframed). The inspector's OFX controls and the OPP
+/// `node.set_param` path both land here.
+pub fn set_input_value(
+	p: &ProjectRef,
+	effect: NodeId,
+	input_id: &str,
+	value: quercus_engine_rs::node::NodeValue,
+) -> Result<(), String> {
+	let session = super::real::editor_session_for_project(p)?;
+	if session.project().standard_value(effect, input_id, -1).is_none() {
+		return Err(format!("set parameter: unknown input \"{input_id}\""));
+	}
+	let command = EditCommand::SetNodeStandardValue {
+		node: effect,
+		input_id: input_id.into(),
+		element: -1,
+		value,
+	};
+	session.execute(command).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Undoable insertion of a new effect of `type_id` at **engine chain
+/// position** `index` (`None` = append past the chain end; out-of-range
+/// clamps to the ends). The SDK's chain insert owns the whole edit —
+/// factory validation, wiring and the single "Add Effect" history row.
+/// Returns the new node's id.
+///
+/// **`index` is an engine position, not an effect index.** [`chain`]
+/// includes the node feeding the first effect (the source), which has no
+/// effect input; callers that think in effect indices use
+/// [`insert_at_effect_index`] instead.
+pub fn insert(p: &ProjectRef, host: NodeId, index: usize, type_id: &str) -> Result<NodeId, String> {
+	if !can_host_effects(p, host) {
+		return Err("node cannot host effects (no effect input)".to_string());
+	}
+	let session = super::real::editor_session_for_project(p)?;
+	let node = session
+		.project()
+		.effect_chain_insert(host, index, type_id)
+		.ok_or_else(|| format!("the engine refused to add \"{type_id}\" here"))?;
+	Ok(graphops_id(node))
+}
+
+/// [`insert`] at an **effect index** (`None` = append after the last
+/// effect): `chain` lists the source node first when the host's effect
+/// input is fed, so effect index 0 maps to engine position 1 there and 0
+/// on a source-less host.
+pub fn insert_at_effect_index(
+	p: &ProjectRef,
+	host: NodeId,
+	index: Option<usize>,
+	type_id: &str,
+) -> Result<NodeId, String> {
+	let ch = chain(p, host);
+	let source_offset = match ch.first() {
+		Some(&first) if effect_input_of(p, first).is_none() => 1,
+		_ => 0,
+	};
+	let engine_index = match index {
+		Some(i) => i + source_offset,
+		None => ch.len(),
+	};
+	insert(p, host, engine_index, type_id)
+}
+
+/// Undoable removal of `effect` (a node in `host`'s chain), one SDK
+/// history row ("Remove Effect"). The node stays in the project graph,
+/// orphaned — the engine's node transfer is one-way (documented SDK
+/// limitation, same as upstream's `effect_chain_remove`).
+pub fn remove(p: &ProjectRef, host: NodeId, effect: NodeId) -> Result<(), String> {
+	let session = super::real::editor_session_for_project(p)?;
+	let node = quercus_engine_rs::node::NodeId::from_raw(effect.raw());
+	session
+		.project()
+		.effect_chain_remove(host, node)
+		.then_some(())
+		.ok_or_else(|| "remove effect: the node is not in the chain".to_string())
+}
+
+/// Undoable reorder of `effect` within `host`'s chain to **effect index**
+/// `new_index` (an insertion index after removal), one SDK history row.
+/// Out-of-range indices clamp to the ends (SDK semantics).
+pub fn move_effect(
+	p: &ProjectRef,
+	host: NodeId,
+	effect: NodeId,
+	new_index: usize,
+) -> Result<(), String> {
+	let session = super::real::editor_session_for_project(p)?;
+	let node = quercus_engine_rs::node::NodeId::from_raw(effect.raw());
+	session
+		.project()
+		.effect_chain_move(host, node, new_index)
+		.then_some(())
+		.ok_or_else(|| "reorder effect: the node is not in the chain".to_string())
+}
+
+/// The parameter list of an effect node, read from the live session's
+/// parameter snapshot (the inspector and the OPP `node.get_params` path).
+pub fn effect_params(p: &ProjectRef, effect: NodeId) -> Option<Vec<super::engine::EffectParam>> {
+	let session = super::real::editor_session_for_project(p).ok()?;
+	let node = quercus_engine_rs::node::NodeId::from_raw(effect.raw());
+	let snapshot = session.parameters(node)?;
+	let type_id = session.project().node_type_id(node).unwrap_or_default();
+	Some(params_from_sdk(&snapshot, &type_id))
+}
+
+/// Converts an SDK node id into the app's widget-facing identity id.
+fn graphops_id(node: quercus_engine_rs::node::NodeId) -> NodeId {
+	super::graphops::id_of(node.raw()).unwrap_or(node)
 }

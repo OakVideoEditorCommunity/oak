@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/node.list_types.json",
+  "title": "node.list_types",
+  "type": "object",
+  "description": "List node/effect types; when 'node' is given, also return that instance's parameters with their live value, default, min/max and choices. Maps 1:2 to OPP/1 section 8.5 node.list_types + node.get_params (the legacy 'list_effects' tool).",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "effect",
+        "transition",
+        "all"
+      ],
+      "description": "Filter by category (OPP/1 section 8.5); defaults to all."
+    },
+    "node": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional node instance id; when present the result also includes that node's parameters (min/max/choices) as returned by OPP/1 node.get_params."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.place_clip.json",
+  "title": "timeline.place_clip",
+  "type": "object",
+  "description": "Place footage on a track at sequence time 'in', starting from 'media_in'. 1:1 mapping to OPP/1 section 8.4 timeline.place_clip: there is deliberately no 'out' parameter - the clip runs to the end of the footage and is shortened afterwards with timeline.trim_clip (the legacy 'out', 'track_kind', 'track_index', 'with_audio' and 'name' extras are not part of the frozen face).",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opaque entity id (OPP/1 section 5 EntityId): footage / sequence / track / clip / node id. Never parse its format; ids are invalidated on project reload. Defaults to the active sequence."
+    },
+    "track": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target track id (OPP/1 section 8.4); read ids from project.get_overview or timeline.add_track."
+    },
+    "footage": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Footage id from media.import_footage / media.list_footage."
+    },
+    "in": {
+      "description": "Clip start on the sequence timeline (rational seconds or frame index).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    },
+    "media_in": {
+      "description": "In-point inside the source media; defaults to 0. Frame indexes are quantized to the footage frame rate.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "track",
+    "footage",
+    "in"
+  ]
+}

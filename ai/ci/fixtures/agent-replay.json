@@ -1,0 +1,13 @@
+{
+	"description": "T6 agent 回放（复用 T3 stub）：真实 pi 进程 + MCP 工具面，模型 stub 按本脚本回放；未用真实 LLM。",
+	"steps": [
+		{ "calls": [{ "name": "mcp__oak__project_open", "arguments": { "name": "ci-replay", "fps": 30 } }] },
+		{ "calls": [{ "name": "mcp__oak__media_import_footage", "arguments": { "paths": ["/tmp/oak-ci-footage-a.mp4"] } }] },
+		{ "calls": [{ "name": "mcp__oak__timeline_add_track", "arguments": { "type": "video" } }] },
+		{ "calls": [{ "name": "mcp__oak__timeline_place_clip", "arguments": { "track": "track-1", "footage": "footage-1", "in": 0 } }] },
+		{ "calls": [{ "name": "mcp__oak__render_get_frame", "arguments": { "sequence": "sequence-1", "time": { "num": 0, "den": 1 }, "format": "png", "max_size": { "width": 16, "height": 16 } } }] },
+		{ "calls": [{ "name": "mcp__oak__project_get_overview", "arguments": {} }] },
+		{ "say": "回放完成：建工程 → 导素材 → 铺轨 → 取帧 → 读总览。" }
+	],
+	"final": { "say": "脚本已走完" }
+}

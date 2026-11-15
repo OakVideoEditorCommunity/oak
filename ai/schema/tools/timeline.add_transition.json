@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/timeline.add_transition.json",
+  "title": "timeline.add_transition",
+  "type": "object",
+  "description": "Attach a transition to one edge of a clip, consuming 'duration'. 1:1 mapping to OPP/1 section 8.4 timeline.add_transition; 'type' uses the engine transition shader ids crossdissolve|fade|wipe|slide (crates/oak-node/src/nodes/transitions.rs TYPE_NAMES/SHADER_IDS). The legacy tool only offered 'dissolve', which maps to 'crossdissolve'.",
+  "properties": {
+    "clip": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Clip that owns the transition edge."
+    },
+    "side": {
+      "type": "string",
+      "enum": [
+        "in",
+        "out"
+      ],
+      "description": "Edge receiving the transition (OPP/1 section 8.4)."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "crossdissolve",
+        "fade",
+        "wipe",
+        "slide"
+      ],
+      "description": "Transition style, engine shader id (crates/oak-node/src/nodes/transitions.rs)."
+    },
+    "duration": {
+      "description": "Total transition length; each side consumes half.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "num": {
+              "type": "integer",
+              "description": "Numerator, in seconds (may be negative)."
+            },
+            "den": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+            }
+          },
+          "required": [
+            "num",
+            "den"
+          ],
+          "additionalProperties": false,
+          "description": "Rational seconds {num, den}, den > 0."
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "clip",
+    "side",
+    "type",
+    "duration"
+  ]
+}

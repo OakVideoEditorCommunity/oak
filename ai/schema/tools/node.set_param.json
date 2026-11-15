@@ -1,0 +1,373 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/node.set_param.json",
+  "title": "node.set_param",
+  "type": "object",
+  "description": "Set one parameter on an effect node. 1:1 mapping to OPP/1 section 8.5 node.set_param. Numeric ranges for unambiguous keys are backfilled from crates/oak-node/src/nodes/*.rs via conditional constraints; keys whose declared ranges differ across node types stay open and must be read back with node.list_types (OPP node.get_params) before setting.",
+  "properties": {
+    "node": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Effect node instance id (from node.add_effect / node.list_types)."
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Parameter key, e.g. 'temperature_in', 'saturation_in', 'radius_in'. Open set - keys live per node type."
+    },
+    "value": {
+      "description": "Parameter value; JSON type follows OPP/1 section 8.5: float/int -> number, bool -> boolean, string/choice -> string, color -> \"#RRGGBB\"/\"#RRGGBBAA\" string, vec2 -> [x, y].",
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "vec2 [x, y]."
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "node",
+    "key",
+    "value"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "temperature_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 1000,
+            "maximum": 40000
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: whitebalance.rs declares min = 1000.0, max = 40000.0 (Kelvin); unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "tint_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: whitebalance.rs declares min = -1.0, max = 1.0; unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "saturation_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 4
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: saturation.rs and colorcorrect.rs both declare min = 0.0, max = 4.0."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "mix_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: dissolve.rs declares min = 0.0, max = 1.0; unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "left_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: cropdistortnode.rs declares min = 0.0, max = 1.0 (percentage); unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "top_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: cropdistortnode.rs declares min = 0.0, max = 1.0 (percentage); unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "right_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: cropdistortnode.rs declares min = 0.0, max = 1.0 (percentage); unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "bottom_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: cropdistortnode.rs declares min = 0.0, max = 1.0 (percentage); unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "opacity_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: min = 0.0 in opacity.rs / stroke.rs / dropshadowfilter.rs; dropshadowfilter.rs declares no max, so the upper bound stays open."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "radius_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: min = 0.0 in blur.rs / erode.rs / stroke.rs / swirldistortnode.rs / dropshadowfilter.rs / dilate.rs; erode.rs and dilate.rs cap at 7.0 but blur.rs does not, so the upper bound stays open."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "volume_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: volume.rs declares min = 0.0, no max; unique effect key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "threshold_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: edgedetect.rs declares min = 0.0, no max; unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "strength_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: noise.rs declares min = 0, no max; unique key."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "feather_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: min = 0.0 in cropdistortnode.rs and mask.rs; no max declared."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key": {
+            "const": "lower_tolerance_in"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "then": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "description": "Range backfilled from crates/oak-node/src/nodes: chromakey.rs declares min = 0.0, no max; unique key."
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "clip": "clip-7",
+  "side": "out",
+  "type": "crossdissolve",
+  "duration": {
+    "num": 12,
+    "den": 25
+  }
+}

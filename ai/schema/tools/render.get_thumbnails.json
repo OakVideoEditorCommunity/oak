@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tools/render.get_thumbnails.json",
+  "title": "render.get_thumbnails",
+  "type": "object",
+  "description": "Render 'count' equally spaced frames over the TimeRange 'range' (contact-sheet sampling for content-aware scanning). 1:1 mapping to OPP/1 section 8.6 render.get_thumbnails; the legacy 'scan_timeline' (timeline range) and 'make_contact_sheet' (footage range) tools were merged into this single face by choosing the target.",
+  "properties": {
+    "sequence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Timeline target (exactly one of sequence/footage)."
+    },
+    "footage": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw media target (exactly one of sequence/footage)."
+    },
+    "range": {
+      "type": "object",
+      "description": "Sampling interval on the target timeline, left-closed right-open.",
+      "properties": {
+        "in": {
+          "description": "Time value. Exactly two accepted forms: (a) rational seconds {num, den} (OPP/1 section 5 Rational - the only wire form of the protocol), or (b) a non-negative integer frame index on the target frame grid. Bare floating-point seconds such as 1.5 are rejected by design; a frame rate like 29.97 must be written as {num: 30000, den: 1001}.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "num": {
+                  "type": "integer",
+                  "description": "Numerator, in seconds (may be negative)."
+                },
+                "den": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+                }
+              },
+              "required": [
+                "num",
+                "den"
+              ],
+              "additionalProperties": false,
+              "description": "Rational seconds {num, den}, den > 0."
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+            }
+          ]
+        },
+        "out": {
+          "description": "Time value. Exactly two accepted forms: (a) rational seconds {num, den} (OPP/1 section 5 Rational - the only wire form of the protocol), or (b) a non-negative integer frame index on the target frame grid. Bare floating-point seconds such as 1.5 are rejected by design; a frame rate like 29.97 must be written as {num: 30000, den: 1001}.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "num": {
+                  "type": "integer",
+                  "description": "Numerator, in seconds (may be negative)."
+                },
+                "den": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Denominator; must be > 0 (OPP/1 section 5 Rational)."
+                }
+              },
+              "required": [
+                "num",
+                "den"
+              ],
+              "additionalProperties": false,
+              "description": "Rational seconds {num, den}, den > 0."
+            },
+            {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Frame index (>= 0). The T1 adapter converts it to Rational using the active sequence/footage frame rate and quantizes to the frame grid."
+            }
+          ]
+        }
+      },
+      "required": [
+        "in",
+        "out"
+      ],
+      "additionalProperties": false
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64,
+      "description": "Number of equally spaced samples; hard cap 64 (OPP/1 section 8.6)."
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Thumbnail height in pixels; defaults to 180 (OPP/1 section 8.6)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "range",
+    "count"
+  ],
+  "allOf": [
+    {
+      "description": "Render target: exactly one of 'sequence' (timeline frame) or 'footage' (raw media frame). OPP/1 section 8.6 requires one of the two and returns INVALID_PARAMS when both are missing; T0 also rejects 'both present' because the protocol leaves that case unspecified (open item, see method-map.md).",
+      "oneOf": [
+        {
+          "required": [
+            "sequence"
+          ],
+          "not": {
+            "required": [
+              "footage"
+            ]
+          },
+          "description": "Timeline frame: render the composed sequence."
+        },
+        {
+          "required": [
+            "footage"
+          ],
+          "not": {
+            "required": [
+              "sequence"
+            ]
+          },
+          "description": "Raw media frame: render one footage file."
+        }
+      ]
+    }
+  ]
+}
