@@ -52,6 +52,17 @@ jobs:
         run: npm ci --prefer-offline --no-audit --no-fund
         working-directory: ai/agent
 
+      # ai/ci/run.sh runs every Rust suite with `--offline`. The MCP build
+      # below only warms oak-ai-tools/oak-ai-mcp, so a cold cargo cache left
+      # the replay crate's new dev-dependencies (fs4, ...) missing and the
+      # chain failed before compiling. Fetch all three manifests while the
+      # runner still has the network; the tests themselves stay offline.
+      - name: Fetch ai/ crate dependencies
+        run: |
+          cargo fetch --locked --manifest-path ai/oak-ai-tools/Cargo.toml
+          cargo fetch --locked --manifest-path ai/oak-ai-mcp/Cargo.toml
+          cargo fetch --locked --manifest-path ai/ci/Cargo.toml
+
       - name: Build MCP binary (default features, no engine)
         run: bash ai/agent/scripts/build-mcp.sh
 
