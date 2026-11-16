@@ -81,9 +81,10 @@
 - `PATH=/tmp/oak-ai-venv/bin:$PATH bash ai/ci/run.sh`：七段全部通过（schema、prescan、oak-ai-tools、oak-ai-mcp、ci-replay、agent-replay、workflow-lint）。
 - 静态 FFmpeg：已通过 `tooling/ffmpeg/build-ffmpeg.sh -j 8` 按项目脚本重建。
 - `cargo test --workspace --locked`（Oak）：通过，全部测试、CLI 与文档测试成功。
-- `cargo test --workspace --locked -- --skip zero_gpu_readbacks`（Quercus）：通过，除下述两个基线失败用例外的全部测试成功。
+- `cargo test --workspace --locked`（Quercus）：通过，全部测试与文档测试成功，无跳过用例。
 - 提交后复核：上述格式检查、Oak 全套件、Quercus 除基线失败项的测试以及 AI headless CI 均再次通过。
-- 基线对照：`pipeline_graph_playback_has_zero_gpu_readbacks` 与 `pipeline_layered_playback_has_zero_gpu_readbacks` 在 pristine HEAD worktree 中同样以 `0 != 3` 失败，确认不是本次修改引入；不修改无关测试预期。
+- Readback 测试修复：测试现同时覆盖 GPU surface import 与 staged upload 两条合法路径；导入帧不得重复上传，未导入帧按实际帧数上传，两个原失败用例均已通过。
+- `docs/zh/code-style.md` 已按维护者要求改为英文。
 
 ## 8. 提交记录
 
@@ -91,4 +92,5 @@
 |---|---|---|---|
 | Oak | `a7014b59d` | 既有文档修改 | 修正两个规划文档的交叉引用 |
 | Quercus | `7e2f077` | 码风整改 | 文件拆分、格式化及必要 CI 修复 |
+| Quercus | `97c075c` | CI 测试修复 | 覆盖零拷贝与 staged readback 路径 |
 | Oak | 当前 HEAD | 码风整改 | 文件拆分、格式化、进度文档、submodule 指针及必要 CI 修复 |

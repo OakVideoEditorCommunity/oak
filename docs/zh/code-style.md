@@ -1,74 +1,75 @@
-# Oak / Quercus 代码风格指南
+# Oak / Quercus Code Style Guide
 
-本文适用于 Oak 根仓库、独立 AI 工作区以及 Quercus 子仓库。目标是让代码易读、易拆分、易验证，而不是为了统一外观做无意义的机械改写。
+This guide applies to the Oak root repository, the standalone AI workspaces,
+and the Quercus submodule. The goal is readable, maintainable, and verifiable
+code, not mechanical rewrites that only make files look uniform.
 
-## 1. 格式化
+## 1. Formatting
 
-- Rust 代码提交前必须执行 `cargo fmt`，不要使用手工对齐代替 rustfmt。
-- Oak 主工作区执行：`cargo fmt --all`。
-- Quercus 工作区执行：`cargo fmt --all`。
-- 独立 AI 工作区分别执行：
+- Run `cargo fmt` before committing Rust code. Do not replace rustfmt with manual alignment.
+- Run `cargo fmt --all` in the Oak root workspace and in the Quercus workspace.
+- Format each standalone AI workspace separately:
   - `cargo fmt --all --manifest-path ai/oak-ai-tools/Cargo.toml`
   - `cargo fmt --all --manifest-path ai/oak-ai-mcp/Cargo.toml`
   - `cargo fmt --all --manifest-path ai/ci/Cargo.toml`
-- 不要并行执行多个会写入同一批文件的格式化命令，避免临时文件竞争。
-- 提交前可用对应的 `cargo fmt --all -- --check` 复查。
+- Do not run multiple formatters concurrently when they can write the same files.
+- Use the corresponding `cargo fmt --all -- --check` command to verify formatting before committing.
 
-## 2. 文件与模块
+## 2. Files and Modules
 
-- 文件尽量不超过 500 行。
-- 超过 1000 行且存在自然职责边界的文件应拆分模块；不要为了压行数切断高度耦合的语义单元。
-- 大型测试模块可以从实现文件移出，保持测试名称、模块路径和覆盖行为不变。
-- 可复用的领域逻辑优先按职责拆分，例如解析、状态管理、后端适配、UI 和测试。
-- 语义上确实应保持一个整体的文件可以超过 1000 行，但应在整改记录或代码评审中说明理由。
-- 生成的锁文件、快照和第三方协议头不按源码行数机械拆分。
-- vendored 代码也要评审，但修改应与本地补丁职责一致，避免无谓增加后续同步成本。
+- Keep files below 500 lines where practical.
+- Split files above 1000 lines when they have a clear responsibility boundary. Do not cut tightly coupled logic merely to satisfy a line count.
+- Large test modules may move out of implementation files without changing test names, module paths, or behavior.
+- Split reusable domain logic by responsibility, such as parsing, state management, backend adapters, UI, and tests.
+- A file may remain above 1000 lines when it is genuinely one semantic unit. Document the reason in the refactor log or code review.
+- Do not mechanically split generated lockfiles, snapshots, or third-party protocol headers.
+- Review vendored code as well, but keep changes consistent with local patch responsibilities and avoid unnecessary synchronization costs.
 
-## 3. 导入与路径
+## 3. Imports and Paths
 
-- 全限定路径尽可能改为 `use` 导入，即使某个符号只使用一次也不必因此保留长路径。
-- 导入必须放在实际使用它的模块作用域内；函数内的局部 `use` 不能当作整个模块的导入。
-- 优先保持符号名与领域含义清晰。模块导入或符号导入都可使用，但不要为了短路径牺牲可读性。
-- `thiserror::Error`、名称冲突、宏路径、文档链接和条件编译等特殊场景可以保留全限定路径。
-- 同一模块不要重复导入同一符号，也不要引入不同来源的同名符号后再依赖猜测解析。
-- 批量整理路径时必须跳过字符串、注释和宏内容，并通过编译验证；不能只做全局文本替换。
-- 不使用 glob 导入掩盖新引入的名称冲突。已有 `use super::*` 等模式不因本次规则机械扩张。
+- Prefer `use` imports over fully qualified paths where practical, even for symbols used only once.
+- Place imports in the module scope that actually uses them. A local `use` inside a function does not cover the whole module.
+- Choose module or symbol imports that preserve clear domain meaning. Do not sacrifice readability merely to shorten a path.
+- Keep fully qualified paths for `thiserror::Error`, naming conflicts, macro paths, documentation links, conditional compilation, and other special resolution cases.
+- Do not import the same symbol twice in one module or rely on ambiguous resolution between same-named symbols from different sources.
+- Bulk path rewrites must skip strings, comments, and macro bodies and must be validated by the compiler. Never rely on global text replacement alone.
+- Do not use glob imports to hide naming conflicts. Do not mechanically expand existing patterns such as `use super::*`.
 
-## 4. 依赖选择
+## 4. Dependency Selection
 
-- 有成熟、维护良好且许可证兼容的库时，优先使用成熟库，不重复实现协议解析、序列化、错误处理、并发、时间、加密或平台适配。
-- 新增依赖前先搜索 Oak、Quercus 和各独立工作区的现有依赖，避免为同一功能引入重复实现。
-- 优先复用已有依赖及其特性，例如统一使用现有的错误派生、JSON、异步运行时、MCP、文件锁和进程管理方案。
-- 不因依赖名称相近就同时引入多个版本或多个实现；确需共存时应在评审中说明兼容边界。
-- 新依赖应评估维护状态、安全记录、许可证、平台支持、MSRV、构建成本、二进制体积和离线 CI 可复现性。
-- 不要为几十行简单领域逻辑强行引入大型框架；成熟库优先不等于依赖数量越多越好。
-- 锁定版本并更新相应锁文件。独立 AI 工作区不能假设根工作区的依赖解析会自动覆盖自己。
+- Prefer mature, maintained, license-compatible libraries over new implementations of protocol parsing, serialization, error handling, concurrency, time, cryptography, or platform integration.
+- Search Oak, Quercus, and every standalone workspace before adding a dependency. Avoid introducing a second implementation of the same functionality.
+- Reuse existing dependencies and features where possible, including the established error derive, JSON, async runtime, MCP, file-locking, and process-management solutions.
+- Do not add multiple versions or implementations of similar dependencies without documenting the compatibility boundary and the reason for coexistence.
+- Evaluate maintenance status, security history, licensing, platform support, MSRV, build cost, binary size, and reproducibility in offline CI.
+- Do not introduce a large framework for a small domain-specific helper. Preferring mature libraries does not mean maximizing dependency count.
+- Pin versions and update the relevant lockfiles. Standalone AI workspaces must not assume that the root workspace resolves their dependencies.
 
-## 5. 实现风格
+## 5. Implementation Style
 
-- 优先修复根因和复用现有抽象，不增加平行的临时通道。
-- 保持模块边界与现有代码一致；码风整改不得夹带功能变化。
-- 名称应表达职责，避免无意义的缩写和重复包装。
-- 错误应保留结构化上下文，不用静默降级、空实现或假成功掩盖缺失能力。
-- 注释和文档用于说明约束与原因，不重复逐行翻译代码。
-- 不为码风修改调整公共 API、测试语义、配置默认值或资源内容。
+- Fix root causes and reuse existing abstractions instead of adding parallel temporary paths.
+- Keep module boundaries consistent with the codebase. Do not mix behavior changes into style-only refactors.
+- Use names that communicate responsibility and avoid unclear abbreviations and redundant wrappers.
+- Preserve structured error context. Do not hide missing capabilities behind silent fallbacks, empty implementations, or false success.
+- Use comments and documentation to explain constraints and rationale rather than translating code line by line.
+- Do not change public APIs, test semantics, configuration defaults, or resource contents in style-only changes.
 
-## 6. 测试与提交
+## 6. Tests and Commits
 
-- 先运行与修改文件最相关的测试，再运行工作区测试和对应 CI 的本地等价命令。
-- 测试外移后必须编译测试目标，不能只构建库目标；私有项可见性是最容易受影响的边界。
-- 路径整理后必须处理编译错误和新增警告，确认没有局部作用域或条件编译误判。
-- AI 无头链应保持无网络、无密钥、可回放；需要下载依赖的步骤与离线测试步骤分开。
-- 码风修改单独提交，不与功能开发混合。
-- 整改导致的 CI 修复纳入同一码风提交；无关失败应记录，不要顺手修改无关功能。
-- 提交中不得包含用户已有但未要求纳入的文件。
+- Run the tests most relevant to the changed files first, then workspace tests and the local equivalent of the affected CI jobs.
+- After moving tests, compile the test targets, not only the library. Private-item visibility is a common failure point.
+- After path cleanup, fix compiler errors and new warnings, especially mistakes involving local scopes and conditional compilation.
+- Keep AI headless tests offline, key-free, and replayable. Separate dependency downloads from offline test execution.
+- Keep style changes in dedicated commits and do not mix them with feature work.
+- Include CI fixes caused by the refactor in the same style commit. Record unrelated failures without changing unrelated functionality.
+- Do not include pre-existing user files that were not explicitly requested in the commit.
 
-## 7. 推荐检查清单
+## 7. Review Checklist
 
-1. 已扫描本次要求覆盖的全部仓库，而非只检查编辑器打开的文件。
-2. 已完成所有适用工作区的 `cargo fmt`。
-3. 超长文件均有拆分结果或明确保留理由。
-4. 全限定路径均已转换或有冲突/特殊解析的保留理由。
-5. 未新增功能重复的依赖，未绕过现有成熟实现。
-6. 相关测试、工作区测试构建及 AI headless CI 均已验证。
-7. 码风提交不包含功能修改、临时脚本、构建产物或未授权的既有文件。
+1. The change covers every required repository, not just files open in the editor.
+2. All applicable workspaces have been formatted with `cargo fmt`.
+3. Oversized files have either been split appropriately or have a documented reason to remain intact.
+4. Fully qualified paths have been converted where safe, with conflicts and special resolution cases documented.
+5. No duplicate functionality or unnecessary dependencies have been introduced, and existing mature implementations are reused.
+6. Relevant tests, workspace test builds, and AI headless CI have passed.
+7. The style commit contains no feature changes, temporary scripts, build artifacts, or unauthorized pre-existing files.
