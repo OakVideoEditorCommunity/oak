@@ -1,5 +1,7 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
 
+use std::env;
+use std::path;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo::rustc-check-cfg=cfg(gles)");
@@ -11,12 +13,12 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(gpui_leak_detection)");
     println!("cargo::rerun-if-env-changed=GPUI_LEAK_DETECTION");
     let requested_by_environment =
-        std::env::var_os("GPUI_LEAK_DETECTION").is_some_and(|value| !value.is_empty());
-    if requested_by_environment || std::env::var_os("CARGO_FEATURE_LEAK_DETECTION").is_some() {
+        env::var_os("GPUI_LEAK_DETECTION").is_some_and(|value| !value.is_empty());
+    if requested_by_environment || env::var_os("CARGO_FEATURE_LEAK_DETECTION").is_some() {
         println!("cargo::rustc-cfg=gpui_leak_detection");
     }
 
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
     if target_os == "windows" {
         #[cfg(feature = "windows-manifest")]
@@ -26,7 +28,7 @@ fn main() {
 
 #[cfg(feature = "windows-manifest")]
 fn embed_resource() {
-    let resource_dir = std::path::Path::new("resources/windows");
+    let resource_dir = path::Path::new("resources/windows");
     let manifest = resource_dir.join("gpui.manifest.xml");
     let rc_file = resource_dir.join("gpui.rc");
     println!("cargo:rerun-if-changed={}", manifest.display());

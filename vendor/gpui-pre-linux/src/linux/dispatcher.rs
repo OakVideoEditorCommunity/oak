@@ -1,3 +1,5 @@
+use gpui::queue;
+use std::error;
 use calloop::{
     EventLoop, PostAction,
     channel::{self, Sender},
@@ -174,7 +176,7 @@ impl<T> PriorityQueueCalloopSender<T> {
         Self { sender: tx, ping }
     }
 
-    fn send(&self, priority: Priority, item: T) -> Result<(), gpui::queue::SendError<T>> {
+    fn send(&self, priority: Priority, item: T) -> Result<(), queue::SendError<T>> {
         let res = self.sender.send(priority, item);
         if res.is_ok() {
             self.ping.ping();
@@ -224,9 +226,9 @@ impl std::fmt::Display for ChannelError {
     }
 }
 
-impl std::error::Error for ChannelError {
+impl error::Error for ChannelError {
     #[cfg_attr(feature = "nightly_coverage", coverage(off))]
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         Some(&self.0)
     }
 }

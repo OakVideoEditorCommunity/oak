@@ -4,13 +4,14 @@
 //! Engine routing (`HostServices`) lands in P1.2 — until then unknown
 //! plugin→host requests answer `METHOD_NOT_FOUND`.
 
-use crate::protocol::{ErrorObject, MsgId, Request, Response, METHOD_NOT_FOUND};
-use serde_json::{json, Value};
+use crate::protocol::{ErrorObject, METHOD_NOT_FOUND, MsgId, Request, Response};
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::error;
 use std::fmt;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
 use std::time::Duration;
 
 /// Protocol default request timeout (§2: SDK 默认 120 s).
@@ -49,7 +50,7 @@ impl fmt::Display for RpcError {
 	}
 }
 
-impl std::error::Error for RpcError {}
+impl error::Error for RpcError {}
 
 impl From<ErrorObject> for RpcError {
 	fn from(e: ErrorObject) -> Self {
@@ -130,8 +131,10 @@ impl HostSession {
 
 	/// Fail every in-flight call (crash / restart: §4.2 「所有 id 与事务作废」).
 	pub fn abort_all(&self, reason: RpcError) -> usize {
-		let drained: Vec<Sender<Result<Value, RpcError>>> =
-			HostSession::lock(&self.pending).drain().map(|(_, tx)| tx).collect();
+		let drained: Vec<Sender<Result<Value, RpcError>>> = HostSession::lock(&self.pending)
+			.drain()
+			.map(|(_, tx)| tx)
+			.collect();
 		let n = drained.len();
 		for tx in drained {
 			let _ = tx.send(Err(reason.clone()));
@@ -271,7 +274,11 @@ mod tests {
 		let s = HostSession::new();
 		let id = s.take_request_id();
 		let rx = s.register(&id);
-		s.complete(&Response::failure(id.clone(), -32001, "not in edit transaction"));
+		s.complete(&Response::failure(
+			id.clone(),
+			-32001,
+			"not in edit transaction",
+		));
 		match HostSession::wait(rx, Duration::from_secs(1)) {
 			Err(RpcError::Remote(e)) => assert_eq!(e.code, -32001),
 			other => panic!("expected Remote error, got {other:?}"),
@@ -310,7 +317,10 @@ mod tests {
 		// P1.2 holds this gate across mutation execution; it must be
 		// exclusive (std::sync::Mutex is non-reentrant → try_lock fails).
 		let guard = s.dispatch_gate.lock().unwrap();
-		assert!(s.dispatch_gate.try_lock().is_err(), "gate must be exclusive");
+		assert!(
+			s.dispatch_gate.try_lock().is_err(),
+			"gate must be exclusive"
+		);
 		drop(guard);
 		// subscribe / unsubscribe bookkeeping
 		let req = Request::new(
@@ -325,11 +335,19 @@ mod tests {
 			Some(json!({"granted": ["timeline.structure_changed", "export.progress"]}))
 		);
 		assert_eq!(s.subscriptions().len(), 2);
-		let req = Request::new(2u64, "events.unsubscribe", json!({"events": ["export.progress"]}));
+		let req = Request::new(
+			2u64,
+			"events.unsubscribe",
+			json!({"events": ["export.progress"]}),
+		);
 		let _ = handle_host_request(&s, &req);
 		assert_eq!(s.subscriptions(), vec!["timeline.structure_changed"]);
 		// session.log records
-		let req = Request::new(3u64, "session.log", json!({"level": "info", "message": "hi"}));
+		let req = Request::new(
+			3u64,
+			"session.log",
+			json!({"level": "info", "message": "hi"}),
+		);
 		assert!(handle_host_request(&s, &req).is_success());
 		assert_eq!(s.logs().len(), 1);
 		// unknown method → METHOD_NOT_FOUND

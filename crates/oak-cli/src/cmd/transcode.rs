@@ -26,10 +26,12 @@
 //! WAV when the source has audio streams.
 
 use quercus_engine_rs::codec;
-use quercus_engine_rs::editor::{EditorSession, TrackKind};
 use quercus_engine_rs::edit::EditCommand;
+use quercus_engine_rs::editor::{EditorSession, TrackKind};
 use quercus_engine_rs::node::{NodeId, Project};
 use quercus_engine_rs::types::{Rational, TimeRange};
+use std::fs;
+use std::path;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_USAGE};
 use crate::engine;
@@ -105,7 +107,15 @@ fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i
 	let frames = (src.duration * fr_num as f64 / fr_den as f64).round() as i64;
 	let frames = frames.max(1);
 
-	let assembly = match assemble_sequence(input, out_w, out_h, fr_num, fr_den, frames, src.audio_streams) {
+	let assembly = match assemble_sequence(
+		input,
+		out_w,
+		out_h,
+		fr_num,
+		fr_den,
+		frames,
+		src.audio_streams,
+	) {
 		Ok(a) => a,
 		Err(msg) => {
 			eprintln!("error: transcode: {msg}");
@@ -114,7 +124,16 @@ fn run_transcode(input: &str, out: &str, width: Option<&str>, is_ppm: bool) -> i
 	};
 
 	let code = if is_ppm {
-		transcode_ppm(&assembly, out, out_w, out_h, fr_num, fr_den, frames, src.audio_streams > 0)
+		transcode_ppm(
+			&assembly,
+			out,
+			out_w,
+			out_h,
+			fr_num,
+			fr_den,
+			frames,
+			src.audio_streams > 0,
+		)
 	} else {
 		transcode_mp4(&assembly, out, fr_num, fr_den, frames)
 	};
@@ -212,25 +231,26 @@ fn transcode_ppm(
 	frames: i64,
 	audio: bool,
 ) -> i32 {
-	if let Err(e) = std::fs::create_dir_all(out) {
+	if let Err(e) = fs::create_dir_all(out) {
 		eprintln!("error: transcode: cannot create output directory \"{out}\": {e}");
 		return EXIT_ERROR;
 	}
 
 	for i in 0..frames {
 		let time = Rational::new(i * i64::from(fr_den), i64::from(fr_num));
-		let frame = match engine::render_frame(&assembly.project, assembly.sequence, time, out_w, out_h) {
-			Ok(f) => f,
-			Err(e) => {
-				let msg = if e.is_empty() {
-					format!("frame {i} failed to render")
-				} else {
-					format!("frame {i} failed to render: {e}")
-				};
-				eprintln!("error: transcode: {msg}");
-				return EXIT_ERROR;
-			}
-		};
+		let frame =
+			match engine::render_frame(&assembly.project, assembly.sequence, time, out_w, out_h) {
+				Ok(f) => f,
+				Err(e) => {
+					let msg = if e.is_empty() {
+						format!("frame {i} failed to render")
+					} else {
+						format!("frame {i} failed to render: {e}")
+					};
+					eprintln!("error: transcode: {msg}");
+					return EXIT_ERROR;
+				}
+			};
 		if let Err(msg) = write_frame_ppm(&frame, out, i) {
 			eprintln!("error: transcode: {msg}");
 			return EXIT_ERROR;
@@ -253,7 +273,14 @@ fn transcode_ppm(
 /// `fr_num`/`fr_den` the frame rate. Returns `EXIT_OK` on success, or `EXIT_ERROR`
 /// after printing the export message on failure.
 fn transcode_mp4(assembly: &Assembly, out: &str, fr_num: i32, fr_den: i32, frames: i64) -> i32 {
-	match engine::export_sequence(&assembly.project, assembly.sequence, out, fr_num, fr_den, frames) {
+	match engine::export_sequence(
+		&assembly.project,
+		assembly.sequence,
+		out,
+		fr_num,
+		fr_den,
+		frames,
+	) {
 		Ok(()) => EXIT_OK,
 		Err(msg) => {
 			let err = if msg.is_empty() {
@@ -276,7 +303,7 @@ fn write_frame_ppm(frame: &engine::RenderedFrame, out: &str, index: i64) -> Resu
 			frame.width, frame.height, frame.linesize
 		));
 	}
-	let path = std::path::Path::new(out).join(format!("frame_{index:05}.ppm"));
+	let path = path::Path::new(out).join(format!("frame_{index:05}.ppm"));
 	ppm::write_ppm(
 		&path,
 		frame.width,
@@ -313,8 +340,14 @@ fn write_audio_wav(assembly: &Assembly, out: &str, frames: i64, fr_num: i32, fr_
 		return EXIT_ERROR;
 	}
 	let samples = (audio.data.len() / audio.channel_count as usize) as i64;
-	let path = std::path::Path::new(out).join("audio.wav");
-	if let Err(e) = wav::write_wav(&path, audio.sample_rate, audio.channel_count, samples, &audio.data) {
+	let path = path::Path::new(out).join("audio.wav");
+	if let Err(e) = wav::write_wav(
+		&path,
+		audio.sample_rate,
+		audio.channel_count,
+		samples,
+		&audio.data,
+	) {
 		eprintln!("error: transcode: cannot write \"{}\": {e}", path.display());
 		return EXIT_ERROR;
 	}
@@ -324,7 +357,7 @@ fn write_audio_wav(assembly: &Assembly, out: &str, frames: i64, fr_num: i32, fr_
 /// Probe the source media into a [`SourceInfo`] through the SDK codec
 /// registry.
 fn probe_source(path: &str) -> Result<SourceInfo, String> {
-	if !std::path::Path::new(path).exists() {
+	if !path::Path::new(path).exists() {
 		return Err(format!("file does not exist: {path}"));
 	}
 	let footage = codec::decoder_probe(None, path, None)

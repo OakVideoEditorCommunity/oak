@@ -21,7 +21,7 @@ use rmcp::model::{
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::server::Server;
 
@@ -32,7 +32,9 @@ pub struct OakMcp {
 
 impl OakMcp {
 	pub fn new(server: Server) -> Self {
-		Self { server: Mutex::new(server) }
+		Self {
+			server: Mutex::new(server),
+		}
 	}
 
 	/// Runs one JSON-RPC request through the frozen core and returns its

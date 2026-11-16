@@ -18,13 +18,15 @@
 //! behaves exactly as the SDK backend does, because both share
 //! [`crate::dispatch`] and [`crate::txn`].
 
+use fnv::FnvHasher;
 use std::collections::BTreeMap;
+use std::fs;
 
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::backend::EngineBackend;
-use crate::error::{ToolError, CODE_NOTHING_TO_UNDO, CODE_STATE, CODE_TRANSACTION};
+use crate::error::{CODE_NOTHING_TO_UNDO, CODE_STATE, CODE_TRANSACTION, ToolError};
 use crate::render::{Frame, frame_summary};
 use crate::timecode::{Rat, TimeContext, TimeValue};
 use crate::tools;
@@ -333,7 +335,7 @@ impl MockBackend {
 			return Err(ToolError::new(
 				CODE_STATE,
 				"the project has no sequence (call timeline.add_track after project.open \
-				 creates the default sequence)"
+				 creates the default sequence)",
 			));
 		}
 		Ok(0)
@@ -583,9 +585,7 @@ impl EngineBackend for MockBackend {
 			.clone()
 			.or_else(|| project.path.clone())
 			.ok_or_else(|| {
-				ToolError::invalid_params(
-					"no 'path' argument and the project has no file path yet",
-				)
+				ToolError::invalid_params("no 'path' argument and the project has no file path yet")
 			})?;
 		project.path = Some(path.clone());
 		Ok(json!({
@@ -659,11 +659,7 @@ impl EngineBackend for MockBackend {
 				})
 			})
 			.collect();
-		let footage: Vec<Value> = project
-			.footage
-			.iter()
-			.map(|f| footage_json(f))
-			.collect();
+		let footage: Vec<Value> = project.footage.iter().map(|f| footage_json(f)).collect();
 		Ok(json!({
 			"project": {
 				"name": project.name,
@@ -680,7 +676,7 @@ impl EngineBackend for MockBackend {
 
 	fn media_probe(&mut self, args: &Value) -> Result<Value, ToolError> {
 		let parsed = tools::media::parse_probe(args)?;
-		let meta = std::fs::metadata(&parsed.path).map_err(|err| {
+		let meta = fs::metadata(&parsed.path).map_err(|err| {
 			ToolError::not_found(format!("cannot probe '{}': {err}", parsed.path))
 		})?;
 		Ok(json!({
@@ -702,7 +698,7 @@ impl EngineBackend for MockBackend {
 		let mut imported = Vec::new();
 		let mut failed = Vec::new();
 		for path in &parsed.paths {
-			match std::fs::metadata(path) {
+			match fs::metadata(path) {
 				Ok(_) => {
 					let id = format!("footage-{}", project.counters.next("footage"));
 					let footage = Footage {
@@ -779,19 +775,14 @@ impl EngineBackend for MockBackend {
 			.find(|f| f.id == footage_id)
 			.ok_or_else(|| ToolError::not_found(format!("unknown footage '{footage_id}'")))?
 			.clone();
-		let in_ = self.rational_at(
-			TimeContext::Track(parsed.track.clone()),
-			parsed.in_,
-		)?;
+		let in_ = self.rational_at(TimeContext::Track(parsed.track.clone()), parsed.in_)?;
 		let in_ = Self::require_non_negative(in_, "clip start 'in'")?;
 		let media_in = match parsed.media_in {
 			Some(value) => self.rational_at(TimeContext::Footage(footage.id.clone()), value)?,
 			None => zero(),
 		};
 		if media_in < zero() {
-			return Err(ToolError::invalid_params(
-				"'media_in' must not be negative",
-			));
+			return Err(ToolError::invalid_params("'media_in' must not be negative"));
 		}
 		if media_in >= footage.duration {
 			return Err(ToolError::invalid_params(format!(
@@ -894,9 +885,7 @@ impl EngineBackend for MockBackend {
 			.iter()
 			.find(|f| f.id == footage_id)
 			.map(|f| f.duration)
-			.ok_or_else(|| {
-				ToolError::not_found(format!("footage '{footage_id}' disappeared"))
-			})?;
+			.ok_or_else(|| ToolError::not_found(format!("footage '{footage_id}' disappeared")))?;
 		let (new_in, new_out, new_media_in) = match parsed.side {
 			Side::In => {
 				if at >= old_out {
@@ -1021,10 +1010,7 @@ impl EngineBackend for MockBackend {
 	fn timeline_add_transition(&mut self, args: &Value) -> Result<Value, ToolError> {
 		let parsed = tools::timeline::parse_add_transition(args)?;
 		let (si, ti, ci) = self.locate_clip(&parsed.clip)?;
-		let at = self.rational_at(
-			TimeContext::Clip(parsed.clip.clone()),
-			parsed.duration,
-		)?;
+		let at = self.rational_at(TimeContext::Clip(parsed.clip.clone()), parsed.duration)?;
 		if at <= zero() {
 			return Err(ToolError::invalid_params(
 				"transition duration must be positive",
@@ -1055,9 +1041,7 @@ impl EngineBackend for MockBackend {
 		let parsed = tools::timeline::parse_add_marker(args)?;
 		let sequence = self.sequence_index(parsed.sequence.as_deref())?;
 		let at = self.rational_at(
-			TimeContext::Sequence(
-				self.require_project()?.sequences[sequence].id.clone(),
-			),
+			TimeContext::Sequence(self.require_project()?.sequences[sequence].id.clone()),
 			parsed.time,
 		)?;
 		let project = self.project_mut()?;
@@ -1121,7 +1105,9 @@ impl EngineBackend for MockBackend {
 		let (si, ti, ci, ei) = self.locate_effect(&parsed.node)?;
 		let project = self.project_mut()?;
 		let effect = &mut project.sequences[si].tracks[ti].clips[ci].effects[ei];
-		effect.params.insert(parsed.key.clone(), parsed.value.clone());
+		effect
+			.params
+			.insert(parsed.key.clone(), parsed.value.clone());
 		Ok(json!({
 			"node": parsed.node,
 			"key": parsed.key,
@@ -1155,7 +1141,10 @@ impl EngineBackend for MockBackend {
 			// mirror the engine factory table.
 			for (type_id, name) in [
 				("org.olivevideoeditor.Olive.blur", "Blur"),
-				("org.olivevideoeditor.Olive.brightnesscontrast", "Brightness & Contrast"),
+				(
+					"org.olivevideoeditor.Olive.brightnesscontrast",
+					"Brightness & Contrast",
+				),
 				("org.olivevideoeditor.Olive.sharpen", "Sharpen"),
 				("org.olivevideoeditor.Olive.opacity", "Opacity"),
 				("org.olivevideoeditor.Olive.volumegain", "Volume (Gain)"),
@@ -1195,11 +1184,7 @@ impl EngineBackend for MockBackend {
 		let parsed = tools::render_tools::parse_get_frame(args)?;
 		let at = match &parsed.target {
 			crate::tools::render_tools::FrameTarget::Sequence(id) => {
-				let index = self.sequence_index(if id.is_empty() {
-					None
-				} else {
-					Some(id)
-				})?;
+				let index = self.sequence_index(if id.is_empty() { None } else { Some(id) })?;
 				let at = self.rational_at(TimeContext::Sequence(id.clone()), parsed.time)?;
 				// The mock renders from the first video track that has
 				// a clip covering `at`.
@@ -1210,9 +1195,10 @@ impl EngineBackend for MockBackend {
 					.iter()
 					.filter(|t| t.kind == "video")
 					.find_map(|track| {
-						track.clips.iter().find(|clip| {
-							clip.in_ <= at && at < clip.out().unwrap_or(clip.in_)
-						})
+						track
+							.clips
+							.iter()
+							.find(|clip| clip.in_ <= at && at < clip.out().unwrap_or(clip.in_))
 					})
 					.and_then(|clip| {
 						project
@@ -1302,7 +1288,8 @@ impl EngineBackend for MockBackend {
 		let parsed = tools::render_tools::parse_get_audio_levels(args)?;
 		let sequence = self.sequence_index(Some(&parsed.sequence))?;
 		let sequence_id = self.require_project()?.sequences[sequence].id.clone();
-		let in_r = self.rational_at(TimeContext::Sequence(sequence_id.clone()), parsed.range.in_)?;
+		let in_r =
+			self.rational_at(TimeContext::Sequence(sequence_id.clone()), parsed.range.in_)?;
 		let out_r = self.rational_at(TimeContext::Sequence(sequence_id), parsed.range.out)?;
 		if out_r <= in_r {
 			return Err(ToolError::invalid_params(format!(
@@ -1338,9 +1325,10 @@ impl EngineBackend for MockBackend {
 	}
 
 	fn edit_undo(&mut self, _args: &Value) -> Result<Value, ToolError> {
-		let entry = self.undo_stack.pop().ok_or_else(|| {
-			ToolError::new(CODE_NOTHING_TO_UNDO, "the undo stack is empty")
-		})?;
+		let entry = self
+			.undo_stack
+			.pop()
+			.ok_or_else(|| ToolError::new(CODE_NOTHING_TO_UNDO, "the undo stack is empty"))?;
 		self.model = entry.snapshot;
 		Ok(json!({
 			"undone": entry.label,
@@ -1366,9 +1354,9 @@ fn footage_json(footage: &Footage) -> Value {
 /// Public so tests can assert a rendered pixel without re-deriving the
 /// rule; the mock never decodes the file.
 pub fn footage_rgb(path: &str) -> [f32; 4] {
-	let mut hasher = fnv::FnvHasher::default();
-		hasher.write(path.as_bytes());
-		let hash = hasher.finish();
+	let mut hasher = FnvHasher::default();
+	hasher.write(path.as_bytes());
+	let hash = hasher.finish();
 	let r = ((hash >> 16) & 0xff) as u8;
 	let g = ((hash >> 8) & 0xff) as u8;
 	let b = (hash & 0xff) as u8;
@@ -1383,79 +1371,7 @@ pub fn footage_rgb(path: &str) -> [f32; 4] {
 }
 
 #[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::dispatch::execute;
-	use serde_json::json;
-
-	/// Two real files on disk (the mock only checks existence).
-	fn temp_file(tag: &str) -> String {
-		let path = std::env::temp_dir().join(format!("oak_mock_{tag}.mp4"));
-		std::fs::write(&path, b"mock media fixture").expect("write fixture");
-		path.to_string_lossy().to_string()
-	}
-
-	#[test]
-	fn new_backend_has_no_project() {
-		let mut backend = MockBackend::new();
-		let err = backend.project_get_overview(&json!({})).unwrap_err();
-		assert_eq!(err.code, CODE_STATE);
-		assert!(!backend.can_undo());
-	}
-
-	#[test]
-	fn open_save_overview_round_trip() {
-		let mut backend = MockBackend::new();
-		let out = execute(&mut backend, "project.open", json!({"fps": 30, "name": "cut"}))
-			.expect("open");
-		assert_eq!(out["created"], true);
-		assert_eq!(out["project"]["fps"]["num"], 30);
-		let overview =
-			execute(&mut backend, "project.get_overview", json!({})).expect("overview");
-		assert_eq!(overview["sequences"].as_array().unwrap().len(), 1);
-		assert_eq!(overview["sequences"][0]["tracks"].as_array().unwrap().len(), 2);
-		let saved = execute(
-			&mut backend,
-			"project.save",
-			json!({"path": "/tmp/oak_mock_roundtrip.ove"}),
-		)
-		.expect("save");
-		assert_eq!(saved["saved"], true);
-	}
-
-	#[test]
-	fn import_requires_existing_files_and_reports_per_path() {
-		let mut backend = MockBackend::new();
-		execute(&mut backend, "project.open", json!({})).expect("open");
-		let good = temp_file("import_ok");
-		let out = execute(
-			&mut backend,
-			"media.import_footage",
-			json!({"paths": [good, "/no/such/file.mp4"]}),
-		)
-		.expect("import");
-		assert_eq!(out["footage"].as_array().unwrap().len(), 1);
-		assert_eq!(out["failed"].as_array().unwrap().len(), 1);
-		assert!(out["footage"][0]["synthetic"] == true);
-		let _ = std::fs::remove_file(&good);
-	}
-
-	#[test]
-	fn unknown_tool_and_schema_failures_stay_structured() {
-		let mut backend = MockBackend::new();
-		let err = execute(&mut backend, "nope.nope", json!({})).unwrap_err();
-		assert_eq!(err.tool.as_deref(), Some("nope.nope"));
-		assert_eq!(err.step.as_deref(), Some("lookup"));
-		let err = execute(
-			&mut backend,
-			"timeline.split_clip",
-			json!({"clip": "clip-1", "time": 1.5}),
-		)
-		.unwrap_err();
-		assert_eq!(err.step.as_deref(), Some("validate"));
-		assert!(err.txn.is_none(), "validation failures start no transaction");
-	}
-}
+mod tests;
 
 // ---------------------------------------------------------------------------
 // v2 extension face (`sequence.*`, T9.2)
@@ -1499,11 +1415,7 @@ impl MockBackend {
 			.get(index)
 			.ok_or_else(|| ToolError::invalid_params("the project has no sequence"))?;
 		let base = SequenceFormat::default_for(project, seq);
-		let current = project
-			.format
-			.get(&seq.id)
-			.cloned()
-			.unwrap_or(base);
+		let current = project.format.get(&seq.id).cloned().unwrap_or(base);
 		Ok((current, index))
 	}
 

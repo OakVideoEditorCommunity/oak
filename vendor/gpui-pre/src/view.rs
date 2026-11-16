@@ -1,3 +1,5 @@
+use core::panic;
+use crate::profiler;
 use crate::{
     AnyElement, AnyEntity, AnyWeakEntity, App, AvailableSpace, Bounds, ContentMask, Context,
     Element, ElementId, Entity, EntityId, GlobalElementId, InspectorElementId, IntoElement,
@@ -262,7 +264,7 @@ pub struct ViewElement<V: View> {
     #[cfg(feature = "profiler")]
     view_type_name: &'static str,
     #[cfg(debug_assertions)]
-    source: &'static core::panic::Location<'static>,
+    source: &'static panic::Location<'static>,
 }
 
 impl<V: View> ViewElement<V> {
@@ -285,7 +287,7 @@ impl<V: View> ViewElement<V> {
             view_type_name,
             view: Some(view),
             #[cfg(debug_assertions)]
-            source: core::panic::Location::caller(),
+            source: panic::Location::caller(),
         }
     }
 
@@ -333,7 +335,7 @@ impl<V: View> Element for ViewElement<V> {
         self.entity_id.map(ElementId::View)
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         #[cfg(debug_assertions)]
         return Some(self.source);
 
@@ -364,7 +366,7 @@ impl<V: View> Element for ViewElement<V> {
             window.window_profiler.end_view(
                 start,
                 self.view_type_name,
-                crate::profiler::ViewPhase::RequestLayout,
+                profiler::ViewPhase::RequestLayout,
             );
             layout
         } else {
@@ -411,7 +413,7 @@ impl<V: View> Element for ViewElement<V> {
             window.window_profiler.end_view(
                 start,
                 self.view_type_name,
-                crate::profiler::ViewPhase::Prepaint,
+                profiler::ViewPhase::Prepaint,
             );
             prepainted
         } else {
@@ -446,7 +448,7 @@ impl<V: View> Element for ViewElement<V> {
             window.window_profiler.end_view(
                 start,
                 self.view_type_name,
-                crate::profiler::ViewPhase::Paint,
+                profiler::ViewPhase::Paint,
             );
         } else {
             // Stateless path: just paint the element.

@@ -1,3 +1,6 @@
+use std::any;
+use std::mem;
+use std::process;
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
@@ -563,7 +566,7 @@ impl X11WindowState {
 
         // Collect errors during setup, so that window can be destroyed on failure.
         let setup_result = maybe!({
-            let pid = std::process::id();
+            let pid = process::id();
             check_reply(
                 || "X11 ChangeProperty for _NET_WM_PID failed.",
                 xcb.change_property32(
@@ -1187,7 +1190,7 @@ impl X11WindowStatePtr {
             // Expose events can present a frame before the refresh timer runs,
             // so every frame request must rebuild stale atlas references after recovery.
             request_frame_options.force_render |=
-                std::mem::take(&mut self.state.borrow_mut().force_render_after_recovery);
+                mem::take(&mut self.state.borrow_mut().force_render_after_recovery);
             fun(request_frame_options);
             self.callbacks.borrow_mut().request_frame = Some(fun);
         }
@@ -1352,7 +1355,7 @@ impl X11WindowStatePtr {
     }
 
     pub fn set_visibility(&self, visibility: WindowVisibility) {
-        if std::mem::replace(&mut self.state.borrow_mut().visibility, visibility) == visibility {
+        if mem::replace(&mut self.state.borrow_mut().visibility, visibility) == visibility {
             return;
         }
         let callback = self.callbacks.borrow_mut().visibility_change.take();
@@ -1983,7 +1986,7 @@ impl PlatformWindow for X11Window {
     /// The window renderer's wgpu device + queue, as
     /// `Box<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>` (Oak's 10-bit display
     /// path uploads viewer frames onto it).
-    fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
+    fn gpu_context(&self) -> Option<Box<dyn any::Any>> {
         let (device, queue) = self.0.state.borrow().renderer.as_ref()?.gpu_context();
         Some(Box::new((device, queue)))
     }

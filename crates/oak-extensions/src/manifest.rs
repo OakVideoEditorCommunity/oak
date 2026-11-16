@@ -7,10 +7,12 @@
 //! `restart.max = 5`, `restart.backoff_ms = 1000`, `env_passthrough =
 //! ["PATH","HOME"]`, `api = 1`.
 
-use crate::protocol::{PanelSpec, API_VERSION};
+use crate::protocol::{API_VERSION, PanelSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::error;
 use std::fmt;
+use std::fs;
 use std::path::Path;
 
 /// The frozen v1 capability set (protocol §7.1).
@@ -73,7 +75,10 @@ pub struct ProcessSpec {
 }
 
 fn default_env_passthrough() -> Vec<String> {
-	DEFAULT_ENV_PASSTHROUGH.iter().map(|s| s.to_string()).collect()
+	DEFAULT_ENV_PASSTHROUGH
+		.iter()
+		.map(|s| s.to_string())
+		.collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -129,7 +134,7 @@ impl fmt::Display for ManifestError {
 	}
 }
 
-impl std::error::Error for ManifestError {}
+impl error::Error for ManifestError {}
 
 impl Manifest {
 	pub fn from_toml(text: &str) -> Result<Manifest, ManifestError> {
@@ -139,7 +144,7 @@ impl Manifest {
 	}
 
 	pub fn load(path: impl AsRef<Path>) -> Result<Manifest, ManifestError> {
-		let text = std::fs::read_to_string(path.as_ref())
+		let text = fs::read_to_string(path.as_ref())
 			.map_err(|e| ManifestError::Parse(format!("{}: {e}", path.as_ref().display())))?;
 		Self::from_toml(&text)
 	}
@@ -147,7 +152,10 @@ impl Manifest {
 	pub fn validate(&self) -> Result<(), ManifestError> {
 		let bad = |m: &str| Err(ManifestError::Invalid(m.to_string()));
 		if self.id.trim().is_empty()
-			|| self.id.chars().any(|c| c.is_whitespace() || c == '/' || c == '\\')
+			|| self
+				.id
+				.chars()
+				.any(|c| c.is_whitespace() || c == '/' || c == '\\')
 		{
 			return bad("id must be a non-empty reverse-domain token");
 		}
@@ -225,8 +233,14 @@ mod tests {
 	#[test]
 	fn defaults_match_the_frozen_table() {
 		let m = from_body("capabilities = []\n[process]\ncommand = [\"x\"]\n").unwrap();
-		assert_eq!(m.restart.max, DEFAULT_MAX_RESTARTS, "restart.max defaults to 5");
-		assert_eq!(m.restart.backoff_ms, DEFAULT_BACKOFF_MS, "backoff defaults to 1000 ms");
+		assert_eq!(
+			m.restart.max, DEFAULT_MAX_RESTARTS,
+			"restart.max defaults to 5"
+		);
+		assert_eq!(
+			m.restart.backoff_ms, DEFAULT_BACKOFF_MS,
+			"backoff defaults to 1000 ms"
+		);
 		assert_eq!(m.process.env_passthrough, vec!["PATH", "HOME"]);
 		assert!(m.panels.is_empty() && m.subscribe.is_empty());
 	}
@@ -264,15 +278,11 @@ mod tests {
 
 	#[test]
 	fn resolve_command_substitutes_plugin_dir() {
-		let m = from_body(
-			"[process]\ncommand = [\"/usr/bin/python3\", \"{plugin_dir}/plugin.py\"]\n",
-		)
-		.unwrap();
+		let m =
+			from_body("[process]\ncommand = [\"/usr/bin/python3\", \"{plugin_dir}/plugin.py\"]\n")
+				.unwrap();
 		let argv = m.resolve_command(Path::new("/opt/plugins/p1"));
-		assert_eq!(
-			argv,
-			vec!["/usr/bin/python3", "/opt/plugins/p1/plugin.py"]
-		);
+		assert_eq!(argv, vec!["/usr/bin/python3", "/opt/plugins/p1/plugin.py"]);
 	}
 
 	#[test]

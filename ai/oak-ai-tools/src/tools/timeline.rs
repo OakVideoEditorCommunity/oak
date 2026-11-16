@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::timecode::{TimeValue, opt_time_arg, time_arg};
-use crate::tools::common::{opt_str, req_str, opt_usize};
+use crate::tools::common::{opt_str, opt_usize, req_str};
 
 /// Which edge of a clip an operation targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,15 +258,14 @@ pub fn is_hex_color(value: &str) -> bool {
 		return false;
 	}
 	let body = &bytes[1..];
-	(body.len() == 6 || body.len() == 8)
-		&& body.iter().all(|b| b.is_ascii_hexdigit())
+	(body.len() == 6 || body.len() == 8) && body.iter().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use serde_json::json;
 	use crate::timecode::Rat;
+	use serde_json::json;
 
 	#[test]
 	fn side_and_transition_parsing() {

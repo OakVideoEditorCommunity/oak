@@ -41,22 +41,22 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use crate::panels::PanelFocused;
+use crate::widgets::viewer::PlaybackClock;
+use gpui_kit::Focusable;
 use gpui_kit::colors::{Colors, DefaultColors};
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
-use gpui_kit::Focusable;
-use crate::panels::PanelFocused;
 use gpui_kit::{
-	canvas, div, img, prelude::*, px, AnyElement, App, Bounds, Context, Entity, EventEmitter,
-	FocusHandle, MouseButton, ObjectFit, Pixels, Point, Rgba, Render, Window,
+	AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, MouseButton, ObjectFit,
+	Pixels, Point, Render, Rgba, Window, canvas, div, img, prelude::*, px,
 };
-use crate::widgets::viewer::PlaybackClock;
 
 use quercus_engine_rs::editor::multicam::{rows_and_columns, rows_cols_to_index};
 
 use crate::oakui::timecode::format_timecode;
 use crate::oakui::{AppEngine, MulticamState};
-use crate::panels::commands::PanelCommandHandler;
 use crate::panels::chip;
+use crate::panels::commands::PanelCommandHandler;
 
 /// The number of sources refreshed per tick during playback (the rest keep
 /// their last frame until their turn — the task's round-robin throttle).
@@ -157,10 +157,7 @@ impl<E: AppEngine> MulticamPanel<E> {
 	/// drops the stale angle frames.
 	fn sync_state(&mut self, cx: &mut Context<Self>) {
 		let state = self.engine.read(cx).multicam_state();
-		let changed = self
-			.state
-			.map(|s| s.node_id)
-			!= state.map(|s| s.node_id)
+		let changed = self.state.map(|s| s.node_id) != state.map(|s| s.node_id)
 			|| self.state.map(|s| s.source_count) != state.map(|s| s.source_count);
 		if changed {
 			self.frames.clear();
@@ -278,8 +275,9 @@ impl<E: AppEngine> MulticamPanel<E> {
 	/// the next `refresh_frames` pass re-requests every angle. `cx` is the
 	/// panel context forwarded to the engine update.
 	fn apply_switch(&mut self, source: i32, split_clip: bool, cx: &mut Context<Self>) {
-		self.engine
-			.update(cx, |engine, cx| engine.multicam_switch_to(source, split_clip, cx));
+		self.engine.update(cx, |engine, cx| {
+			engine.multicam_switch_to(source, split_clip, cx)
+		});
 		self.frames.clear();
 		self.full_refresh = true;
 	}
@@ -386,8 +384,9 @@ impl<E: AppEngine> MulticamPanel<E> {
 		let cell_h = f32::from(self.grid_bounds.size.height) / multi as f32;
 		let cell_w = cell_w.max(1.0);
 		let cell_h = cell_h.max(1.0);
-		let cells: Vec<AnyElement> =
-			(0..state.source_count).map(|s| self.cell(s, cell_w, cell_h, colors)).collect();
+		let cells: Vec<AnyElement> = (0..state.source_count)
+			.map(|s| self.cell(s, cell_w, cell_h, colors))
+			.collect();
 		div()
 			.size_full()
 			.flex()
@@ -536,7 +535,7 @@ impl<E: AppEngine> Panel for MulticamPanel<E> {
 mod tests {
 	use super::*;
 	use crate::actions::MulticamSwitch5;
-	use gpui_kit::{size, Focusable, TestAppContext, VisualTestContext};
+	use gpui_kit::{Focusable, TestAppContext, VisualTestContext, size};
 	use std::cell::Cell;
 	use std::rc::Rc;
 
@@ -548,11 +547,7 @@ mod tests {
 
 	/// Click-point → source index with the same math [`MulticamPanel`]
 	/// applies: cell = grid/multi, source = rows_cols_to_index(r, c).
-	fn click_to_source(
-		grid: (f32, f32),
-		click: (f32, f32),
-		sources: i32,
-	) -> Option<i32> {
+	fn click_to_source(grid: (f32, f32), click: (f32, f32), sources: i32) -> Option<i32> {
 		if click.0 < 0.0 || click.1 < 0.0 || click.0 >= grid.0 || click.1 >= grid.1 {
 			return None;
 		}
@@ -616,8 +611,15 @@ mod tests {
 			(panel.state, panel.frames.len())
 		});
 		let state = state.expect("the mock reports a demo multicam");
-		assert!(state.source_count >= 1, "demo sources: {}", state.source_count);
-		assert_eq!(frame_count, state.source_count as usize, "every angle frame is cached");
+		assert!(
+			state.source_count >= 1,
+			"demo sources: {}",
+			state.source_count
+		);
+		assert_eq!(
+			frame_count, state.source_count as usize,
+			"every angle frame is cached"
+		);
 	}
 
 	/// A minimal window root that mirrors the multicam panel's key-context
@@ -657,11 +659,9 @@ mod tests {
 						.track_focus(&self.panel_focus)
 						.w_1_2()
 						.bg(gpui_kit::rgb(0x202020))
-						.on_action(
-							move |_: &MulticamSwitch5, _: &mut Window, _: &mut App| {
-								switched.set(true);
-							},
-						),
+						.on_action(move |_: &MulticamSwitch5, _: &mut Window, _: &mut App| {
+							switched.set(true);
+						}),
 				)
 				.child(
 					crate::oakui::component::text_input("value-box", cx)
@@ -677,9 +677,7 @@ mod tests {
 	/// instead of reaching the input handler — every field could only ever
 	/// type `0`.)
 	#[gpui_kit::test]
-	async fn digit_keys_type_in_text_fields_but_switch_inside_the_panel(
-		cx: &mut TestAppContext,
-	) {
+	async fn digit_keys_type_in_text_fields_but_switch_inside_the_panel(cx: &mut TestAppContext) {
 		cx.update(|cx| {
 			gpui_kit::init(cx);
 			cx.init_colors();
@@ -712,15 +710,15 @@ mod tests {
 		cx.simulate_keystrokes("5");
 		let (switched, text) = cx.read(|app| {
 			let harness = harness.read(app);
-			(harness.switched.get(), harness.editable.read(app).value().to_string())
+			(
+				harness.switched.get(),
+				harness.editable.read(app).value().to_string(),
+			)
 		});
 		assert!(
 			switched,
 			"the panel-scoped binding fires while the panel is focused"
 		);
-		assert_eq!(
-			text, "50",
-			"the same key no longer types into the field"
-		);
+		assert_eq!(text, "50", "the same key no longer types into the field");
 	}
 }

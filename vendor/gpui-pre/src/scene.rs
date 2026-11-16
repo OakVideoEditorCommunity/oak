@@ -1,6 +1,8 @@
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
 
+use std::any;
+use std::sync;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -774,7 +776,7 @@ pub struct PaintSurface {
     /// The GPU texture painted into this surface (type-erased
     /// `Arc<wgpu::Texture>`; the wgpu renderer downcasts it back).
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-    pub texture: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    pub texture: sync::Arc<dyn any::Any + Send + Sync>,
     /// The texture's dimensions in device pixels.
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     pub texture_size: Size<crate::DevicePixels>,

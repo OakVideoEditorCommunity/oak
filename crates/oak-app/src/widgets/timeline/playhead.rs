@@ -70,7 +70,10 @@ impl RenderOnce for PlayheadElement {
 				let mut path = PathBuilder::fill();
 				path.move_to(point(px(x.as_f32() - 5.0), bounds.top()));
 				path.line_to(point(px(x.as_f32() + 6.0), bounds.top()));
-				path.line_to(point(px(x.as_f32() + 0.5), bounds.top() + px(handle_height)));
+				path.line_to(point(
+					px(x.as_f32() + 0.5),
+					bounds.top() + px(handle_height),
+				));
 				path.close();
 				let path = path.build().expect("playhead handle path always builds");
 				window.paint_path(path, color);

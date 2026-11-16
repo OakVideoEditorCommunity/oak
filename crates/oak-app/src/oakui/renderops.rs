@@ -20,13 +20,26 @@
 //! mixing and export execution live in the external `quercus-engine` crate. Synchronous wait helpers
 //! are called only by background workers and tests.
 
+use super::displaycolor;
+use super::gpu;
+use super::real;
+use crate::oakui;
+use quercus_engine_rs::codec;
+use quercus_engine_rs::editor;
+use quercus_engine_rs::preview_video;
+use quercus_engine_rs::render;
+use quercus_engine_rs::task;
+use quercus_engine_rs::utils;
+use std::path;
 use std::sync::mpsc;
+use std::thread;
+use std::time;
 
 use gpui_kit::RenderImage;
-use quercus_engine_rs::types::PixelFormat;
-use quercus_engine_rs::state::Config;
-use quercus_engine_rs::types::Rational;
 use quercus_engine_rs::node::NodeId;
+use quercus_engine_rs::state::Config;
+use quercus_engine_rs::types::PixelFormat;
+use quercus_engine_rs::types::Rational;
 
 use super::engine::{ExportEvent, ExportSession};
 use super::frames::{bgra_bytes_to_render_image, lazy_gpu_f32_rgba_to_bgra_image};
@@ -46,16 +59,13 @@ pub const SLOT_FORMAT_BGRA8: i32 = 100;
 /// staging, no worker binary requirement"), so frames arrive as
 /// `TicketPayload::Video` → `FrameOrigin::Cpu`, never as shm slots.
 pub fn ensure_render_manager() -> bool {
-	if quercus_engine_rs::render::manager_is_initialized() {
+	if render::manager_is_initialized() {
 		return true;
 	}
-	if !quercus_engine_rs::render::manager_init(
-		quercus_engine_rs::render::RenderBackend::Pipeline,
-	) && !quercus_engine_rs::render::manager_is_initialized()
-	{
+	if !render::manager_init(render::RenderBackend::Pipeline) && !render::manager_is_initialized() {
 		log::error!("render manager init failed");
 	}
-	quercus_engine_rs::render::manager_is_initialized()
+	render::manager_is_initialized()
 }
 
 /// Whether preview decoding may substitute proxy media.
@@ -65,7 +75,7 @@ pub fn use_proxy_media() -> bool {
 
 /// An SDK-owned frame and its display conversion.
 pub enum RenderedFrame {
-	Sdk(quercus_engine_rs::preview_video::VideoFrame),
+	Sdk(preview_video::VideoFrame),
 }
 
 impl RenderedFrame {
@@ -97,8 +107,8 @@ impl RenderedFrame {
 	pub fn format(&self) -> i32 {
 		match self {
 			RenderedFrame::Sdk(frame) => match frame.info().pixel_format {
-				quercus_engine_rs::preview_video::VideoPixelFormat::F32Rgba => PIXEL_FORMAT_F32,
-				quercus_engine_rs::preview_video::VideoPixelFormat::Bgra8 => SLOT_FORMAT_BGRA8,
+				preview_video::VideoPixelFormat::F32Rgba => PIXEL_FORMAT_F32,
+				preview_video::VideoPixelFormat::Bgra8 => SLOT_FORMAT_BGRA8,
 			},
 		}
 	}
@@ -110,7 +120,7 @@ impl RenderedFrame {
 	pub fn is_shm(&self) -> bool {
 		match self {
 			RenderedFrame::Sdk(frame) => {
-				frame.info().origin == quercus_engine_rs::preview_video::FrameOrigin::SharedMemory
+				frame.info().origin == preview_video::FrameOrigin::SharedMemory
 			}
 		}
 	}
@@ -121,9 +131,7 @@ impl RenderedFrame {
 	/// zero-copy through `to_display`'s texture registration.
 	pub fn is_gpu(&self) -> bool {
 		match self {
-			RenderedFrame::Sdk(frame) => {
-				frame.info().origin == quercus_engine_rs::preview_video::FrameOrigin::Gpu
-			}
+			RenderedFrame::Sdk(frame) => frame.info().origin == preview_video::FrameOrigin::Gpu,
 		}
 	}
 
@@ -147,35 +155,28 @@ impl RenderedFrame {
 				// Register the display-transformed texture for the viewer. The
 				// lazy image keeps geometry and materializes bytes only for CPU consumers.
 				if let Some((ptr, tw, th)) = frame.take_gpu_texture() {
-					let texture = unsafe {
-						std::sync::Arc::from_raw(ptr as *const wgpu::Texture)
-					};
+					let texture = unsafe { std::sync::Arc::from_raw(ptr as *const wgpu::Texture) };
 					let image = lazy_gpu_f32_rgba_to_bgra_image(
 						tw.max(1) as u32,
 						th.max(1) as u32,
 						frame.clone(),
 					);
-					super::gpu::register_texture(
-						image.id.0,
-						tw.max(1) as u32,
-						th.max(1) as u32,
-						texture,
-					);
+					gpu::register_texture(image.id.0, tw.max(1) as u32, th.max(1) as u32, texture);
 					return Some((image, None, None));
 				}
 				let data = frame.bytes();
 				match info.pixel_format {
-					quercus_engine_rs::preview_video::VideoPixelFormat::F32Rgba => {
+					preview_video::VideoPixelFormat::F32Rgba => {
 						let mut samples =
 							repack_f32_rows(info.width, info.height, info.linesize, &data)?;
 						apply_output_node_f32(&mut samples);
-						super::displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
+						displaycolor::apply_f32_rgba(&mut samples, (w * h) as i64);
 						let image = lazy_gpu_f32_rgba_to_bgra_image(w, h, frame.clone());
 						Some((image, None, Some(samples)))
 					}
-					quercus_engine_rs::preview_video::VideoPixelFormat::Bgra8 => {
+					preview_video::VideoPixelFormat::Bgra8 => {
 						let mut owned = data;
-						super::displaycolor::apply_bgra8(&mut owned, (w * h) as i64);
+						displaycolor::apply_bgra8(&mut owned, (w * h) as i64);
 						let image = bgra_bytes_to_render_image(w, h, &owned)?;
 						Some((image, None, None))
 					}
@@ -187,7 +188,7 @@ impl RenderedFrame {
 
 /// Applies the project's output transform before display-color conversion.
 pub(crate) fn apply_output_node_f32(samples: &mut [f32]) {
-	quercus_engine_rs::utils::working_to_display_target(
+	utils::working_to_display_target(
 		samples,
 		&quercus_engine_rs::state::color_working_space(),
 		&quercus_engine_rs::state::color_output_gamut(),
@@ -277,10 +278,8 @@ pub fn submit_video_frame(
 	width: i32,
 	height: i32,
 	format: Option<PixelFormat>,
-) -> Result<quercus_engine_rs::task::Task, String> {
-	submit_video_frame_scheduled(
-		p, viewer, frame_ts, tb, width, height, format, None,
-	)
+) -> Result<task::Task, String> {
+	submit_video_frame_scheduled(p, viewer, frame_ts, tb, width, height, format, None)
 }
 
 /// Starts one sequence/footage frame render at playback priority.
@@ -314,7 +313,7 @@ pub fn submit_playback_video_frame(
 	format: Option<PixelFormat>,
 	playhead: i64,
 	generation: u64,
-) -> Result<quercus_engine_rs::task::Task, String> {
+) -> Result<task::Task, String> {
 	submit_video_frame_scheduled(
 		p,
 		viewer,
@@ -359,19 +358,19 @@ fn submit_video_frame_scheduled(
 	height: i32,
 	format: Option<PixelFormat>,
 	playback: Option<(i64, u64)>,
-) -> Result<quercus_engine_rs::task::Task, String> {
+) -> Result<task::Task, String> {
 	validate_geometry(width, height, tb)?;
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let pixel_format = if format == Some(PixelFormat::F32) {
-		quercus_engine_rs::preview_video::VideoPixelFormat::F32Rgba
+		preview_video::VideoPixelFormat::F32Rgba
 	} else {
-		quercus_engine_rs::preview_video::VideoPixelFormat::Bgra8
+		preview_video::VideoPixelFormat::Bgra8
 	};
 	let viewer = quercus_engine_rs::node::NodeId::from_raw(viewer.raw());
 	let time = rational_to_sdk(Rational::new(frame_ts * tb.0, tb.1));
 	let size = (width as u32, height as u32);
 	if let Some((playhead, generation)) = playback {
-		quercus_engine_rs::task::render_playback_video(
+		task::render_playback_video(
 			&session.project(),
 			viewer,
 			time,
@@ -382,13 +381,7 @@ fn submit_video_frame_scheduled(
 			generation,
 		)
 	} else {
-		quercus_engine_rs::task::render_video(
-			&session.project(),
-			viewer,
-			time,
-			size,
-			pixel_format,
-		)
+		task::render_video(&session.project(), viewer, time, size, pixel_format)
 	}
 	.ok_or_else(|| "failed to start the video render task".to_string())
 }
@@ -406,7 +399,7 @@ fn submit_video_frame_scheduled(
 /// # Errors
 ///
 /// Returns an error string when the task fails/cancels or produces no frame.
-fn wait_video_frame(task: quercus_engine_rs::task::Task) -> Result<RenderedFrame, String> {
+fn wait_video_frame(task: task::Task) -> Result<RenderedFrame, String> {
 	if !task.wait() {
 		let error = task.error();
 		return Err(if error.is_empty() {
@@ -512,14 +505,14 @@ pub fn render_multicam_angle_frame(
 	height: i32,
 ) -> Result<RenderedFrame, String> {
 	validate_geometry(width, height, tb)?;
-	let session = super::real::editor_session_for_project(p)?;
-	let task = quercus_engine_rs::task::render_track_video(
+	let session = real::editor_session_for_project(p)?;
+	let task = task::render_track_video(
 		&session.project(),
 		quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 		quercus_engine_rs::node::NodeId::from_raw(track.raw()),
 		rational_to_sdk(Rational::new(frame_ts * tb.0, tb.1)),
 		(width as u32, height as u32),
-		quercus_engine_rs::preview_video::VideoPixelFormat::F32Rgba,
+		preview_video::VideoPixelFormat::F32Rgba,
 	)
 	.ok_or_else(|| "failed to start the multicam render task".to_string())?;
 	wait_video_frame(task)
@@ -556,7 +549,7 @@ pub fn render_audio_range(
 	len_ts: i64,
 	tb: (i64, i64),
 ) -> Result<RenderedAudio, String> {
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let (tx, rx) = mpsc::channel();
 	submit_audio_chunk(&session, seq, start_ts, len_ts, tb, tx)?;
 	rx.recv().map(|(_, audio)| audio).map_err(|e| e.to_string())
@@ -564,7 +557,7 @@ pub fn render_audio_range(
 
 /// One audio-render job owned by [`AudioRenderWorker`].
 struct AudioRenderJob {
-	task: quercus_engine_rs::task::Task,
+	task: task::Task,
 	start_ts: i64,
 	expected_frames: usize,
 	tx: mpsc::Sender<(i64, RenderedAudio)>,
@@ -616,7 +609,7 @@ impl AudioRenderJob {
 /// ordering and non-blocking submit contract with a bounded thread count.
 pub struct AudioRenderWorker {
 	tx: Option<mpsc::Sender<AudioRenderJob>>,
-	_join: std::thread::JoinHandle<()>,
+	_join: thread::JoinHandle<()>,
 }
 
 impl AudioRenderWorker {
@@ -633,7 +626,7 @@ impl AudioRenderWorker {
 	/// oak-audio-render")`); this is a startup-time resource failure.
 	pub fn new() -> Self {
 		let (tx, rx) = mpsc::channel::<AudioRenderJob>();
-		let join = std::thread::Builder::new()
+		let join = thread::Builder::new()
 			.name("oak-audio-render".into())
 			.spawn(move || {
 				while let Ok(job) = rx.recv() {
@@ -685,7 +678,7 @@ impl Drop for AudioRenderWorker {
 /// Returns an error string for an invalid time base or when the SDK cannot
 /// start the render task.
 fn audio_render_job(
-	session: &quercus_engine_rs::editor::EditorSession,
+	session: &editor::EditorSession,
 	seq: NodeId,
 	start_ts: i64,
 	len_ts: i64,
@@ -701,8 +694,8 @@ fn audio_render_job(
 	);
 	let expected_frames = ((range.out.to_f64() * 48_000.0).round()
 		- (range.in_.to_f64() * 48_000.0).round())
-		.max(0.0) as usize;
-	let task = quercus_engine_rs::task::render_audio(
+	.max(0.0) as usize;
+	let task = task::render_audio(
 		&session.project(),
 		quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
 		range,
@@ -739,7 +732,7 @@ fn audio_render_job(
 /// Returns an error string when the time base is invalid or the SDK cannot
 /// start the audio render task.
 pub fn submit_audio_chunk(
-	session: &quercus_engine_rs::editor::EditorSession,
+	session: &editor::EditorSession,
 	seq: NodeId,
 	start_ts: i64,
 	len_ts: i64,
@@ -747,14 +740,14 @@ pub fn submit_audio_chunk(
 	tx: mpsc::Sender<(i64, RenderedAudio)>,
 ) -> Result<(), String> {
 	let job = audio_render_job(session, seq, start_ts, len_ts, tb, tx)?;
-	std::thread::spawn(move || job.run());
+	thread::spawn(move || job.run());
 	Ok(())
 }
 
 /// Playback path: queue the chunk on the persistent audio worker instead
 /// of creating one OS thread per chunk.
 pub fn submit_audio_chunk_to_worker(
-	session: &quercus_engine_rs::editor::EditorSession,
+	session: &editor::EditorSession,
 	seq: NodeId,
 	start_ts: i64,
 	len_ts: i64,
@@ -800,12 +793,12 @@ pub fn encoding_params(
 	p: &ProjectRef,
 	seq: NodeId,
 	format: i32,
-	_path: &std::path::Path,
+	_path: &path::Path,
 	workarea: Option<(i64, i64)>,
 	length_frames: i64,
-) -> Result<quercus_engine_rs::task::EncodingParams, String> {
-	let container = quercus_engine_rs::codec::Format::from_i32(format)
-		.ok_or_else(|| format!("unknown export format {format}"))?;
+) -> Result<task::EncodingParams, String> {
+	let container =
+		codec::Format::from_i32(format).ok_or_else(|| format!("unknown export format {format}"))?;
 	let video_codec = container
 		.video_codecs()
 		.iter()
@@ -837,7 +830,7 @@ pub fn encoding_params(
 			),
 		),
 	};
-	Ok(quercus_engine_rs::task::EncodingParams {
+	Ok(task::EncodingParams {
 		format,
 		video_enabled: true,
 		video_codec,
@@ -893,12 +886,12 @@ pub fn encoding_params(
 pub fn encoding_params_with_settings(
 	p: &ProjectRef,
 	seq: NodeId,
-	settings: &crate::oakui::engine::ExportSettings,
-	_path: &std::path::Path,
+	settings: &oakui::engine::ExportSettings,
+	_path: &path::Path,
 	workarea: Option<(i64, i64)>,
 	length_frames: i64,
-) -> Result<quercus_engine_rs::task::EncodingParams, String> {
-	let container = quercus_engine_rs::codec::Format::from_i32(settings.format)
+) -> Result<task::EncodingParams, String> {
+	let container = codec::Format::from_i32(settings.format)
 		.ok_or_else(|| format!("unknown export format {}", settings.format))?;
 	let video_codec = container
 		.video_codecs()
@@ -970,7 +963,7 @@ pub fn encoding_params_with_settings(
 		},
 	};
 	let pixel_format = if settings.bit_depth == 10 { 1 } else { 0 };
-	Ok(quercus_engine_rs::task::EncodingParams {
+	Ok(task::EncodingParams {
 		format: settings.format,
 		video_enabled: true,
 		video_codec,
@@ -1021,29 +1014,28 @@ pub fn encoding_params_with_settings(
 /// Returns an error string when the SDK cannot start the export task (no task
 /// id). Per-frame failures are reported through `ExportEvent::Finished`.
 pub fn spawn_export(
-	session: &quercus_engine_rs::editor::EditorSession,
+	session: &editor::EditorSession,
 	seq: quercus_engine_rs::node::NodeId,
 	filename: &str,
-	params: quercus_engine_rs::task::EncodingParams,
+	params: task::EncodingParams,
 ) -> Result<ExportSession, String> {
-	let task = quercus_engine_rs::task::export(&session.project(), seq, filename, &params)
+	let task = task::export(&session.project(), seq, filename, &params)
 		.ok_or_else(|| "failed to start the export task".to_string())?;
 	let cancellation = task.cancellation();
 	let (tx, rx) = mpsc::channel::<ExportEvent>();
-	std::thread::spawn(move || {
+	thread::spawn(move || {
 		let _ = tx.send(ExportEvent::Started);
 		loop {
 			let _ = tx.send(ExportEvent::Progress(task.progress().clamp(0.0, 1.0)));
 			match task.state() {
-				quercus_engine_rs::task::TaskState::Running => {
-					std::thread::sleep(std::time::Duration::from_millis(10));
+				task::TaskState::Running => {
+					thread::sleep(time::Duration::from_millis(10));
 				}
-				quercus_engine_rs::task::TaskState::Succeeded => {
+				task::TaskState::Succeeded => {
 					let _ = tx.send(ExportEvent::Finished(true, String::new()));
 					break;
 				}
-				quercus_engine_rs::task::TaskState::Failed
-				| quercus_engine_rs::task::TaskState::Cancelled => {
+				task::TaskState::Failed | task::TaskState::Cancelled => {
 					let error = {
 						let error = task.error();
 						if error.is_empty() {

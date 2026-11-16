@@ -180,7 +180,11 @@ pub fn validate(tool: &str, args: &Value) -> Result<(), crate::error::ToolError>
 			break;
 		}
 		let path = error.instance_path().to_string();
-		let path = if path.is_empty() { "$".to_string() } else { path };
+		let path = if path.is_empty() {
+			"$".to_string()
+		} else {
+			path
+		};
 		// `additionalProperties` errors name the rejected keys in their own
 		// text; keeping it verbatim is what lets the model see `frameRate`.
 		messages.push(format!("{path}: {error}"));
@@ -259,7 +263,13 @@ mod tests {
 		}
 		// The writable keys plus the echo — nothing extra, nothing missing.
 		let mut expected: Vec<&str> = vec![
-			"sequence", "name", "width", "height", "fps", "rate", "interlaced",
+			"sequence",
+			"name",
+			"width",
+			"height",
+			"fps",
+			"rate",
+			"interlaced",
 		];
 		expected.extend(crate::tools::v2::sequence::READ_ONLY_ECHO_KEYS);
 		let mut actual: Vec<&str> = props.keys().map(String::as_str).collect();

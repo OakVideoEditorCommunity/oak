@@ -5,6 +5,10 @@
 //! [`EffectStackEvent`]. See the [module-level docs](crate::widgets::effect_stack)
 //! for the "edits are requests" contract.
 
+use crate::widgets;
+use gpui_kit::Background;
+use gpui_kit::Hsla;
+use std::collections;
 use std::rc::Rc;
 
 use gpui_kit::{
@@ -178,7 +182,7 @@ pub struct EffectStackView<D: EffectStackDataSource> {
 	/// moment any edit notifies. Entries are created on first expansion and
 	/// pruned when their effect leaves the stack; value re-syncs are the
 	/// view's own job (it observes the engine).
-	params_views: std::collections::HashMap<EffectId, AnyView>,
+	params_views: collections::HashMap<EffectId, AnyView>,
 	focus_handle: FocusHandle,
 	drag_state: DragState,
 }
@@ -194,7 +198,7 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 		Self {
 			data,
 			params_renderer: None,
-			params_views: std::collections::HashMap::new(),
+			params_views: collections::HashMap::new(),
 			focus_handle: cx.focus_handle(),
 			drag_state: DragState::default(),
 		}
@@ -261,7 +265,8 @@ impl<D: EffectStackDataSource> EffectStackView<D> {
 		card_id: EffectId,
 		event: &DragMoveEvent<EffectId>,
 		cx: &mut Context<Self>,
-	) {		let effects = self.data.read(cx).effects();
+	) {
+		let effects = self.data.read(cx).effects();
 		let dragged = *event.drag(cx);
 		self.drag_state.dragged = Some(dragged);
 		if !event.bounds.contains(&event.event.position) {
@@ -507,7 +512,7 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 					.justify_center()
 					.text_sm()
 					.text_color(colors.disabled)
-					.child(crate::widgets::i18n::tr("effect_stack.empty", "No selection")),
+					.child(widgets::i18n::tr("effect_stack.empty", "No selection")),
 			);
 		};
 
@@ -568,15 +573,13 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 			}
 
 			if !fixed {
-				header_row = header_row.cursor_pointer().on_click(cx.listener(
-					move |this, _event, _window, cx| {
+				header_row = header_row
+					.cursor_pointer()
+					.on_click(cx.listener(move |this, _event, _window, cx| {
 						cx.stop_propagation();
 						this.toggle_expanded(id, cx);
-					},
-				))
-				.hover(|style| {
-					style.bg(crate::widgets::theme::neutral_hover(&colors))
-				});
+					}))
+					.hover(|style| style.bg(widgets::theme::neutral_hover(&colors)));
 			}
 
 			if reorderable {
@@ -596,7 +599,7 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 						.id(ElementId::named_usize("effect-toggle", id.0 as usize))
 						.cursor_pointer()
 						.rounded_sm()
-						.hover(|style| style.bg(crate::widgets::theme::neutral_hover(&colors)))
+						.hover(|style| style.bg(widgets::theme::neutral_hover(&colors)))
 						.text_color(if enabled {
 							colors.text
 						} else {
@@ -630,12 +633,12 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 						.rounded_sm()
 						.hover(|style| {
 							style
-								.bg(crate::widgets::theme::neutral_hover(&colors))
+								.bg(widgets::theme::neutral_hover(&colors))
 								.text_color(colors.text)
 						})
 						.text_color(colors.disabled)
-						.child(crate::widgets::glyphs::icon(
-							crate::widgets::glyphs::Glyph::Close,
+						.child(widgets::glyphs::icon(
+							widgets::glyphs::Glyph::Close,
 							colors.text,
 						))
 						.on_click(cx.listener(move |this, _event, _window, cx| {
@@ -661,10 +664,10 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 				// output card and effect bodies stay neutral.
 				.bg(match effect.kind() {
 					EffectCardKind::Source => {
-						gpui_kit::Background::from(gpui_kit::Hsla::from(colors.selected).opacity(0.3))
+						Background::from(Hsla::from(colors.selected).opacity(0.3))
 					}
-					EffectCardKind::Output => gpui_kit::Background::from(colors.container),
-					EffectCardKind::Effect => gpui_kit::Background::from(colors.background),
+					EffectCardKind::Output => Background::from(colors.container),
+					EffectCardKind::Effect => Background::from(colors.background),
 				})
 				.overflow_hidden();
 			wrapper = wrapper.child(header_row);
@@ -746,10 +749,10 @@ impl<D: EffectStackDataSource> Render for EffectStackView<D> {
 			.px_3()
 			.py_2()
 			.rounded_md()
-			.hover(|style| style.bg(crate::widgets::theme::neutral_hover(&colors)))
+			.hover(|style| style.bg(widgets::theme::neutral_hover(&colors)))
 			.text_sm()
 			.text_color(colors.text)
-			.child(crate::widgets::i18n::tr("effect_stack.add", "+ Add Effect"))
+			.child(widgets::i18n::tr("effect_stack.add", "+ Add Effect"))
 			.on_click(cx.listener(move |this, _event, _window, cx| this.add(cx)));
 
 		root.child(column).child(add_button)

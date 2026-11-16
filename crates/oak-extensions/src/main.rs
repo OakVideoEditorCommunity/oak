@@ -9,14 +9,17 @@
 
 use oak_extensions::lifecycle::{LifecycleConfig, PluginHost, PluginState};
 use oak_extensions::manifest::Manifest;
+use std::env;
 use std::path::PathBuf;
+use std::process;
+use std::sync;
 use std::time::{Duration, Instant};
 
 fn main() {
-	let args: Vec<String> = std::env::args().skip(1).collect();
+	let args: Vec<String> = env::args().skip(1).collect();
 	if args.is_empty() {
 		eprintln!("usage: opp-smoke <plugin-dir|plugin.toml> [--duration-ms N]");
-		std::process::exit(64);
+		process::exit(64);
 	}
 	let target = PathBuf::from(&args[0]);
 	let mut duration_ms: u64 = 30_000;
@@ -25,7 +28,7 @@ fn main() {
 			Some(v) => v,
 			None => {
 				eprintln!("--duration-ms needs a number");
-				std::process::exit(64);
+				process::exit(64);
 			}
 		};
 	}
@@ -44,14 +47,14 @@ fn main() {
 		Ok(m) => m,
 		Err(e) => {
 			eprintln!("[smoke] manifest error: {e}");
-			std::process::exit(65);
+			process::exit(65);
 		}
 	};
 	let host = match PluginHost::start(manifest, plugin_dir, LifecycleConfig::default()) {
 		Ok(h) => h,
 		Err(e) => {
 			eprintln!("[smoke] start error: {e}");
-			std::process::exit(66);
+			process::exit(66);
 		}
 	};
 
@@ -71,8 +74,8 @@ fn main() {
 					break;
 				}
 			}
-			Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-			Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+			Err(sync::mpsc::RecvTimeoutError::Timeout) => {}
+			Err(sync::mpsc::RecvTimeoutError::Disconnected) => break,
 		}
 		if Instant::now() >= deadline && !timed_out {
 			timed_out = true;
@@ -98,10 +101,10 @@ fn main() {
 		}
 	}
 	if matches!(host.state(), PluginState::Failed) {
-		std::process::exit(2);
+		process::exit(2);
 	}
 	if timed_out && !reached_ready {
-		std::process::exit(3);
+		process::exit(3);
 	}
-	std::process::exit(0);
+	process::exit(0);
 }

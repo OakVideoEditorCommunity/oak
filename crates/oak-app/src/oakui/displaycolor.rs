@@ -79,11 +79,16 @@
 //! transform chain per fingerprint, so dragging the window onto another
 //! display re-resolves its ICC without touching the OS-managed paths.
 
+use super::gpu;
+use gpui_kit::ContentPrimaries;
+use gpui_kit::ContentTransfer;
+use gpui_kit::LayerColorManagement;
+use std::env;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use quercus_engine_rs::color::ColorProcessor;
-use quercus_engine_rs::core::{pipeline_output_spec, OutputColorSpec};
+use quercus_engine_rs::core::{OutputColorSpec, pipeline_output_spec};
 use quercus_engine_rs::render::gpu_set_display_transform_required;
 use quercus_engine_rs::state::Config;
 use quercus_engine_rs::utils::output_spec_to_xyz_d65;
@@ -164,7 +169,7 @@ fn on_wayland() -> bool {
 /// Stable for the process lifetime except the macOS/X11 preference, which
 /// the config key governs at runtime.
 pub fn display_policy() -> DisplayPolicy {
-	if let Ok(override_mode) = std::env::var("OAK_DISPLAY_POLICY") {
+	if let Ok(override_mode) = env::var("OAK_DISPLAY_POLICY") {
 		match override_mode.to_ascii_lowercase().as_str() {
 			"os" => return DisplayPolicy::OsManaged,
 			"self" => return DisplayPolicy::SelfManaged,
@@ -208,8 +213,7 @@ pub fn display_policy() -> DisplayPolicy {
 	// mapping, so self-management is the only way to honor wide-gamut
 	// displays there (the "off" preference opts back into OS-management).
 	#[cfg(target_os = "macos")]
-	match Config::global().get(CONFIG_KEY_COLOR_MODE).as_deref()
-	{
+	match Config::global().get(CONFIG_KEY_COLOR_MODE).as_deref() {
 		Some("icc") => DisplayPolicy::SelfManaged,
 		_ => DisplayPolicy::OsManaged,
 	}
@@ -222,7 +226,8 @@ pub fn display_policy() -> DisplayPolicy {
 
 /// The persisted mode preference ("icc" = self-manage, "off" = OS-managed).
 fn configured_mode() -> String {
-	Config::global().get(CONFIG_KEY_COLOR_MODE)
+	Config::global()
+		.get(CONFIG_KEY_COLOR_MODE)
 		.unwrap_or_else(|| "icc".to_string())
 }
 
@@ -300,14 +305,16 @@ fn current_monitor_fingerprint(window: &gpui_kit::Window, cx: &gpui_kit::App) ->
 /// The active (policy, mode, icc, content, monitor) key.
 fn current_key() -> (DisplayPolicy, String, String, String, String) {
 	let policy = display_policy();
-	let custom = Config::global().get(CONFIG_KEY_CUSTOM_ICC)
+	let custom = Config::global()
+		.get(CONFIG_KEY_CUSTOM_ICC)
 		.unwrap_or_default();
 	// The content space: a non-empty override (an explicit OCIO colorspace
 	// name) wins; otherwise the chain follows the project's output spec —
 	// its (gamut, transfer) pair rekeys (and so rebuilds) the chain, so a
 	// project settings change flows through the same GENERATION machinery
 	// as a preference change.
-	let space = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
+	let space = Config::global()
+		.get(CONFIG_KEY_CONTENT_SPACE)
 		.unwrap_or_default();
 	let space = if space.is_empty() {
 		let spec = pipeline_output_spec();
@@ -460,12 +467,12 @@ pub fn is_active() -> bool {
 /// output spec changes (which rekeys the content-colorspace declaration).
 pub fn apply_to_window(window: &mut gpui_kit::Window) {
 	let active = is_active();
-	let gpu_transform = super::gpu::install_display_lut();
+	let gpu_transform = gpu::install_display_lut();
 	gpu_set_display_transform_required(!gpu_transform);
 	let mode = if active {
-		gpui_kit::LayerColorManagement::SelfManaged
+		LayerColorManagement::SelfManaged
 	} else {
-		gpui_kit::LayerColorManagement::OsManaged
+		LayerColorManagement::OsManaged
 	};
 	window.set_layer_color_management(mode);
 	// OS-managed: name the content colorspace so the OS maps from it
@@ -482,15 +489,15 @@ fn content_colorspace() -> gpui_kit::WindowContentColorspace {
 	let spec = pipeline_output_spec();
 	gpui_kit::WindowContentColorspace {
 		primaries: match spec.gamut.as_str() {
-			"displayp3" => gpui_kit::ContentPrimaries::DisplayP3,
-			"bt2020" => gpui_kit::ContentPrimaries::Bt2020,
-			_ => gpui_kit::ContentPrimaries::Srgb,
+			"displayp3" => ContentPrimaries::DisplayP3,
+			"bt2020" => ContentPrimaries::Bt2020,
+			_ => ContentPrimaries::Srgb,
 		},
 		transfer: match spec.transfer.as_str() {
-			"gamma22" => gpui_kit::ContentTransfer::Gamma22,
-			"pq" => gpui_kit::ContentTransfer::Pq,
-			"hlg" => gpui_kit::ContentTransfer::Hlg,
-			_ => gpui_kit::ContentTransfer::Srgb,
+			"gamma22" => ContentTransfer::Gamma22,
+			"pq" => ContentTransfer::Pq,
+			"hlg" => ContentTransfer::Hlg,
+			_ => ContentTransfer::Srgb,
 		},
 	}
 }
@@ -570,7 +577,8 @@ mod tests {
 	fn key_tracks_monitor_and_content_override() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global()
+			.get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(Some("x11:TEST-1".into()));
@@ -595,11 +603,14 @@ mod tests {
 		note_monitor(None);
 		let key = current_key();
 		assert_eq!(key.4, "");
-		assert_eq!(key.3, format!(
-			"{}:{}",
-			pipeline_output_spec().gamut,
-			pipeline_output_spec().transfer
-		));
+		assert_eq!(
+			key.3,
+			format!(
+				"{}:{}",
+				pipeline_output_spec().gamut,
+				pipeline_output_spec().transfer
+			)
+		);
 	}
 
 	/// `current()` caches per key: a rebuild only happens after a key
@@ -608,7 +619,8 @@ mod tests {
 	fn current_caches_per_key() {
 		let _lock = crate::oakui::graphops::test_lock();
 		let _monitor = MonitorRestore::capture();
-		let previous = Config::global().get(CONFIG_KEY_CONTENT_SPACE)
+		let previous = Config::global()
+			.get(CONFIG_KEY_CONTENT_SPACE)
 			.unwrap_or_default();
 
 		note_monitor(None);

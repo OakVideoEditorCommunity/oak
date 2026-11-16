@@ -1,3 +1,5 @@
+use std::env;
+use std::thread;
 use crate::{PlatformDispatcher, Priority, RunnableVariant};
 use scheduler::Instant;
 use scheduler::{Clock, Scheduler, SessionId, TestScheduler, TestSchedulerConfig, Yield};
@@ -26,7 +28,7 @@ impl TestDispatcher {
             seed,
             randomize_order: true,
             allow_parking: false,
-            capture_pending_traces: std::env::var("PENDING_TRACES")
+            capture_pending_traces: env::var("PENDING_TRACES")
                 .map_or(false, |var| var == "1" || var == "true"),
             timeout_ticks: 0..=1000,
         }));
@@ -141,7 +143,7 @@ impl PlatformDispatcher for TestDispatcher {
     }
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             f();
         });
     }

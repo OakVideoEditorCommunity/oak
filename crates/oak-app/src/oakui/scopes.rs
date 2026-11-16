@@ -187,8 +187,10 @@ mod tests {
 
 		// Neutral gray chroma projects to the vectorscope's center.
 		let points = crate::widgets::scopes::vectorscope_points(&data.chroma);
-		assert!(points
-			.iter()
-			.all(|&(u, v)| u.abs() < 1e-6 && v.abs() < 1e-6));
+		assert!(
+			points
+				.iter()
+				.all(|&(u, v)| u.abs() < 1e-6 && v.abs() < 1e-6)
+		);
 	}
 }

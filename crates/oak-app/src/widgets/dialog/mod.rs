@@ -241,13 +241,15 @@ impl Render for Modal {
 			// below stops propagation, so only the true backdrop hits this).
 			.on_mouse_down(
 				gpui_kit::MouseButton::Left,
-				cx.listener(move |this, _event: &gpui_kit::MouseDownEvent, _window, cx| {
-					if this.options.dismiss_on_mask {
-						let control = this.control;
-						cx.emit(ModalEvent::Dismissed { control });
-						cx.notify();
-					}
-				}),
+				cx.listener(
+					move |this, _event: &gpui_kit::MouseDownEvent, _window, cx| {
+						if this.options.dismiss_on_mask {
+							let control = this.control;
+							cx.emit(ModalEvent::Dismissed { control });
+							cx.notify();
+						}
+					},
+				),
 			)
 			.flex()
 			.items_center()
@@ -344,7 +346,9 @@ impl Render for Modal {
 								_ => colors.background,
 							};
 							let hover_bg = match role {
-								DialogButtonRole::Primary => crate::widgets::theme::accent_hover(&colors),
+								DialogButtonRole::Primary => {
+									crate::widgets::theme::accent_hover(&colors)
+								}
 								_ => crate::widgets::theme::neutral_hover(&colors),
 							};
 							let text = match role {

@@ -24,21 +24,21 @@ use std::sync::{Mutex, RwLock};
 
 use oak_extensions::host_services::{
 	AddEffectAtReq, AddEffectReq, AddMarkerReq, AddTrackReq, AddTransitionPlacedReq,
-	AddTransitionReq, AudioLevelsRequest, EffectTypeInfo, TransitionPlaced, TransitionSide,
-	AudioLevelsResult, ClipInfo, DeleteClipReq, EntityId, ExportJob, ExportRequest, FootageInfo,
-	FrameRequest, FrameResult, HostError, HostServices, MediaProbe, MoveClipReq, NodeTypeInfo,
-	ParamInfo, PlaceClipReq, ProjectInfo, Rational, SequenceInfo, SequenceSettings,
-	SetKeyframeReq, SetParamReq, SetSequenceFormatReq, SetWorkareaReq,
-	RippleDeleteReq, SplitClipReq, ThumbnailsRequest, TimelineStructure, TrackInfo, TrimClipReq,
+	AddTransitionReq, AudioLevelsRequest, AudioLevelsResult, ClipInfo, DeleteClipReq,
+	EffectTypeInfo, EntityId, ExportJob, ExportRequest, FootageInfo, FrameRequest, FrameResult,
+	HostError, HostServices, MediaProbe, MoveClipReq, NodeTypeInfo, ParamInfo, PlaceClipReq,
+	ProjectInfo, Rational, RippleDeleteReq, SequenceInfo, SequenceSettings, SetKeyframeReq,
+	SetParamReq, SetSequenceFormatReq, SetWorkareaReq, SplitClipReq, ThumbnailsRequest,
+	TimelineStructure, TrackInfo, TransitionPlaced, TransitionSide, TrimClipReq,
 };
 use oak_extensions::protocol::{INVALID_PARAMS, METHOD_NOT_FOUND};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::oakui::effectchain;
 use crate::oakui::graphops::{self, ProjectRef};
 use crate::oakui::renderops::{self, RenderedFrame};
-use quercus_engine_rs::node::NodeId;
 use quercus_engine_rs::editor::TrackKind;
+use quercus_engine_rs::node::NodeId;
 
 /// The six-domain host: the current project plus the single-holder
 /// transaction state (OPP §6 rule 1: one open transaction per host).
@@ -140,15 +140,9 @@ impl OppHost {
 	/// model does not know the type catalogue, so a bare "unknown type" would
 	/// make it guess again next round. Every branch carries the addable list,
 	/// already filtered by the clip's media kind.
-	fn effect_error(
-		&self,
-		p: &ProjectRef,
-		host: NodeId,
-		type_id: &str,
-		reason: &str,
-	) -> HostError {
+	fn effect_error(&self, p: &ProjectRef, host: NodeId, type_id: &str, reason: &str) -> HostError {
 		let available = {
-				let mut ids: Vec<String> = effectchain::addable_effects_for(&p, host)
+			let mut ids: Vec<String> = effectchain::addable_effects_for(&p, host)
 				.into_iter()
 				.map(|e| e.type_id)
 				.collect();
@@ -230,9 +224,8 @@ impl OppHost {
 
 	/// The wire form of a sequence's settings.
 	fn settings_of(&self, p: &ProjectRef, seq: NodeId) -> Result<SequenceSettings, HostError> {
-		let (name, width, height, rate, interlaced) =
-			graphops::sequence_settings(&p, seq)
-				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?;
+		let (name, width, height, rate, interlaced) = graphops::sequence_settings(&p, seq)
+			.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?;
 		let duration = graphops::sequence_length(&p, seq);
 		Ok(SequenceSettings {
 			id: id_string(seq),
@@ -247,9 +240,8 @@ impl OppHost {
 
 	/// `(num, den)` frame timebase of `seq` (`graphops::sequence_time_base`).
 	fn timebase(&self, p: &ProjectRef, seq: NodeId) -> Result<(i64, i64), HostError> {
-		graphops::sequence_time_base(&p, seq).ok_or_else(|| {
-			HostError::invalid_state("the sequence has no valid frame rate")
-		})
+		graphops::sequence_time_base(&p, seq)
+			.ok_or_else(|| HostError::invalid_state("the sequence has no valid frame rate"))
 	}
 }
 
@@ -357,9 +349,11 @@ impl HostServices for OppHost {
 		let target = match path {
 			Some(s) if !s.is_empty() => Path::new(s).to_path_buf(),
 			_ => {
-						let filename = p.filename();
+				let filename = p.filename();
 				if filename.is_empty() {
-					return Err(HostError::invalid_state("the project has no path to save to"));
+					return Err(HostError::invalid_state(
+						"the project has no path to save to",
+					));
 				}
 				PathBuf::from(filename)
 			}
@@ -385,8 +379,7 @@ impl HostServices for OppHost {
 				id: id_string(id),
 				name: graphops::node_label(&p, id),
 				path: None,
-				duration: graphops::footage_duration_seconds(&p, id)
-					.map(secs_rational),
+				duration: graphops::footage_duration_seconds(&p, id).map(secs_rational),
 			})
 			.collect())
 	}
@@ -399,9 +392,9 @@ impl HostServices for OppHost {
 		Ok(id_string(id))
 	}
 
-// ---------------------------------------------------------------------------
-// timeline.*
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// timeline.*
+	// ---------------------------------------------------------------------------
 
 	fn timeline_get_structure(&self) -> Result<TimelineStructure, HostError> {
 		let p = self.project()?;
@@ -413,8 +406,7 @@ impl HostServices for OppHost {
 				let clips = graphops::clip_ids(&p, tid)
 					.into_iter()
 					.map(|cid| {
-						let (in_p, out_p, _) = graphops::clip_range(&p, cid)
-							.unwrap_or((
+						let (in_p, out_p, _) = graphops::clip_range(&p, cid).unwrap_or((
 							quercus_engine_rs::types::Rational::new(0, 1),
 							quercus_engine_rs::types::Rational::new(0, 1),
 							quercus_engine_rs::types::Rational::new(0, 1),
@@ -473,7 +465,7 @@ impl HostServices for OppHost {
 		let footage = parse_id(&req.footage)?;
 		let track = parse_id(&req.track)?;
 		let (kind, index, tb, in_ts, out_ts) = {
-				// The wire carries a track id; the engine wants (kind, index).
+			// The wire carries a track id; the engine wants (kind, index).
 			let mut found = None;
 			for kind in [TrackKind::Video, TrackKind::Audio, TrackKind::Subtitle] {
 				let ids = graphops::track_ids(&p, seq, kind);
@@ -542,7 +534,7 @@ impl HostServices for OppHost {
 		let seq = self.first_sequence(&p)?;
 		let tb = self.timebase(&p, seq)?;
 		let (old_in, old_out) = {
-				graphops::clip_range(&p, clip)
+			graphops::clip_range(&p, clip)
 				.map(|(i, o, _)| (i, o))
 				.ok_or_else(|| HostError::entity_not_found(&req.clip))?
 		};
@@ -568,9 +560,7 @@ impl HostServices for OppHost {
 		let seq = self.first_sequence(&p)?;
 		let tb = self.timebase(&p, seq)?;
 		let at = to_ts(&req.to_at, tb)?;
-		let same_track = {
-				graphops::clip_track(&p, clip) == Some(dest)
-		};
+		let same_track = { graphops::clip_track(&p, clip) == Some(dest) };
 		let result = if same_track {
 			graphops::move_clip(&p, clip, at)
 		} else {
@@ -646,9 +636,9 @@ impl HostServices for OppHost {
 		))
 	}
 
-// ---------------------------------------------------------------------------
-// node.*
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// node.*
+	// ---------------------------------------------------------------------------
 
 	fn node_list_types(&self) -> Result<Vec<NodeTypeInfo>, HostError> {
 		// The SDK's built-in factory table plus the runtime-registered
@@ -659,27 +649,26 @@ impl HostServices for OppHost {
 			.map(|m| NodeTypeInfo {
 				type_id: m.type_id,
 				label: m.name,
-				category: m
-					.category
-					.map(|c| format!("{c:?}"))
-					.unwrap_or_default(),
+				category: m.category.map(|c| format!("{c:?}")).unwrap_or_default(),
 			})
 			.collect();
-		out.extend(quercus_engine_rs::effect::dynamic_factory_entries().into_iter().map(|m| {
-			NodeTypeInfo {
-				type_id: m.type_id,
-				label: m.name,
-				category: m.sub_category,
-			}
-		}));
+		out.extend(
+			quercus_engine_rs::effect::dynamic_factory_entries()
+				.into_iter()
+				.map(|m| NodeTypeInfo {
+					type_id: m.type_id,
+					label: m.name,
+					category: m.sub_category,
+				}),
+		);
 		Ok(out)
 	}
 
 	fn node_get_params(&self, node: &EntityId) -> Result<Vec<ParamInfo>, HostError> {
 		let p = self.project()?;
 		let id = parse_id(node)?;
-		let params = effectchain::effect_params(&p, id)
-			.ok_or_else(|| HostError::entity_not_found(node))?;
+		let params =
+			effectchain::effect_params(&p, id).ok_or_else(|| HostError::entity_not_found(node))?;
 		Ok(params
 			.into_iter()
 			.map(|ep| ParamInfo {
@@ -692,7 +681,11 @@ impl HostServices for OppHost {
 			.collect())
 	}
 
-	fn node_add_effect(&self, _req: AddEffectReq, _txn: Option<&str>) -> Result<EntityId, HostError> {
+	fn node_add_effect(
+		&self,
+		_req: AddEffectReq,
+		_txn: Option<&str>,
+	) -> Result<EntityId, HostError> {
 		Err(unsupported(
 			"node.add_effect",
 			"the engine entry point is `Engine::add_effect(index, type_id, cx)`, which \
@@ -711,11 +704,7 @@ impl HostServices for OppHost {
 		))
 	}
 
-	fn node_set_keyframe(
-		&self,
-		_req: SetKeyframeReq,
-		_txn: Option<&str>,
-	) -> Result<(), HostError> {
+	fn node_set_keyframe(&self, _req: SetKeyframeReq, _txn: Option<&str>) -> Result<(), HostError> {
 		Err(unsupported(
 			"node.set_keyframe",
 			"`set_value_at_time_command` needs an engine `NodeValue` plus the input's \
@@ -735,9 +724,9 @@ impl HostServices for OppHost {
 		))
 	}
 
-// ---------------------------------------------------------------------------
-// render.*
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// render.*
+	// ---------------------------------------------------------------------------
 
 	fn render_get_frame(&self, req: FrameRequest) -> Result<FrameResult, HostError> {
 		if req.footage.is_some() {
@@ -817,8 +806,7 @@ impl HostServices for OppHost {
 		for clip in req.clips.iter().take(count) {
 			let cid = parse_id(clip)?;
 			let (in_p, _, _) = {
-						graphops::clip_range(&p, cid)
-					.ok_or_else(|| HostError::entity_not_found(clip))?
+				graphops::clip_range(&p, cid).ok_or_else(|| HostError::entity_not_found(clip))?
 			};
 			let ts = graphops::rational_to_ts(in_p, tb);
 			let frame = renderops::render_sequence_frame(
@@ -880,7 +868,7 @@ impl HostServices for OppHost {
 		let tb = self.timebase(&p, seq)?;
 		let clip = parse_id(&req.clip)?;
 		let (in_p, out_p) = {
-				graphops::clip_range(&p, clip)
+			graphops::clip_range(&p, clip)
 				.map(|(i, o, _)| (i, o))
 				.ok_or_else(|| HostError::entity_not_found(&req.clip))?
 		};
@@ -903,11 +891,15 @@ impl HostServices for OppHost {
 		Ok(AudioLevelsResult { levels })
 	}
 
-// ---------------------------------------------------------------------------
-// export.*
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// export.*
+	// ---------------------------------------------------------------------------
 
-	fn export_start(&self, _req: ExportRequest, _txn: Option<&str>) -> Result<ExportJob, HostError> {
+	fn export_start(
+		&self,
+		_req: ExportRequest,
+		_txn: Option<&str>,
+	) -> Result<ExportJob, HostError> {
 		Err(unsupported(
 			"export.start",
 			"`spawn_export` returns an `ExportSession` holding a non-`Send` mpsc event \
@@ -927,9 +919,9 @@ impl HostServices for OppHost {
 		))
 	}
 
-// ---------------------------------------------------------------------------
-// edit.* (undo domain)
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// edit.* (undo domain)
+	// ---------------------------------------------------------------------------
 
 	fn edit_begin(&self, label: &str) -> Result<EntityId, HostError> {
 		let mut t = self.txn.lock().unwrap_or_else(|e| e.into_inner());
@@ -996,9 +988,9 @@ impl HostServices for OppHost {
 		Ok(graphops::undo_can_undo())
 	}
 
-// ---------------------------------------------------------------------------
-// events.* (routed by the dispatch layer, not here)
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
+	// events.* (routed by the dispatch layer, not here)
+	// ---------------------------------------------------------------------------
 
 	fn events_subscribe(&self, _events: &[String]) -> Result<Vec<String>, HostError> {
 		Err(unsupported(
@@ -1049,7 +1041,11 @@ impl HostServices for OppHost {
 			.collect())
 	}
 
-	fn node_add_effect_at(&self, req: AddEffectAtReq, txn: Option<&str>) -> Result<EntityId, HostError> {
+	fn node_add_effect_at(
+		&self,
+		req: AddEffectAtReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError> {
 		self.require_txn(txn)?;
 		let p = self.project()?;
 		let host = parse_id(&req.target)?;
@@ -1096,9 +1092,7 @@ impl HostServices for OppHost {
 		// where this one ends (no guessing — the test is strict equality).
 		let seam_next = match req.side {
 			TransitionSide::In => None,
-			TransitionSide::Out => {
-						graphops::next_contiguous_clip(&p, clip)
-			}
+			TransitionSide::Out => graphops::next_contiguous_clip(&p, clip),
 		};
 
 		match (req.side, seam_next) {
@@ -1112,14 +1106,9 @@ impl HostServices for OppHost {
 					));
 				}
 				let half = graphops::ts_to_rational(half_frames, tb);
-				let id = graphops::add_transition_at_seam_typed(
-					&p,
-					clip,
-					next,
-					half,
-					Some(kind_index),
-				)
-				.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
+				let id =
+					graphops::add_transition_at_seam_typed(&p, clip, next, half, Some(kind_index))
+						.map_err(|e| HostError::new(INVALID_PARAMS, format!("transition: {e}")))?;
 				Ok(TransitionPlaced {
 					id: identity(id).to_string(),
 					placement: "seam".to_string(),
@@ -1160,7 +1149,7 @@ impl HostServices for OppHost {
 		// the caller supplied, then write the whole tuple back as ONE undo
 		// row (changing the rate reinterprets every block's time base).
 		let (name, width, height, rate, interlaced) = {
-				graphops::sequence_settings(&p, seq)
+			graphops::sequence_settings(&p, seq)
 				.ok_or_else(|| HostError::invalid_state("the sequence has no video stream"))?
 		};
 		let rate = match req.rate {
@@ -1206,7 +1195,11 @@ impl HostServices for OppHost {
 ///
 /// P7: `RenderedFrame::to_display` hands back repacked, display-transformed
 /// samples (no `linesize` anymore), so the old row-stride reader is gone.
-fn encode_png_rgba_f32_samples(width: i32, height: i32, samples: &[f32]) -> Result<String, HostError> {
+fn encode_png_rgba_f32_samples(
+	width: i32,
+	height: i32,
+	samples: &[f32],
+) -> Result<String, HostError> {
 	use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 	if width <= 0 || height <= 0 {
 		return Err(HostError::internal(format!(
@@ -1247,7 +1240,6 @@ fn encode_png_bgra8(width: i32, height: i32, bgra: &[u8]) -> Result<String, Host
 		.map_err(|e| HostError::internal(format!("png encode failed: {e}")))?;
 	Ok(base64::engine::general_purpose::STANDARD.encode(&png))
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests (run with `cargo test -p oak-app opp::`)
@@ -1290,7 +1282,13 @@ mod tests {
 
 		let token = host.edit_begin("opp: add track").unwrap();
 		let id = host
-			.timeline_add_track(AddTrackReq { kind: "video".into(), name: None }, Some(&token))
+			.timeline_add_track(
+				AddTrackReq {
+					kind: "video".into(),
+					name: None,
+				},
+				Some(&token),
+			)
 			.unwrap();
 		assert!(!id.is_empty(), "add_track returned an empty entity id");
 		// The row lands on the stack only at `edit_commit`: inside an open
@@ -1298,12 +1296,20 @@ mod tests {
 		host.edit_commit(&token).unwrap();
 
 		let after = host.timeline_get_structure().unwrap();
-		assert_eq!(after.tracks.len(), before + 1, "the new track is not visible");
+		assert_eq!(
+			after.tracks.len(),
+			before + 1,
+			"the new track is not visible"
+		);
 		assert!(
 			after.tracks.iter().any(|t| t.id == id),
 			"the returned id is not one of the structure's tracks"
 		);
-		assert_eq!(after.sequence, id_string(seq), "structure reports another sequence");
+		assert_eq!(
+			after.sequence,
+			id_string(seq),
+			"structure reports another sequence"
+		);
 		assert!(
 			graphops::undo_count() > before_count,
 			"add_track did not push an undo row"
@@ -1323,7 +1329,10 @@ mod tests {
 		host.attach_project(project);
 
 		let e = host.media_probe("/nonexistent/clip.mp4").unwrap_err();
-		assert_eq!(e.code, METHOD_NOT_FOUND, "wrong error code for an unmapped method");
+		assert_eq!(
+			e.code, METHOD_NOT_FOUND,
+			"wrong error code for an unmapped method"
+		);
 		let data = e.data.expect("Unsupported must carry structured data");
 		assert_eq!(data["unsupported"], true, "data.unsupported must be true");
 		assert_eq!(data["method"], "media.probe");
@@ -1363,8 +1372,14 @@ mod tests {
 
 		// One real edit, so the stack is non-empty and a stray push shows up.
 		let t = host.edit_begin("setup").unwrap();
-		host.timeline_add_track(AddTrackReq { kind: "video".into(), name: None }, Some(&t))
-			.unwrap();
+		host.timeline_add_track(
+			AddTrackReq {
+				kind: "video".into(),
+				name: None,
+			},
+			Some(&t),
+		)
+		.unwrap();
 		host.edit_commit(&t).unwrap();
 		let before = graphops::undo_count();
 		assert!(before >= 1, "setup edit did not land on the stack");
@@ -1373,7 +1388,9 @@ mod tests {
 		// neither may push an undo row.
 		let t2 = host.edit_begin("io").unwrap();
 		host.project_save(file.to_str(), Some(&t2)).expect("save");
-		let info = host.project_open(file.to_str().unwrap(), Some(&t2)).expect("open");
+		let info = host
+			.project_open(file.to_str().unwrap(), Some(&t2))
+			.expect("open");
 		assert!(
 			!info.name.is_empty(),
 			"open should report the loaded project's name"

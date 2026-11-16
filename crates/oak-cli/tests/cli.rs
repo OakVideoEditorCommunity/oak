@@ -33,6 +33,8 @@
 //! stream counts of 0 and a 0 duration until the module fills them in —
 //! the assertions pin the real contract.
 
+use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -91,19 +93,16 @@ struct TempDir(PathBuf);
 
 impl TempDir {
 	fn new(tag: &str) -> Self {
-		let dir = std::env::temp_dir().join(format!(
-			"oak_cli_test_{tag}_{}",
-			std::process::id()
-		));
-		let _ = std::fs::remove_dir_all(&dir);
-		std::fs::create_dir_all(&dir).unwrap();
+		let dir = env::temp_dir().join(format!("oak_cli_test_{tag}_{}", std::process::id()));
+		let _ = fs::remove_dir_all(&dir);
+		fs::create_dir_all(&dir).unwrap();
 		TempDir(dir)
 	}
 }
 
 impl Drop for TempDir {
 	fn drop(&mut self) {
-		let _ = std::fs::remove_dir_all(&self.0);
+		let _ = fs::remove_dir_all(&self.0);
 	}
 }
 
@@ -112,11 +111,9 @@ fn help_prints_the_cpp_usage_text_and_exits_zero() {
 	let (code, stdout, stderr) = run(&["--help"]);
 	assert_eq!(code, 0);
 	// stderr may carry dyld's objc class-duplication notices only.
-	assert!(
-		!real_errors(&stderr).contains("error:"),
-		"stderr: {stderr}"
-	);
-	assert!(stdout.starts_with("oak-cli - headless consumer of the oak editor modules (direct Rust ABI)\n"));
+	assert!(!real_errors(&stderr).contains("error:"), "stderr: {stderr}");
+	assert!(stdout
+		.starts_with("oak-cli - headless consumer of the oak editor modules (direct Rust ABI)\n"));
 	assert!(stdout.contains("oak-cli transcode <input_media> <out> [width] [--format ppm|mp4]"));
 	assert!(stdout.contains("Exit codes:"));
 	assert!(stdout.contains("64  usage error"));
@@ -162,7 +159,10 @@ fn info_on_the_fixture_prints_the_project() {
 	assert!(stdout.contains("Modified: no"), "{stdout}");
 	assert!(stdout.contains("Sequences: 1"), "{stdout}");
 	assert!(stdout.contains("[0] \"Fixture Sequence\""), "{stdout}");
-	assert!(stdout.contains("frame rate: 30000/1001 (29.970 fps)"), "{stdout}");
+	assert!(
+		stdout.contains("frame rate: 30000/1001 (29.970 fps)"),
+		"{stdout}"
+	);
 	assert!(stdout.contains("Footage: 1"), "{stdout}");
 	// The C++ fixture stores the footage path relative to the project;
 	// the CLI resolves it against the project directory and reports it
@@ -244,7 +244,7 @@ fn render_the_fixture_writes_ppm_frames_and_a_wav() {
 	assert!(dir.0.join("frame_00002.ppm").is_file());
 	assert!(dir.0.join("audio.wav").is_file());
 	// PPM header of the first frame (P6).
-	let first = std::fs::read(dir.0.join("frame_00000.ppm")).unwrap();
+	let first = fs::read(dir.0.join("frame_00000.ppm")).unwrap();
 	assert!(first.starts_with(b"P6\n"), "PPM header");
 }
 
@@ -305,7 +305,7 @@ fn transcode_the_image_fixture_to_ppm_frames() {
 	// A still image counts as one frame.
 	assert!(dir.0.join("frame_00000.ppm").is_file());
 	assert!(!dir.0.join("frame_00001.ppm").exists());
-	let first = std::fs::read(dir.0.join("frame_00000.ppm")).unwrap();
+	let first = fs::read(dir.0.join("frame_00000.ppm")).unwrap();
 	assert!(first.starts_with(b"P6\n160 90\n255\n"), "160x90 P6 header");
 	// No audio stream in the fixture: no WAV.
 	assert!(!dir.0.join("audio.wav").exists());
@@ -325,6 +325,6 @@ fn transcode_mp4_writes_a_real_mp4() {
 		"160",
 	]);
 	assert_eq!(code, 0, "stderr: {stderr}");
-	let head = std::fs::read(&out).expect("mp4 written");
+	let head = fs::read(&out).expect("mp4 written");
 	assert_eq!(&head[4..8], b"ftyp", "mp4 container");
 }

@@ -10,6 +10,7 @@
 //! argument serializes and gates confirmation only (deviation recorded by
 //! P1.2 in `docs/zh/plans/opp-implementation-notes.md`).
 
+use crate::protocol;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -360,34 +361,34 @@ impl HostError {
 	}
 	pub fn capability_denied(method: &str) -> Self {
 		Self::new(
-			crate::protocol::CAPABILITY_DENIED,
+			protocol::CAPABILITY_DENIED,
 			format!("capability denied for {method}"),
 		)
 	}
 	pub fn not_in_transaction() -> Self {
-		Self::new(crate::protocol::NOT_IN_TRANSACTION, "not in edit transaction")
+		Self::new(protocol::NOT_IN_TRANSACTION, "not in edit transaction")
 	}
 	pub fn transaction_conflict() -> Self {
-		Self::new(crate::protocol::TRANSACTION_CONFLICT, "transaction already held")
+		Self::new(protocol::TRANSACTION_CONFLICT, "transaction already held")
 	}
 	pub fn entity_not_found(id: &str) -> Self {
 		Self::with_data(
-			crate::protocol::ENTITY_NOT_FOUND,
+			protocol::ENTITY_NOT_FOUND,
 			"entity not found",
 			serde_json::json!({ "entity": id }),
 		)
 	}
 	pub fn invalid_state(msg: impl Into<String>) -> Self {
-		Self::new(crate::protocol::INVALID_STATE, msg)
+		Self::new(protocol::INVALID_STATE, msg)
 	}
 	pub fn internal(msg: impl Into<String>) -> Self {
-		Self::new(crate::protocol::INTERNAL_ERROR, msg)
+		Self::new(protocol::INTERNAL_ERROR, msg)
 	}
 }
 
-impl From<HostError> for crate::protocol::ErrorObject {
+impl From<HostError> for protocol::ErrorObject {
 	fn from(e: HostError) -> Self {
-		crate::protocol::ErrorObject {
+		protocol::ErrorObject {
 			code: e.code,
 			message: e.message,
 			data: e.data,
@@ -452,24 +453,44 @@ pub trait HostServices: Send + Sync {
 
 	// ---- timeline.* ----
 	fn timeline_get_structure(&self) -> Result<TimelineStructure, HostError>;
-	fn timeline_add_track(&self, req: AddTrackReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
-	fn timeline_place_clip(&self, req: PlaceClipReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
-	fn timeline_split_clip(&self, req: SplitClipReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
+	fn timeline_add_track(
+		&self,
+		req: AddTrackReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
+	fn timeline_place_clip(
+		&self,
+		req: PlaceClipReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
+	fn timeline_split_clip(
+		&self,
+		req: SplitClipReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
 	fn timeline_trim_clip(&self, req: TrimClipReq, txn: Option<&str>) -> Result<(), HostError>;
 	fn timeline_move_clip(&self, req: MoveClipReq, txn: Option<&str>) -> Result<(), HostError>;
-	fn timeline_ripple_delete(&self, req: RippleDeleteReq, txn: Option<&str>)
-	-> Result<(), HostError>;
-	fn timeline_delete_clip(&self, req: DeleteClipReq, txn: Option<&str>)
-	-> Result<(), HostError>;
-	fn timeline_add_transition(&self, req: AddTransitionReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
-	fn timeline_add_marker(&self, req: AddMarkerReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
-	fn timeline_set_workarea(&self, req: SetWorkareaReq, txn: Option<&str>)
-	-> Result<(), HostError>;
+	fn timeline_ripple_delete(
+		&self,
+		req: RippleDeleteReq,
+		txn: Option<&str>,
+	) -> Result<(), HostError>;
+	fn timeline_delete_clip(&self, req: DeleteClipReq, txn: Option<&str>) -> Result<(), HostError>;
+	fn timeline_add_transition(
+		&self,
+		req: AddTransitionReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
+	fn timeline_add_marker(
+		&self,
+		req: AddMarkerReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
+	fn timeline_set_workarea(
+		&self,
+		req: SetWorkareaReq,
+		txn: Option<&str>,
+	) -> Result<(), HostError>;
 
 	// ---- node.* ----
 	fn node_list_types(&self) -> Result<Vec<NodeTypeInfo>, HostError>;
@@ -481,10 +502,11 @@ pub trait HostServices: Send + Sync {
 
 	// ---- render.* (never blocks the GUI thread — engine ticket path) ----
 	fn render_get_frame(&self, req: FrameRequest) -> Result<FrameResult, HostError>;
-	fn render_get_thumbnails(&self, req: ThumbnailsRequest)
-	-> Result<Vec<FrameResult>, HostError>;
-	fn render_get_audio_levels(&self, req: AudioLevelsRequest)
-	-> Result<AudioLevelsResult, HostError>;
+	fn render_get_thumbnails(&self, req: ThumbnailsRequest) -> Result<Vec<FrameResult>, HostError>;
+	fn render_get_audio_levels(
+		&self,
+		req: AudioLevelsRequest,
+	) -> Result<AudioLevelsResult, HostError>;
 
 	// ---- export.* ----
 	fn export_start(&self, req: ExportRequest, txn: Option<&str>) -> Result<ExportJob, HostError>;
@@ -520,8 +542,11 @@ pub trait HostServices: Send + Sync {
 	// ---- effect/transition edits (T10A; added after the frozen 22) -----
 	/// Adds an effect to a clip's chain and reports where it landed (the
 	/// edit is one undo row; `index` `None` appends, out-of-range clamps).
-	fn node_add_effect_at(&self, req: AddEffectAtReq, txn: Option<&str>)
-	-> Result<EntityId, HostError>;
+	fn node_add_effect_at(
+		&self,
+		req: AddEffectAtReq,
+		txn: Option<&str>,
+	) -> Result<EntityId, HostError>;
 	/// Adds a transition and reports **where** it landed: `side:"in"` and a
 	/// non-contiguous `side:"out"` take the edge path; a `side:"out"` whose
 	/// clip is strictly adjacent to the next clip on the same track takes
@@ -553,7 +578,10 @@ mod tests {
 		let wire: ErrorObject = e.clone().into();
 		assert_eq!(wire.code, crate::protocol::ENTITY_NOT_FOUND);
 		assert_eq!(wire.data, Some(serde_json::json!({"entity": "n17"})));
-		assert_eq!(e.to_string(), format!("[{}] entity not found", crate::protocol::ENTITY_NOT_FOUND));
+		assert_eq!(
+			e.to_string(),
+			format!("[{}] entity not found", crate::protocol::ENTITY_NOT_FOUND)
+		);
 		assert_eq!(
 			HostError::not_in_transaction().code,
 			crate::protocol::NOT_IN_TRANSACTION

@@ -2,6 +2,8 @@
 //! can be used to describe common units, concepts, and the relationships
 //! between them.
 
+use std::f32;
+use std::iter;
 use anyhow::{Context as _, anyhow};
 use core::fmt::Debug;
 use derive_more::{Add, AddAssign, Div, DivAssign, Mul, Neg, Sub, SubAssign};
@@ -2643,7 +2645,7 @@ pub fn percentage(value: f32) -> Percentage {
 
 impl From<Percentage> for Radians {
     fn from(value: Percentage) -> Self {
-        radians(value.0 * std::f32::consts::PI * 2.0)
+        radians(value.0 * f32::consts::PI * 2.0)
     }
 }
 
@@ -2766,13 +2768,13 @@ impl Debug for Pixels {
     }
 }
 
-impl std::iter::Sum for Pixels {
+impl iter::Sum for Pixels {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::ZERO, |a, b| a + b)
     }
 }
 
-impl<'a> std::iter::Sum<&'a Pixels> for Pixels {
+impl<'a> iter::Sum<&'a Pixels> for Pixels {
     fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
         iter.fold(Self::ZERO, |a, b| a + *b)
     }

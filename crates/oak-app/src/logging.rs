@@ -29,6 +29,7 @@
 //!   per-target overrides on top of the global level. A bare level among the
 //!   pairs sets the global level.
 
+use std::env;
 use std::sync::Once;
 
 use log::{Level, LevelFilter, Metadata, Record};
@@ -137,11 +138,7 @@ impl log::Log for StderrLogger {
 			Level::Debug => "DEBUG",
 			Level::Trace => "TRACE",
 		};
-		eprintln!(
-			"[{level} {}] {}",
-			record.target(),
-			record.args()
-		);
+		eprintln!("[{level} {}] {}", record.target(), record.args());
 	}
 
 	fn flush(&self) {}
@@ -152,7 +149,7 @@ static INIT: Once = Once::new();
 /// Install the stderr logger once (idempotent). Honors `RUST_LOG`.
 pub fn init() {
 	INIT.call_once(|| {
-		let filter = Filter::parse(std::env::var("RUST_LOG").ok().as_deref());
+		let filter = Filter::parse(env::var("RUST_LOG").ok().as_deref());
 		let max = filter
 			.targets
 			.iter()

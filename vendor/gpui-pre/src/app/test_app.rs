@@ -24,6 +24,9 @@
 //! }
 //! ```
 
+use crate::ScrollDelta;
+use crate::TouchPhase;
+use std::path;
 use crate::{
     AnyWindowHandle, App, AppCell, AppContext, AsyncApp, BackgroundExecutor, BorrowAppContext,
     Bounds, ClipboardItem, Context, Entity, ForegroundExecutor, Global, InputEvent, Keystroke,
@@ -289,7 +292,7 @@ impl TestApp {
     /// Simulate answering a path selection dialog.
     pub fn simulate_new_path_selection(
         &self,
-        select: impl FnOnce(&std::path::Path) -> Option<std::path::PathBuf>,
+        select: impl FnOnce(&path::Path) -> Option<path::PathBuf>,
     ) {
         self.platform.simulate_new_path_selection(select);
     }
@@ -448,9 +451,9 @@ impl<V: 'static + Render> TestAppWindow<V> {
     pub fn simulate_scroll(&mut self, position: Point<Pixels>, delta: Point<Pixels>) {
         self.simulate_event(crate::ScrollWheelEvent {
             position,
-            delta: crate::ScrollDelta::Pixels(delta),
+            delta: ScrollDelta::Pixels(delta),
             modifiers: Default::default(),
-            touch_phase: crate::TouchPhase::Moved,
+            touch_phase: TouchPhase::Moved,
         });
     }
 

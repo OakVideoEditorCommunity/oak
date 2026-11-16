@@ -1,3 +1,4 @@
+use std::slice;
 use std::default::Default;
 
 use ash::vk;
@@ -75,7 +76,7 @@ fn main() {
             .queue_priorities(&priorities);
 
         let create_info = vk::DeviceCreateInfo::default()
-            .queue_create_infos(std::slice::from_ref(&queue_info))
+            .queue_create_infos(slice::from_ref(&queue_info))
             .enabled_extension_names(&device_extension_names_raw)
             .enabled_features(&features);
 

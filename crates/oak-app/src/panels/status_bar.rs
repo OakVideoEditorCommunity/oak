@@ -20,14 +20,14 @@
 //! write failed") on the left; current timecode / duration, frame rate and
 //! resolution on the right.
 
-use gpui_kit::colors::DefaultColors;
 use crate::widgets::timeline::Frame;
-use gpui_kit::{div, prelude::*, Context, Entity, Render, Window};
+use gpui_kit::colors::DefaultColors;
+use gpui_kit::{Context, Entity, Render, Window, div, prelude::*};
 
 use crate::widgets::viewer::PlaybackClock;
 
-use crate::oakui::timecode::{format_duration, format_fps, format_resolution, format_timecode};
 use crate::oakui::AppEngine;
+use crate::oakui::timecode::{format_duration, format_fps, format_resolution, format_timecode};
 
 /// The global status bar.
 pub struct StatusBar<E: AppEngine> {
@@ -76,15 +76,9 @@ impl<E: AppEngine> Render for StatusBar<E> {
 				gpui_kit::rgba(0xcc6666ff),
 			)
 		} else if engine.storage_bound() {
-			(
-				crate::i18n::tr("status.storage.written"),
-				colors.disabled,
-			)
+			(crate::i18n::tr("status.storage.written"), colors.disabled)
 		} else {
-			(
-				crate::i18n::tr("status.storage.unbound"),
-				colors.disabled,
-			)
+			(crate::i18n::tr("status.storage.unbound"), colors.disabled)
 		};
 
 		// The proxy segment doubles as the in-flight proxy transcode's

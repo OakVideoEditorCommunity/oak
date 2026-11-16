@@ -39,6 +39,9 @@
 //! (usage). Frame progress goes to stderr (`frame N: T s`).
 
 use quercus_engine_rs::types::{Rational, TimeRange};
+use std::env;
+use std::fs;
+use std::path;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK, EXIT_RENDER_UNAVAILABLE, EXIT_USAGE};
 use crate::engine;
@@ -87,7 +90,7 @@ pub fn run(project: String, start_seconds: &str, end_seconds: &str, out_dir: &st
 fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 	// Absolute project path first — the C++ CLI chdirs into the project
 	// directory so relative footage paths resolve during rendering.
-	let abs = match std::fs::canonicalize(project) {
+	let abs = match fs::canonicalize(project) {
 		Ok(p) => p,
 		Err(e) => {
 			eprintln!("error: render: cannot open project \"{project}\": {e}");
@@ -95,7 +98,7 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		}
 	};
 	if let Some(dir) = abs.parent() {
-		let _ = std::env::set_current_dir(dir);
+		let _ = env::set_current_dir(dir);
 	}
 
 	let loaded = match engine::load_project(&abs.to_string_lossy()) {
@@ -144,7 +147,7 @@ fn run_render(project: &str, start: f64, end: f64, out_dir: &str) -> i32 {
 		return EXIT_ERROR;
 	}
 
-	if let Err(e) = std::fs::create_dir_all(out_dir) {
+	if let Err(e) = fs::create_dir_all(out_dir) {
 		eprintln!("error: render: cannot create output directory \"{out_dir}\": {e}");
 		engine::render_manager_shutdown();
 		return EXIT_ERROR;
@@ -226,7 +229,7 @@ fn write_frame_ppm(frame: &engine::RenderedFrame, out_dir: &str, index: u64) -> 
 			frame.width, frame.height, frame.linesize
 		));
 	}
-	let path = std::path::Path::new(out_dir).join(format!("frame_{index:05}.ppm"));
+	let path = path::Path::new(out_dir).join(format!("frame_{index:05}.ppm"));
 	ppm::write_ppm(
 		&path,
 		frame.width,
@@ -249,7 +252,7 @@ fn write_audio_wav(audio: &engine::RenderedAudio, out_dir: &str) -> i32 {
 		return EXIT_RENDER_UNAVAILABLE;
 	}
 	let samples = (audio.data.len() / channels as usize) as i64;
-	let path = std::path::Path::new(out_dir).join("audio.wav");
+	let path = path::Path::new(out_dir).join("audio.wav");
 	if let Err(e) = wav::write_wav(&path, rate, channels, samples, &audio.data) {
 		eprintln!("error: render: cannot write \"{}\": {e}", path.display());
 		return EXIT_ERROR;

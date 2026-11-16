@@ -37,7 +37,13 @@
 //! reports the item id, the keymap dispatches the gpui action, and both end
 //! up in `OakApp::dispatch_action_id`.
 
+use crate::i18n;
+use crate::widgets;
+use gpui_kit::Keystroke;
 use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::io;
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
@@ -358,8 +364,7 @@ pub fn entry_for_menu_id(id: usize) -> Option<&'static ActionEntry> {
 /// report). (The fork's `EditableText` context is gone with the fork.)
 pub(crate) fn input_exclusion_predicate() -> Rc<KeyBindingContextPredicate> {
 	Rc::new(
-		KeyBindingContextPredicate::parse("!Input")
-			.expect("the input-exclusion predicate parses"),
+		KeyBindingContextPredicate::parse("!Input").expect("the input-exclusion predicate parses"),
 	)
 }
 
@@ -409,7 +414,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
 pub fn display_shortcut(action: ActionId) -> Option<String> {
 	let keys = effective_keys(action.entry());
 	let key = keys.first()?;
-	let keystroke = gpui_kit::Keystroke::parse(key).expect("effective keys parse (tests enforce it)");
+	let keystroke = Keystroke::parse(key).expect("effective keys parse (tests enforce it)");
 
 	// `secondary-` parses to `platform` on macOS and `control` elsewhere;
 	// the modifier renderers below follow the same split.
@@ -442,7 +447,7 @@ pub fn display_shortcut(action: ActionId) -> Option<String> {
 		"down" => label.push('↓'),
 		"backspace" => label.push('⌫'),
 		"delete" => label.push_str("Del"),
-		"space" => label.push_str(crate::i18n::tr("shortcut.space")),
+		"space" => label.push_str(i18n::tr("shortcut.space")),
 		"home" => label.push_str("Home"),
 		"end" => label.push_str("End"),
 		other if other.len() == 1 => label.push_str(&other.to_uppercase()),
@@ -515,8 +520,8 @@ pub(crate) fn shortcuts_test_lock() -> &'static Mutex<()> {
 /// The path of the custom-shortcuts file: `<config>/shortcuts`, exactly like
 /// the C++ `MainWindow::get_custom_shortcuts_file`.
 pub fn custom_shortcuts_path() -> String {
-	let dir = configuration_location()
-		.unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+	let dir =
+		configuration_location().unwrap_or_else(|| env::temp_dir().to_string_lossy().into_owned());
 	format!("{}/shortcuts", dir.trim_end_matches('/'))
 }
 
@@ -541,7 +546,7 @@ fn parse_shortcut_line(line: &str) -> Option<(String, Vec<String>)> {
 	let keys = if value.is_empty() {
 		Vec::new()
 	} else {
-		if gpui_kit::Keystroke::parse(value).is_err() {
+		if Keystroke::parse(value).is_err() {
 			return None;
 		}
 		vec![value.to_string()]
@@ -629,7 +634,7 @@ pub fn has_custom_shortcuts() -> bool {
 /// compare keys regardless of the `secondary-` vs `cmd-`/`super-`/`win-`
 /// spelling (the parser maps all of them to the same modifier bits).
 fn canonical_key(key: &str) -> Option<String> {
-	gpui_kit::Keystroke::parse(key)
+	Keystroke::parse(key)
 		.ok()
 		.map(|keystroke| keystroke.unparse())
 }
@@ -666,7 +671,7 @@ fn default_canonical(entry: &ActionEntry) -> Vec<String> {
 /// no-op (everything stays at the defaults).
 pub fn load_custom_shortcuts() {
 	let path = custom_shortcuts_path();
-	if let Ok(contents) = std::fs::read_to_string(&path) {
+	if let Ok(contents) = fs::read_to_string(&path) {
 		apply_shortcut_overrides(parse_shortcut_file(&contents));
 	}
 }
@@ -674,7 +679,7 @@ pub fn load_custom_shortcuts() {
 /// Loads overrides from an explicit file path (the Keyboard tab's Import).
 /// Returns the number of lines applied.
 pub fn load_custom_shortcuts_from(path: &str) -> Result<usize, String> {
-	let contents = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+	let contents = fs::read_to_string(path).map_err(|e| e.to_string())?;
 	let entries = parse_shortcut_file(&contents);
 	let count = entries.len();
 	apply_shortcut_overrides(entries);
@@ -703,14 +708,14 @@ pub fn save_custom_shortcuts_to(path: &str) -> Result<usize, String> {
 		}
 	}
 	if lines.is_empty() {
-		match std::fs::remove_file(path) {
+		match fs::remove_file(path) {
 			Ok(()) => {}
-			Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+			Err(e) if e.kind() == io::ErrorKind::NotFound => {}
 			Err(e) => return Err(e.to_string()),
 		}
 		return Ok(0);
 	}
-	std::fs::write(path, serialize_shortcut_file(&lines)).map_err(|e| e.to_string())?;
+	fs::write(path, serialize_shortcut_file(&lines)).map_err(|e| e.to_string())?;
 	Ok(lines.len())
 }
 
@@ -829,16 +834,16 @@ impl Tool {
 	/// `Edit`/`Transition`/`Add`/`Record`/`Hand` have no widget counterpart
 	/// (the widget's pointer tool covers them); those map to `None` and the
 	/// timeline keeps its previous tool.
-	pub const fn timeline_tool(self) -> Option<crate::widgets::timeline::TimelineTool> {
+	pub const fn timeline_tool(self) -> Option<widgets::timeline::TimelineTool> {
 		match self {
-			Tool::Pointer => Some(crate::widgets::timeline::TimelineTool::Select),
-			Tool::TrackSelect => Some(crate::widgets::timeline::TimelineTool::TrackSelect),
-			Tool::Ripple => Some(crate::widgets::timeline::TimelineTool::Ripple),
-			Tool::Rolling => Some(crate::widgets::timeline::TimelineTool::Roll),
-			Tool::Razor => Some(crate::widgets::timeline::TimelineTool::Razor),
-			Tool::Slip => Some(crate::widgets::timeline::TimelineTool::Slip),
-			Tool::Slide => Some(crate::widgets::timeline::TimelineTool::Slide),
-			Tool::Zoom => Some(crate::widgets::timeline::TimelineTool::Zoom),
+			Tool::Pointer => Some(widgets::timeline::TimelineTool::Select),
+			Tool::TrackSelect => Some(widgets::timeline::TimelineTool::TrackSelect),
+			Tool::Ripple => Some(widgets::timeline::TimelineTool::Ripple),
+			Tool::Rolling => Some(widgets::timeline::TimelineTool::Roll),
+			Tool::Razor => Some(widgets::timeline::TimelineTool::Razor),
+			Tool::Slip => Some(widgets::timeline::TimelineTool::Slip),
+			Tool::Slide => Some(widgets::timeline::TimelineTool::Slide),
+			Tool::Zoom => Some(widgets::timeline::TimelineTool::Zoom),
 			_ => None,
 		}
 	}
@@ -850,423 +855,20 @@ pub trait TimelineToolExt {
 	fn app_tool(self) -> Tool;
 }
 
-impl TimelineToolExt for crate::widgets::timeline::TimelineTool {
+impl TimelineToolExt for widgets::timeline::TimelineTool {
 	fn app_tool(self) -> Tool {
 		match self {
-			crate::widgets::timeline::TimelineTool::Select => Tool::Pointer,
-			crate::widgets::timeline::TimelineTool::TrackSelect => Tool::TrackSelect,
-			crate::widgets::timeline::TimelineTool::Ripple => Tool::Ripple,
-			crate::widgets::timeline::TimelineTool::Roll => Tool::Rolling,
-			crate::widgets::timeline::TimelineTool::Razor => Tool::Razor,
-			crate::widgets::timeline::TimelineTool::Slip => Tool::Slip,
-			crate::widgets::timeline::TimelineTool::Slide => Tool::Slide,
-			crate::widgets::timeline::TimelineTool::Zoom => Tool::Zoom,
+			widgets::timeline::TimelineTool::Select => Tool::Pointer,
+			widgets::timeline::TimelineTool::TrackSelect => Tool::TrackSelect,
+			widgets::timeline::TimelineTool::Ripple => Tool::Ripple,
+			widgets::timeline::TimelineTool::Roll => Tool::Rolling,
+			widgets::timeline::TimelineTool::Razor => Tool::Razor,
+			widgets::timeline::TimelineTool::Slip => Tool::Slip,
+			widgets::timeline::TimelineTool::Slide => Tool::Slide,
+			widgets::timeline::TimelineTool::Zoom => Tool::Zoom,
 		}
 	}
 }
 
 #[cfg(test)]
-mod tests {
-	use super::*;
-
-	/// Every stable id is unique (the shortcut-file format keys on it).
-	#[test]
-	fn registry_ids_are_unique() {
-		let mut seen = std::collections::HashSet::new();
-		for entry in REGISTRY {
-			assert!(
-				seen.insert(entry.cpp_id),
-				"duplicate cpp id {}",
-				entry.cpp_id
-			);
-		}
-	}
-
-	/// Every menu id is unique (the menu bar reports plain ids; a duplicate
-	/// would make two items dispatch the same action). Panel-context
-	/// hotkeys share [`HIDDEN_MENU_ID`] (no menu item) and are skipped.
-	#[test]
-	fn registry_menu_ids_are_unique() {
-		let mut seen = std::collections::HashSet::new();
-		for entry in REGISTRY {
-			if entry.menu_id() == HIDDEN_MENU_ID {
-				continue;
-			}
-			assert!(
-				seen.insert(entry.menu_id()),
-				"duplicate menu id {} ({})",
-				entry.menu_id(),
-				entry.cpp_id
-			);
-		}
-	}
-
-	/// Every default key parses as a gpui keystroke (the table is static
-	/// data, so a typo would otherwise surface only as a dead shortcut at
-	/// runtime — `key_bindings` would panic at startup).
-	#[test]
-	fn every_default_key_parses() {
-		for entry in REGISTRY {
-			for key in entry.default_keys {
-				assert!(
-					gpui_kit::Keystroke::parse(key).is_ok(),
-					"invalid keystroke {key:?} on {}",
-					entry.cpp_id
-				);
-			}
-		}
-	}
-
-	/// No two actions claim the same keystroke (a conflict would make the
-	/// keymap dispatch whichever binding was registered last).
-	#[test]
-	fn default_keys_are_conflict_free() {
-		let mut seen = std::collections::HashMap::new();
-		for entry in REGISTRY {
-			for key in entry.default_keys {
-				let parsed = gpui_kit::Keystroke::parse(key).unwrap();
-				let canon = parsed.unparse();
-				let previous = seen.insert(canon.clone(), entry.cpp_id);
-				assert!(
-					previous.is_none(),
-					"keystroke {canon} bound to both {} and {}",
-					previous.unwrap(),
-					entry.cpp_id
-				);
-			}
-		}
-	}
-
-	/// The multicam source-switch hotkeys are panel-context: their
-	/// bindings carry the `MulticamPanel` key context so the digit keys
-	/// stay free for text entry outside the panel, and every other binding
-	/// stays global. (Regression: bound globally, `1..9` matched in every
-	/// focused panel and swallowed the digits before any value box / hex
-	/// field / text input could type them.)
-	#[test]
-	fn multicam_bindings_are_scoped_to_the_panel_context() {
-		let panel_context = Some(Rc::new(
-			KeyBindingContextPredicate::parse("MulticamPanel").unwrap(),
-		));
-		let multicam_actions: &[&dyn Action] = &[
-			&MulticamSwitch1, &MulticamSwitch2, &MulticamSwitch3, &MulticamSwitch4,
-			&MulticamSwitch5, &MulticamSwitch6, &MulticamSwitch7, &MulticamSwitch8,
-			&MulticamSwitch9, &MulticamSwitchNoSplit1, &MulticamSwitchNoSplit2,
-			&MulticamSwitchNoSplit3, &MulticamSwitchNoSplit4, &MulticamSwitchNoSplit5,
-			&MulticamSwitchNoSplit6, &MulticamSwitchNoSplit7, &MulticamSwitchNoSplit8,
-			&MulticamSwitchNoSplit9,
-		];
-		let mut scoped = 0usize;
-		for binding in key_bindings() {
-			let is_multicam = multicam_actions
-				.iter()
-				.any(|known| binding.action().partial_eq(*known));
-			if is_multicam {
-				scoped += 1;
-				assert_eq!(
-					binding.predicate(),
-					panel_context,
-					"the source-switch binding must be gated on the MulticamPanel key context"
-				);
-			} else {
-				assert_eq!(
-					binding.predicate(),
-					Some(input_exclusion_predicate()),
-					"non-multicam bindings must stay out of text fields"
-				);
-			}
-		}
-		assert_eq!(scoped, 18, "all 18 source-switch bindings are panel-scoped");
-	}
-
-	/// The input-exclusion predicate matches everywhere EXCEPT inside an
-	/// editable-text field, so single-key shuttles (j/k/l, i/o, c/v, …)
-	/// fire on the timeline but never swallow a letter typed into a value
-	/// box / hex field / text input (the "cannot type into the text field"
-	/// report).
-	#[test]
-	fn input_exclusion_predicate_stays_out_of_text_fields() {
-		let predicate = input_exclusion_predicate();
-		let text_context = gpui_kit::KeyContext::parse("Input").unwrap();
-		let panel_context = gpui_kit::KeyContext::parse("Timeline").unwrap();
-		assert_eq!(
-			predicate.depth_of(&[text_context]),
-			None,
-			"no app hotkey matches while a text field is focused"
-		);
-		assert!(
-			predicate.depth_of(&[panel_context]).is_some(),
-			"hotkeys still match outside text fields"
-		);
-	}
-
-	/// Every registry action appears somewhere in the menu tree (an action
-	/// without a menu entry is unreachable with the mouse, and the registry
-	/// is meant to drive the menus).
-	#[test]
-	fn every_action_appears_in_the_menu_tree() {
-		let _guard = crate::i18n::lang_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		crate::i18n::set_language_code("en-US");
-
-		use crate::oakui::component::menu;
-		fn collect(menu: &menu::Menu, out: &mut Vec<usize>) {
-			for item in &menu.items {
-				out.push(item.id);
-				if let Some(sub) = &item.submenu {
-					collect(sub, out);
-				}
-			}
-		}
-		let mut ids = Vec::new();
-		for entry in crate::app::make_menus_for_test() {
-			collect(&entry.menu, &mut ids);
-		}
-		// Context-menu-only actions (the timeline clip menu's synchronize
-		// group) appear in the clip menu instead of the menu bar.
-		collect(
-			&crate::panels::timeline::clip_menu(
-				crate::oakui::engine::SyncEligibility::default(),
-				&[],
-				None,
-			),
-			&mut ids,
-		);
-		for entry in REGISTRY {
-			// The panel-context hotkeys (multicam source switches) are bound
-			// to the focused panel, not to any menu — the C++ attaches them
-			// straight to the MulticamWidget.
-			if entry.menu_id() == HIDDEN_MENU_ID {
-				continue;
-			}
-			assert!(
-				ids.contains(&entry.menu_id()),
-				"action {} (menu id {}) has no menu item",
-				entry.cpp_id,
-				entry.menu_id()
-			);
-		}
-	}
-
-	/// Every registry i18n key exists in both language tables with a
-	/// non-empty value (the menu labels come straight from `tr`).
-	#[test]
-	fn every_i18n_key_exists_in_both_languages() {
-		for entry in REGISTRY {
-			for code in ["en-US", "zh-CN"] {
-				let _guard = crate::i18n::lang_test_lock()
-					.lock()
-					.unwrap_or_else(|e| e.into_inner());
-				crate::i18n::set_language_code(code);
-				let value = crate::i18n::tr(entry.i18n_key);
-				assert_ne!(
-					value, entry.i18n_key,
-					"i18n key {} ({code}) is missing for action {}",
-					entry.i18n_key, entry.cpp_id
-				);
-				assert!(!value.is_empty());
-			}
-		}
-		// The loop leaves zh-CN active; restore the default so lock-free
-		// tests building English menus are not fooled mid-assert.
-		let _guard = crate::i18n::lang_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		crate::i18n::set_language_code("en-US");
-	}
-
-	/// The shortcut display formatter renders the documented labels for a
-	/// sample of shapes (modifier stacks, arrows, named keys, punctuation).
-	/// The glyph form is the macOS rendering; other platforms spell the
-	/// modifiers out (covered by the parser tests instead).
-	#[test]
-	#[cfg(target_os = "macos")]
-	fn display_shortcut_formats_labels() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		assert_eq!(display_shortcut(ActionId::Redo).as_deref(), Some("⇧⌘Z"));
-		assert_eq!(
-			display_shortcut(ActionId::SplitAtPlayhead).as_deref(),
-			Some("⌘K")
-		);
-		assert_eq!(display_shortcut(ActionId::NudgeLeft).as_deref(), Some("⌥←"));
-		assert_eq!(
-			display_shortcut(ActionId::FullScreen).as_deref(),
-			Some("F11")
-		);
-		assert_eq!(display_shortcut(ActionId::Insert).as_deref(), Some(","));
-		assert!(display_shortcut(ActionId::About).is_none());
-	}
-
-	// -------------------------------------------------------------------
-	// Custom shortcut overrides (stage 7)
-	// -------------------------------------------------------------------
-
-	/// A unique temporary directory for one test (the `shortcuts` file
-	/// round-trip), so parallel tests never collide on the same path.
-	fn temp_dir(label: &str) -> String {
-		static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-		let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-		let path = std::env::temp_dir().join(format!(
-			"oak-shortcuts-test-{label}-{}-{n}",
-			std::process::id()
-		));
-		let _ = std::fs::remove_dir_all(&path);
-		std::fs::create_dir_all(&path).unwrap();
-		path.to_string_lossy().into_owned()
-	}
-
-	/// Parsing skips blank lines, unknown ids and unparseable keystrokes; an
-	/// empty value after the tab means "unbound".
-	#[test]
-	fn parse_shortcut_file_skips_malformed_lines() {
-		let entries = parse_shortcut_file(
-			"newproj\tsecondary-n\n\nbogusaction\tsecondary-x\nundo\t\nsaveproj\tnot-a-key\ncut\tsecondary-c\n",
-		);
-		assert_eq!(
-			entries,
-			vec![
-				("newproj".to_string(), vec!["secondary-n".to_string()]),
-				("undo".to_string(), vec![]), // unbound
-				("cut".to_string(), vec!["secondary-c".to_string()]),
-			]
-		);
-	}
-
-	/// Write → clear → reload round-trips the effective keys, and the file
-	/// only carries the entries that differ from the registry defaults.
-	#[test]
-	fn shortcuts_file_round_trips_through_the_override_table() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		reset_all_custom_shortcuts();
-		let dir = temp_dir("roundtrip");
-		let path = format!("{dir}/shortcuts");
-
-		// `newproj` = its own default (spelled in registry syntax) → not a
-		// diff; the other two differ (`undo` gets unbound).
-		set_custom_shortcut("newproj", vec!["secondary-n".to_string()]);
-		set_custom_shortcut("saveproj", vec!["cmd-alt-s".to_string()]);
-		set_custom_shortcut("undo", Vec::new()); // unbound
-		assert_eq!(save_custom_shortcuts_to(&path).unwrap(), 2);
-
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert!(contents.contains("saveproj\t"), "file: {contents}");
-		assert!(contents.contains("undo\t"), "file: {contents}");
-		assert!(!contents.contains("newproj"), "file: {contents}");
-
-		// Reload into a fresh table.
-		reset_all_custom_shortcuts();
-		assert!(!has_custom_shortcuts());
-		assert_eq!(load_custom_shortcuts_from(&path).unwrap(), 2);
-		assert_eq!(
-			effective_keys(ActionId::SaveProject.entry()),
-			vec!["cmd-alt-s".to_string()]
-		);
-		assert_eq!(effective_keys(ActionId::Undo.entry()), Vec::<String>::new());
-		// The un-overridden action keeps its registry default.
-		assert_eq!(
-			effective_keys(ActionId::NewProject.entry()),
-			vec!["secondary-n".to_string()]
-		);
-	}
-
-	/// A default-equal override is dropped on save (canonical comparison), and
-	/// an all-default table removes the file entirely (the C++ behavior).
-	#[test]
-	fn save_writes_only_entries_that_differ_from_default() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		reset_all_custom_shortcuts();
-		let dir = temp_dir("diff");
-		let path = format!("{dir}/shortcuts");
-
-		set_custom_shortcut("newproj", vec!["secondary-n".to_string()]);
-		set_custom_shortcut("undo", vec!["cmd-alt-z".to_string()]);
-		assert_eq!(save_custom_shortcuts_to(&path).unwrap(), 1);
-		let contents = std::fs::read_to_string(&path).unwrap();
-		assert!(contents.contains("undo\tcmd-alt-z"), "file: {contents}");
-		assert!(!contents.contains("newproj"), "file: {contents}");
-
-		// All-default → the file disappears.
-		reset_all_custom_shortcuts();
-		set_custom_shortcut("newproj", vec!["secondary-n".to_string()]);
-		assert_eq!(save_custom_shortcuts_to(&path).unwrap(), 0);
-		assert!(!std::path::Path::new(&path).exists());
-	}
-
-	/// Effective keys fall back to the registry defaults and the multi-key
-	/// defaults stay intact until overridden.
-	#[test]
-	fn effective_keys_fall_back_to_defaults() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		reset_all_custom_shortcuts();
-		// Delete defaults to ["delete", "backspace"].
-		assert_eq!(
-			effective_keys(ActionId::Delete.entry()),
-			vec!["delete".to_string(), "backspace".to_string()]
-		);
-		set_custom_shortcut("delete", vec!["secondary-x".to_string()]);
-		assert_eq!(
-			effective_keys(ActionId::Delete.entry()),
-			vec!["secondary-x".to_string()]
-		);
-		reset_custom_shortcut("delete");
-		assert_eq!(
-			effective_keys(ActionId::Delete.entry()),
-			vec!["delete".to_string(), "backspace".to_string()]
-		);
-	}
-
-	/// Conflict resolution: taking a key away from another action moves the
-	/// binding (the displaced action falls back to its remaining keys, or to
-	/// none).
-	#[test]
-	fn stealing_a_key_moves_the_binding_away() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		reset_all_custom_shortcuts();
-		let canon = canonical_key("secondary-c").expect("copy's key parses");
-		assert_eq!(owner_of_shortcut(&canon), Some(ActionId::Copy));
-
-		// The capture flow: steal the key away from its current owner, then
-		// assign it to the target.
-		let stolen = steal_shortcut_for(ActionId::Paste.entry(), &canon);
-		assert_eq!(stolen, Some(ActionId::Copy));
-		set_custom_shortcut(ActionId::Paste.entry().cpp_id, vec![canon.clone()]);
-		assert_eq!(owner_of_shortcut(&canon), Some(ActionId::Paste));
-		assert!(
-			effective_keys(ActionId::Copy.entry()).is_empty(),
-			"the displaced Copy must be unbound"
-		);
-
-		// A key nobody owns steals nothing.
-		reset_all_custom_shortcuts();
-		assert_eq!(steal_shortcut_for(ActionId::Paste.entry(), "f24"), None);
-	}
-
-	/// Overriding a default with the same key keeps `display_shortcut` stable
-	/// (the canonical comparison treats `secondary-` and `cmd-` as equal).
-	#[test]
-	#[cfg(target_os = "macos")]
-	fn display_shortcut_uses_the_effective_key() {
-		let _guard = shortcuts_test_lock()
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		set_custom_shortcut("saveproj", vec!["cmd-alt-s".to_string()]);
-		assert_eq!(
-			display_shortcut(ActionId::SaveProject).as_deref(),
-			Some("⌥⌘S")
-		);
-		set_custom_shortcut("saveproj", Vec::new()); // unbound → no label
-		assert!(display_shortcut(ActionId::SaveProject).is_none());
-		reset_all_custom_shortcuts();
-	}
-}
+mod tests;

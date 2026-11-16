@@ -31,13 +31,13 @@
 //! `OakApp<MockEngine>` tests in `crate::app`.
 
 use crate::oakui::component::text_input;
+use gpui_kit::base::input::InputState;
 use gpui_kit::colors::DefaultColors;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-	div, App, ClickEvent, Context, ElementId, Entity, EventEmitter, Hsla, Render, SharedString,
-	Window,
+	App, ClickEvent, Context, ElementId, Entity, EventEmitter, Hsla, Render, SharedString, Window,
+	div,
 };
-use gpui_kit::base::input::InputState;
 
 use crate::i18n;
 use crate::oakui::{AppEngine, LibraryProject};
@@ -287,11 +287,13 @@ impl<E: AppEngine> Render for ProjectManager<E> {
 					.min_h_0()
 					.overflow_y_scroll()
 					.children(if self.rows.is_empty() {
-						vec![div()
-							.p_4()
-							.text_color(colors.disabled)
-							.child(i18n::tr("manager.empty"))
-							.into_any_element()]
+						vec![
+							div()
+								.p_4()
+								.text_color(colors.disabled)
+								.child(i18n::tr("manager.empty"))
+								.into_any_element(),
+						]
 					} else {
 						self.rows
 							.iter()

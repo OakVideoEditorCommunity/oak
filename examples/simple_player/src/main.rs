@@ -39,32 +39,53 @@
 //! ```
 
 #[cfg(target_os = "macos")]
-use gpui_kit::{px, size, AnyWindowHandle, AppContext, Entity, Result, VisualTestAppContext};
-#[cfg(target_os = "macos")]
 use gpui_kit::platform::current_platform;
+#[cfg(target_os = "macos")]
+use gpui_kit::{px, size, AnyWindowHandle, AppContext, Entity, Result, VisualTestAppContext};
 #[cfg(target_os = "macos")]
 use oakapp::app::OakApp;
 #[cfg(target_os = "macos")]
 use oakapp::i18n;
 #[cfg(target_os = "macos")]
 use oakapp::oakui::MockEngine;
+use std::env;
+use std::fs;
+use std::path;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_WIDTH: f32 = 1600.0;
 #[cfg(target_os = "macos")]
 const DEFAULT_HEIGHT: f32 = 900.0;
 #[cfg(target_os = "macos")]
-const OUT_ZH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-window.png");
+const OUT_ZH: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-window.png"
+);
 #[cfg(target_os = "macos")]
-const OUT_EN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-window-en.png");
+const OUT_EN: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-window-en.png"
+);
 #[cfg(target_os = "macos")]
-const OUT_MGR_ZH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-manager.png");
+const OUT_MGR_ZH: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-manager.png"
+);
 #[cfg(target_os = "macos")]
-const OUT_MGR_EN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-manager-en.png");
+const OUT_MGR_EN: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-manager-en.png"
+);
 #[cfg(target_os = "macos")]
-const OUT_PREF_ZH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-preferences.png");
+const OUT_PREF_ZH: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-preferences.png"
+);
 #[cfg(target_os = "macos")]
-const OUT_PREF_EN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screenshot-preferences-en.png");
+const OUT_PREF_EN: &str = concat!(
+	env!("CARGO_MANIFEST_DIR"),
+	"/../../docs/screenshot-preferences-en.png"
+);
 
 /// Logical y of the timeline toolbar row, which sits at the top of the
 /// bottom dock panel in the default layout: the dock starts at y 27.5 (the
@@ -91,7 +112,7 @@ const TOOLBAR_BAND: f32 = 44.0;
 /// directory or writing the PNGs.
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
-	let args: Vec<String> = std::env::args().skip(1).collect();
+	let args: Vec<String> = env::args().skip(1).collect();
 	let width = args
 		.first()
 		.and_then(|s| s.parse().ok())
@@ -112,7 +133,7 @@ fn main() -> Result<()> {
 	{
 		let (handle, root) = open_shell(&mut cx, width, height);
 		let image = cx.capture_screenshot(handle.into())?;
-		std::fs::create_dir_all(std::path::Path::new(OUT_ZH).parent().unwrap())?;
+		fs::create_dir_all(path::Path::new(OUT_ZH).parent().unwrap())?;
 		image.save(OUT_ZH)?;
 		println!("wrote {OUT_ZH} ({}×{})", image.width(), image.height());
 		assert_toolbar(&image, "zh-CN");
@@ -123,7 +144,7 @@ fn main() -> Result<()> {
 	{
 		let (handle, root) = open_shell(&mut cx, width, height);
 		let image = cx.capture_screenshot(handle.into())?;
-		std::fs::create_dir_all(std::path::Path::new(OUT_EN).parent().unwrap())?;
+		fs::create_dir_all(path::Path::new(OUT_EN).parent().unwrap())?;
 		image.save(OUT_EN)?;
 		println!("wrote {OUT_EN} ({}×{})", image.width(), image.height());
 		assert_toolbar(&image, "en-US");

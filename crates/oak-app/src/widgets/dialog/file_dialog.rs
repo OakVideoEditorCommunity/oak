@@ -189,7 +189,9 @@ mod tests {
 		});
 		let window = cx.open_window(size(px(400.0), px(120.0)), |window, cx| {
 			let content = cx.new(|cx| FileDialogContent::new(window, cx));
-			content.update(cx, |content, cx| content.set_path("/tmp/movie.mov", window, cx));
+			content.update(cx, |content, cx| {
+				content.set_path("/tmp/movie.mov", window, cx)
+			});
 			Host { content }
 		});
 		cx.run_until_parked();

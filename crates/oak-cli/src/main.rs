@@ -37,6 +37,7 @@
 //! [`wav`] are pure-Rust formatting/writing helpers (exact ports of the
 //! C++ `printf`/writers).
 
+use std::env;
 mod cmd;
 mod engine;
 mod fmt;
@@ -144,7 +145,7 @@ enum Command {
 /// that function returns (0 success, 1 general error, 2 rendering unavailable).
 /// This function never returns; it must only be used as the process entry point.
 fn main() {
-	let args: Vec<String> = std::env::args().skip(1).collect();
+	let args: Vec<String> = env::args().skip(1).collect();
 
 	// argv[1] handling that mirrors the C++ main() exactly.
 	if let Some(first) = args.first() {

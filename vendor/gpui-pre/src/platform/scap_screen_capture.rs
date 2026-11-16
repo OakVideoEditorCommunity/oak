@@ -1,4 +1,5 @@
 //! Screen capture for Linux and Windows
+use std::thread;
 use crate::{
     DevicePixels, ForegroundExecutor, ScreenCaptureFrame, ScreenCaptureSource, ScreenCaptureStream,
     Size, SourceMetadata, size,
@@ -45,7 +46,7 @@ struct ScapCaptureSource {
 /// Populates the sender with the screens available for capture.
 fn get_screen_targets(sources_tx: oneshot::Sender<Result<Vec<ScapCaptureSource>>>) {
     // Due to use of blocking APIs, a new thread is used.
-    std::thread::spawn(|| {
+    thread::spawn(|| {
         let targets = match scap::get_all_targets() {
             Ok(targets) => targets,
             Err(err) => {
@@ -92,7 +93,7 @@ impl ScreenCaptureSource for ScapCaptureSource {
         let target = self.target.clone();
 
         // Due to use of blocking APIs, a dedicated thread is used.
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             match new_scap_capturer(Some(scap::Target::Display(target.clone()))) {
                 Ok(mut capturer) => {
                     capturer.start_capture();
@@ -125,7 +126,7 @@ fn start_default_target_screen_capture(
     sources_tx: oneshot::Sender<Result<Vec<ScapDefaultTargetCaptureSource>>>,
 ) {
     // Due to use of blocking APIs, a dedicated thread is used.
-    std::thread::spawn(|| {
+    thread::spawn(|| {
         let start_result = gpui_util::maybe!({
             let mut capturer = new_scap_capturer(None)?;
             capturer.start_capture();

@@ -27,6 +27,7 @@
 
 #![allow(dead_code)]
 
+use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -97,7 +98,7 @@ pub fn write_wav(
 		.and_then(|v| u16::try_from(v).ok())
 		.ok_or_else(|| invalid_data("block align overflow"))?;
 
-	let mut f = std::fs::File::create(path)?;
+	let mut f = fs::File::create(path)?;
 	f.write_all(b"RIFF")?;
 	write_u32_le(&mut f, 36 + data_size)?;
 	f.write_all(b"WAVE")?;

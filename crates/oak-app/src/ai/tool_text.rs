@@ -22,6 +22,7 @@
 //! actually sent instead of inventing a grammar. (TODO: extend only with
 //! captured samples, never by speculation.)
 
+use serde_json::Number;
 use serde_json::{Map, Value};
 
 use super::llm::ToolCall;
@@ -110,7 +111,10 @@ pub fn scan(content: &str) -> TextCallScan {
 	// Markup without a block: `content` carried `<function=`/`<parameter=`
 	// but never opened a `<tool_call>`. That is still a model trying to call a
 	// tool, so it must be reported — never shown as an answer.
-	if calls.is_empty() && unparsed.is_none() && (content.contains(FUNCTION) || content.contains(PARAMETER)) {
+	if calls.is_empty()
+		&& unparsed.is_none()
+		&& (content.contains(FUNCTION) || content.contains(PARAMETER))
+	{
 		unparsed = Some(format!(
 			"text-form markup without a `<tool_call>` block: {}",
 			content.trim()
@@ -165,17 +169,11 @@ fn parse_block(block: &str) -> Result<ToolCall, String> {
 			None => key_end,
 		};
 		let value_region = &after_param[value_start..];
-		let cut = [
-			PARAMETER,
-			FUNCTION,
-			CLOSE,
-			"</parameter>",
-			"</parameter",
-		]
-		.iter()
-		.filter_map(|token| value_region.find(token))
-		.min()
-		.unwrap_or(value_region.len());
+		let cut = [PARAMETER, FUNCTION, CLOSE, "</parameter>", "</parameter"]
+			.iter()
+			.filter_map(|token| value_region.find(token))
+			.min()
+			.unwrap_or(value_region.len());
 		let raw_value = value_region[..cut].trim();
 		args.insert(key, infer_value(raw_value));
 		cursor = &value_region[cut..];
@@ -211,7 +209,7 @@ pub fn infer_value(raw: &str) -> Value {
 	}
 	if is_decimal(text) {
 		if let Ok(f) = text.parse::<f64>() {
-			if let Some(n) = serde_json::Number::from_f64(f) {
+			if let Some(n) = Number::from_f64(f) {
 				return Value::Number(n);
 			}
 		}
@@ -280,7 +278,10 @@ mod tests {
 		assert_eq!(scan.calls.len(), 1, "{scan:?}");
 		assert_eq!(scan.calls[0].name, "timeline.add_track");
 		assert_eq!(scan.calls[0].arguments, json!({ "type": "video" }));
-		assert!(scan.unparsed.is_some(), "the parameterless block is reported");
+		assert!(
+			scan.unparsed.is_some(),
+			"the parameterless block is reported"
+		);
 	}
 
 	#[test]
@@ -297,9 +298,17 @@ mod tests {
 		let content = "Sure, setting the frame rate.\n<tool_call>\n<function=sequence.set_format>\n<parameter=fps>24\n</tool_call>\nDone.";
 		let scan = scan(content);
 		assert_eq!(scan.calls.len(), 1);
-		assert!(scan.prose.contains("setting the frame rate"), "{}", scan.prose);
+		assert!(
+			scan.prose.contains("setting the frame rate"),
+			"{}",
+			scan.prose
+		);
 		assert!(scan.prose.contains("Done."), "{}", scan.prose);
-		assert!(!scan.prose.contains('<'), "markup leaked into prose: {}", scan.prose);
+		assert!(
+			!scan.prose.contains('<'),
+			"markup leaked into prose: {}",
+			scan.prose
+		);
 	}
 
 	#[test]
@@ -307,7 +316,7 @@ mod tests {
 		for content in [
 			"<tool_call>\n<parameter=fps>60\n</tool_call>", // no function
 			"<function=sequence.set_format>\n<parameter=fps>60", // no block
-			"<tool_call><function=></tool_call>",          // empty name
+			"<tool_call><function=></tool_call>",           // empty name
 			"<tool_call><function=sequence.set_format></tool_call>", // no params
 		] {
 			let scan = scan(content);

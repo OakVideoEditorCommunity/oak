@@ -1,3 +1,4 @@
+use core::num;
 #[cfg(feature = "std")]
 use alloc::sync::Arc;
 use alloc::{boxed::Box, string::ToString, vec::Vec};
@@ -38,7 +39,7 @@ fn memory_location_to_metal(location: MemoryLocation) -> MTLResourceOptions {
 
 #[derive(Debug)]
 pub struct Allocation {
-    chunk_id: Option<core::num::NonZeroU64>,
+    chunk_id: Option<num::NonZeroU64>,
     offset: u64,
     size: u64,
     memory_block_index: usize,

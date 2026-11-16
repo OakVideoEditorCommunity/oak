@@ -7,6 +7,7 @@
 //!
 //! If all of your elements are the same height, see [`crate::UniformList`] for a simpler API
 
+use core::panic;
 use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
     FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
@@ -1445,7 +1446,7 @@ impl Element for List {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

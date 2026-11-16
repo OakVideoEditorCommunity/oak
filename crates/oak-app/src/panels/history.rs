@@ -21,15 +21,15 @@
 //! stack to it (`row + 1`); a right-click opens a context menu with
 //! undo/redo and a jump-to-row action.
 
+use crate::oakui::component::menu::{ContextMenu, ContextMenuEvent, Menu, MenuItem};
+use crate::panels::PanelFocused;
 use gpui_kit::colors::DefaultColors;
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
-use gpui_kit::{FocusHandle, Focusable};
-use crate::panels::PanelFocused;
 use gpui_kit::{
-	div, prelude::*, px, AnyElement, App, Context, ElementId, Entity, EventEmitter, MouseButton,
-	MouseDownEvent, Render, SharedString, Window,
+	AnyElement, App, Context, ElementId, Entity, EventEmitter, MouseButton, MouseDownEvent, Render,
+	SharedString, Window, div, prelude::*, px,
 };
-use crate::oakui::component::menu::{ContextMenu, ContextMenuEvent, Menu, MenuItem};
+use gpui_kit::{FocusHandle, Focusable};
 
 use crate::oakui::AppEngine;
 use crate::panels::commands::PanelCommandHandler;
@@ -63,7 +63,8 @@ impl<E: AppEngine> HistoryPanel<E> {
 		// undo, redo and jump runs through the engine), so re-reading on
 		// observe keeps the rows, the graying and the selection live —
 		// the C++ model reset itself on Core::undo_index_changed.
-		cx.observe(&engine, |_this, _engine, cx| cx.notify()).detach();
+		cx.observe(&engine, |_this, _engine, cx| cx.notify())
+			.detach();
 
 		let menu = cx.new(|cx| ContextMenu::new(0, window, cx));
 		cx.subscribe(&menu, |this, _menu, event: &ContextMenuEvent, cx| {
@@ -125,7 +126,9 @@ impl<E: AppEngine> HistoryPanel<E> {
 		}
 		if let Some(row) = row {
 			self.menu_row = Some(row);
-			items.push(MenuItem::new(MENU_JUMP_HERE, crate::i18n::tr("history.jump_here")).separated());
+			items.push(
+				MenuItem::new(MENU_JUMP_HERE, crate::i18n::tr("history.jump_here")).separated(),
+			);
 		} else {
 			self.menu_row = None;
 		}
@@ -181,13 +184,15 @@ impl<E: AppEngine> Render for HistoryPanel<E> {
 					.when(!is_selected, |el| {
 						el.hover(|style| style.bg(crate::widgets::theme::row_hover(&colors)))
 					})
-					.on_click(cx.listener(move |this, _event: &gpui_kit::ClickEvent, _window, cx| {
-						// A left click jumps to this row (the C++
-						// currentRowChanged → oakengine_undo_jump(row+1)).
-						this.engine
-							.update(cx, |engine, cx| engine.jump_history(row as i64 + 1, cx));
-						cx.stop_propagation();
-					}))
+					.on_click(cx.listener(
+						move |this, _event: &gpui_kit::ClickEvent, _window, cx| {
+							// A left click jumps to this row (the C++
+							// currentRowChanged → oakengine_undo_jump(row+1)).
+							this.engine
+								.update(cx, |engine, cx| engine.jump_history(row as i64 + 1, cx));
+							cx.stop_propagation();
+						},
+					))
 					.on_mouse_down(
 						MouseButton::Right,
 						cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
@@ -211,7 +216,11 @@ impl<E: AppEngine> Render for HistoryPanel<E> {
 							.overflow_hidden()
 							.whitespace_nowrap()
 							.text_ellipsis()
-							.text_color(if is_selected { colors.selected_text } else { row_color })
+							.text_color(if is_selected {
+								colors.selected_text
+							} else {
+								row_color
+							})
 							.child(label),
 					),
 			);
@@ -284,7 +293,7 @@ impl<E: AppEngine> Panel for HistoryPanel<E> {
 mod tests {
 	use super::*;
 	use crate::oakui::MockEngine;
-	use gpui_kit::{size, Modifiers, TestAppContext, VisualTestContext};
+	use gpui_kit::{Modifiers, TestAppContext, VisualTestContext, size};
 
 	/// Builds the panel in a window and returns a `VisualTestContext`.
 	fn panel_window(
@@ -330,7 +339,10 @@ mod tests {
 		cx.update(|window, cx| {
 			window.draw(cx).clear(cx);
 		});
-		assert!(cx.debug_bounds("menu-popup").is_none(), "menu starts hidden");
+		assert!(
+			cx.debug_bounds("menu-popup").is_none(),
+			"menu starts hidden"
+		);
 
 		cx.simulate_mouse_down(
 			gpui_kit::point(px(160.0), px(200.0)),
@@ -391,7 +403,11 @@ mod tests {
 
 		// Dock metadata.
 		cx.update(|_window, app| {
-			assert_eq!(panel.read(app).panel_name(), crate::panels::ids::HISTORY, "the dock routes by id");
+			assert_eq!(
+				panel.read(app).panel_name(),
+				crate::panels::ids::HISTORY,
+				"the dock routes by id"
+			);
 		});
 
 		// Left click focuses the panel (the dock re-emits the event).
@@ -409,7 +425,10 @@ mod tests {
 		cx.update(|window, cx| {
 			window.draw(cx).clear(cx);
 		});
-		assert!(cx.debug_bounds("menu-popup").is_some(), "blank-area menu opens");
+		assert!(
+			cx.debug_bounds("menu-popup").is_some(),
+			"blank-area menu opens"
+		);
 
 		// Every menu action routes to the engine; unknown ids are ignored,
 		// and show_menu toggles between row and blank-area targets.
@@ -427,7 +446,10 @@ mod tests {
 				assert_eq!(panel.engine.read(cx).history_index(), total - 1);
 				let entries = panel.engine.read(cx).history_entries();
 				assert_eq!(entries.len(), total as usize, "undo keeps rows listed");
-				assert!(!entries.last().expect("rows").done, "the undone row is gray");
+				assert!(
+					!entries.last().expect("rows").done,
+					"the undone row is gray"
+				);
 				panel.on_menu(MENU_REDO, cx);
 				assert_eq!(panel.engine.read(cx).history_index(), total);
 				assert!(

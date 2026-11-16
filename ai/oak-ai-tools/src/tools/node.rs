@@ -29,12 +29,11 @@ pub fn parse_add_effect(args: &Value) -> Result<AddEffectArgs, ToolError> {
 		effect: req_str(args, "effect")?.to_string(),
 		index: match args.get("index") {
 			None | Some(Value::Null) => None,
-			Some(_) => Some(
-				args.get("index")
-					.and_then(Value::as_u64)
-					.ok_or_else(|| ToolError::invalid_params("field 'index' must be an integer >= 0"))?
-					 as usize,
-			),
+			Some(_) => {
+				Some(args.get("index").and_then(Value::as_u64).ok_or_else(|| {
+					ToolError::invalid_params("field 'index' must be an integer >= 0")
+				})? as usize)
+			}
 		},
 	})
 }
@@ -145,7 +144,10 @@ mod tests {
 
 	#[test]
 	fn range_table_matches_the_freeze() {
-		assert_eq!(range_for("temperature_in"), Some((Some(1000.0), Some(40000.0))));
+		assert_eq!(
+			range_for("temperature_in"),
+			Some((Some(1000.0), Some(40000.0)))
+		);
 		assert_eq!(range_for("tint_in"), Some((Some(-1.0), Some(1.0))));
 		assert_eq!(range_for("opacity_in"), Some((Some(0.0), None)));
 		assert_eq!(range_for("gamma_in"), None); // explicitly open
@@ -165,7 +167,8 @@ mod tests {
 
 	#[test]
 	fn arg_parsing() {
-		let args = json!({"clip": "clip-1", "effect": "org.olivevideoeditor.Olive.blur", "index": 2});
+		let args =
+			json!({"clip": "clip-1", "effect": "org.olivevideoeditor.Olive.blur", "index": 2});
 		let parsed = parse_add_effect(&args).unwrap();
 		assert_eq!(parsed.index, Some(2));
 		let set = json!({"node": "node-1", "key": "radius_in", "value": 4.0});

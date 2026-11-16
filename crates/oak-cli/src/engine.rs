@@ -13,14 +13,16 @@
 //! audio are SDK tasks/buffers, and export is the unified task API. The CLI
 //! links no other Oak crate.
 
+use quercus_engine_rs::audio;
+use quercus_engine_rs::codec;
+use quercus_engine_rs::ofx;
+use quercus_engine_rs::state;
 use std::path::Path;
 
 use quercus_engine_rs::editor::{EditorSession, TrackKind};
 use quercus_engine_rs::node::{NodeId, NodeKind, Project};
 use quercus_engine_rs::render::{self, RenderBackend};
-use quercus_engine_rs::task::{
-	self, EncodingParams, TaskState,
-};
+use quercus_engine_rs::task::{self, EncodingParams, TaskState};
 use quercus_engine_rs::types::{Rational, TimeRange};
 
 /// The CLI's shared project handle (SDK, not an internal graph).
@@ -189,12 +191,12 @@ pub struct RenderedFrame {
 
 /// Initializes the render manager and the engine backends the CLI uses.
 pub fn render_manager_init() -> Result<(), String> {
-	let _ = quercus_engine_rs::state::color_set_up_default_config(None);
+	let _ = state::color_set_up_default_config(None);
 	render::textengine_install();
-	let _ = quercus_engine_rs::audio::create_instance();
-	let _ = quercus_engine_rs::ofx::scan();
-	quercus_engine_rs::ofx::register_plugin_nodes();
-	quercus_engine_rs::ofx::install_render_executor();
+	let _ = audio::create_instance();
+	let _ = ofx::scan();
+	ofx::register_plugin_nodes();
+	ofx::install_render_executor();
 	if !render::manager_init(RenderBackend::Threads) && !render::manager_is_initialized() {
 		return Err("cannot initialize the render manager".to_string());
 	}
@@ -316,16 +318,16 @@ pub fn export_sequence(
 		return Err("the sequence has no video parameters".to_string());
 	}
 	let params = EncodingParams {
-		format: quercus_engine_rs::codec::Format::MPEG4Video as i32,
+		format: codec::Format::MPEG4Video as i32,
 		video_enabled: true,
-		video_codec: quercus_engine_rs::codec::Codec::H264 as i32,
+		video_codec: codec::Codec::H264 as i32,
 		video_width: width,
 		video_height: height,
 		video_time_base_num: fr_den.max(1),
 		video_time_base_den: fr_num.max(1),
 		video_pixel_format: 0,
 		audio_enabled: true,
-		audio_codec: quercus_engine_rs::codec::Codec::AAC as i32,
+		audio_codec: codec::Codec::AAC as i32,
 		audio_sample_rate: 48_000,
 		audio_channel_layout: 0x3,
 		export_length_num: frames.max(0) as i32 * fr_den.max(1),

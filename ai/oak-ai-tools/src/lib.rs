@@ -34,10 +34,10 @@ pub mod error;
 pub mod hooks;
 pub mod mock;
 pub mod render;
-#[cfg(feature = "sdk")]
-pub mod sdk;
 pub mod schema;
 pub mod schema_v2;
+#[cfg(feature = "sdk")]
+pub mod sdk;
 pub mod timecode;
 pub mod tools;
 pub mod txn;

@@ -76,12 +76,8 @@ send({"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"api":1,"name":"
 fn handshake_timeout_kills_the_process() {
 	let dir = test_dir("hs-timeout");
 	write_plugin(&dir, "import time\ntime.sleep(60)\n");
-	let host = PluginHost::start(
-		manifest(&dir, "hs-timeout", 5, 10),
-		&dir,
-		quiet_config(),
-	)
-	.expect("start");
+	let host = PluginHost::start(manifest(&dir, "hs-timeout", 5, 10), &dir, quiet_config())
+		.expect("start");
 	assert!(
 		host.wait_state(|s| s == PluginState::Failed, Duration::from_secs(10)),
 		"expected Failed, got {:?}",
@@ -118,12 +114,8 @@ time.sleep(60)
 "
 		),
 	);
-	let host = PluginHost::start(
-		manifest(&dir, "stdout", 5, 10),
-		&dir,
-		quiet_config(),
-	)
-	.expect("start");
+	let host =
+		PluginHost::start(manifest(&dir, "stdout", 5, 10), &dir, quiet_config()).expect("start");
 	assert!(
 		host.wait_state(|s| s == PluginState::Failed, Duration::from_secs(10)),
 		"expected Failed, got {:?}",
@@ -146,12 +138,8 @@ fn seventeen_mib_line_is_rejected_and_kills() {
 		&dir,
 		"import sys, time\nsys.stdout.write('x' * (17 * 1024 * 1024) + '\\n')\nsys.stdout.flush()\ntime.sleep(60)\n",
 	);
-	let host = PluginHost::start(
-		manifest(&dir, "oversize", 5, 10),
-		&dir,
-		quiet_config(),
-	)
-	.expect("start");
+	let host =
+		PluginHost::start(manifest(&dir, "oversize", 5, 10), &dir, quiet_config()).expect("start");
 	assert!(
 		host.wait_state(|s| s == PluginState::Failed, Duration::from_secs(15)),
 		"expected Failed, got {:?}",
@@ -183,12 +171,16 @@ sys.exit(0)
 "
 		),
 	);
-	let host = PluginHost::start(manifest(&dir, "crash", 5, 10), &dir, LifecycleConfig {
-		handshake_timeout: Duration::from_secs(5),
-		heartbeat_interval: Duration::from_secs(30),
-		heartbeat_timeout: Duration::from_secs(30),
-		..LifecycleConfig::default()
-	})
+	let host = PluginHost::start(
+		manifest(&dir, "crash", 5, 10),
+		&dir,
+		LifecycleConfig {
+			handshake_timeout: Duration::from_secs(5),
+			heartbeat_interval: Duration::from_secs(30),
+			heartbeat_timeout: Duration::from_secs(30),
+			..LifecycleConfig::default()
+		},
+	)
 	.expect("start");
 	assert!(
 		host.wait_state(|s| s == PluginState::Failed, Duration::from_secs(30)),
@@ -200,11 +192,7 @@ sys.exit(0)
 		Some(FailureReason::MaxRestartsExceeded),
 		"the loop must stop on the restart budget"
 	);
-	assert_eq!(
-		host.spawn_count(),
-		6,
-		"exactly initial spawn + 5 restarts"
-	);
+	assert_eq!(host.spawn_count(), 6, "exactly initial spawn + 5 restarts");
 }
 
 /// ⑤ Clean shutdown: notification → self-exit inside the grace window, so
@@ -277,12 +265,28 @@ fn clean_shutdown_needs_no_kill() {
 #[test]
 fn default_knobs_match_the_frozen_protocol() {
 	let c = LifecycleConfig::default();
-	assert_eq!(c.handshake_timeout, Duration::from_secs(10), "10 s handshake");
+	assert_eq!(
+		c.handshake_timeout,
+		Duration::from_secs(10),
+		"10 s handshake"
+	);
 	assert_eq!(c.heartbeat_interval, Duration::from_secs(2), "2 s ping");
-	assert_eq!(c.heartbeat_timeout, Duration::from_secs(5), "5 s pong budget");
+	assert_eq!(
+		c.heartbeat_timeout,
+		Duration::from_secs(5),
+		"5 s pong budget"
+	);
 	assert_eq!(c.heartbeat_misses, 3, "3 misses = crash");
-	assert_eq!(c.shutdown_grace, Duration::from_secs(2), "2 s self-exit grace");
-	assert_eq!(c.shutdown_kill_wait, Duration::from_secs(2), "2 s SIGTERM grace");
+	assert_eq!(
+		c.shutdown_grace,
+		Duration::from_secs(2),
+		"2 s self-exit grace"
+	);
+	assert_eq!(
+		c.shutdown_kill_wait,
+		Duration::from_secs(2),
+		"2 s SIGTERM grace"
+	);
 }
 
 /// The eleven states are distinct and only three are terminal.
@@ -331,12 +335,16 @@ time.sleep(60)
 	// timeout tests use) makes a loaded macOS runner fail the handshake
 	// before the plugin can say hello. Give the handshake the same 10 s
 	// budget the timeout tests give a slow first message.
-	let host = PluginHost::start(manifest(&dir, "call", 0, 10), &dir, LifecycleConfig {
-		handshake_timeout: Duration::from_secs(10),
-		heartbeat_interval: Duration::from_secs(30),
-		heartbeat_timeout: Duration::from_secs(30),
-		..LifecycleConfig::default()
-	})
+	let host = PluginHost::start(
+		manifest(&dir, "call", 0, 10),
+		&dir,
+		LifecycleConfig {
+			handshake_timeout: Duration::from_secs(10),
+			heartbeat_interval: Duration::from_secs(30),
+			heartbeat_timeout: Duration::from_secs(30),
+			..LifecycleConfig::default()
+		},
+	)
 	.expect("start");
 	// Before Ready: NotReady.
 	let deadline = Instant::now() + Duration::from_secs(10);
@@ -350,9 +358,19 @@ time.sleep(60)
 		host.failure()
 	);
 	let err = host
-		.call("project.get_info", serde_json::json!({}), Duration::from_millis(50))
+		.call(
+			"project.get_info",
+			serde_json::json!({}),
+			Duration::from_millis(50),
+		)
 		.expect_err("plugin never answers → timeout");
-	assert!(matches!(err, oak_extensions::session::RpcError::Timeout), "{err:?}");
+	assert!(
+		matches!(err, oak_extensions::session::RpcError::Timeout),
+		"{err:?}"
+	);
 	host.shutdown("test_done");
-	assert!(host.wait_terminal(Duration::from_secs(10)), "terminal after shutdown");
+	assert!(
+		host.wait_terminal(Duration::from_secs(10)),
+		"terminal after shutdown"
+	);
 }

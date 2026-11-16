@@ -1,5 +1,6 @@
 //! Shared argument extraction helpers.
 
+use crate::backend;
 use serde_json::Value;
 
 use crate::error::ToolError;
@@ -11,7 +12,9 @@ pub fn req_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
 		.get(key)
 		.and_then(Value::as_str)
 		.filter(|s| !s.is_empty())
-		.ok_or_else(|| ToolError::invalid_params(format!("field '{key}' must be a non-empty string")))?;
+		.ok_or_else(|| {
+			ToolError::invalid_params(format!("field '{key}' must be a non-empty string"))
+		})?;
 	Ok(value)
 }
 
@@ -23,16 +26,17 @@ pub fn opt_str<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, ToolEr
 			.as_str()
 			.filter(|s| !s.is_empty())
 			.map(Some)
-			.ok_or_else(|| ToolError::invalid_params(format!("field '{key}' must be a non-empty string"))),
+			.ok_or_else(|| {
+				ToolError::invalid_params(format!("field '{key}' must be a non-empty string"))
+			}),
 	}
 }
 
 /// Required non-negative integer field.
 pub fn req_usize(args: &Value, key: &str) -> Result<usize, ToolError> {
-	let value = args
-		.get(key)
-		.and_then(Value::as_u64)
-		.ok_or_else(|| ToolError::invalid_params(format!("field '{key}' must be a non-negative integer")))?;
+	let value = args.get(key).and_then(Value::as_u64).ok_or_else(|| {
+		ToolError::invalid_params(format!("field '{key}' must be a non-negative integer"))
+	})?;
 	usize::try_from(value)
 		.map_err(|_| ToolError::invalid_params(format!("field '{key}' is out of range")))
 }
@@ -97,12 +101,16 @@ pub fn opt_max_size(args: &Value, key: &str) -> Result<Option<(u32, u32)>, ToolE
 		.get("width")
 		.and_then(Value::as_u64)
 		.filter(|v| *v >= 1)
-		.ok_or_else(|| ToolError::invalid_params(format!("'{key}.width' must be an integer >= 1")))?;
+		.ok_or_else(|| {
+			ToolError::invalid_params(format!("'{key}.width' must be an integer >= 1"))
+		})?;
 	let height = value
 		.get("height")
 		.and_then(Value::as_u64)
 		.filter(|v| *v >= 1)
-		.ok_or_else(|| ToolError::invalid_params(format!("'{key}.height' must be an integer >= 1")))?;
+		.ok_or_else(|| {
+			ToolError::invalid_params(format!("'{key}.height' must be an integer >= 1"))
+		})?;
 	Ok(Some((
 		u32::try_from(width).unwrap_or(u32::MAX),
 		u32::try_from(height).unwrap_or(u32::MAX),
@@ -112,14 +120,14 @@ pub fn opt_max_size(args: &Value, key: &str) -> Result<Option<(u32, u32)>, ToolE
 /// Resolves `value` against the backend's frame grid, mapping failures
 /// onto `TIMECODE_INVALID` with the entity in the message.
 pub fn resolve(
-	backend: &dyn crate::backend::EngineBackend,
+	backend: &dyn backend::EngineBackend,
 	ctx: crate::timecode::TimeContext,
 	value: TimeValue,
 ) -> Result<crate::timecode::Rat, ToolError> {
 	let described = format!("{value} on {ctx}");
-	backend.rational_at(ctx, value).map_err(|err| {
-		ToolError::timecode(format!("{described}: {}", err.message))
-	})
+	backend
+		.rational_at(ctx, value)
+		.map_err(|err| ToolError::timecode(format!("{described}: {}", err.message)))
 }
 
 #[cfg(test)]
@@ -145,7 +153,10 @@ mod tests {
 	fn range_parsing() {
 		let args = json!({"range": {"in": {"num": 1, "den": 2}, "out": 30}});
 		let range = req_range(&args, "range").unwrap();
-		assert_eq!(range.in_, TimeValue::Rational(crate::timecode::Rat::new(1, 2).unwrap()));
+		assert_eq!(
+			range.in_,
+			TimeValue::Rational(crate::timecode::Rat::new(1, 2).unwrap())
+		);
 		assert_eq!(range.out, TimeValue::Frame(30));
 		let bad = json!({"range": {"in": 1.5, "out": 3}});
 		assert!(req_range(&bad, "range").is_err());

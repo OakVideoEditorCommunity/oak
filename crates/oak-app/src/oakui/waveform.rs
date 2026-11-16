@@ -28,9 +28,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::widgets::timeline::clip::ClipDecorator;
 use crate::widgets::timeline::ClipId;
 use crate::widgets::timeline::FrameRange;
+use crate::widgets::timeline::clip::ClipDecorator;
 use gpui_kit::{Bounds, Hsla, Pixels, Window};
 
 pub use quercus_engine_rs::audio_analysis::MinMax;
@@ -132,11 +132,8 @@ impl WaveformCache {
 /// channels/points; the clip is then drawn without a waveform.
 fn extract(filename: &str, duration_frames: i64, _fps: f32) -> Option<ClipWaveform> {
 	const SAMPLES_PER_POINT: i32 = 256;
-	let waveform = quercus_engine_rs::audio_analysis::Waveform::extract(
-		filename,
-		0,
-		SAMPLES_PER_POINT,
-	)?;
+	let waveform =
+		quercus_engine_rs::audio_analysis::Waveform::extract(filename, 0, SAMPLES_PER_POINT)?;
 	let info = waveform.info();
 	if info.channels <= 0 || info.point_count == 0 {
 		return None;
@@ -174,13 +171,15 @@ pub fn extract_audio_envelope(filename: &str, stream_index: i32) -> Option<Vec<f
 	if info.channels <= 0 || info.point_count == 0 {
 		return None;
 	}
-	let window_points =
-		(f64::from(info.sample_rate) * 0.1 / f64::from(SAMPLES_PER_POINT)).round().max(1.0) as usize;
+	let window_points = (f64::from(info.sample_rate) * 0.1 / f64::from(SAMPLES_PER_POINT))
+		.round()
+		.max(1.0) as usize;
 	let peaks = waveform.peaks(0);
 	let mut envelope = Vec::with_capacity(peaks.len().div_ceil(window_points));
 	for chunk in peaks.chunks(window_points) {
 		envelope.push(chunk.iter().fold(0.0f64, |acc, point| {
-			acc.max(f64::from(point.min).abs()).max(f64::from(point.max).abs())
+			acc.max(f64::from(point.min).abs())
+				.max(f64::from(point.max).abs())
 		}));
 	}
 	Some(envelope)
@@ -309,8 +308,7 @@ mod tests {
 	fn envelope_windows_peaks_and_degrades_without_audio() {
 		let _lock = media_lock();
 		let media = test_media("env", true);
-		let envelope =
-			extract_audio_envelope(&media.to_string_lossy(), 0).expect("envelope");
+		let envelope = extract_audio_envelope(&media.to_string_lossy(), 0).expect("envelope");
 		assert!(!envelope.is_empty());
 		assert!(
 			envelope.len() >= 2,

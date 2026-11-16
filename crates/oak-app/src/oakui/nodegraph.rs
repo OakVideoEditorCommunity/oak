@@ -51,9 +51,9 @@
 use std::collections::HashMap;
 
 use crate::widgets::node_graph::{
-	EdgeData, EdgeId, NodeData, NodeId, PortData, PortId, PortDataType, PortKind,
+	EdgeData, EdgeId, NodeData, NodeId, PortData, PortDataType, PortId, PortKind,
 };
-use gpui_kit::{hsla, point, px, Hsla, Pixels, Point, SharedString};
+use gpui_kit::{Hsla, Pixels, Point, SharedString, hsla, point, px};
 
 use quercus_engine_rs::node::NodeId as DomainNodeId;
 
@@ -109,11 +109,7 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 		if meta.flags & quercus_engine_rs::effect::NODE_FLAG_DONT_SHOW_IN_CREATE_MENU != 0 {
 			continue;
 		}
-		let Some(category_key) = meta
-			.category
-			.map(category)
-			.and_then(node_category_key)
-		else {
+		let Some(category_key) = meta.category.map(category).and_then(node_category_key) else {
 			continue;
 		};
 		out.push(NodeLibraryEntry {
@@ -127,8 +123,9 @@ pub fn node_library() -> Vec<super::engine::NodeLibraryEntry> {
 		});
 	}
 	for meta in quercus_engine_rs::effect::dynamic_factory_entries() {
-		let category_key = node_category_key(category(quercus_engine_rs::effect::NodeCategory::OpenFx))
-			.expect("the OpenFX category is visible in the node library");
+		let category_key =
+			node_category_key(category(quercus_engine_rs::effect::NodeCategory::OpenFx))
+				.expect("the OpenFX category is visible in the node library");
 		out.push(NodeLibraryEntry {
 			type_id: meta.type_id,
 			name: meta.name,
@@ -510,7 +507,9 @@ fn present_graph_snapshot(
 				input_id: port.id.clone().into(),
 				label: port.label.clone().into(),
 				data_type: match port.media_type {
-					Some(GraphMediaType::Samples) => PortDataType::new("samples", hsla(0.12, 0.65, 0.55, 1.0)),
+					Some(GraphMediaType::Samples) => {
+						PortDataType::new("samples", hsla(0.12, 0.65, 0.55, 1.0))
+					}
 					_ => video_type(),
 				},
 				connected: port.connected,
@@ -553,7 +552,11 @@ fn present_graph_snapshot(
 		let to_port = nodes
 			.iter()
 			.find(|node| node.id.0 == edge.to.raw())
-			.and_then(|node| node.inputs.iter().find(|port| port.input_id.as_ref() == edge.input_id))
+			.and_then(|node| {
+				node.inputs
+					.iter()
+					.find(|port| port.input_id.as_ref() == edge.input_id)
+			})
 			.map(|port| port.id)
 			.unwrap_or_else(|| port_id(edge.to.raw(), PortKind::Input, 0));
 		edges.push(RealEdge {
@@ -575,7 +578,10 @@ fn present_graph_snapshot(
 		if node.position != point(px(0.0), px(0.0)) {
 			continue;
 		}
-		let snapshot_node = snapshot.nodes.iter().find(|candidate| candidate.id.raw() == node.id.0)
+		let snapshot_node = snapshot
+			.nodes
+			.iter()
+			.find(|candidate| candidate.id.raw() == node.id.0)
 			.expect("presentation nodes come from the same snapshot");
 		let role = role_of(&snapshot_node.type_id, node.id.0 == seq_ident);
 		let row = row_at_role.entry(role).or_insert(0);
@@ -837,12 +843,13 @@ pub fn apply_edit_in_view(
 			let Some(id_str) = id_str else {
 				return Err("target input missing".into());
 			};
-			session.execute(quercus_engine_rs::edit::EditCommand::Connect {
-				from: quercus_engine_rs::node::NodeId::from_raw(from_node),
-				to: quercus_engine_rs::node::NodeId::from_raw(to_node),
-				input_id: id_str,
-			})
-			.map(|_| ())
+			session
+				.execute(quercus_engine_rs::edit::EditCommand::Connect {
+					from: quercus_engine_rs::node::NodeId::from_raw(from_node),
+					to: quercus_engine_rs::node::NodeId::from_raw(to_node),
+					input_id: id_str,
+				})
+				.map(|_| ())
 		}
 		NodeGraphEvent::DisconnectionRequested { edge } => {
 			if is_output_wire(*edge) {
@@ -861,16 +868,21 @@ pub fn apply_edit_in_view(
 				.edges
 				.iter()
 				.find(|connection| {
-					real_edge_id(connection.from.raw(), connection.to.raw(), &connection.input_id).0
-						== edge.0
+					real_edge_id(
+						connection.from.raw(),
+						connection.to.raw(),
+						&connection.input_id,
+					)
+					.0 == edge.0
 				})
 				.map(|connection| (connection.to, connection.input_id.clone()))
 				.ok_or_else(|| format!("edge {} not found", edge.0))?;
-			session.execute(quercus_engine_rs::edit::EditCommand::Disconnect {
-				to: quercus_engine_rs::node::NodeId::from_raw(to.raw()),
-				input_id: conn_id,
-			})
-			.map(|_| ())
+			session
+				.execute(quercus_engine_rs::edit::EditCommand::Disconnect {
+					to: quercus_engine_rs::node::NodeId::from_raw(to.raw()),
+					input_id: conn_id,
+				})
+				.map(|_| ())
 		}
 		NodeGraphEvent::NodeMoveRequested { nodes, delta } => {
 			for node in nodes {
@@ -889,20 +901,23 @@ pub fn apply_edit_in_view(
 					.filter(|(x, y)| *x != 0.0 || *y != 0.0);
 				let base = placed.unwrap_or_else(|| {
 					if clip.is_some() {
-						fallback_base_in(&snapshot, seq, &clip_context_nodes(&snapshot, seq), node.0)
-							.unwrap_or_else(|| fallback_base(&snapshot, seq, node.0))
+						fallback_base_in(
+							&snapshot,
+							seq,
+							&clip_context_nodes(&snapshot, seq),
+							node.0,
+						)
+						.unwrap_or_else(|| fallback_base(&snapshot, seq, node.0))
 					} else {
 						fallback_base(&snapshot, seq, node.0)
 					}
 				});
-				session.execute(
-					quercus_engine_rs::edit::EditCommand::SetContextPosition {
-						node: quercus_engine_rs::node::NodeId::from_raw(node.0),
-						context: quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
-						x: base.0 + f64::from(delta.x.as_f32()),
-						y: base.1 + f64::from(delta.y.as_f32()),
-					},
-				)?;
+				session.execute(quercus_engine_rs::edit::EditCommand::SetContextPosition {
+					node: quercus_engine_rs::node::NodeId::from_raw(node.0),
+					context: quercus_engine_rs::node::NodeId::from_raw(seq.raw()),
+					x: base.0 + f64::from(delta.x.as_f32()),
+					y: base.1 + f64::from(delta.y.as_f32()),
+				})?;
 			}
 			Ok(())
 		}
@@ -912,9 +927,11 @@ pub fn apply_edit_in_view(
 				if node.0 == seq.raw() {
 					continue;
 				}
-				session_for_graph(project)?.execute(quercus_engine_rs::edit::EditCommand::RemoveNode {
-					node: quercus_engine_rs::node::NodeId::from_raw(node.0),
-				})?;
+				session_for_graph(project)?.execute(
+					quercus_engine_rs::edit::EditCommand::RemoveNode {
+						node: quercus_engine_rs::node::NodeId::from_raw(node.0),
+					},
+				)?;
 			}
 			Ok(())
 		}

@@ -18,3 +18,6 @@ implementation details.
 
 In order to keep the code as readable and maintainable as possible, code
 submitted should be formatted using cargo fmt.
+
+See the [Code Style Guide](docs/zh/code-style.md) for module size, imports,
+dependency selection, and validation requirements.

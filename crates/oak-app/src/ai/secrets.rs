@@ -141,7 +141,6 @@ impl SecretStore for KeyringStore {
 			Err(_) => None,
 		}
 	}
-
 }
 
 /// In-memory store for tests (and for `AiConfig::load`, which must keep
@@ -238,7 +237,11 @@ mod tests {
 		}
 
 		let store = Broken;
-		assert_eq!(read_config(&store), (None, None, None), "degrades, no panic");
+		assert_eq!(
+			read_config(&store),
+			(None, None, None),
+			"degrades, no panic"
+		);
 	}
 
 	/// The degraded backend's **write** side: `KeyringWriter::store`/
@@ -284,7 +287,11 @@ mod tests {
 		let mut store = MemoryStore::new();
 		assert_eq!(store.get(ACCOUNT_API_KEY), None, "starts empty");
 		store.store(ACCOUNT_API_KEY, "k").expect("write seam");
-		assert_eq!(store.get(ACCOUNT_API_KEY).as_deref(), Some("k"), "read seam");
+		assert_eq!(
+			store.get(ACCOUNT_API_KEY).as_deref(),
+			Some("k"),
+			"read seam"
+		);
 
 		store.remove(ACCOUNT_API_KEY).expect("write seam remove");
 		assert_eq!(store.get(ACCOUNT_API_KEY), None, "removed through the loop");

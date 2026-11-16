@@ -1,3 +1,5 @@
+use std::hint;
+use std::mem;
 use std::time::Duration;
 
 use itertools::Itertools;
@@ -65,7 +67,7 @@ impl ActionStatistics {
     }
 
     pub fn take(&mut self) -> Self {
-        let taken = std::mem::take(self);
+        let taken = mem::take(self);
         self.running = taken.running;
         taken
     }
@@ -92,7 +94,7 @@ impl ActionStatistics {
             // When ran sequentially self.running will always be Some. When ran
             // concurrently that is no longer true. But that is fine, we do not
             // need to track action timings in tests.
-            std::hint::cold_path();
+            hint::cold_path();
             return;
         };
 
@@ -104,7 +106,7 @@ impl ActionStatistics {
 
         let runtime = now.duration_since(started);
         if runtime >= self.runtime_to_beat {
-            std::hint::cold_path(); // most actions are not the worst, optimize for that
+            hint::cold_path(); // most actions are not the worst, optimize for that
 
             if self.longest_runtimes.is_full()
                 && let Some(to_replace) = self

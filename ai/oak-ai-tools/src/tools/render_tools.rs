@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::error::ToolError;
 use crate::timecode::{TimeValue, time_arg};
-use crate::tools::common::{opt_positive, opt_str, req_range, req_str, RangeArg};
+use crate::tools::common::{RangeArg, opt_positive, opt_str, req_range, req_str};
 
 /// Which target a render call addresses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,8 +92,7 @@ pub fn parse_get_thumbnails(args: &Value) -> Result<GetThumbnailsArgs, ToolError
 			"count must be within 1..=64, got {count}"
 		)));
 	}
-	let height = opt_positive(args, "height")?
-		.map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+	let height = opt_positive(args, "height")?.map(|v| u32::try_from(v).unwrap_or(u32::MAX));
 	Ok(GetThumbnailsArgs {
 		target: FrameTarget::from_args(args)?,
 		range: req_range(args, "range")?,
@@ -125,8 +124,8 @@ pub fn parse_get_audio_levels(args: &Value) -> Result<GetAudioLevelsArgs, ToolEr
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use serde_json::json;
 	use crate::timecode::Rat;
+	use serde_json::json;
 
 	#[test]
 	fn target_is_exactly_one_of_two() {
@@ -139,9 +138,7 @@ mod tests {
 			FrameTarget::Footage(_)
 		));
 		assert!(FrameTarget::from_args(&json!({})).is_err());
-		assert!(
-			FrameTarget::from_args(&json!({"sequence": "s", "footage": "f"})).is_err()
-		);
+		assert!(FrameTarget::from_args(&json!({"sequence": "s", "footage": "f"})).is_err());
 	}
 
 	#[test]

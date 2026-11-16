@@ -16,8 +16,9 @@
 
 //! Build-time link configuration.
 
+use std::env;
 fn main() {
-	if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+	if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
 		// The static FFmpeg's external codec libraries pull in `-lz`, and
 		// on some machines that resolves to a package-manager copy whose
 		// install name is @rpath/libz.1.dylib; without an LC_RPATH entry

@@ -21,6 +21,8 @@
 //! SDK types. It is deliberately small and readable so a new frontend can
 //! copy the session/task/ownership patterns.
 
+use quercus_engine_rs::codec;
+use std::fs;
 pub mod shell;
 
 use std::path::{Path, PathBuf};
@@ -115,7 +117,7 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 		));
 	}
 	init_engine();
-	std::fs::create_dir_all(work_dir)
+	fs::create_dir_all(work_dir)
 		.map_err(|e| format!("cannot create {}: {e}", work_dir.display()))?;
 
 	// 1. Project + sequence. `create_sequence` also installs the default
@@ -169,10 +171,7 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 
 	// 4. Edit: split, trim, move, ripple-delete the rear half.
 	session
-		.execute(EditCommand::SplitClip {
-			clip,
-			time_ts: 20,
-		})
+		.execute(EditCommand::SplitClip { clip, time_ts: 20 })
 		.map_err(|e| format!("split: {e}"))?;
 	// SplitClip returns no node id; the rear half is the block that now
 	// starts at the split time on the same track.
@@ -197,10 +196,7 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 		})
 		.map_err(|e| format!("trim: {e}"))?;
 	session
-		.execute(EditCommand::MoveClip {
-			clip,
-			new_in_ts: 6,
-		})
+		.execute(EditCommand::MoveClip { clip, new_in_ts: 6 })
 		.map_err(|e| format!("move: {e}"))?;
 	session
 		.execute(EditCommand::RippleDeleteClip { clip: rear })
@@ -211,10 +207,7 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	// the redo re-applies it. One user action = one history row.
 	let rows_before = revision();
 	session
-		.execute(EditCommand::MoveClip {
-			clip,
-			new_in_ts: 8,
-		})
+		.execute(EditCommand::MoveClip { clip, new_in_ts: 8 })
 		.map_err(|e| format!("move again: {e}"))?;
 	let rows_after = revision();
 	if rows_after != rows_before + 1 {
@@ -309,7 +302,9 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	if !source_frame.wait() {
 		return Err("source frame render failed".to_string());
 	}
-	let _ = source_frame.take().ok_or_else(|| "no source frame".to_string())?;
+	let _ = source_frame
+		.take()
+		.ok_or_else(|| "no source frame".to_string())?;
 
 	let audio_request = program
 		.request_audio(0.25)
@@ -386,9 +381,9 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 	let length = content_length(&project, sequence);
 	let export_path = work_dir.join("sdk_editor_demo.mp4");
 	let params = EncodingParams {
-		format: quercus_engine_rs::codec::Format::MPEG4Video as i32,
+		format: codec::Format::MPEG4Video as i32,
 		video_enabled: true,
-		video_codec: quercus_engine_rs::codec::Codec::H264 as i32,
+		video_codec: codec::Codec::H264 as i32,
 		video_width: geometry.0.max(2),
 		video_height: geometry.1.max(2),
 		video_time_base_num: rate.den.clamp(1, i32::MAX as i64) as i32,
@@ -399,20 +394,15 @@ pub fn run(work_dir: &Path) -> Result<DemoReport, String> {
 		export_length_den: length.den.max(1) as i32,
 		..EncodingParams::default()
 	};
-	let export = task::export(
-		&project,
-		sequence,
-		&export_path.to_string_lossy(),
-		&params,
-	)
-	.ok_or_else(|| "export task rejected".to_string())?;
+	let export = task::export(&project, sequence, &export_path.to_string_lossy(), &params)
+		.ok_or_else(|| "export task rejected".to_string())?;
 	if !export.wait() {
 		return Err(format!("export failed: {}", export.error()));
 	}
 	if export.state() != TaskState::Succeeded {
 		return Err(format!("export did not succeed: {:?}", export.state()));
 	}
-	let export_bytes = std::fs::metadata(&export_path)
+	let export_bytes = fs::metadata(&export_path)
 		.map(|meta| meta.len())
 		.map_err(|e| format!("export file missing: {e}"))?;
 	if export_bytes == 0 {

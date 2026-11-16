@@ -107,7 +107,10 @@ mod tests {
 				let sample = i64::from(i) * i64::from(SPP);
 				let inside = (48_000..96_000).contains(&sample);
 				if inside {
-					MinMax { min: -1.0, max: 1.0 }
+					MinMax {
+						min: -1.0,
+						max: 1.0,
+					}
 				} else {
 					MinMax::default()
 				}

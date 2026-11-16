@@ -1,4 +1,5 @@
 #![deny(unsafe_code, clippy::unwrap_used)]
+use core::num;
 #[cfg(feature = "std")]
 use alloc::sync::Arc;
 use alloc::{
@@ -49,7 +50,7 @@ impl SubAllocator for DedicatedBlockAllocator {
         _granularity: u64,
         name: &str,
         #[cfg(feature = "std")] backtrace: Arc<Backtrace>,
-    ) -> Result<(u64, core::num::NonZeroU64)> {
+    ) -> Result<(u64, num::NonZeroU64)> {
         if self.allocated != 0 {
             return Err(AllocationError::OutOfMemory);
         }
@@ -68,12 +69,12 @@ impl SubAllocator for DedicatedBlockAllocator {
         }
 
         #[allow(clippy::unwrap_used)]
-        let dummy_id = core::num::NonZeroU64::new(1).unwrap();
+        let dummy_id = num::NonZeroU64::new(1).unwrap();
         Ok((0, dummy_id))
     }
 
-    fn free(&mut self, chunk_id: Option<core::num::NonZeroU64>) -> Result<()> {
-        if chunk_id != core::num::NonZeroU64::new(1) {
+    fn free(&mut self, chunk_id: Option<num::NonZeroU64>) -> Result<()> {
+        if chunk_id != num::NonZeroU64::new(1) {
             Err(AllocationError::Internal("Chunk ID must be 1.".into()))
         } else {
             self.allocated = 0;
@@ -83,10 +84,10 @@ impl SubAllocator for DedicatedBlockAllocator {
 
     fn rename_allocation(
         &mut self,
-        chunk_id: Option<core::num::NonZeroU64>,
+        chunk_id: Option<num::NonZeroU64>,
         name: &str,
     ) -> Result<()> {
-        if chunk_id != core::num::NonZeroU64::new(1) {
+        if chunk_id != num::NonZeroU64::new(1) {
             Err(AllocationError::Internal("Chunk ID must be 1.".into()))
         } else {
             self.name = Some(name.into());

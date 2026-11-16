@@ -6,6 +6,7 @@
 //! tolerance-configurable so a golden frame can be compared either
 //! bit-exactly (tolerance `0.0`) or statistically.
 
+use fnv::FnvHasher;
 use std::io::Cursor;
 
 use serde_json::{Value, json};
@@ -179,7 +180,7 @@ impl Frame {
 			max,
 			non_black_ratio: non_black as f64 / denom,
 			fnv64: {
-				let mut hasher = fnv::FnvHasher::default();
+				let mut hasher = FnvHasher::default();
 				hasher.write(&self.quantised());
 				hasher.finish()
 			},
@@ -213,11 +214,7 @@ impl Frame {
 			));
 		}
 		let mut count = 0usize;
-		for (a, b) in self
-			.rgba
-			.chunks_exact(4)
-			.zip(other.rgba.chunks_exact(4))
-		{
+		for (a, b) in self.rgba.chunks_exact(4).zip(other.rgba.chunks_exact(4)) {
 			let diff = a
 				.iter()
 				.zip(b)
@@ -296,7 +293,12 @@ mod tests {
 				frame.set_pixel(
 					x,
 					y,
-					[(t + shift).clamp(0.0, 1.0), 0.5, y as f32 / height.max(1) as f32, 1.0],
+					[
+						(t + shift).clamp(0.0, 1.0),
+						0.5,
+						y as f32 / height.max(1) as f32,
+						1.0,
+					],
 				);
 			}
 		}

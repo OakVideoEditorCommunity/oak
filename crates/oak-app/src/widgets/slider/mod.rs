@@ -21,15 +21,15 @@ mod model;
 
 use std::sync::{Arc, RwLock};
 
+use gpui_kit::base::input::InputState;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::input::{Input, InputEvent};
 use gpui_kit::{
 	App, BorderStyle, Bounds, ClickEvent, Context, Corners, DragMoveEvent, Edges, ElementId,
 	Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton, MouseDownEvent,
 	Pixels, Point, Render, ScrollWheelEvent, Subscription, Window, canvas, colors::DefaultColors,
 	div, fill, point, prelude::*, px, quad, size,
 };
-use gpui_kit::base::input::InputState;
-use gpui_kit::component::input::{Input, InputEvent};
-use gpui_kit::component::Sizable as _;
 
 pub use model::SliderModel;
 

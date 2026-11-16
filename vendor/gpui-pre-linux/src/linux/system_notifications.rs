@@ -1,6 +1,7 @@
 //! System notifications over the XDG notifications D-Bus interface, via
 //! `notify-rust`.
 
+use std::thread;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -56,7 +57,7 @@ impl SystemNotificationState {
         let tag = notification.tag.clone();
         // `show` connects to the session bus and `wait_for_action` blocks
         // until the notification closes, so both run off the UI thread.
-        let spawn_result = std::thread::Builder::new()
+        let spawn_result = thread::Builder::new()
             .name("system-notification".to_string())
             .spawn(move || match built.show() {
                 Ok(handle) => handle.wait_for_action(|action| {

@@ -24,7 +24,13 @@
 //! Marker and work-area state live in the session; the project library is
 //! the SDK `ProjectLibrary`.
 
+use super::real;
+use quercus_engine_rs::edit;
+use quercus_undo::global;
+use quercus_undo::undocommand;
+use std::collections;
 use std::path::Path;
+use std::sync;
 
 use quercus_engine_rs::editor::{EditorSession, TrackKind};
 use quercus_engine_rs::node::{NodeId, NodeKind, Project};
@@ -87,7 +93,7 @@ pub fn load_ove(path: &Path) -> Result<ProjectRef, String> {
 /// Returns an error when no session exists for `project` or when the
 /// serializer fails; the message includes the display path.
 pub fn save_ove(project: &ProjectRef, path: &Path) -> Result<(), String> {
-	let session = super::real::editor_session_for_project(project)?;
+	let session = real::editor_session_for_project(project)?;
 	session
 		.save(&path.to_string_lossy())
 		.map_err(|error| format!("failed to save \"{}\": {error}", path.display()))
@@ -145,13 +151,13 @@ pub fn create_sequence_with_params(
 	name: &str,
 	params: Option<(i32, i32, Rational, bool)>,
 ) -> NodeId {
-	let session = super::real::editor_session_for_project(project)
+	let session = real::editor_session_for_project(project)
 		.expect("create a sequence through the SDK session");
 	let (width, height, rate, interlaced) = params
 		.map(|(w, h, r, i)| (Some(w), Some(h), Some(sdk_rational(r)), Some(i)))
 		.unwrap_or((None, None, None, None));
 	let result = session
-		.execute(quercus_engine_rs::edit::EditCommand::CreateSequence {
+		.execute(edit::EditCommand::CreateSequence {
 			name: name.to_string(),
 			width,
 			height,
@@ -164,8 +170,8 @@ pub fn create_sequence_with_params(
 
 /// Create a folder under the project's root (undoable "New Folder").
 pub fn create_folder(project: &ProjectRef, name: &str) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(project)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::CreateFolder {
+	let session = real::editor_session_for_project(project)?;
+	let result = session.execute(edit::EditCommand::CreateFolder {
 		name: name.to_string(),
 	})?;
 	primary(result)
@@ -180,8 +186,8 @@ pub const TEXT_FOOTAGE_LABEL: &str = "文本";
 /// Create a text generator in the project's root folder (ONE undo row
 /// covers the node and its mount).
 pub fn create_text_footage_node(project: &ProjectRef) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(project)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::CreateTextFootage)?;
+	let session = real::editor_session_for_project(project)?;
+	let result = session.execute(edit::EditCommand::CreateTextFootage)?;
 	primary(result)
 }
 
@@ -191,8 +197,8 @@ pub fn create_text_footage_node(project: &ProjectRef) -> Result<NodeId, String> 
 /// graph for sequence nodes that have no folder parent. Failures (for
 /// example no session for the project) are ignored.
 pub fn ensure_sequences_mounted(project: &ProjectRef) {
-	if let Ok(session) = super::real::editor_session_for_project(project) {
-		let _ = session.execute(quercus_engine_rs::edit::EditCommand::EnsureSequencesMounted);
+	if let Ok(session) = real::editor_session_for_project(project) {
+		let _ = session.execute(edit::EditCommand::EnsureSequencesMounted);
 	}
 }
 
@@ -213,13 +219,7 @@ pub fn set_sequence_parameters(
 	if !project.node_set_label(seq, name) {
 		return Err("could not rename the sequence".to_string());
 	}
-	if !project.sequence_set_video_params(
-		seq,
-		width,
-		height,
-		rate.num as i32,
-		rate.den as i32,
-	) {
+	if !project.sequence_set_video_params(seq, width, height, rate.num as i32, rate.den as i32) {
 		return Err("could not set the sequence video parameters".to_string());
 	}
 	if !project.sequence_set_interlaced(seq, interlaced) {
@@ -235,7 +235,10 @@ pub fn set_sequence_parameters(
 /// Read through the SDK (project handle, no graph lock: the project is the
 /// shared refcounted handle upstream's P7 migration left in place of the
 /// old `Arc<Mutex<Graph>>`).
-pub fn sequence_settings(p: &ProjectRef, seq: NodeId) -> Option<(String, i32, i32, Rational, bool)> {
+pub fn sequence_settings(
+	p: &ProjectRef,
+	seq: NodeId,
+) -> Option<(String, i32, i32, Rational, bool)> {
 	if p.node_kind(seq) != Some(NodeKind::Sequence) {
 		return None;
 	}
@@ -279,7 +282,7 @@ pub fn set_sequence_parameters_undoable(
 	let undo_project = project.clone();
 	let redo_tuple = after;
 	let undo_tuple = before;
-	let command = quercus_undo::undocommand::UndoCommand::from_closures(
+	let command = undocommand::UndoCommand::from_closures(
 		move || {
 			let _ = set_sequence_parameters(
 				&redo_project,
@@ -303,7 +306,7 @@ pub fn set_sequence_parameters_undoable(
 			);
 		},
 	);
-	quercus_undo::global::push(command, "Set Sequence Format").map_err(|e| e.to_string())
+	global::push(command, "Set Sequence Format").map_err(|e| e.to_string())
 }
 
 /// The label of a node (empty when the id is stale).
@@ -327,9 +330,7 @@ pub fn node_type_id(p: &ProjectRef, id: NodeId) -> String {
 pub fn multicam_nodes(p: &ProjectRef) -> Vec<NodeId> {
 	p.node_ids()
 		.into_iter()
-		.filter(|&id| {
-			p.node_type_id(id).as_deref() == Some("org.olivevideoeditor.Olive.multicam")
-		})
+		.filter(|&id| p.node_type_id(id).as_deref() == Some("org.olivevideoeditor.Olive.multicam"))
 		.collect()
 }
 
@@ -381,10 +382,10 @@ pub fn sequence_playhead(p: &ProjectRef, seq: NodeId) -> Rational {
 /// Failure to obtain the session or to execute the command is ignored, so
 /// the call cannot report that the move was rejected.
 pub fn sequence_set_playhead(p: &ProjectRef, seq: NodeId, time: Rational) {
-	let Ok(session) = super::real::editor_session_for_project(p) else {
+	let Ok(session) = real::editor_session_for_project(p) else {
 		return;
 	};
-	let _ = session.execute(quercus_engine_rs::edit::EditCommand::SetSequencePlayhead {
+	let _ = session.execute(edit::EditCommand::SetSequencePlayhead {
 		sequence: sdk_node(seq),
 		time: sdk_rational(time),
 	});
@@ -535,8 +536,8 @@ pub fn find_input_footage(p: &ProjectRef, id: NodeId) -> Option<NodeId> {
 pub fn clip_transition_widths(
 	p: &ProjectRef,
 	track: NodeId,
-) -> std::collections::HashMap<NodeId, (Option<Rational>, Option<Rational>)> {
-	let mut widths = std::collections::HashMap::new();
+) -> collections::HashMap<NodeId, (Option<Rational>, Option<Rational>)> {
+	let mut widths = collections::HashMap::new();
 	for block in 0..p.track_block_count(track) {
 		let clip = p.track_block_at(track, block);
 		if !is_timeline_clip(p, clip) {
@@ -583,16 +584,16 @@ pub fn footage_duration_seconds(p: &ProjectRef, id: NodeId) -> Option<f64> {
 /// (for example no session for the project) are ignored, so the call cannot
 /// report whether anything was reprobed.
 pub fn reprobe_unprobed_footage(project: &ProjectRef) {
-	if let Ok(session) = super::real::editor_session_for_project(project) {
-		let _ = session.execute(quercus_engine_rs::edit::EditCommand::ReprobeUnprobedFootage);
+	if let Ok(session) = real::editor_session_for_project(project) {
+		let _ = session.execute(edit::EditCommand::ReprobeUnprobedFootage);
 	}
 }
 
 /// Import a media file into the project's root folder (one undoable
 /// "Import Footage" entry).
 pub fn import_footage(project: &ProjectRef, path: &Path) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(project)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::ImportFootage {
+	let session = real::editor_session_for_project(project)?;
+	let result = session.execute(edit::EditCommand::ImportFootage {
 		path: path.to_string_lossy().into_owned(),
 	})?;
 	primary(result)
@@ -635,7 +636,7 @@ pub fn marker_add(
 		return Err("a marker already exists at that time".to_string());
 	}
 	session
-		.execute(quercus_engine_rs::edit::EditCommand::MarkerAdd {
+		.execute(edit::EditCommand::MarkerAdd {
 			time: sdk_rational(time),
 			name: name.to_string(),
 			color,
@@ -657,7 +658,7 @@ pub fn marker_remove(session: &EditorSession, time: Rational) -> Result<(), Stri
 		return Err("no marker at that time".to_string());
 	}
 	session
-		.execute(quercus_engine_rs::edit::EditCommand::MarkerRemove {
+		.execute(edit::EditCommand::MarkerRemove {
 			time: sdk_rational(time),
 		})
 		.map(|_| ())
@@ -677,7 +678,7 @@ pub fn workarea_state(session: &EditorSession) -> (bool, TimeRange) {
 /// timeline can follow a drag; use [`workarea_set_undoable`] for a committed
 /// change. `range` is in rational seconds; command errors are ignored.
 pub fn workarea_set(session: &EditorSession, enabled: bool, range: TimeRange) {
-	let _ = session.execute(quercus_engine_rs::edit::EditCommand::WorkareaSet {
+	let _ = session.execute(edit::EditCommand::WorkareaSet {
 		enabled,
 		range: sdk_time_range(range),
 	});
@@ -692,7 +693,7 @@ pub fn workarea_set_undoable(
 	old_range: TimeRange,
 ) -> Result<(), String> {
 	session
-		.execute(quercus_engine_rs::edit::EditCommand::WorkareaSetUndoable {
+		.execute(edit::EditCommand::WorkareaSetUndoable {
 			enabled,
 			range: sdk_time_range(range),
 			old_range: sdk_time_range(old_range),
@@ -820,9 +821,7 @@ pub fn library_open(uuid: &str) -> Result<ProjectRef, String> {
 	if uuid.is_empty() {
 		return Err("invalid uuid".to_string());
 	}
-	let session = library_or_error()?
-		.open(uuid)
-		.map_err(|e| e.to_string())?;
+	let session = library_or_error()?.open(uuid).map_err(|e| e.to_string())?;
 	Ok(session.project())
 }
 
@@ -849,8 +848,8 @@ pub fn library_open(uuid: &str) -> Result<ProjectRef, String> {
 ///
 /// Returns an error when no SDK session can be obtained for `p` or when the
 /// command itself fails.
-fn execute(p: &ProjectRef, command: quercus_engine_rs::edit::EditCommand) -> Result<(), String> {
-	super::real::editor_session_for_project(p)?
+fn execute(p: &ProjectRef, command: edit::EditCommand) -> Result<(), String> {
+	real::editor_session_for_project(p)?
 		.execute(command)
 		.map(|_| ())
 }
@@ -872,17 +871,14 @@ fn from_sdk_rational(value: quercus_engine_rs::types::Rational) -> Rational {
 }
 
 fn sdk_time_range(value: TimeRange) -> quercus_engine_rs::types::TimeRange {
-	quercus_engine_rs::types::TimeRange::new(
-		value.in_,
-		value.out,
-	)
+	quercus_engine_rs::types::TimeRange::new(value.in_, value.out)
 }
 
 fn track_kind_from_sdk(kind: quercus_engine_rs::editor::TrackKind) -> TrackKind {
 	kind
 }
 
-fn primary(result: quercus_engine_rs::edit::EditResult) -> Result<NodeId, String> {
+fn primary(result: edit::EditResult) -> Result<NodeId, String> {
 	result
 		.primary
 		.and_then(|node| id_of(node.raw()))
@@ -892,10 +888,10 @@ fn primary(result: quercus_engine_rs::edit::EditResult) -> Result<NodeId, String
 /// Add a track of `kind` to the sequence (undoable "Add Track"; the
 /// module's `TimelineAddTrackCommand`), returning the new track's index.
 pub fn add_track(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Result<usize, String> {
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
 	session
-		.execute(quercus_engine_rs::edit::EditCommand::AddTrack {
+		.execute(edit::EditCommand::AddTrack {
 			kind: sdk_track_kind(kind),
 		})
 		.map(|result| result.value.max(0) as usize)
@@ -907,7 +903,7 @@ pub fn add_track(p: &ProjectRef, seq: NodeId, kind: TrackKind) -> Result<usize, 
 pub fn remove_track(p: &ProjectRef, track: NodeId) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RemoveTrack {
+		edit::EditCommand::RemoveTrack {
 			track: sdk_node(track),
 		},
 	)
@@ -938,7 +934,7 @@ pub fn track_locked(p: &ProjectRef, track: NodeId) -> Option<bool> {
 pub fn set_track_muted(p: &ProjectRef, track: NodeId, muted: bool) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetTrackMuted {
+		edit::EditCommand::SetTrackMuted {
 			track: sdk_node(track),
 			muted,
 		},
@@ -950,7 +946,7 @@ pub fn set_track_muted(p: &ProjectRef, track: NodeId, muted: bool) -> Result<(),
 pub fn set_track_locked(p: &ProjectRef, track: NodeId, locked: bool) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetTrackLocked {
+		edit::EditCommand::SetTrackLocked {
 			track: sdk_node(track),
 			locked,
 		},
@@ -965,7 +961,7 @@ pub fn set_track_height(p: &ProjectRef, track: NodeId, height: f64) {
 	}
 	let _ = execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetTrackHeight {
+		edit::EditCommand::SetTrackHeight {
 			track: sdk_node(track),
 			height,
 		},
@@ -1007,9 +1003,9 @@ pub fn place_footage_clip(
 	if kind != TrackKind::Video && kind != TrackKind::Audio {
 		return Err("clips are only supported on video and audio tracks".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PlaceFootageClip {
+	let result = session.execute(edit::EditCommand::PlaceFootageClip {
 		footage: sdk_node(footage),
 		kind: sdk_track_kind(kind),
 		track_index,
@@ -1040,9 +1036,9 @@ pub fn create_adjustment_layer(
 	if in_ts < 0 || out_ts <= in_ts {
 		return Err("invalid adjustment layer range (need 0 <= in < out)".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::CreateAdjustmentLayer {
+	let result = session.execute(edit::EditCommand::CreateAdjustmentLayer {
 		track: sdk_node(track),
 		in_ts,
 		out_ts,
@@ -1132,7 +1128,10 @@ pub fn undo_group_abort() -> bool {
 /// `type_in` input stores, which the typed placement writes below.
 pub fn transition_kind_index(kind: &str) -> Option<i64> {
 	const SHADER_IDS: [&str; 4] = ["crossdissolve", "fade", "wipe", "slide"];
-	SHADER_IDS.iter().position(|id| *id == kind).map(|i| i as i64)
+	SHADER_IDS
+		.iter()
+		.position(|id| *id == kind)
+		.map(|i| i as i64)
 }
 
 /// Sets the transition block's shader combo (`type_in`) as one SDK undo
@@ -1144,7 +1143,7 @@ fn set_transition_kind(p: &ProjectRef, block: NodeId, kind_index: i64) -> Result
 	// Resolve the live session backing `p` first (the same lookup every
 	// SDK edit in this module does): no session means no history row, and
 	// failing loudly beats a silent raw project write.
-	let _session = super::real::editor_session_for_project(p)?;
+	let _session = real::editor_session_for_project(p)?;
 	let combo = quercus_engine_rs::node::NodeValue {
 		kind: 16, // combo: integer index
 		num: kind_index,
@@ -1228,8 +1227,8 @@ pub fn add_transition_at_seam(
 	next: NodeId,
 	half: Rational,
 ) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::AddTransitionAtSeam {
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::AddTransitionAtSeam {
 		previous: sdk_node(prev),
 		next: sdk_node(next),
 		half: sdk_rational(half),
@@ -1249,8 +1248,8 @@ pub fn add_transition_at_edge(
 	start_edge: bool,
 	length: Rational,
 ) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::AddTransitionAtEdge {
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::AddTransitionAtEdge {
 		clip: sdk_node(clip),
 		start_edge,
 		length: sdk_rational(length),
@@ -1283,9 +1282,9 @@ pub fn add_default_transition(
 	clip_blocks: &[NodeId],
 	half: Rational,
 ) -> Result<usize, String> {
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::AddDefaultTransition {
+	let result = session.execute(edit::EditCommand::AddDefaultTransition {
 		clips: clip_blocks.iter().copied().map(sdk_node).collect(),
 		half: sdk_rational(half),
 	})?;
@@ -1309,8 +1308,8 @@ pub fn set_transition_length(
 	frame: Rational,
 	new_length: Rational,
 ) -> Result<Rational, String> {
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::SetTransitionLength {
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::SetTransitionLength {
 		clip: sdk_node(clip),
 		start_edge,
 		frame: sdk_rational(frame),
@@ -1353,9 +1352,9 @@ pub fn place_nested_sequence_clip(
 	if in_ts < 0 || out_ts <= in_ts {
 		return Err("invalid clip range (need 0 <= in < out)".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(host_seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PlaceNestedSequenceClip {
+	let result = session.execute(edit::EditCommand::PlaceNestedSequenceClip {
 		source: sdk_node(source_seq),
 		track_index,
 		in_ts,
@@ -1379,9 +1378,9 @@ pub fn place_text_clip(
 	in_ts: i64,
 	out_ts: i64,
 ) -> Result<NodeId, String> {
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(host_seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PlaceTextClip {
+	let result = session.execute(edit::EditCommand::PlaceTextClip {
 		text: sdk_node(text),
 		track_index,
 		in_ts,
@@ -1407,9 +1406,9 @@ pub fn place_generator_clip(
 	if in_ts < 0 || out_ts <= in_ts {
 		return Err("invalid clip range (need 0 <= in < out)".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(host_seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PlaceGeneratorClip {
+	let result = session.execute(edit::EditCommand::PlaceGeneratorClip {
 		generator: sdk_node(generator),
 		track_index,
 		in_ts,
@@ -1437,9 +1436,9 @@ pub fn place_footage_clips_linked(
 	if placements.len() < 2 {
 		return Err("linked placement needs at least two tracks".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PlaceFootageClipsLinked {
+	let result = session.execute(edit::EditCommand::PlaceFootageClipsLinked {
 		footage: sdk_node(footage),
 		placements: placements
 			.iter()
@@ -1462,7 +1461,7 @@ pub fn place_footage_clips_linked(
 pub fn split_clip(p: &ProjectRef, clip: NodeId, time_ts: i64) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SplitClip {
+		edit::EditCommand::SplitClip {
 			clip: sdk_node(clip),
 			time_ts,
 		},
@@ -1482,7 +1481,7 @@ pub fn split_clips_preserving_links(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SplitClipsPreservingLinks {
+		edit::EditCommand::SplitClipsPreservingLinks {
 			clips: blocks.iter().copied().map(sdk_node).collect(),
 			time_ts,
 		},
@@ -1505,7 +1504,7 @@ pub fn trim_clip(
 	}
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::TrimClip {
+		edit::EditCommand::TrimClip {
 			clip: sdk_node(clip),
 			new_in_ts,
 			new_out_ts,
@@ -1526,7 +1525,7 @@ pub fn ripple_trim_clip(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RippleTrimClip {
+		edit::EditCommand::RippleTrimClip {
 			clip: sdk_node(clip),
 			start_edge,
 			new_frame,
@@ -1548,7 +1547,7 @@ pub fn roll_edit(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RollEdit {
+		edit::EditCommand::RollEdit {
 			track: sdk_node(track),
 			a: sdk_node(a),
 			b: sdk_node(b),
@@ -1567,7 +1566,7 @@ pub fn roll_edit(
 pub fn slide_clip(p: &ProjectRef, clip: NodeId, new_start: i64) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SlideClip {
+		edit::EditCommand::SlideClip {
 			clip: sdk_node(clip),
 			new_start,
 		},
@@ -1580,7 +1579,7 @@ pub fn slide_clip(p: &ProjectRef, clip: NodeId, new_start: i64) -> Result<(), St
 pub fn slip_clip(p: &ProjectRef, clip: NodeId, new_media_in: i64) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SlipClip {
+		edit::EditCommand::SlipClip {
 			clip: sdk_node(clip),
 			new_media_in,
 		},
@@ -1594,7 +1593,7 @@ pub fn slip_clip(p: &ProjectRef, clip: NodeId, new_media_in: i64) -> Result<(), 
 pub fn move_clip(p: &ProjectRef, clip: NodeId, new_in_ts: i64) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::MoveClip {
+		edit::EditCommand::MoveClip {
 			clip: sdk_node(clip),
 			new_in_ts,
 		},
@@ -1613,7 +1612,7 @@ pub fn move_clip_to_track(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::MoveClipToTrack {
+		edit::EditCommand::MoveClipToTrack {
 			clip: sdk_node(clip),
 			track: sdk_node(dest_track),
 			new_in_ts,
@@ -1637,7 +1636,7 @@ pub fn move_clip_with_links(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::MoveClipWithLinks {
+		edit::EditCommand::MoveClipWithLinks {
 			clip: sdk_node(clip),
 			track: dest_track.map(sdk_node),
 			new_in_ts,
@@ -1669,7 +1668,7 @@ pub fn move_clip_with_links(
 pub fn set_clips_linked(p: &ProjectRef, blocks: &[NodeId], linked: bool) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetClipsLinked {
+		edit::EditCommand::SetClipsLinked {
 			clips: blocks.iter().copied().map(sdk_node).collect(),
 			linked,
 		},
@@ -1681,7 +1680,7 @@ pub fn set_clips_linked(p: &ProjectRef, blocks: &[NodeId], linked: bool) -> Resu
 pub fn delete_clip(p: &ProjectRef, clip: NodeId) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::DeleteClip {
+		edit::EditCommand::DeleteClip {
 			clip: sdk_node(clip),
 		},
 	)
@@ -1693,7 +1692,7 @@ pub fn delete_clip(p: &ProjectRef, clip: NodeId) -> Result<(), String> {
 pub fn ripple_delete_clip(p: &ProjectRef, clip: NodeId) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RippleDeleteClip {
+		edit::EditCommand::RippleDeleteClip {
 			clip: sdk_node(clip),
 		},
 	)
@@ -1706,7 +1705,7 @@ pub fn ripple_delete_clip(p: &ProjectRef, clip: NodeId) -> Result<(), String> {
 pub fn remove_node(p: &ProjectRef, node: NodeId) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RemoveNode {
+		edit::EditCommand::RemoveNode {
 			node: sdk_node(node),
 		},
 	)
@@ -1720,8 +1719,8 @@ pub fn remove_node(p: &ProjectRef, node: NodeId) -> Result<(), String> {
 /// stack, the oak_core config store and the codec decode sessions, so any
 /// test touching them serializes on this lock.
 #[cfg(test)]
-pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-	static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub fn test_lock() -> sync::MutexGuard<'static, ()> {
+	static LOCK: sync::Mutex<()> = sync::Mutex::new(());
 	LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -1754,10 +1753,10 @@ pub struct ClipboardClip {
 /// Capture the selected clips into clipboard form (`Copy`; `Cut` copies
 /// then deletes). Clips without a footage upstream are skipped.
 pub fn copy_clips(p: &ProjectRef, clips: &[NodeId]) -> Vec<ClipboardClip> {
-	let Ok(session) = super::real::editor_session_for_project(p) else {
+	let Ok(session) = real::editor_session_for_project(p) else {
 		return Vec::new();
 	};
-	let Ok(result) = session.execute(quercus_engine_rs::edit::EditCommand::CopyClips {
+	let Ok(result) = session.execute(edit::EditCommand::CopyClips {
 		clips: clips.iter().copied().map(sdk_node).collect(),
 	}) else {
 		return Vec::new();
@@ -1791,10 +1790,8 @@ pub fn paste_clips(
 	playhead_ts: i64,
 ) -> Result<Vec<NodeId>, String> {
 	let _ = (seq, items);
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PasteClips {
-		playhead_ts,
-	})?;
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::PasteClips { playhead_ts })?;
 	Ok(result
 		.ids
 		.into_iter()
@@ -1812,7 +1809,7 @@ pub fn paste_clips(
 pub fn set_blocks_enabled(p: &ProjectRef, blocks: &[NodeId], enabled: bool) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetBlocksEnabled {
+		edit::EditCommand::SetBlocksEnabled {
 			clips: blocks.iter().copied().map(sdk_node).collect(),
 			enabled,
 		},
@@ -1827,7 +1824,7 @@ pub fn set_clips_speed(p: &ProjectRef, clips: &[NodeId], speed: f64) -> Result<(
 	}
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::SetClipsSpeed {
+		edit::EditCommand::SetClipsSpeed {
 			clips: clips.iter().copied().map(sdk_node).collect(),
 			speed,
 		},
@@ -1851,7 +1848,7 @@ pub fn rename_blocks(p: &ProjectRef, blocks: &[NodeId], name: &str) -> Result<()
 	}
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RenameBlocks {
+		edit::EditCommand::RenameBlocks {
 			clips: blocks.iter().copied().map(sdk_node).collect(),
 			name: name.to_string(),
 		},
@@ -1867,8 +1864,8 @@ pub fn duplicate_clips(
 	clips: &[NodeId],
 ) -> Result<Vec<NodeId>, String> {
 	let _ = seq;
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::DuplicateClips {
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::DuplicateClips {
 		clips: clips.iter().copied().map(sdk_node).collect(),
 	})?;
 	Ok(result
@@ -1904,10 +1901,8 @@ pub fn paste_clips_insert(
 	playhead_ts: i64,
 ) -> Result<Vec<NodeId>, String> {
 	let _ = (seq, items);
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::PasteClipsInsert {
-		playhead_ts,
-	})?;
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::PasteClipsInsert { playhead_ts })?;
 	Ok(result
 		.ids
 		.into_iter()
@@ -1929,10 +1924,10 @@ pub fn delete_area(
 	if out_ts <= in_ts {
 		return Err("invalid area (need in < out)".to_string());
 	}
-	let session = super::real::editor_session_for_project(p)?;
+	let session = real::editor_session_for_project(p)?;
 	let _ = session.set_current_sequence(seq);
 	session
-		.execute(quercus_engine_rs::edit::EditCommand::DeleteArea {
+		.execute(edit::EditCommand::DeleteArea {
 			in_ts,
 			out_ts,
 			ripple,
@@ -1952,7 +1947,7 @@ pub fn roll_clip_edge_to(
 ) -> Result<(), String> {
 	execute(
 		p,
-		quercus_engine_rs::edit::EditCommand::RollClipEdgeTo {
+		edit::EditCommand::RollClipEdgeTo {
 			clip: sdk_node(clip),
 			at_in,
 			frame_ts,
@@ -1969,8 +1964,8 @@ pub fn roll_clip_edge_to(
 /// placement machinery predate command composition).
 pub fn nest_clips(p: &ProjectRef, seq: NodeId, clips: &[NodeId]) -> Result<NodeId, String> {
 	let _ = seq;
-	let session = super::real::editor_session_for_project(p)?;
-	let result = session.execute(quercus_engine_rs::edit::EditCommand::NestClips {
+	let session = real::editor_session_for_project(p)?;
+	let result = session.execute(edit::EditCommand::NestClips {
 		clips: clips.iter().copied().map(sdk_node).collect(),
 	})?;
 	primary(result)

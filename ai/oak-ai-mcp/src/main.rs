@@ -5,7 +5,11 @@
 //! only, so stdout stays a clean frame stream.
 
 use clap::Parser as _;
+use oak_ai_tools::dispatch;
+use rmcp::transport;
 use std::process::ExitCode;
+use tokio::runtime;
+use tokio::task;
 
 use oak_ai_mcp::backend_select::{self, BackendKind};
 use oak_ai_mcp::rmcp_server::OakMcp;
@@ -42,13 +46,13 @@ fn main() -> ExitCode {
 		env!("CARGO_PKG_VERSION"),
 		oak_ai_mcp::server::BASELINE_PROTOCOL_VERSION,
 		kind.label(),
-		oak_ai_tools::dispatch::registry().len(),
+		dispatch::registry().len(),
 	);
 
 	let server = OakMcp::new(Server::new(backend, kind.label()));
 	// The SDK drives the stdio transport; a current-thread runtime is enough
 	// for a single-connection server.
-	let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+	let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
 		Ok(runtime) => runtime,
 		Err(err) => {
 			eprintln!("oak-ai-mcp: cannot start the async runtime: {err}");
@@ -57,9 +61,9 @@ fn main() -> ExitCode {
 	};
 	// `local` feature: the engine backend is not `Send`, so the handler runs on
 	// a LocalSet rather than a Send-requiring task.
-	let local = tokio::task::LocalSet::new();
+	let local = task::LocalSet::new();
 	runtime.block_on(local.run_until(async move {
-		match server.serve(rmcp::transport::stdio()).await {
+		match server.serve(transport::stdio()).await {
 			Ok(service) => {
 				let _ = service.waiting().await;
 				ExitCode::SUCCESS

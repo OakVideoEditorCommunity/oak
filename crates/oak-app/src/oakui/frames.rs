@@ -25,7 +25,10 @@
 
 use crate::widgets::timeline::Frame;
 use gpui_kit::RenderImage;
+use image::RgbaImage;
+use quercus_engine_rs::preview_video;
 use std::borrow::Cow;
+use std::slice;
 
 /// Width of the synthetic test frame (a small proxy size; the real engine
 /// will deliver full-resolution frames).
@@ -104,7 +107,7 @@ pub(crate) fn f32_rgba_to_bgra_image(width: u32, height: u32, samples: &[f32]) -
 		"F32 RGBA frame must be tightly packed"
 	);
 	let bytes = f32_rgba_to_bgra_bytes(samples);
-	let buffer = image::RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
+	let buffer = RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
 	RenderImage::new(smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1))
 }
 
@@ -122,7 +125,7 @@ pub(crate) fn f32_rgba_to_bgra_image(width: u32, height: u32, samples: &[f32]) -
 pub(crate) fn lazy_gpu_f32_rgba_to_bgra_image(
 	width: u32,
 	height: u32,
-	frame: quercus_engine_rs::preview_video::VideoFrame,
+	frame: preview_video::VideoFrame,
 ) -> RenderImage {
 	RenderImage::new_lazy(width, height, move || {
 		let samples = frame.f32_samples();
@@ -130,7 +133,7 @@ pub(crate) fn lazy_gpu_f32_rgba_to_bgra_image(
 			return smallvec::SmallVec::new();
 		}
 		let bytes = f32_rgba_to_bgra_bytes(&samples);
-		let buffer = image::RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
+		let buffer = RgbaImage::from_raw(width, height, bytes).expect("BGRA frame");
 		smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1)
 	})
 }
@@ -161,7 +164,7 @@ pub(crate) fn bgra_bytes_to_render_image(
 	if bytes.len() < need {
 		return None;
 	}
-	let buffer = image::RgbaImage::from_raw(width, height, bytes[..need].to_vec())?;
+	let buffer = RgbaImage::from_raw(width, height, bytes[..need].to_vec())?;
 	Some(RenderImage::new(smallvec::SmallVec::from_elem(
 		image::Frame::new(buffer),
 		1,
@@ -182,23 +185,27 @@ pub(crate) fn bgra_bytes_to_render_image(
 /// an explicit, aligned row pitch for multi-row copies — a `None` pitch
 /// fails validation and the texture stays black.
 #[cfg(test)]
-pub(crate) fn f32_rgba_to_16f_bytes(width: u32, height: u32, samples: &[f32]) -> Option<(Vec<u8>, u32)> {
-		if samples.len() != (width * height * 4) as usize {
-			return None;
-		}
-		let row_samples = (width * 4) as usize;
-		let unpadded_row_bytes = row_samples * 2;
-		let row_bytes = unpadded_row_bytes.next_multiple_of(256);
-		let mut bytes = vec![0u8; row_bytes * height as usize];
-		for (row, chunk) in samples.chunks_exact(row_samples).enumerate() {
-			let dst = &mut bytes[row * row_bytes..row * row_bytes + unpadded_row_bytes];
-			for (i, &v) in chunk.iter().enumerate() {
-				let h = half::f16::from_f32(v.clamp(0.0, 1.0));
-				dst[i * 2..i * 2 + 2].copy_from_slice(&h.to_bits().to_le_bytes());
-			}
-		}
-		Some((bytes, row_bytes as u32))
+pub(crate) fn f32_rgba_to_16f_bytes(
+	width: u32,
+	height: u32,
+	samples: &[f32],
+) -> Option<(Vec<u8>, u32)> {
+	if samples.len() != (width * height * 4) as usize {
+		return None;
 	}
+	let row_samples = (width * 4) as usize;
+	let unpadded_row_bytes = row_samples * 2;
+	let row_bytes = unpadded_row_bytes.next_multiple_of(256);
+	let mut bytes = vec![0u8; row_bytes * height as usize];
+	for (row, chunk) in samples.chunks_exact(row_samples).enumerate() {
+		let dst = &mut bytes[row * row_bytes..row * row_bytes + unpadded_row_bytes];
+		for (i, &v) in chunk.iter().enumerate() {
+			let h = half::f16::from_f32(v.clamp(0.0, 1.0));
+			dst[i * 2..i * 2 + 2].copy_from_slice(&h.to_bits().to_le_bytes());
+		}
+	}
+	Some((bytes, row_bytes as u32))
+}
 
 #[cfg(test)]
 mod tests {
@@ -314,9 +321,7 @@ pub(crate) fn f32_rgba_to_32f_bytes<'a>(
 	}
 	let row_bytes = width as usize * 16;
 	let pitch = row_bytes.next_multiple_of(256);
-	let raw = unsafe {
-		std::slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4)
-	};
+	let raw = unsafe { slice::from_raw_parts(samples.as_ptr() as *const u8, samples.len() * 4) };
 	if row_bytes == pitch {
 		return Some((Cow::Borrowed(raw), pitch as u32));
 	}

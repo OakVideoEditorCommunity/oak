@@ -2,6 +2,7 @@
 //! The element's own size is determined solely by its style and the space
 //! offered by its parent.
 
+use core::panic;
 use refineable::Refineable as _;
 
 use crate::{
@@ -62,7 +63,7 @@ impl Element for ContainerQuery {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

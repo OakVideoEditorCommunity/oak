@@ -43,13 +43,14 @@
 //!   nodes: the measure/render hooks they call through (`install`), and the
 //!   system font list feeding their font-family combo.
 
+use std::path;
 pub mod component;
 pub mod displaycolor;
 pub mod effectchain;
 pub mod engine;
 pub mod frames;
-pub mod graphops;
 pub mod gpu;
+pub mod graphops;
 pub mod icons;
 pub mod mock;
 pub mod nodegraph;
@@ -81,14 +82,20 @@ pub use real::{RealClock, RealEngine};
 /// containers count as audio, everything else as video.
 pub fn filename_is_audio(name: &str) -> bool {
 	matches!(
-		std::path::Path::new(name)
+		path::Path::new(name)
 			.extension()
 			.and_then(|e| e.to_str())
 			.map(|e| e.to_ascii_lowercase())
 			.as_deref(),
 		Some(
-			"wav" | "mp3" | "flac" | "aac" | "ogg" | "oga" | "opus" | "m4a" | "wma" | "aiff"
-				| "aif" | "ac3" | "amr" | "ape" | "caf"
+			"wav"
+				| "mp3" | "flac"
+				| "aac" | "ogg"
+				| "oga" | "opus"
+				| "m4a" | "wma"
+				| "aiff" | "aif"
+				| "ac3" | "amr"
+				| "ape" | "caf"
 		)
 	)
 }

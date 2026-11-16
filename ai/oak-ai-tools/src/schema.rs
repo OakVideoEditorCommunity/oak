@@ -9,12 +9,13 @@
 //! the backend.
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use jsonschema::Validator;
 use serde_json::Value;
 
-use crate::error::{ToolError, CODE_SCHEMA_VALIDATION};
+use crate::error::{CODE_SCHEMA_VALIDATION, ToolError};
 
 /// `ai/schema/tools`, resolved from this crate's manifest directory (no
 /// machine-local absolute paths are baked into the source).
@@ -44,12 +45,20 @@ impl ToolSchema {
 					break;
 				}
 				let path = error.instance_path().to_string();
-				let path = if path.is_empty() { "$".to_string() } else { path };
+				let path = if path.is_empty() {
+					"$".to_string()
+				} else {
+					path
+				};
 				messages.push(format!("{path}: {error}"));
 			}
 			return Err(ToolError::new(
 				CODE_SCHEMA_VALIDATION,
-				format!("arguments rejected by schema '{}': {}", self.name, messages.join("; ")),
+				format!(
+					"arguments rejected by schema '{}': {}",
+					self.name,
+					messages.join("; ")
+				),
 			));
 		}
 		Ok(())
@@ -71,9 +80,12 @@ impl SchemaRegistry {
 	/// `title` must match it, otherwise the freeze is broken and we panic.
 	pub fn load_dir(dir: &Path) -> Self {
 		let mut tools = BTreeMap::new();
-		let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+		let mut entries: Vec<PathBuf> = fs::read_dir(dir)
 			.unwrap_or_else(|err| {
-				panic!("cannot read the frozen tool schema directory {}: {err}", dir.display())
+				panic!(
+					"cannot read the frozen tool schema directory {}: {err}",
+					dir.display()
+				)
 			})
 			.filter_map(|entry| entry.ok().map(|e| e.path()))
 			.filter(|path| path.extension().is_some_and(|ext| ext == "json"))
@@ -89,11 +101,14 @@ impl SchemaRegistry {
 				.to_string_lossy()
 				.to_string();
 			let name = source.trim_end_matches(".json").to_string();
-			let text = std::fs::read_to_string(&path)
+			let text = fs::read_to_string(&path)
 				.unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
 			let schema: Value = serde_json::from_str(&text)
 				.unwrap_or_else(|err| panic!("{} is not valid JSON: {err}", path.display()));
-			let title = schema.get("title").and_then(Value::as_str).unwrap_or_default();
+			let title = schema
+				.get("title")
+				.and_then(Value::as_str)
+				.unwrap_or_default();
 			if title != name {
 				panic!(
 					"schema title mismatch in {}: title '{title}' != file name '{name}'",
@@ -104,7 +119,9 @@ impl SchemaRegistry {
 				.with_draft(jsonschema::Draft::Draft7)
 				.offline()
 				.build(&schema)
-				.unwrap_or_else(|err| panic!("{} does not compile as draft-07: {err}", path.display()));
+				.unwrap_or_else(|err| {
+					panic!("{} does not compile as draft-07: {err}", path.display())
+				});
 			tools.insert(
 				name.clone(),
 				ToolSchema {

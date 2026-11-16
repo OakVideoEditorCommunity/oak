@@ -22,7 +22,12 @@
 
 #![cfg(feature = "sdk")]
 
+use std::env;
+use std::fs;
+use std::mem;
 use std::path::{Path, PathBuf};
+use std::process;
+use std::slice;
 use std::sync::{Mutex, MutexGuard};
 
 use oak_ai_tools::dispatch::execute;
@@ -30,7 +35,7 @@ use oak_ai_tools::render::Frame;
 use oak_ai_tools::sdk::SdkBackend;
 use oak_ai_tools::timecode::Rat;
 use oak_engine_rust_sdk::codec::{
-	Codec, EncodingParams, EncoderSession, Format, Frame as SdkFrame,
+	Codec, EncoderSession, EncodingParams, Format, Frame as SdkFrame,
 };
 use oak_engine_rust_sdk::types::{PixelFormat, Rational, VideoParams};
 use serde_json::{Value, json};
@@ -47,13 +52,7 @@ fn call(backend: &mut SdkBackend, tool: &str, args: Value) -> Value {
 }
 
 /// Writes a solid-colour H.264 clip with the engine's own encoder.
-fn encode_solid_clip(
-	path: &Path,
-	colour: [f32; 3],
-	frames: i32,
-	fps: i32,
-	size: i32,
-) {
+fn encode_solid_clip(path: &Path, colour: [f32; 3], frames: i32, fps: i32, size: i32) {
 	let mut params = EncodingParams::new();
 	params
 		.set_filename(path.to_str().expect("utf-8 temp path"))
@@ -88,9 +87,9 @@ fn encode_solid_clip(
 			let data = frame.data().expect("frame buffer");
 			// F32 RGBA: the buffer is `width * height * 4` little-endian f32.
 			let floats = unsafe {
-				std::slice::from_raw_parts_mut(
+				slice::from_raw_parts_mut(
 					data.as_mut_ptr() as *mut f32,
-					data.len() / std::mem::size_of::<f32>(),
+					data.len() / mem::size_of::<f32>(),
 				)
 			};
 			for pixel in floats.chunks_exact_mut(4) {
@@ -109,11 +108,8 @@ fn encode_solid_clip(
 
 /// A temp media path unique to this test binary.
 fn temp_media(tag: &str) -> PathBuf {
-	let path = std::env::temp_dir().join(format!(
-		"oak_sdk_e2e_{tag}_{}.mp4",
-		std::process::id()
-	));
-	let _ = std::fs::remove_file(&path);
+	let path = env::temp_dir().join(format!("oak_sdk_e2e_{tag}_{}.mp4", process::id()));
+	let _ = fs::remove_file(&path);
 	path
 }
 
@@ -153,7 +149,11 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 	// --- open ---------------------------------------------------------
 	// `project.open` initialises the render manager (inline backend) and the
 	// process-wide active project, then creates the default sequence.
-	let out = call(&mut backend, "project.open", json!({"name": "e2e", "fps": 30}));
+	let out = call(
+		&mut backend,
+		"project.open",
+		json!({"name": "e2e", "fps": 30}),
+	);
 	assert_eq!(out["created"], true);
 	assert_eq!(out["backend"], "sdk");
 	assert_eq!(out["project"]["fps"], json!({"num": 30, "den": 1}));
@@ -182,7 +182,10 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 	assert_eq!(probe["duration_source"], "video stream time base");
 	let probed = rat_of(&probe["duration"]);
 	assert!(probed > Rat::new(3, 2).unwrap(), "probed duration {probed}");
-	assert!(probed <= Rat::new(5, 2).unwrap(), "probed duration {probed}");
+	assert!(
+		probed <= Rat::new(5, 2).unwrap(),
+		"probed duration {probed}"
+	);
 
 	let out = call(
 		&mut backend,
@@ -287,14 +290,21 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 	assert_eq!(out["out"], duration.to_json());
 	assert_eq!(
 		out["length"],
-		duration.checked_sub(Rat::new(3, 2).unwrap()).unwrap().to_json()
+		duration
+			.checked_sub(Rat::new(3, 2).unwrap())
+			.unwrap()
+			.to_json()
 	);
 	// The split advanced the media in point to 1 s (the media split point),
 	// and the trim moves it by the same 0.5 s the head moved.
 	assert_eq!(out["media_in"], json!({"num": 3, "den": 2}));
 
 	// --- ripple_delete the left half ----------------------------------
-	let out = call(&mut backend, "timeline.ripple_delete", json!({"clip": clip_a}));
+	let out = call(
+		&mut backend,
+		"timeline.ripple_delete",
+		json!({"clip": clip_a}),
+	);
 	assert_eq!(out["removed"], true);
 	assert_eq!(out["ripple"], json!({"num": 1, "den": 1}));
 
@@ -314,7 +324,13 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 		.find(|clip| clip["id"] == json!(right))
 		.expect("the trimmed half on the track");
 	assert_eq!(moved["in"], json!({"num": 1, "den": 2}));
-	assert_eq!(moved["out"], duration.checked_sub(Rat::new(1, 1).unwrap()).unwrap().to_json());
+	assert_eq!(
+		moved["out"],
+		duration
+			.checked_sub(Rat::new(1, 1).unwrap())
+			.unwrap()
+			.to_json()
+	);
 	let shifted = clips
 		.iter()
 		.find(|clip| clip["id"] == json!(clip_b))
@@ -323,7 +339,11 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 	assert_eq!(shifted["in"], json!({"num": 1, "den": 1}));
 	assert_eq!(
 		shifted["out"],
-		Rat::new(1, 1).unwrap().checked_add(duration).unwrap().to_json()
+		Rat::new(1, 1)
+			.unwrap()
+			.checked_add(duration)
+			.unwrap()
+			.to_json()
 	);
 
 	// --- render after the edits ---------------------------------------
@@ -421,8 +441,8 @@ fn acceptance_chain_render_and_full_undo_on_the_engine() {
 	assert_eq!(err.code, "NOTHING_TO_UNDO");
 	assert_eq!(err.tool.as_deref(), Some("edit.undo"));
 
-	let _ = std::fs::remove_file(&media_a);
-	let _ = std::fs::remove_file(&media_b);
+	let _ = fs::remove_file(&media_a);
+	let _ = fs::remove_file(&media_b);
 }
 
 #[test]
@@ -465,7 +485,11 @@ fn a_rejected_edit_aborts_and_changes_nothing() {
 	.expect_err("an overlapping placement must be rejected");
 	assert_eq!(err.code, "INVALID_PARAMS");
 	assert_eq!(err.step.as_deref(), Some("invoke"));
-	assert_eq!(err.txn.as_deref(), Some("aborted"), "the failure must abort");
+	assert_eq!(
+		err.txn.as_deref(),
+		Some("aborted"),
+		"the failure must abort"
+	);
 	assert_eq!(err.tool.as_deref(), Some("timeline.place_clip"));
 
 	// The document is byte-for-byte unchanged and no undo row was recorded.
@@ -488,7 +512,7 @@ fn a_rejected_edit_aborts_and_changes_nothing() {
 	assert!(err.txn.is_none());
 	assert_eq!(backend.undo_index(), history);
 
-	let _ = std::fs::remove_file(&media);
+	let _ = fs::remove_file(&media);
 }
 
 /// Minimal standard base64 (an independent decoder, so a bug in the crate's

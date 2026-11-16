@@ -12,7 +12,7 @@
 
 use serde_json::Value;
 
-use crate::error::{ToolError, CODE_TRANSACTION};
+use crate::error::{CODE_TRANSACTION, ToolError};
 
 /// The transactional half of a backend: begin / commit / abort.
 ///
@@ -95,7 +95,12 @@ pub enum GroupOutcome {
 /// This is the primitive the adapter-layer confirmation gate needs: the
 /// gate wants to see the edit *before* it lands, which is only possible
 /// while the group is still open.
-pub fn run_gated<T, F, D>(ops: &mut T, tool: &str, call: F, decide: D) -> Result<GroupOutcome, ToolError>
+pub fn run_gated<T, F, D>(
+	ops: &mut T,
+	tool: &str,
+	call: F,
+	decide: D,
+) -> Result<GroupOutcome, ToolError>
 where
 	T: TxnOps + ?Sized,
 	F: FnOnce(&mut T) -> Result<Value, ToolError>,
@@ -148,7 +153,10 @@ impl<'a, T: TxnOps + ?Sized> GroupGuard<'a, T> {
 	/// Opens the group.
 	pub fn begin(ops: &'a mut T, label: &str) -> Result<Self, ToolError> {
 		ops.txn_begin(label)?;
-		Ok(Self { ops, finished: false })
+		Ok(Self {
+			ops,
+			finished: false,
+		})
 	}
 
 	/// Closes the group successfully.

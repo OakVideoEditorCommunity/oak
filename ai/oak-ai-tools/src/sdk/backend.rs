@@ -16,6 +16,7 @@
 //! Where the engine has no counterpart for a frozen tool the method returns
 //! [`ToolError::unsupported`] with a gap id from [`super::gaps`].
 
+use super::Counters;
 use oak_engine_rust_sdk::codec::{Codec, Format, decoder_probe};
 use oak_engine_rust_sdk::effect::{
 	NODE_FLAG_AUDIO_EFFECT, NODE_FLAG_DONT_SHOW_IN_CREATE_MENU, NODE_FLAG_VIDEO_EFFECT,
@@ -32,9 +33,12 @@ use oak_engine_rust_sdk::task::{self, TaskState};
 use oak_engine_rust_sdk::timeline;
 use oak_engine_rust_sdk::types::PixelFormat;
 use serde_json::{Value, json};
+use std::fs;
 
 use crate::backend::EngineBackend;
-use crate::error::{CODE_BACKEND, CODE_INTERNAL, CODE_IO, CODE_NOTHING_TO_UNDO, CODE_STATE, ToolError};
+use crate::error::{
+	CODE_BACKEND, CODE_INTERNAL, CODE_IO, CODE_NOTHING_TO_UNDO, CODE_STATE, ToolError,
+};
 use crate::render::frame_summary;
 use crate::timecode::{Rat, TimeContext};
 use crate::tools;
@@ -186,7 +190,7 @@ impl EngineBackend for SdkBackend {
 		self.names.clear();
 		self.nodes.clear();
 		self.clip_source.clear();
-		self.counters = super::Counters::default();
+		self.counters = Counters::default();
 		self.project = Some(project);
 
 		let fallback_name = parsed
@@ -196,9 +200,9 @@ impl EngineBackend for SdkBackend {
 			.unwrap_or_else(|| "Untitled".to_string());
 		if created {
 			let project = self.handle()?;
-			let sequence = project
-				.create_sequence(&fallback_name)
-				.ok_or_else(|| ToolError::backend("the engine could not create the default sequence"))?;
+			let sequence = project.create_sequence(&fallback_name).ok_or_else(|| {
+				ToolError::backend("the engine could not create the default sequence")
+			})?;
 			if let Some(fps) = parsed.fps {
 				let (width, height) = project.sequence_geometry(sequence).unwrap_or((1920, 1080));
 				let num = i32::try_from(fps.num)
@@ -264,7 +268,7 @@ impl EngineBackend for SdkBackend {
 				"the engine could not save the project to '{path}'"
 			)));
 		}
-		let bytes = std::fs::metadata(&path).map(|meta| meta.len()).map_err(|err| {
+		let bytes = fs::metadata(&path).map(|meta| meta.len()).map_err(|err| {
 			ToolError::new(
 				CODE_IO,
 				format!("the project was saved but '{path}' cannot be read back: {err}"),
@@ -311,10 +315,14 @@ impl EngineBackend for SdkBackend {
 
 	fn media_probe(&mut self, args: &Value) -> Result<Value, ToolError> {
 		let parsed = tools::media::parse_probe(args)?;
-		let meta = std::fs::metadata(&parsed.path)
-			.map_err(|err| ToolError::not_found(format!("cannot probe '{}': {err}", parsed.path)))?;
+		let meta = fs::metadata(&parsed.path).map_err(|err| {
+			ToolError::not_found(format!("cannot probe '{}': {err}", parsed.path))
+		})?;
 		let description = decoder_probe(None, &parsed.path, None).ok_or_else(|| {
-			ToolError::backend(format!("no registered decoder could read '{}'", parsed.path))
+			ToolError::backend(format!(
+				"no registered decoder could read '{}'",
+				parsed.path
+			))
 		})?;
 		let mut out = json!({
 			"path": parsed.path,
@@ -335,10 +343,13 @@ impl EngineBackend for SdkBackend {
 		if let Some(video) = &video {
 			out["width"] = json!(video.width);
 			out["height"] = json!(video.height);
-			let fps = Rat::new(i64::from(video.frame_rate_num), i64::from(video.frame_rate_den))
-				.map_err(|err| {
-					ToolError::backend(format!("the probe reported a bad frame rate: {err}"))
-				})?;
+			let fps = Rat::new(
+				i64::from(video.frame_rate_num),
+				i64::from(video.frame_rate_den),
+			)
+			.map_err(|err| {
+				ToolError::backend(format!("the probe reported a bad frame rate: {err}"))
+			})?;
 			out["fps"] = fps.to_json();
 		}
 		// The container duration is what the probe reports when the format
@@ -357,10 +368,9 @@ impl EngineBackend for SdkBackend {
 					.duration
 					.checked_mul(i64::from(video.time_base_num))
 					.ok_or_else(|| ToolError::backend("probed duration overflows"))?;
-				let duration =
-					Rat::new(ticks, i64::from(video.time_base_den)).map_err(|err| {
-						ToolError::backend(format!("the probe reported a bad duration: {err}"))
-					})?;
+				let duration = Rat::new(ticks, i64::from(video.time_base_den)).map_err(|err| {
+					ToolError::backend(format!("the probe reported a bad duration: {err}"))
+				})?;
 				out["duration"] = duration.to_json();
 				out["duration_source"] = json!("video stream time base");
 			}
@@ -475,10 +485,14 @@ impl EngineBackend for SdkBackend {
 			)));
 		}
 		if !project.block_set_length(clip, SdkBackend::sdk_rat(length)) {
-			return Err(ToolError::backend("the engine refused to set the clip length"));
+			return Err(ToolError::backend(
+				"the engine refused to set the clip length",
+			));
 		}
 		if media_in != zero() && !project.block_set_media_in(clip, SdkBackend::sdk_rat(media_in)) {
-			return Err(ToolError::backend("the engine refused to set the clip media in"));
+			return Err(ToolError::backend(
+				"the engine refused to set the clip media in",
+			));
 		}
 		if !timeline::block_place(&project, list, track_index as i32, clip, in_sdk) {
 			return Err(ToolError::backend(format!(
@@ -504,7 +518,8 @@ impl EngineBackend for SdkBackend {
 		let project = self.handle()?;
 		let clip = self.clip(&parsed.clip)?;
 		let (_, track, _, _) = self.locate_block(clip)?;
-		let (at, at_sdk) = self.resolve_time(TimeContext::Clip(parsed.clip.clone()), parsed.time)?;
+		let (at, at_sdk) =
+			self.resolve_time(TimeContext::Clip(parsed.clip.clone()), parsed.time)?;
 		let in_ = SdkBackend::rat(project.block_in(clip), "block in")?;
 		let out = SdkBackend::rat(project.block_out(clip), "block out")?;
 		if !(in_ < at && at < out) {
@@ -585,7 +600,9 @@ impl EngineBackend for SdkBackend {
 		};
 		let new_length = new_out.checked_sub(new_in)?;
 		if new_length.is_zero() {
-			return Err(ToolError::invalid_params("the trim would leave an empty clip"));
+			return Err(ToolError::invalid_params(
+				"the trim would leave an empty clip",
+			));
 		}
 		// The media may not run past the source, when this session knows the
 		// source (see GAP_CLIP_SOURCE_QUERY for the loaded-project case).
@@ -602,7 +619,14 @@ impl EngineBackend for SdkBackend {
 				}
 			}
 		}
-		Self::reject_overlap(&project, track, &parsed.clip, new_in, new_length, Some(clip))?;
+		Self::reject_overlap(
+			&project,
+			track,
+			&parsed.clip,
+			new_in,
+			new_length,
+			Some(clip),
+		)?;
 
 		// Engine trim semantics: a head trim anchors the timeline OUT point and
 		// shifts the media in point with it (`BlockTrimCommand`, TrimIn); a tail
@@ -725,8 +749,13 @@ impl EngineBackend for SdkBackend {
 			}
 			let old_in = SdkBackend::rat(project.block_in(block), "block in")?;
 			let new_in = old_in.checked_sub(length)?;
-			if !timeline::block_move(&project, list, track_index as i32, block, SdkBackend::sdk_rat(new_in))
-			{
+			if !timeline::block_move(
+				&project,
+				list,
+				track_index as i32,
+				block,
+				SdkBackend::sdk_rat(new_in),
+			) {
 				return Err(ToolError::backend(format!(
 					"the engine refused to shift a following clip from {old_in} to {new_in}"
 				)));
@@ -843,7 +872,10 @@ impl EngineBackend for SdkBackend {
 			.node_of(&parsed.node)
 			.ok_or_else(|| ToolError::not_found(format!("unknown node '{}'", parsed.node)))?;
 		if !node.is_valid() {
-			return Err(ToolError::not_found(format!("unknown node '{}'", parsed.node)));
+			return Err(ToolError::not_found(format!(
+				"unknown node '{}'",
+				parsed.node
+			)));
 		}
 		let current = project
 			.standard_value(node, &parsed.key, -1)
@@ -936,7 +968,7 @@ impl EngineBackend for SdkBackend {
 			"category": category,
 			"backend": "sdk",
 			"note": "effects come from the engine's node factory table; transition styles are \
-			         the frozen T0 enum (the engine models transitions as timeline blocks)",
+					 the frozen T0 enum (the engine models transitions as timeline blocks)",
 		}))
 	}
 
@@ -1105,7 +1137,7 @@ impl EngineBackend for SdkBackend {
 				handle.error()
 			)));
 		}
-		let bytes = std::fs::metadata(&parsed.output_path)
+		let bytes = fs::metadata(&parsed.output_path)
 			.map(|meta| meta.len())
 			.unwrap_or(0);
 		Ok(json!({
@@ -1159,8 +1191,8 @@ fn native_size(geometry: Option<(i32, i32)>) -> (u32, u32) {
 			if width <= DEFAULT_FRAME_SIZE.0 && height <= DEFAULT_FRAME_SIZE.1 {
 				return (width, height);
 			}
-			let scale = f64::from(DEFAULT_FRAME_SIZE.0) / f64::from(width)
-				.min(f64::from(DEFAULT_FRAME_SIZE.1) / f64::from(height));
+			let scale = f64::from(DEFAULT_FRAME_SIZE.0)
+				/ f64::from(width).min(f64::from(DEFAULT_FRAME_SIZE.1) / f64::from(height));
 			(
 				((f64::from(width) * scale).round() as u32).max(1),
 				((f64::from(height) * scale).round() as u32).max(1),

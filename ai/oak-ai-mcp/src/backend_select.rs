@@ -10,6 +10,8 @@
 
 use oak_ai_tools::backend::EngineBackend;
 use oak_ai_tools::mock::MockBackend;
+#[cfg(feature = "sdk")]
+use oak_ai_tools::sdk;
 
 /// Which backend a session runs against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,11 +56,13 @@ pub fn build(kind: BackendKind) -> Result<Box<dyn EngineBackend>, String> {
 /// FFmpeg) is far too heavy to be a default build requirement.
 #[cfg(not(feature = "sdk"))]
 fn sdk_backend() -> Result<Box<dyn EngineBackend>, String> {
-	Err("--backend sdk is not available: this binary was built without the 'sdk' \
+	Err(
+		"--backend sdk is not available: this binary was built without the 'sdk' \
 	     feature. Rebuild with `cargo build --release --features sdk` (it links \
 	     oak-engine-rust-sdk and the project FFmpeg/engine). Refusing to fall back \
 	     to the mock backend; pass --backend mock to run against the in-memory mock."
-		.to_string())
+			.to_string(),
+	)
 }
 
 /// With the feature on, `--backend sdk` constructs the real engine
@@ -71,7 +75,7 @@ fn sdk_backend() -> Result<Box<dyn EngineBackend>, String> {
 /// `cargo check --features sdk` record lives in README "已知限制".
 #[cfg(feature = "sdk")]
 fn sdk_backend() -> Result<Box<dyn EngineBackend>, String> {
-	Ok(Box::new(oak_ai_tools::sdk::SdkBackend::new()))
+	Ok(Box::new(sdk::SdkBackend::new()))
 }
 
 #[cfg(test)]

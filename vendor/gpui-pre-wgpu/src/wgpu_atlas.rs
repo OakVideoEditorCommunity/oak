@@ -1,3 +1,8 @@
+use wgpu::TextureAspect;
+use wgpu::TextureDimension;
+use wgpu::TextureFormat;
+use wgpu::TextureUsages;
+use wgpu::TextureViewDescriptor;
 use anyhow::{Context as _, Result};
 use etagere::{BucketedAtlasAllocator, size2};
 use gpui::{
@@ -197,7 +202,7 @@ impl WgpuAtlasTextures {
 
         let size = min_size.min(&max_atlas_size).max(&DEFAULT_ATLAS_SIZE);
         let format = match kind {
-            AtlasTextureKind::Monochrome => wgpu::TextureFormat::R8Unorm,
+            AtlasTextureKind::Monochrome => TextureFormat::R8Unorm,
             AtlasTextureKind::Subpixel | AtlasTextureKind::Polychrome => self.color_texture_format,
         };
 
@@ -210,13 +215,13 @@ impl WgpuAtlasTextures {
             },
             mip_level_count: 1,
             sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
+            dimension: TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = texture.create_view(&TextureViewDescriptor::default());
 
         let texture_list = &mut self.storage[kind];
         let index = texture_list.free_list.pop();
@@ -280,7 +285,7 @@ impl WgpuAtlasTextures {
                         y: upload.bounds.origin.y.0 as u32,
                         z: 0,
                     },
-                    aspect: wgpu::TextureAspect::All,
+                    aspect: TextureAspect::All,
                 },
                 &upload.data,
                 wgpu::TexelCopyBufferLayout {
@@ -363,8 +368,8 @@ impl WgpuAtlasTexture {
 
     fn bytes_per_pixel(&self) -> u8 {
         match self.format {
-            wgpu::TextureFormat::R8Unorm => 1,
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm => 4,
+            TextureFormat::R8Unorm => 1,
+            TextureFormat::Bgra8Unorm | TextureFormat::Rgba8Unorm => 4,
             _ => 4,
         }
     }
@@ -380,7 +385,7 @@ impl WgpuAtlasTexture {
 
 fn swizzle_upload_data(bytes: &[u8], format: wgpu::TextureFormat) -> Vec<u8> {
     match format {
-        wgpu::TextureFormat::Rgba8Unorm => {
+        TextureFormat::Rgba8Unorm => {
             let mut data = bytes.to_vec();
             for pixel in data.chunks_exact_mut(4) {
                 pixel.swap(0, 2);

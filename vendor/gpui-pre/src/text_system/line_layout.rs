@@ -1,3 +1,4 @@
+use std::mem;
 use crate::{FontId, GlyphId, Pixels, PlatformTextSystem, Point, SharedString, Size, point, px};
 use collections::FxHashMap;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -587,7 +588,7 @@ impl LineLayoutCache {
         let _font_generation = self.clear_if_font_generation_changed();
         let mut curr_frame = self.current_frame.write();
         let mut prev_frame = self.previous_frame.lock();
-        std::mem::swap(&mut *prev_frame, &mut *curr_frame);
+        mem::swap(&mut *prev_frame, &mut *curr_frame);
         curr_frame.lines.clear();
         curr_frame.wrapped_lines.clear();
         curr_frame.used_lines.clear();

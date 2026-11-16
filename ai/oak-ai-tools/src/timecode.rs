@@ -46,11 +46,15 @@ fn rat_from_parts(num: i128, den: i128) -> Result<Rat, ToolError> {
 		den = -den;
 	}
 	let g = gcd(num, den);
-	let (num, den) = if g > 1 { (num / g, den / g) } else { (num, den) };
-	let num = i64::try_from(num)
-		.map_err(|_| ToolError::timecode("rational numerator out of range"))?;
-	let den = i64::try_from(den)
-		.map_err(|_| ToolError::timecode("rational denominator out of range"))?;
+	let (num, den) = if g > 1 {
+		(num / g, den / g)
+	} else {
+		(num, den)
+	};
+	let num =
+		i64::try_from(num).map_err(|_| ToolError::timecode("rational numerator out of range"))?;
+	let den =
+		i64::try_from(den).map_err(|_| ToolError::timecode("rational denominator out of range"))?;
 	Ok(Rat { num, den })
 }
 
@@ -261,8 +265,7 @@ impl fmt::Display for TimeValue {
 	}
 }
 
-const REJECT: &str =
-	"bare floating-point seconds are rejected; use {num, den} rational seconds or an integer frame index";
+const REJECT: &str = "bare floating-point seconds are rejected; use {num, den} rational seconds or an integer frame index";
 
 impl<'de> Deserialize<'de> for TimeValue {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<TimeValue, D::Error> {
@@ -352,8 +355,7 @@ pub fn rate_arg(args: &Value, key: &str) -> Result<Rat, ToolError> {
 	let raw = args
 		.get(key)
 		.ok_or_else(|| ToolError::invalid_params(format!("missing field '{key}'")))?;
-	rate_value(raw)
-		.ok_or_else(|| ToolError::timecode(format!("field '{key}': {REJECT}")))
+	rate_value(raw).ok_or_else(|| ToolError::timecode(format!("field '{key}': {REJECT}")))
 }
 
 /// Parses a frame-rate value (integer fps or `{num, den}`); `None` for
@@ -385,7 +387,13 @@ mod tests {
 		assert_eq!(Rat::new(-6, 8).unwrap(), Rat { num: -3, den: 4 });
 		assert_eq!(Rat::new(6, -8).unwrap(), Rat { num: -3, den: 4 });
 		assert_eq!(Rat::new(0, 5).unwrap(), Rat { num: 0, den: 1 });
-		assert_eq!(Rat::new(30000, 1001).unwrap(), Rat { num: 30000, den: 1001 });
+		assert_eq!(
+			Rat::new(30000, 1001).unwrap(),
+			Rat {
+				num: 30000,
+				den: 1001
+			}
+		);
 	}
 
 	#[test]
@@ -454,7 +462,10 @@ mod tests {
 		let rate = Rat::new(30000, 1001).unwrap();
 		assert_eq!(
 			TimeValue::Frame(30).to_rational(rate).unwrap(),
-			Rat { num: 1001, den: 1000 }
+			Rat {
+				num: 1001,
+				den: 1000
+			}
 		);
 		// Integer frame rate: frame N == N seconds / 30.
 		let rate = Rat::new(30, 1).unwrap();
@@ -464,10 +475,7 @@ mod tests {
 		);
 		// A rational passes through untouched.
 		let t = Rat::new(3, 25).unwrap();
-		assert_eq!(
-			TimeValue::Rational(t).to_rational(rate).unwrap(),
-			t
-		);
+		assert_eq!(TimeValue::Rational(t).to_rational(rate).unwrap(), t);
 		// A null frame rate cannot host a frame index.
 		let bad = Rat::new(0, 1).unwrap();
 		assert!(TimeValue::Frame(1).to_rational(bad).is_err());

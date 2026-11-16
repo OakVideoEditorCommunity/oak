@@ -38,6 +38,9 @@ pub mod controls;
 pub mod menu;
 pub mod text_input;
 
-pub use controls::{Slider, SliderEvent, SliderModel, SpinBox, SpinBoxEvent, CheckBox, CheckBoxEvent, CheckState, ComboBox, ComboBoxEvent, ComboBoxOption, SliderValue, ValueKind, OfxColorPicker};
-pub use menu::{ContextMenu, Menu, MenuItem, MenuBar};
-pub use text_input::{install_text_input_bindings, text_input, TextInput};
+pub use controls::{
+	CheckBox, CheckBoxEvent, CheckState, ComboBox, ComboBoxEvent, ComboBoxOption, OfxColorPicker,
+	Slider, SliderEvent, SliderModel, SliderValue, SpinBox, SpinBoxEvent, ValueKind,
+};
+pub use menu::{ContextMenu, Menu, MenuBar, MenuItem};
+pub use text_input::{TextInput, install_text_input_bindings, text_input};

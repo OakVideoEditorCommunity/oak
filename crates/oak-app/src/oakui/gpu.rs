@@ -30,7 +30,24 @@
 //! return `None` and the caller falls back to the BGRA8 CPU-frame path,
 //! which keeps the pre-existing behavior.
 
+use super::displaycolor;
+use super::frames;
+use crate::oakui;
+use crate::widgets;
+use gpui_kit::DevicePixels;
+use quercus_engine_rs::core;
+use quercus_engine_rs::state;
+use quercus_engine_rs::utils;
+use std::env;
+use std::ffi;
 use std::sync::Mutex;
+use wgpu::Backend;
+use wgpu::Features;
+use wgpu::Origin3d;
+use wgpu::TextureAspect;
+use wgpu::TextureDimension;
+use wgpu::TextureFormat;
+use wgpu::TextureUsages;
 
 use quercus_engine_rs::render::gpu_set_display_transform_required;
 
@@ -53,10 +70,10 @@ struct Lut3d {
 fn display_lut_key() -> String {
 	format!(
 		"{}|{}|{}|{}",
-		crate::oakui::displaycolor::generation(),
-		quercus_engine_rs::state::color_working_space(),
-		quercus_engine_rs::state::color_output_gamut(),
-		quercus_engine_rs::state::color_output_transfer()
+		oakui::displaycolor::generation(),
+		state::color_working_space(),
+		state::color_output_gamut(),
+		state::color_output_transfer()
 	)
 }
 
@@ -68,9 +85,9 @@ fn display_lut_key() -> String {
 /// CPU path performs runs here once per settings change, on the GPU's
 /// behalf, at full precision.
 fn build_display_lut() -> Lut3d {
-	let edge = quercus_engine_rs::core::DISPLAY_EDGE;
-	let lo = quercus_engine_rs::core::DISPLAY_LO;
-	let hi = quercus_engine_rs::core::DISPLAY_HI;
+	let edge = core::DISPLAY_EDGE;
+	let lo = core::DISPLAY_LO;
+	let hi = core::DISPLAY_HI;
 	let n = (edge as usize).pow(3);
 	let mut samples = vec![0.0f32; n * 4];
 	let step = |i: usize, axis: usize| -> f32 {
@@ -88,13 +105,13 @@ fn build_display_lut() -> Lut3d {
 			}
 		}
 	}
-	quercus_engine_rs::utils::working_to_display_target(
+	utils::working_to_display_target(
 		&mut samples,
-		&quercus_engine_rs::state::color_working_space(),
-		&quercus_engine_rs::state::color_output_gamut(),
-		&quercus_engine_rs::state::color_output_transfer(),
+		&state::color_working_space(),
+		&state::color_output_gamut(),
+		&state::color_output_transfer(),
 	);
-	super::displaycolor::apply_f32_rgba(&mut samples, n as i64);
+	displaycolor::apply_f32_rgba(&mut samples, n as i64);
 	let mut data = Vec::with_capacity(n * 3);
 	for px in samples.as_chunks::<4>().0 {
 		data.extend_from_slice(&px[..3]);
@@ -114,9 +131,9 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	// context. The engine's render textures then live on this device and can
 	// be sampled directly by the viewer (zero-copy presentation).
 	let backend = match device.adapter_info().backend {
-		wgpu::Backend::Metal => quercus_engine_rs::render::GpuBackend::Metal,
-		wgpu::Backend::Gl => quercus_engine_rs::render::GpuBackend::Gl,
-		wgpu::Backend::Vulkan => quercus_engine_rs::render::GpuBackend::Vulkan,
+		Backend::Metal => quercus_engine_rs::render::GpuBackend::Metal,
+		Backend::Gl => quercus_engine_rs::render::GpuBackend::Gl,
+		Backend::Vulkan => quercus_engine_rs::render::GpuBackend::Vulkan,
 		// Dx12 is not a separate engine backend discriminant; the engine's
 		// external-memory import gates on Vulkan anyway, so use Auto.
 		_ => quercus_engine_rs::render::GpuBackend::Auto,
@@ -126,14 +143,14 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 	// GL import, submit, or present) block the UI's surface acquisition on
 	// the same fence lock. The zero-copy handoff is opt-in for machines where
 	// the shared path is known-good.
-	let shared = std::env::var("OAK_GPU_SHARED")
+	let shared = env::var("OAK_GPU_SHARED")
 		.map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 		.unwrap_or(false);
 	if shared {
 		unsafe {
 			quercus_engine_rs::render::gpu_install(
-				std::sync::Arc::as_ptr(&device) as *const std::ffi::c_void,
-				std::sync::Arc::as_ptr(&queue) as *const std::ffi::c_void,
+				std::sync::Arc::as_ptr(&device) as *const ffi::c_void,
+				std::sync::Arc::as_ptr(&queue) as *const ffi::c_void,
 				backend,
 			);
 		}
@@ -143,11 +160,8 @@ pub fn register_context(device: std::sync::Arc<wgpu::Device>, queue: std::sync::
 			format!("{backend:?}")
 		);
 	}
-	let zero_copy = shared
-		&& device
-			.features()
-			.contains(wgpu::Features::FLOAT32_FILTERABLE)
-		&& install_display_lut();
+	let zero_copy =
+		shared && device.features().contains(Features::FLOAT32_FILTERABLE) && install_display_lut();
 	gpu_set_display_transform_required(!zero_copy);
 	if let Ok(mut ctx) = GPU_CONTEXT.lock() {
 		*ctx = Some((device.clone(), queue.clone()));
@@ -178,8 +192,8 @@ pub fn install_display_lut() -> bool {
 	let lut = build_display_lut();
 	quercus_engine_rs::render::gpu_set_display_lut(
 		lut.edge,
-		&quercus_engine_rs::core::DISPLAY_LO,
-		&quercus_engine_rs::core::DISPLAY_HI,
+		&core::DISPLAY_LO,
+		&core::DISPLAY_HI,
 		&lut.data,
 	)
 }
@@ -206,13 +220,10 @@ pub fn upload_rgba32f(
 		let ctx = GPU_CONTEXT.lock().ok()?;
 		ctx.as_ref().map(|(d, q)| (d.clone(), q.clone()))?
 	};
-	if !device
-		.features()
-		.contains(wgpu::Features::FLOAT32_FILTERABLE)
-	{
+	if !device.features().contains(Features::FLOAT32_FILTERABLE) {
 		return None;
 	}
-	let (bytes, bytes_per_row) = super::frames::f32_rgba_to_32f_bytes(width, height, samples)?;
+	let (bytes, bytes_per_row) = frames::f32_rgba_to_32f_bytes(width, height, samples)?;
 	let texture = device.create_texture(&wgpu::TextureDescriptor {
 		label: Some("oak_display_rgba32f"),
 		size: wgpu::Extent3d {
@@ -222,17 +233,17 @@ pub fn upload_rgba32f(
 		},
 		mip_level_count: 1,
 		sample_count: 1,
-		dimension: wgpu::TextureDimension::D2,
-		format: wgpu::TextureFormat::Rgba32Float,
-		usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+		dimension: TextureDimension::D2,
+		format: TextureFormat::Rgba32Float,
+		usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
 		view_formats: &[],
 	});
 	queue.write_texture(
 		wgpu::TexelCopyTextureInfo {
 			texture: &texture,
 			mip_level: 0,
-			origin: wgpu::Origin3d::ZERO,
-			aspect: wgpu::TextureAspect::All,
+			origin: Origin3d::ZERO,
+			aspect: TextureAspect::All,
 		},
 		bytes.as_ref(),
 		wgpu::TexelCopyBufferLayout {
@@ -271,12 +282,12 @@ pub fn register_texture(
 	height: u32,
 	texture: std::sync::Arc<wgpu::Texture>,
 ) {
-	crate::widgets::viewer::register_gpu_frame(
+	widgets::viewer::register_gpu_frame(
 		image_id,
 		texture,
 		gpui_kit::Size {
-			width: gpui_kit::DevicePixels::from(width),
-			height: gpui_kit::DevicePixels::from(height),
+			width: DevicePixels::from(width),
+			height: DevicePixels::from(height),
 		},
 	);
 }
@@ -308,8 +319,8 @@ mod tests {
 	#[test]
 	fn rgba16f_pack_clamps_pins_values_and_pads_rows() {
 		let samples = [1.0, 0.5, 0.0, 1.0, -1.0, 2.0, 0.25, 0.5];
-		let (bytes, pitch) = super::super::frames::f32_rgba_to_16f_bytes(2, 1, &samples)
-			.expect("valid samples");
+		let (bytes, pitch) =
+			super::super::frames::f32_rgba_to_16f_bytes(2, 1, &samples).expect("valid samples");
 		assert_eq!(pitch, 256, "rows are 256-byte aligned for write_texture");
 		assert_eq!(bytes.len(), 256);
 		let word = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);

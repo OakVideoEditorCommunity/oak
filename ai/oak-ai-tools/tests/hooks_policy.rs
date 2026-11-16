@@ -14,7 +14,7 @@ use oak_ai_tools::backend::EngineBackend;
 use oak_ai_tools::dispatch::{self, execute};
 use oak_ai_tools::error::ToolError;
 use oak_ai_tools::hooks::{
-	self, BeforeCommit, Decision, EditFailed, FailureEvent, GatedOutcome, GatePoint, Hooks,
+	self, BeforeCommit, Decision, EditFailed, FailureEvent, GatePoint, GatedOutcome, Hooks,
 	OperationClass, PendingEdit, Policy, ReadbackVerdict, RenderDone, RenderDoneEvent,
 };
 use oak_ai_tools::mock::MockBackend;
@@ -154,7 +154,8 @@ impl BeforeCommit for Recording {
 
 impl RenderDone for Recording {
 	fn render_done(&mut self, event: &RenderDoneEvent<'_>) -> ReadbackVerdict {
-		self.readbacks.push((event.tool.to_string(), event.frames.len()));
+		self.readbacks
+			.push((event.tool.to_string(), event.frames.len()));
 		ReadbackVerdict::Pass
 	}
 }
@@ -239,11 +240,15 @@ fn proposal_only_never_enters_the_backend_for_a_mutating_tool() {
 				json!({"sequence": "sequence-1", "output_path": "/tmp/oak-hooks.mp4"}),
 			),
 		] {
-			let outcome = dispatch::execute_with(&mut spy, tool, args, Policy::ProposalOnly, &mut hook);
+			let outcome =
+				dispatch::execute_with(&mut spy, tool, args, Policy::ProposalOnly, &mut hook);
 			results.push((tool.to_string(), outcome));
 		}
 		// Nothing was invoked, not even a transaction was opened.
-		assert_eq!(spy.edits, 0, "proposal-only must not enter a mutating method");
+		assert_eq!(
+			spy.edits, 0,
+			"proposal-only must not enter a mutating method"
+		);
 		assert_eq!(spy.begins, 0, "proposal-only must not open an undo group");
 		assert_eq!(spy.commits, 0);
 		assert_eq!(spy.aborts, 0, "there was nothing to abort");
@@ -295,7 +300,10 @@ fn proposal_only_still_runs_reads() {
 		Policy::ProposalOnly,
 		&mut hook,
 	);
-	assert!(outcome.is_applied(), "reads are auto in every mode: {outcome:?}");
+	assert!(
+		outcome.is_applied(),
+		"reads are auto in every mode: {outcome:?}"
+	);
 	assert_eq!(spy.edits, 0);
 	assert_eq!(spy.begins, 1, "a read is still wrapped in its undo group");
 	drop(spy);
@@ -340,7 +348,11 @@ fn confirm_matrix_reads_run_edits_gate_at_commit_project_and_export_before() {
 	// (tool, args, expected gate point or None when the gate is skipped)
 	let cases: [(&str, Value, Option<GatePoint>); 5] = [
 		("project.get_overview", json!({}), None),
-		("timeline.add_track", json!({"type": "audio"}), Some(GatePoint::BeforeCommit)),
+		(
+			"timeline.add_track",
+			json!({"type": "audio"}),
+			Some(GatePoint::BeforeCommit),
+		),
 		(
 			"project.save",
 			json!({"path": "/tmp/oak-hooks-save.ove"}),
@@ -438,7 +450,11 @@ fn reject_at_commit_aborts_and_restores_the_document() {
 	assert_eq!(hook.gate.len(), 1);
 	assert!(hook.gate[0].has_result);
 	assert_eq!(backend.serialize(), state, "abort must restore the state");
-	assert_eq!(backend.undo_depth(), depth, "an aborted group is not pushed");
+	assert_eq!(
+		backend.undo_depth(),
+		depth,
+		"an aborted group is not pushed"
+	);
 	// Rejections are not failures: `edit_failed` stays silent.
 	assert!(hook.failures.is_empty());
 }
@@ -501,12 +517,18 @@ fn proposed_at_commit_decides_without_applying() {
 		GatedOutcome::Proposed { proposal } => {
 			assert_eq!(proposal.tool, "timeline.split_clip");
 			assert_eq!(proposal.reason.as_deref(), Some("show me first"));
-			assert_eq!(proposal.args, json!({"clip": clip, "time": {"num": 4, "den": 1}}));
+			assert_eq!(
+				proposal.args,
+				json!({"clip": clip, "time": {"num": 4, "den": 1}})
+			);
 		}
 		other => panic!("expected a proposal, got {other:?}"),
 	}
 	assert_eq!(hook.gate.len(), 1);
-	assert!(hook.gate[0].has_result, "the proposal comes after the preview");
+	assert!(
+		hook.gate[0].has_result,
+		"the proposal comes after the preview"
+	);
 	assert_eq!(backend.serialize(), state);
 	assert_eq!(backend.undo_depth(), depth);
 }
@@ -589,15 +611,19 @@ fn the_grading_table_is_bidirectionally_equal_to_the_frozen_schema_face() {
 	// `transactional` flag rather than a second hand-maintained list.
 	let mut seen: Vec<OperationClass> = Vec::new();
 	for def in dispatch::registry() {
-		let class = hooks::class_of(def.name)
-			.unwrap_or_else(|| panic!("{} is not graded", def.name));
+		let class =
+			hooks::class_of(def.name).unwrap_or_else(|| panic!("{} is not graded", def.name));
 		if !seen.contains(&class) {
 			seen.push(class);
 		}
 		let point = class.gate_point(def.transactional);
 		if def.name == "edit.undo" {
 			assert!(!def.transactional);
-			assert_eq!(point, GatePoint::BeforeInvoke, "edit.undo has no group to roll back");
+			assert_eq!(
+				point,
+				GatePoint::BeforeInvoke,
+				"edit.undo has no group to roll back"
+			);
 		}
 		if class == OperationClass::Edit && def.transactional {
 			assert_eq!(point, GatePoint::BeforeCommit, "{}", def.name);
@@ -854,8 +880,8 @@ fn the_read_only_echo_is_ignored_but_a_misspelled_writable_key_is_named() {
 	let mut backend = MockBackend::new();
 	EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "Echo" }))
 		.expect("open");
-	let settings = EngineExt::sequence_get_settings(&backend, serde_json::json!({}))
-		.expect("settings");
+	let settings =
+		EngineExt::sequence_get_settings(&backend, serde_json::json!({})).expect("settings");
 	let mut write_back = settings.clone();
 	if let Some(obj) = write_back.as_object_mut() {
 		obj.insert("fps".to_string(), serde_json::json!(24));
@@ -911,7 +937,7 @@ fn v2_gate_accepts_the_tolerated_spellings() {
 	] {
 		let mut backend = MockBackend::new();
 		EngineBackend::project_open(&mut backend, &serde_json::json!({ "name": "Gate" }))
-		.expect("open");
+			.expect("open");
 		let outcome = execute_v2_with(
 			&mut backend,
 			"sequence.set_format",

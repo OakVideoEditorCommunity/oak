@@ -1,3 +1,5 @@
+use std::ffi;
+use std::future;
 use std::{path::PathBuf, rc::Rc};
 
 use gpui::{
@@ -25,7 +27,7 @@ pub(crate) fn select_backend(
     environment: &GraphicalEnvironment,
 ) -> Option<Backend> {
     let is_set =
-        |value: &Option<std::ffi::OsString>| value.as_ref().is_some_and(|value| !value.is_empty());
+        |value: &Option<ffi::OsString>| value.as_ref().is_some_and(|value| !value.is_empty());
     #[cfg(feature = "wayland")]
     if modes.contains(WindowingModes::WAYLAND) && is_set(&environment.wayland_display) {
         return Some(Backend::Wayland);
@@ -197,7 +199,7 @@ impl DisplayConnection {
         dispatch!(
             self,
             connection => Box::pin(connection.window_identifier()),
-            headless => Box::pin(std::future::ready(None))
+            headless => Box::pin(future::ready(None))
         )
     }
 

@@ -197,10 +197,9 @@ fn run_fixture(fixture: &str) -> (String, Vec<FrameLog>, usize) {
 					let height = frame["height"].as_u64().expect("height") as u32;
 					assert!(width > 0 && height > 0, "zero-sized frame: {frame}");
 					let decoded = oak_ai_tools::render::Frame::from_png(
-						&base64::engine::general_purpose::STANDARD.decode(
-							frame["png_base64"].as_str().expect("png payload"),
-						)
-						.expect("base64"),
+						&base64::engine::general_purpose::STANDARD
+							.decode(frame["png_base64"].as_str().expect("png payload"))
+							.expect("base64"),
 					)
 					.expect("PNG decodes");
 					let stats = decoded.stats();

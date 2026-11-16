@@ -1,3 +1,4 @@
+use std::ffi;
 #[cfg(any(test, feature = "test-support"))]
 use crate::NoopTextSystem;
 #[cfg(any(test, feature = "test-support"))]
@@ -47,7 +48,7 @@ pub(crate) struct TestPlatform {
     pub(crate) system_notifications: RefCell<TestSystemNotifications>,
     pub text_system: Arc<dyn PlatformTextSystem>,
     pub expect_restart:
-        RefCell<Option<oneshot::Sender<(Option<PathBuf>, Vec<std::ffi::OsString>)>>>,
+        RefCell<Option<oneshot::Sender<(Option<PathBuf>, Vec<ffi::OsString>)>>>,
     idle_sleep_prevention_count: Arc<AtomicUsize>,
     idle_sleep_prevention_delay: Cell<Duration>,
     idle_sleep_prevention_fails: Cell<bool>,
@@ -488,7 +489,7 @@ impl Platform for TestPlatform {
 
     fn quit(&self) {}
 
-    fn restart(&self, path: Option<PathBuf>, arguments: Vec<std::ffi::OsString>) {
+    fn restart(&self, path: Option<PathBuf>, arguments: Vec<ffi::OsString>) {
         if let Some(tx) = self.expect_restart.take() {
             tx.send((path, arguments)).unwrap();
         }

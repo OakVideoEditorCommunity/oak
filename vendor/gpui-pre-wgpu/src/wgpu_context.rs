@@ -1,3 +1,24 @@
+use std::env;
+use wgpu::Backend;
+use wgpu::BackendOptions;
+use wgpu::Backends;
+use wgpu::DeviceLostReason;
+use wgpu::DeviceType;
+use wgpu::ErrorFilter;
+use wgpu::ExperimentalFeatures;
+use wgpu::Features;
+use wgpu::Instance;
+use wgpu::InstanceFlags;
+use wgpu::Limits;
+use wgpu::MemoryBudgetThresholds;
+use wgpu::MemoryHints;
+use wgpu::PowerPreference;
+use wgpu::PresentMode;
+use wgpu::SurfaceTarget;
+use wgpu::TextureUsages;
+use wgpu::Trace;
+use wgpu::util;
+use wgpu::wgt;
 #[cfg(not(target_family = "wasm"))]
 use anyhow::Context as _;
 #[cfg(not(target_family = "wasm"))]
@@ -38,7 +59,7 @@ impl DeviceErrorState {
             let errors = Arc::clone(&errors);
             move |reason, message| {
                 log::error!("wgpu device lost: reason={reason:?}, message={message}");
-                if reason != wgpu::DeviceLostReason::Destroyed {
+                if reason != DeviceLostReason::Destroyed {
                     errors.lost.store(true, Ordering::Relaxed);
                 }
             }
@@ -206,7 +227,7 @@ impl WgpuContext {
         let device_id_filter = Self::device_id_filter();
         let (adapter, device, queue, dual_source_blending, color_texture_format, target_format) =
             gpui::block_on(async {
-                let mut adapters = instance.enumerate_adapters(wgpu::Backends::all()).await;
+                let mut adapters = instance.enumerate_adapters(Backends::all()).await;
                 Self::sort_adapters(&mut adapters, device_id_filter, None);
 
                 for adapter in adapters {
@@ -222,7 +243,7 @@ impl WgpuContext {
                     match Self::create_device(&adapter).await {
                         Ok((device, queue, dual_source_blending, color_texture_format)) => {
                             #[cfg(feature = "bench-support")]
-                            if adapter_info.device_type == wgpu::DeviceType::Cpu {
+                            if adapter_info.device_type == DeviceType::Cpu {
                                 log::error!(
                                     "Headless renderer selected software adapter {:?}; \
                                      benchmark results measure CPU software rendering, not hardware GPU rendering",
@@ -272,10 +293,10 @@ impl WgpuContext {
     /// here without updating it.
     fn headless_target_format(adapter: &wgpu::Adapter) -> Option<wgpu::TextureFormat> {
         let required_usages =
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+            TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC;
         [
-            wgpu::TextureFormat::Rgba8Unorm,
-            wgpu::TextureFormat::Bgra8Unorm,
+            TextureFormat::Rgba8Unorm,
+            TextureFormat::Bgra8Unorm,
         ]
         .into_iter()
         .find(|format| {
@@ -318,11 +339,11 @@ impl WgpuContext {
 
     #[cfg(not(target_family = "wasm"))]
     fn device_id_filter() -> Option<u32> {
-        match std::env::var("ZED_DEVICE_ID") {
+        match env::var("ZED_DEVICE_ID") {
             Ok(value) => parse_pci_id(&value)
                 .context("Failed to parse device ID from `ZED_DEVICE_ID` environment variable")
                 .log_err(),
-            Err(std::env::VarError::NotPresent) => None,
+            Err(env::VarError::NotPresent) => None,
             error => {
                 error
                     .context("Failed to read value of `ZED_DEVICE_ID` environment variable")
@@ -347,31 +368,31 @@ impl WgpuContext {
         preference: WebBackendPreference,
     ) -> anyhow::Result<PreparedWebGraphics> {
         let backends = match preference {
-            WebBackendPreference::Auto => wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
-            WebBackendPreference::WebGpu => wgpu::Backends::BROWSER_WEBGPU,
-            WebBackendPreference::WebGl => wgpu::Backends::GL,
+            WebBackendPreference::Auto => Backends::BROWSER_WEBGPU | Backends::GL,
+            WebBackendPreference::WebGpu => Backends::BROWSER_WEBGPU,
+            WebBackendPreference::WebGl => Backends::GL,
         };
         let descriptor = wgpu::InstanceDescriptor {
             backends,
-            flags: wgpu::InstanceFlags::default(),
-            backend_options: wgpu::BackendOptions::default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            flags: InstanceFlags::default(),
+            backend_options: BackendOptions::default(),
+            memory_budget_thresholds: MemoryBudgetThresholds::default(),
             display: Some(Box::new(WebDisplaySource)),
         };
         let instance = if preference == WebBackendPreference::Auto {
-            wgpu::util::new_instance_with_webgpu_detection(descriptor).await
+            util::new_instance_with_webgpu_detection(descriptor).await
         } else {
-            wgpu::Instance::new(descriptor)
+            Instance::new(descriptor)
         };
         let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+            .create_surface(SurfaceTarget::Canvas(canvas.clone()))
             .map_err(|error| {
                 anyhow::anyhow!("Failed to create browser graphics surface: {error}")
             })?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
+                power_preference: PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
@@ -383,8 +404,8 @@ impl WgpuContext {
             })?;
         let adapter_info = adapter.get_info();
         let backend = match adapter_info.backend {
-            wgpu::Backend::BrowserWebGpu => WgpuBackend::BrowserWebGpu,
-            wgpu::Backend::Gl => WgpuBackend::Gl,
+            Backend::BrowserWebGpu => WgpuBackend::BrowserWebGpu,
+            Backend::Gl => WgpuBackend::Gl,
             backend => {
                 anyhow::bail!(
                     "Browser graphics initialization selected unexpected backend {backend:?}"
@@ -420,11 +441,11 @@ impl WgpuContext {
     ) -> anyhow::Result<(wgpu::Device, wgpu::Queue, bool, TextureFormat)> {
         let dual_source_blending = adapter
             .features()
-            .contains(wgpu::Features::DUAL_SOURCE_BLENDING);
+            .contains(Features::DUAL_SOURCE_BLENDING);
 
-        let mut required_features = wgpu::Features::empty();
+        let mut required_features = Features::empty();
         if dual_source_blending {
-            required_features |= wgpu::Features::DUAL_SOURCE_BLENDING;
+            required_features |= Features::DUAL_SOURCE_BLENDING;
         } else {
             log::warn!(
                 "Dual-source blending not available on this GPU. \
@@ -438,30 +459,30 @@ impl WgpuContext {
         // invalid at submit time.
         if adapter
             .features()
-            .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
+            .contains(Features::TEXTURE_FORMAT_16BIT_NORM)
         {
-            required_features |= wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+            required_features |= Features::TEXTURE_FORMAT_16BIT_NORM;
         }
         if adapter
             .features()
-            .contains(wgpu::Features::FLOAT32_FILTERABLE)
+            .contains(Features::FLOAT32_FILTERABLE)
         {
-            required_features |= wgpu::Features::FLOAT32_FILTERABLE;
+            required_features |= Features::FLOAT32_FILTERABLE;
         }
 
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
         #[cfg(target_family = "wasm")]
-        let required_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-            wgpu::Limits::downlevel_webgl2_defaults()
+        let required_limits = if adapter.get_info().backend == Backend::Gl {
+            Limits::downlevel_webgl2_defaults()
                 .using_resolution(adapter.limits())
                 .using_alignment(adapter.limits())
         } else {
-            wgpu::Limits::downlevel_defaults()
+            Limits::downlevel_defaults()
                 .using_resolution(adapter.limits())
                 .using_alignment(adapter.limits())
         };
         #[cfg(not(target_family = "wasm"))]
-        let required_limits = wgpu::Limits::downlevel_defaults()
+        let required_limits = Limits::downlevel_defaults()
             .using_resolution(adapter.limits())
             .using_alignment(adapter.limits());
 
@@ -470,9 +491,9 @@ impl WgpuContext {
                 label: Some("gpui_device"),
                 required_features,
                 required_limits,
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: MemoryHints::MemoryUsage,
+                trace: Trace::Off,
+                experimental_features: ExperimentalFeatures::disabled(),
             })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create wgpu device: {e}"))?;
@@ -486,12 +507,12 @@ impl WgpuContext {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    pub fn instance(display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
-        wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
-            flags: wgpu::InstanceFlags::default(),
-            backend_options: wgpu::BackendOptions::default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+    pub fn instance(display: Option<Box<dyn wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
+        Instance::new(wgpu::InstanceDescriptor {
+            backends: Backends::VULKAN | Backends::GL,
+            flags: InstanceFlags::default(),
+            backend_options: BackendOptions::default(),
+            memory_budget_thresholds: MemoryBudgetThresholds::default(),
             display,
         })
     }
@@ -530,7 +551,7 @@ impl WgpuContext {
         bool,
         TextureFormat,
     )> {
-        let mut adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all()).await;
+        let mut adapters: Vec<_> = instance.enumerate_adapters(Backends::all()).await;
 
         if adapters.is_empty() {
             anyhow::bail!("No GPU adapters found");
@@ -560,7 +581,7 @@ impl WgpuContext {
         for adapter in adapters {
             let info = adapter.get_info();
 
-            if reject_software && info.device_type == wgpu::DeviceType::Cpu {
+            if reject_software && info.device_type == DeviceType::Cpu {
                 log::info!(
                     "Skipping software renderer: {} ({:?})",
                     info.name,
@@ -633,14 +654,14 @@ impl WgpuContext {
                 _ => 1,
             };
             let type_priority: u8 = match info.device_type {
-                wgpu::DeviceType::DiscreteGpu => 0,
-                wgpu::DeviceType::IntegratedGpu => 1,
-                wgpu::DeviceType::Other => 2,
-                wgpu::DeviceType::VirtualGpu => 3,
-                wgpu::DeviceType::Cpu => 4,
+                DeviceType::DiscreteGpu => 0,
+                DeviceType::IntegratedGpu => 1,
+                DeviceType::Other => 2,
+                DeviceType::VirtualGpu => 3,
+                DeviceType::Cpu => 4,
             };
             let backend_priority: u8 = match info.backend {
-                wgpu::Backend::Vulkan | wgpu::Backend::Metal | wgpu::Backend::Dx12 => 0,
+                Backend::Vulkan | Backend::Metal | Backend::Dx12 => 0,
                 _ => 1,
             };
 
@@ -670,14 +691,14 @@ impl WgpuContext {
 
         let (device, queue, dual_source_blending, color_atlas_texture_format) =
             Self::create_device(adapter).await?;
-        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let error_scope = device.push_error_scope(ErrorFilter::Validation);
 
         let test_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::RENDER_ATTACHMENT,
             format: caps.formats[0],
             width: 64,
             height: 64,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
@@ -699,17 +720,17 @@ impl WgpuContext {
     }
 
     fn select_color_texture_format(adapter: &wgpu::Adapter) -> anyhow::Result<wgpu::TextureFormat> {
-        let required_usages = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
-        let bgra_features = adapter.get_texture_format_features(wgpu::TextureFormat::Bgra8Unorm);
-        let rgba_features = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba8Unorm);
+        let required_usages = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST;
+        let bgra_features = adapter.get_texture_format_features(TextureFormat::Bgra8Unorm);
+        let rgba_features = adapter.get_texture_format_features(TextureFormat::Rgba8Unorm);
         #[cfg(target_family = "wasm")]
-        if adapter.get_info().backend == wgpu::Backend::Gl
+        if adapter.get_info().backend == Backend::Gl
             && rgba_features.allowed_usages.contains(required_usages)
         {
-            return Ok(wgpu::TextureFormat::Rgba8Unorm);
+            return Ok(TextureFormat::Rgba8Unorm);
         }
         if bgra_features.allowed_usages.contains(required_usages) {
-            return Ok(wgpu::TextureFormat::Bgra8Unorm);
+            return Ok(TextureFormat::Bgra8Unorm);
         }
         if rgba_features.allowed_usages.contains(required_usages) {
             let info = adapter.get_info();
@@ -720,7 +741,7 @@ impl WgpuContext {
                 info.backend,
                 required_usages,
             );
-            return Ok(wgpu::TextureFormat::Rgba8Unorm);
+            return Ok(TextureFormat::Rgba8Unorm);
         }
 
         let info = adapter.get_info();

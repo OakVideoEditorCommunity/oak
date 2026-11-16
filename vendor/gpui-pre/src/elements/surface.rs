@@ -1,3 +1,5 @@
+use core::panic;
+use std::any;
 use crate::{
     App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
     ObjectFit, Pixels, Style, StyleRefinement, Styled, Window,
@@ -23,7 +25,7 @@ pub enum SurfaceSource {
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     Texture {
         /// The texture.
-        texture: Arc<dyn std::any::Any + Send + Sync>,
+        texture: Arc<dyn any::Any + Send + Sync>,
         /// Its dimensions in device pixels.
         size: Size<DevicePixels>,
     },
@@ -34,7 +36,7 @@ pub enum SurfaceSource {
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub struct TextureSource {
     /// The texture (type-erased `Arc<wgpu::Texture>`).
-    pub texture: Arc<dyn std::any::Any + Send + Sync>,
+    pub texture: Arc<dyn any::Any + Send + Sync>,
     /// Its dimensions in device pixels.
     pub size: Size<DevicePixels>,
 }
@@ -143,7 +145,7 @@ impl Element for Surface {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

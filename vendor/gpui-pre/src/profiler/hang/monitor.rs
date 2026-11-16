@@ -1,3 +1,5 @@
+use std::io;
+use std::thread;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
@@ -28,7 +30,7 @@ pub enum HangMonitorError {
     AlreadyStarted,
     /// The monitor thread couldn't be spawned.
     #[error("failed to spawn the hang monitor thread: {0}")]
-    Spawn(#[source] std::io::Error),
+    Spawn(#[source] io::Error),
 }
 
 /// Why a [`HangMonitor`] polled its detector.
@@ -79,12 +81,12 @@ impl HangMonitor {
         mut detector: HangDetector,
         interval: Duration,
         mut on_poll: F,
-    ) -> std::io::Result<Self>
+    ) -> io::Result<Self>
     where
         F: FnMut(HangMonitorPoll) + Send + 'static,
     {
         let (requests, receiver) = mpsc::channel();
-        std::thread::Builder::new()
+        thread::Builder::new()
             .name("HangDetection".to_string())
             .spawn(move || {
                 loop {

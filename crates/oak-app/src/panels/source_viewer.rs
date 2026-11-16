@@ -17,16 +17,12 @@
 //! The source viewer panel (素材查看器): the `ViewerWidget` over the source
 //! monitor's clock, with its own transport and format chips.
 
+use crate::panels::PanelFocused;
+use crate::widgets::viewer::{SafeMargins, ViewerEvent, ViewerWidget, ViewerZoom, WaveformMode};
 use gpui_kit::colors::DefaultColors;
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
+use gpui_kit::{App, Context, Entity, EventEmitter, MouseButton, Render, Window, div, prelude::*};
 use gpui_kit::{FocusHandle, Focusable};
-use crate::panels::PanelFocused;
-use gpui_kit::{
-	div, prelude::*, App, Context, Entity, EventEmitter, MouseButton, Render, Window,
-};
-use crate::widgets::viewer::{
-	SafeMargins, ViewerEvent, ViewerWidget, ViewerZoom, WaveformMode,
-};
 
 use crate::actions::ActionId;
 use crate::oakui::component::menu;
@@ -55,9 +51,8 @@ pub struct SourceViewerPanel<E: AppEngine> {
 
 impl<E: AppEngine> SourceViewerPanel<E> {
 	pub(crate) fn set_video_fullscreen(&mut self, fullscreen: bool, cx: &mut Context<Self>) {
-		self.viewer.update(cx, |viewer, cx| {
-			viewer.set_video_fullscreen(fullscreen, cx)
-		});
+		self.viewer
+			.update(cx, |viewer, cx| viewer.set_video_fullscreen(fullscreen, cx));
 	}
 
 	/// Builds a viewer over `clock` (the source monitor's clock).
@@ -81,31 +76,40 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 		let viewer = cx.new(|cx| ViewerWidget::new(2, clock.clone(), window, cx));
 		// Route every transport request to the engine's source monitor, and
 		// re-emit the loop-range / overlay requests for the app shell.
-		cx.subscribe(&viewer, |this, _viewer, event: &ViewerEvent, cx| match event {
-			// The source monitor hosts no OFX interact: the picture's
-			// pointer/key events are not forwarded here (the program
-			// viewer's panel forwards them when an interact is live).
-			ViewerEvent::InteractPointer { .. } | ViewerEvent::InteractKey { .. } => {}
-			// The widget already toggled its own overlay state.
-			ViewerEvent::ToggleSafeFramesRequested { .. } | ViewerEvent::ToggleZoomRequested { .. } => {}
-			// Both monitors share the shell-owned program workarea.
-			ViewerEvent::InPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetInPoint),
-			ViewerEvent::OutPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetOutPoint),
-			ViewerEvent::ClearRangeRequested { .. } => cx.emit(menu::ViewerPanelEvent::ClearRange),
-			event => {
-				let monitor = Monitor::Source;
-				this.engine.update(cx, |engine, cx| match event {
-					ViewerEvent::PlayRequested { .. } => engine.play(monitor, cx),
-					ViewerEvent::PauseRequested { .. } => engine.pause(monitor, cx),
-					ViewerEvent::StepRequested { delta, .. } => engine.step(monitor, *delta, cx),
-					other => println!("[source viewer] request: {other:?}"),
-				});
-			}
-		})
+		cx.subscribe(
+			&viewer,
+			|this, _viewer, event: &ViewerEvent, cx| match event {
+				// The source monitor hosts no OFX interact: the picture's
+				// pointer/key events are not forwarded here (the program
+				// viewer's panel forwards them when an interact is live).
+				ViewerEvent::InteractPointer { .. } | ViewerEvent::InteractKey { .. } => {}
+				// The widget already toggled its own overlay state.
+				ViewerEvent::ToggleSafeFramesRequested { .. }
+				| ViewerEvent::ToggleZoomRequested { .. } => {}
+				// Both monitors share the shell-owned program workarea.
+				ViewerEvent::InPointRequested { .. } => cx.emit(menu::ViewerPanelEvent::SetInPoint),
+				ViewerEvent::OutPointRequested { .. } => {
+					cx.emit(menu::ViewerPanelEvent::SetOutPoint)
+				}
+				ViewerEvent::ClearRangeRequested { .. } => {
+					cx.emit(menu::ViewerPanelEvent::ClearRange)
+				}
+				event => {
+					let monitor = Monitor::Source;
+					this.engine.update(cx, |engine, cx| match event {
+						ViewerEvent::PlayRequested { .. } => engine.play(monitor, cx),
+						ViewerEvent::PauseRequested { .. } => engine.pause(monitor, cx),
+						ViewerEvent::StepRequested { delta, .. } => {
+							engine.step(monitor, *delta, cx)
+						}
+						other => println!("[source viewer] request: {other:?}"),
+					});
+				}
+			},
+		)
 		.detach();
 
-		let context_menu =
-			ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
+		let context_menu = ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
 
 		Self {
 			focus_handle: cx.focus_handle(),
@@ -141,11 +145,13 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 		match action {
 			menu::ViewerMenuAction::ZoomFit => {
 				let zoom = ViewerZoom::Fit;
-				self.viewer.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
 			}
 			menu::ViewerMenuAction::ZoomLevel(index) => {
 				let zoom = ViewerZoom::Level(index);
-				self.viewer.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_zoom(zoom, cx));
 			}
 			menu::ViewerMenuAction::Resolution(divider) => self
 				.engine
@@ -175,7 +181,8 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 			}),
 			menu::ViewerMenuAction::ShowFps => {
 				let show = self.viewer.read(cx).show_fps();
-				self.viewer.update(cx, |viewer, cx| viewer.set_show_fps(!show, cx));
+				self.viewer
+					.update(cx, |viewer, cx| viewer.set_show_fps(!show, cx));
 			}
 			menu::ViewerMenuAction::SaveFrame => self.save_frame(cx),
 			menu::ViewerMenuAction::FullScreen => {
@@ -201,7 +208,11 @@ impl<E: AppEngine> SourceViewerPanel<E> {
 			.filter(|dir| std::fs::create_dir_all(dir).is_ok())
 			.unwrap_or_else(|| std::path::PathBuf::from("."));
 		let path = dir.join(name);
-		match self.engine.read(cx).save_frame(Monitor::Source, path.clone(), cx) {
+		match self
+			.engine
+			.read(cx)
+			.save_frame(Monitor::Source, path.clone(), cx)
+		{
 			Ok(path) => println!("[source viewer] saved frame to {}", path.display()),
 			Err(error) => println!("[source viewer] save frame failed: {error}"),
 		}
@@ -372,7 +383,10 @@ impl<E: AppEngine> BasePanel for SourceViewerPanel<E> {
 
 impl<E: AppEngine> Panel for SourceViewerPanel<E> {
 	fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-		viewer_title("panel.source_viewer", &self.engine.read(cx).source_media_name())
+		viewer_title(
+			"panel.source_viewer",
+			&self.engine.read(cx).source_media_name(),
+		)
 	}
 }
 
@@ -380,8 +394,8 @@ impl<E: AppEngine> Panel for SourceViewerPanel<E> {
 mod tests {
 	use super::*;
 	use crate::oakui::MockEngine;
-	use gpui_kit::{Modifiers, px, size, TestAppContext, VisualTestContext};
 	use crate::widgets::viewer::PlaybackClock as _;
+	use gpui_kit::{Modifiers, TestAppContext, VisualTestContext, px, size};
 
 	/// Builds the panel in a window and returns a `VisualTestContext`.
 	fn panel_window(
@@ -435,10 +449,7 @@ mod tests {
 				let _ = panel.engine.read(cx).stop_on_last();
 
 				let _ = panel.engine.read(cx).waveform_mode();
-				panel.apply_viewer_action(
-					menu::ViewerMenuAction::Waveform(WaveformMode::Both),
-					cx,
-				);
+				panel.apply_viewer_action(menu::ViewerMenuAction::Waveform(WaveformMode::Both), cx);
 				let _ = panel.engine.read(cx).waveform_mode();
 
 				let show_fps = panel.viewer.read(cx).show_fps();
@@ -498,8 +509,7 @@ mod tests {
 		cx.update(|window, cx| {
 			window.draw(cx).clear(cx);
 		});
-		cx.update(|_window, _app| {
-		});
+		cx.update(|_window, _app| {});
 
 		// A right-click anywhere in the panel opens the viewer menu.
 		cx.simulate_mouse_down(

@@ -27,7 +27,9 @@
 //! The transport sits behind [`UpdateTransport`] so tests can script
 //! responses without touching the network.
 
+use crate::oakui;
 use std::time::Duration;
+use ureq::Agent;
 
 use serde::Deserialize;
 
@@ -117,14 +119,15 @@ pub fn is_newer(remote: &str, current: &str) -> bool {
 	match (parse_version(remote), parse_version(current)) {
 		(Some(remote), Some(current)) => remote > current,
 		_ => {
-			remote.trim().trim_start_matches(['v', 'V']) != current.trim().trim_start_matches(['v', 'V'])
+			remote.trim().trim_start_matches(['v', 'V'])
+				!= current.trim().trim_start_matches(['v', 'V'])
 		}
 	}
 }
 
 /// Whether the preferences allow the startup check (default on).
 pub fn check_enabled() -> bool {
-	crate::oakui::real::config_get_bool(CONFIG_KEY_CHECK_UPDATES, true)
+	oakui::real::config_get_bool(CONFIG_KEY_CHECK_UPDATES, true)
 }
 
 /// Persists the preferences toggle.
@@ -134,7 +137,7 @@ pub fn check_enabled() -> bool {
 /// saves its configuration (on exit). Counterpart of [`check_enabled`], which
 /// defaults to `true` when the key is absent.
 pub fn set_check_enabled(enabled: bool) {
-	crate::oakui::real::config_set_bool(CONFIG_KEY_CHECK_UPDATES, enabled);
+	oakui::real::config_set_bool(CONFIG_KEY_CHECK_UPDATES, enabled);
 }
 
 /// Whether a fetched release is worth prompting about (newer than the
@@ -157,7 +160,7 @@ pub struct HttpTransport;
 
 impl UpdateTransport for HttpTransport {
 	fn get(&self, url: &str) -> Result<String, String> {
-		let config = ureq::Agent::config_builder()
+		let config = Agent::config_builder()
 			.timeout_global(Some(Duration::from_secs(5)))
 			.build();
 		let agent: ureq::Agent = config.into();
@@ -206,7 +209,10 @@ mod tests {
 		assert_eq!(release.notes, "更新说明（Markdown）");
 		assert!(!release.is_prerelease);
 		assert_eq!(release.published_at, "2026-09-20T08:00:00+00:00");
-		assert_eq!(release.download_url, "/api/v1/releases/7/download?asset_id=12");
+		assert_eq!(
+			release.download_url,
+			"/api/v1/releases/7/download?asset_id=12"
+		);
 	}
 
 	/// Optional fields default; a response without a version is rejected.
@@ -217,7 +223,10 @@ mod tests {
 		assert!(!minimal.is_prerelease);
 
 		assert!(parse_latest("{}").is_err(), "no version");
-		assert!(parse_latest(r#"{"version":"  "}"#).is_err(), "blank version");
+		assert!(
+			parse_latest(r#"{"version":"  "}"#).is_err(),
+			"blank version"
+		);
 		assert!(parse_latest("not json").is_err());
 	}
 
@@ -235,8 +244,14 @@ mod tests {
 		assert!(is_newer("v0.5.1", "0.5.0"));
 		assert!(!is_newer("v0.5.0", "0.5.0"));
 		assert!(!is_newer("v0.4.9", "0.5.0"));
-		assert!(is_newer("2026.1", "0.5.0"), "unparsable remote falls back to inequality");
-		assert!(!is_newer("v0.5.0", "0.5.0-rc.1"), "pre-release current compares by core");
+		assert!(
+			is_newer("2026.1", "0.5.0"),
+			"unparsable remote falls back to inequality"
+		);
+		assert!(
+			!is_newer("v0.5.0", "0.5.0-rc.1"),
+			"pre-release current compares by core"
+		);
 	}
 
 	/// The check is on by default and follows the preferences toggle.

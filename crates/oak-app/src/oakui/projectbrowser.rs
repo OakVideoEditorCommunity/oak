@@ -23,7 +23,10 @@
 //! nodes' stable identities, so selection round-trips through
 //! [`find_by_identity`].
 
+use super::real;
 use crate::widgets::project_explorer::ProjectEntry;
+use quercus_engine_rs::editor;
+use quercus_engine_rs::node;
 
 use crate::oakui::graphops::ProjectRef;
 
@@ -33,11 +36,11 @@ use crate::oakui::graphops::ProjectRef;
 /// is `snapshot.name`, and it is marked as a folder only when
 /// `snapshot.kind` is [`quercus_engine_rs::node::NodeKind::Folder`]; a node
 /// with no kind therefore renders as a leaf.
-fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEntry {
+fn child_entry(snapshot: &editor::EntrySnapshot) -> ProjectEntry {
 	ProjectEntry::new(
 		snapshot.id.raw(),
 		snapshot.name.clone(),
-		snapshot.kind == Some(quercus_engine_rs::node::NodeKind::Folder),
+		snapshot.kind == Some(node::NodeKind::Folder),
 	)
 }
 
@@ -46,18 +49,14 @@ fn child_entry(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> ProjectEn
 /// `snapshot` must be a folder from the project graph; its `children` are the
 /// entries directly beneath it, in graph order. The folder's own identity and
 /// name are not included in the result.
-fn folder_children(snapshot: &quercus_engine_rs::editor::EntrySnapshot) -> Vec<ProjectEntry> {
-	snapshot
-		.children
-		.iter()
-		.map(child_entry)
-		.collect()
+fn folder_children(snapshot: &editor::EntrySnapshot) -> Vec<ProjectEntry> {
+	snapshot.children.iter().map(child_entry).collect()
 }
 
 fn find_snapshot<'a>(
-	entry: &'a quercus_engine_rs::editor::EntrySnapshot,
+	entry: &'a editor::EntrySnapshot,
 	identity: u64,
-) -> Option<&'a quercus_engine_rs::editor::EntrySnapshot> {
+) -> Option<&'a editor::EntrySnapshot> {
 	if entry.id.raw() == identity {
 		return Some(entry);
 	}
@@ -75,7 +74,7 @@ fn find_snapshot<'a>(
 /// editor session; when that fails (for example the project is not open) an
 /// empty vector is returned rather than an error.
 pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
-	let Ok(session) = super::real::editor_session_for_project(project) else {
+	let Ok(session) = real::editor_session_for_project(project) else {
 		return Vec::new();
 	};
 	folder_children(&session.snapshot().root)
@@ -84,22 +83,19 @@ pub fn roots(project: &ProjectRef) -> Vec<ProjectEntry> {
 /// The children of the folder whose identity is `parent_id` (empty when
 /// not found or not a folder).
 pub fn children(project: &ProjectRef, parent_id: u64) -> Vec<ProjectEntry> {
-	let Ok(session) = super::real::editor_session_for_project(project) else {
+	let Ok(session) = real::editor_session_for_project(project) else {
 		return Vec::new();
 	};
 	let snapshot = session.snapshot();
 	find_snapshot(&snapshot.root, parent_id)
-		.filter(|entry| entry.kind == Some(quercus_engine_rs::node::NodeKind::Folder))
+		.filter(|entry| entry.kind == Some(node::NodeKind::Folder))
 		.map(folder_children)
 		.unwrap_or_default()
 }
 
 /// The project node with `identity` (validated against the graph), or
 /// `None`.
-pub fn find_by_identity(
-	project: &ProjectRef,
-	identity: u64,
-) -> Option<quercus_engine_rs::node::NodeId> {
-	let session = super::real::editor_session_for_project(project).ok()?;
+pub fn find_by_identity(project: &ProjectRef, identity: u64) -> Option<node::NodeId> {
+	let session = real::editor_session_for_project(project).ok()?;
 	find_snapshot(&session.snapshot().root, identity).map(|entry| entry.id)
 }

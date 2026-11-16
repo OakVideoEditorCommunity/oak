@@ -1,3 +1,5 @@
+use crate::AvailableSpace;
+use crate::CursorStyle;
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
@@ -657,7 +659,7 @@ impl TextLayout {
             move |known_dimensions, available_space, window, cx| {
                 let wrap_width = if text_style.white_space == WhiteSpace::Normal {
                     known_dimensions.width.or(match available_space.width {
-                        crate::AvailableSpace::Definite(x) => Some(x),
+                        AvailableSpace::Definite(x) => Some(x),
                         _ => None,
                     })
                 } else {
@@ -667,7 +669,7 @@ impl TextLayout {
                 let (truncate_width, truncation_affix, truncate_from) =
                     if let Some(text_overflow) = text_style.text_overflow.clone() {
                         let width = known_dimensions.width.or(match available_space.width {
-                            crate::AvailableSpace::Definite(x) => match text_style.line_clamp {
+                            AvailableSpace::Definite(x) => match text_style.line_clamp {
                                 Some(max_lines) => Some(x * max_lines),
                                 None => Some(x),
                             },
@@ -1178,7 +1180,7 @@ impl Element for InteractiveText {
                             .iter()
                             .any(|range| range.contains(&ix))
                     {
-                        window.set_cursor_style(crate::CursorStyle::PointingHand, hitbox)
+                        window.set_cursor_style(CursorStyle::PointingHand, hitbox)
                     }
 
                     let text_layout = text_layout.clone();

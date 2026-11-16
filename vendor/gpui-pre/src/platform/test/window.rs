@@ -1,3 +1,7 @@
+use crate::Capslock;
+use crate::ExternalDragPayload;
+use crate::Modifiers;
+use std::mem;
 use crate::{
     AnyWindowHandle, Bounds, DevicePixels, DispatchEventResult, DisplayId, GpuSpecs, HeadlessAtlas,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformHeadlessRenderer, PlatformInput,
@@ -138,7 +142,7 @@ impl TestWindow {
     pub fn simulate_scheduled_frame(&self) -> bool {
         let callback = {
             let mut state = self.0.lock();
-            if !std::mem::take(&mut state.frame_scheduled) {
+            if !mem::take(&mut state.frame_scheduled) {
                 return false;
             }
             state.frame_callback_pending = false;
@@ -371,11 +375,11 @@ impl PlatformWindow for TestWindow {
     }
 
     fn modifiers(&self) -> crate::Modifiers {
-        crate::Modifiers::default()
+        Modifiers::default()
     }
 
     fn capslock(&self) -> crate::Capslock {
-        crate::Capslock::default()
+        Capslock::default()
     }
 
     fn set_input_handler(&mut self, input_handler: PlatformInputHandler) {
@@ -596,7 +600,7 @@ impl PlatformWindow for TestWindow {
     fn start_external_drag(&self, payload: &crate::ExternalDragPayload) -> bool {
         let mut state = self.0.lock();
         match payload {
-            crate::ExternalDragPayload::Files(paths) => {
+            ExternalDragPayload::Files(paths) => {
                 state.external_drag_files.extend_from_slice(paths.entries());
             }
         }

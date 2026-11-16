@@ -1,3 +1,4 @@
+use crate::seal;
 use crate::{App, EntityId, SharedString, SharedUri, Task};
 use collections::FxHashSet;
 use futures::{Future, TryFutureExt};
@@ -113,7 +114,7 @@ pub trait Asset: 'static {
 /// An asset Loader which logs the [`Err`] variant of a [`Result`] during loading
 pub enum AssetLogger<T> {
     #[doc(hidden)]
-    _Phantom(PhantomData<T>, &'static dyn crate::seal::Sealed),
+    _Phantom(PhantomData<T>, &'static dyn seal::Sealed),
 }
 
 impl<T, R, E> Asset for AssetLogger<T>

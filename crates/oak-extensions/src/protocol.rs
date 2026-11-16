@@ -4,8 +4,10 @@
 //! §1 (framing), §2 (envelope), §3 (error codes), §4.1 (handshake).
 //! This module is the type layer only: no process handling, no I/O policy.
 
+use serde::de;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::error;
 use std::fmt;
 use std::io::Read;
 
@@ -90,25 +92,25 @@ impl Serialize for MsgId {
 impl<'de> Deserialize<'de> for MsgId {
 	fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
 		struct IdVisitor;
-		impl<'de> serde::de::Visitor<'de> for IdVisitor {
+		impl<'de> de::Visitor<'de> for IdVisitor {
 			type Value = MsgId;
 			fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
 				f.write_str("a string or integer id")
 			}
-			fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<MsgId, E> {
+			fn visit_i64<E: de::Error>(self, v: i64) -> Result<MsgId, E> {
 				Ok(MsgId::Number(v))
 			}
-			fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<MsgId, E> {
+			fn visit_u64<E: de::Error>(self, v: u64) -> Result<MsgId, E> {
 				Ok(MsgId::Number(v as i64))
 			}
-			fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<MsgId, E> {
+			fn visit_f64<E: de::Error>(self, v: f64) -> Result<MsgId, E> {
 				if v.fract() == 0.0 && v.abs() < i64::MAX as f64 {
 					Ok(MsgId::Number(v as i64))
 				} else {
 					Err(E::custom("id must be an integer"))
 				}
 			}
-			fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<MsgId, E> {
+			fn visit_str<E: de::Error>(self, v: &str) -> Result<MsgId, E> {
 				Ok(MsgId::String(v.to_string()))
 			}
 		}
@@ -296,7 +298,7 @@ impl fmt::Display for FrameError {
 	}
 }
 
-impl std::error::Error for FrameError {}
+impl error::Error for FrameError {}
 
 /// Serialize `msg` as one NDJSON line (including the trailing `\n`).
 pub fn encode_line<M: Serialize>(msg: &M) -> Result<Vec<u8>, FrameError> {
@@ -340,7 +342,7 @@ pub fn decode_line(line: &[u8]) -> Result<Message, FrameError> {
 	let has_method = obj.contains_key("method");
 	let has_result = obj.contains_key("result");
 	let has_error = obj.contains_key("error");
-	fn to_msg<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, FrameError> {
+	fn to_msg<T: de::DeserializeOwned>(v: Value) -> Result<T, FrameError> {
 		serde_json::from_value(v).map_err(|_| FrameError::InvalidRequest)
 	}
 	match (has_id, has_method, has_result, has_error) {
@@ -379,10 +381,7 @@ impl<R: Read> FramedReader<R> {
 	pub fn read_message(&mut self) -> Result<Option<Message>, FrameError> {
 		let mut chunk = [0u8; 8192];
 		loop {
-			if let Some(rel) = self.buf[self.scanned..]
-				.iter()
-				.position(|&b| b == b'\n')
-			{
+			if let Some(rel) = self.buf[self.scanned..].iter().position(|&b| b == b'\n') {
 				let i = self.scanned + rel;
 				let line: Vec<u8> = self.buf.drain(..=i).collect();
 				self.scanned = 0;
@@ -451,7 +450,11 @@ pub struct HelloResult {
 
 /// Heartbeat request (§4.2): `{"id":"ping-317","method":"session.ping"}`.
 pub fn ping_request(seq: u64) -> Request {
-	Request::new(MsgId::String(format!("ping-{seq}")), "session.ping", Value::Null)
+	Request::new(
+		MsgId::String(format!("ping-{seq}")),
+		"session.ping",
+		Value::Null,
+	)
 }
 
 /// Shutdown notification (§4.4).
@@ -642,14 +645,13 @@ mod tests {
 	#[test]
 	fn reader_handles_batched_lines_and_eof() {
 		let mut input = Vec::new();
-		input.extend_from_slice(
-			&encode_line(&Request::new(1u64, "a", json!({}))).unwrap(),
-		);
-		input.extend_from_slice(
-			&encode_line(&Notification::new("b", json!({"x": 1}))).unwrap(),
-		);
+		input.extend_from_slice(&encode_line(&Request::new(1u64, "a", json!({}))).unwrap());
+		input.extend_from_slice(&encode_line(&Notification::new("b", json!({"x": 1}))).unwrap());
 		let mut reader = FramedReader::new(Cursor::new(input));
-		assert!(matches!(reader.read_message(), Ok(Some(Message::Request(_)))));
+		assert!(matches!(
+			reader.read_message(),
+			Ok(Some(Message::Request(_)))
+		));
 		assert!(matches!(
 			reader.read_message(),
 			Ok(Some(Message::Notification(_)))

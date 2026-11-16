@@ -1,3 +1,6 @@
+use std::collections;
+use std::io;
+use std::panic;
 use std::{
     fs,
     hash::{Hash, Hasher},
@@ -52,7 +55,7 @@ impl Svg {
     /// The SVG will be rendered directly from the provided bytes.
     pub fn data(mut self, data: &[u8]) -> Self {
         // Generate a unique deterministic path based on the data hash for caching
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = collections::hash_map::DefaultHasher::new();
         data.hash(&mut hasher);
         let hash = hasher.finish();
         let path = SharedString::from(format!("__binary_svg__{}", hash));
@@ -77,7 +80,7 @@ impl Element for Svg {
         self.interactivity.element_id.clone()
     }
 
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         self.interactivity.source_location()
     }
 
@@ -288,7 +291,7 @@ enum SvgAsset {}
 
 impl Asset for SvgAsset {
     type Source = SharedString;
-    type Output = Result<Arc<[u8]>, Arc<std::io::Error>>;
+    type Output = Result<Arc<[u8]>, Arc<io::Error>>;
 
     fn load(
         source: Self::Source,

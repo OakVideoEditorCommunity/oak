@@ -22,6 +22,7 @@
 //! * [`FrameRange`] is half-open: `[start, end)`.
 
 use gpui_kit::{Pixels, px};
+use std::ops;
 
 /// A rational frame rate: `num / den` frames per second.
 ///
@@ -124,7 +125,7 @@ impl Frame {
 	}
 }
 
-impl std::ops::Add for Frame {
+impl ops::Add for Frame {
 	type Output = Frame;
 
 	fn add(self, rhs: Frame) -> Frame {
@@ -132,7 +133,7 @@ impl std::ops::Add for Frame {
 	}
 }
 
-impl std::ops::Sub for Frame {
+impl ops::Sub for Frame {
 	type Output = Frame;
 
 	fn sub(self, rhs: Frame) -> Frame {
@@ -140,7 +141,7 @@ impl std::ops::Sub for Frame {
 	}
 }
 
-impl std::ops::AddAssign for Frame {
+impl ops::AddAssign for Frame {
 	fn add_assign(&mut self, rhs: Frame) {
 		self.0 += rhs.0;
 	}

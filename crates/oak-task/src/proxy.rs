@@ -23,6 +23,13 @@
 //!
 //! CPP-PARITY: src/task/src/proxy/proxy.h
 
+use oak_core::configstore;
+use oak_core::miscutils;
+use std::collections;
+use std::fs;
+use std::path;
+use std::sync;
+use std::thread;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
@@ -199,10 +206,10 @@ impl ProxyTask {
 	/// 探测本机可用的硬件 H.264 编码器（每进程每 ffmpeg 路径缓存一次：
 	/// `ffmpeg -hide_banner -encoders` 的输出里按平台优先级找）。
 	pub fn probe_hw_encoder(ffmpeg_path: &str) -> HwEncoder {
-		static CACHE: std::sync::OnceLock<
-			std::sync::Mutex<std::collections::HashMap<String, HwEncoder>>,
-		> = std::sync::OnceLock::new();
-		let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+		static CACHE: sync::OnceLock<
+			sync::Mutex<collections::HashMap<String, HwEncoder>>,
+		> = sync::OnceLock::new();
+		let cache = CACHE.get_or_init(|| sync::Mutex::new(collections::HashMap::new()));
 		let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
 		if let Some(enc) = cache.get(ffmpeg_path) {
 			return *enc;
@@ -215,7 +222,7 @@ impl ProxyTask {
 	fn probe_hw_encoder_uncached(ffmpeg_path: &str) -> HwEncoder {
 		let mut command = Command::new(ffmpeg_path);
 		command.args(["-hide_banner", "-encoders"]);
-		oak_core::miscutils::hide_console_window(&mut command);
+		miscutils::hide_console_window(&mut command);
 		let out = command.output();
 		let Ok(out) = out else {
 			return HwEncoder::Software;
@@ -269,7 +276,7 @@ impl ProxyTask {
 			"null",
 			"-",
 		]);
-		oak_core::miscutils::hide_console_window(&mut command);
+		miscutils::hide_console_window(&mut command);
 		let out = command.output();
 		matches!(out, Ok(out) if out.status.success())
 	}
@@ -394,7 +401,7 @@ impl ProxyTask {
 
 	/// 配置的代理转码并发上限（[1, 16]）。
 	pub fn proxy_max_concurrent() -> i32 {
-		oak_core::configstore::ConfigStore::instance()
+		configstore::ConfigStore::instance()
 			.get_int(None, Self::CONFIG_KEY_PROXY_MAX_CONCURRENT, 1)
 			.clamp(1, 16)
 	}
@@ -403,7 +410,7 @@ impl ProxyTask {
 	/// 逻辑处理器数的一半——机器永远留一半以上给前台）。`concurrent`
 	/// 是当前的并发上限配置。
 	pub fn transcode_thread_budget(concurrent: i32) -> i32 {
-		let cores = std::thread::available_parallelism()
+		let cores = thread::available_parallelism()
 			.map(|n| n.get())
 			.unwrap_or(2) as i32;
 		let half = (cores / 2).max(1);
@@ -452,7 +459,7 @@ impl TaskBehavior for ProxyTask {
 		// unification: the old two-stage C ABI getter is gone; an empty
 		// string means "not found"). The `FFmpegPath` config takes
 		// precedence when set (C++ `OAK_CONFIG("FFmpegPath")`).
-		let configured = oak_core::configstore::ConfigStore::instance()
+		let configured = configstore::ConfigStore::instance()
 			.get(None, "FFmpegPath")
 			.unwrap_or_default();
 		let ffmpeg_path = ProxyManager::find_ffmpeg(&configured);
@@ -464,10 +471,10 @@ impl TaskBehavior for ProxyTask {
 		}
 
 		// Create the output directory if needed.
-		if let Some(parent) = std::path::Path::new(&self.output_filename).parent() {
+		if let Some(parent) = path::Path::new(&self.output_filename).parent() {
 			if !parent.as_os_str().is_empty()
 				&& !parent.exists()
-				&& std::fs::create_dir_all(parent).is_err()
+				&& fs::create_dir_all(parent).is_err()
 			{
 				task.set_error("Failed to create proxy output directory");
 				return Err(Error::Failed(
@@ -476,9 +483,9 @@ impl TaskBehavior for ProxyTask {
 			}
 		}
 
-		let _ = std::fs::remove_file(&self.output_filename);
+		let _ = fs::remove_file(&self.output_filename);
 		let working_filename = format!("{}.working.mp4", self.output_filename);
-		let _ = std::fs::remove_file(&working_filename);
+		let _ = fs::remove_file(&working_filename);
 
 		// 硬件加速（能用硬编就一定用；探测不到回退 libx264）+ 线程
 		// 预算（后台任务不把机器打满）。
@@ -511,7 +518,7 @@ impl TaskBehavior for ProxyTask {
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped());
 		// A GUI Oak spawning a console child would flash a console window.
-		oak_core::miscutils::hide_console_window(&mut command);
+		miscutils::hide_console_window(&mut command);
 		let mut child = match command.spawn() {
 			Ok(child) => child,
 			Err(_) => {
@@ -524,10 +531,10 @@ impl TaskBehavior for ProxyTask {
 		// the tail so the failure message says *why* the transcode failed
 		// (ffmpeg explains it there, and users see it in the task error).
 		let stderr = child.stderr.take();
-		let stderr_tail = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+		let stderr_tail = sync::Arc::new(sync::Mutex::new(Vec::<String>::new()));
 		if let Some(stderr) = stderr {
 			let tail = stderr_tail.clone();
-			std::thread::spawn(move || {
+			thread::spawn(move || {
 				for line in BufReader::new(stderr).lines().map_while(|line| line.ok()) {
 					let mut tail = tail.lock().unwrap_or_else(|e| e.into_inner());
 					if tail.len() == 8 {
@@ -557,7 +564,7 @@ impl TaskBehavior for ProxyTask {
 				if task.is_cancelled() {
 					let _ = child.kill();
 					let _ = child.wait();
-					let _ = std::fs::remove_file(&working_filename);
+					let _ = fs::remove_file(&working_filename);
 					task.set_error("Proxy generation was cancelled");
 					return Err(Error::Cancelled);
 				}
@@ -566,7 +573,7 @@ impl TaskBehavior for ProxyTask {
 
 		let exit_status = child.wait();
 		if !matches!(exit_status, Ok(status) if status.success()) {
-			let _ = std::fs::remove_file(&working_filename);
+			let _ = fs::remove_file(&working_filename);
 			let detail = stderr_tail
 				.lock()
 				.map(|tail| tail.join("; "))
@@ -581,14 +588,14 @@ impl TaskBehavior for ProxyTask {
 			return Err(Error::Failed(message));
 		}
 
-		if !std::path::Path::new(&working_filename).exists() {
+		if !path::Path::new(&working_filename).exists() {
 			task.set_error("ffmpeg finished but proxy file was not created");
 			return Err(Error::Failed(
 				"ffmpeg finished but proxy file was not created".to_string(),
 			));
 		}
 
-		if std::fs::rename(&working_filename, &self.output_filename).is_err() {
+		if fs::rename(&working_filename, &self.output_filename).is_err() {
 			task.set_error("Failed to move proxy into place");
 			return Err(Error::Failed("Failed to move proxy into place".to_string()));
 		}
@@ -601,7 +608,7 @@ impl TaskBehavior for ProxyTask {
 /// Probe the source duration via `ffprobe` next to ffmpeg; 0.0 when
 /// unavailable (in which case no intermediate progress is reported).
 fn probe_source_duration_seconds(ffmpeg_path: &str, source_filename: &str) -> f64 {
-	let ffprobe = std::path::Path::new(ffmpeg_path).with_file_name("ffprobe");
+	let ffprobe = path::Path::new(ffmpeg_path).with_file_name("ffprobe");
 	if !ffprobe.exists() {
 		return 0.0;
 	}
@@ -615,7 +622,7 @@ fn probe_source_duration_seconds(ffmpeg_path: &str, source_filename: &str) -> f6
 		"default=noprint_wrappers=1:nokey=1",
 		source_filename,
 	]);
-	oak_core::miscutils::hide_console_window(&mut command);
+	miscutils::hide_console_window(&mut command);
 	let output = command.output();
 	match output {
 		Ok(out) if out.status.success() => {

@@ -25,6 +25,7 @@
 
 use quercus_engine_rs::codec;
 use quercus_engine_rs::types::Rational;
+use std::path;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK};
 use crate::fmt;
@@ -53,7 +54,7 @@ pub fn run(mediafile: String) -> i32 {
 ///
 /// * `mediafile` - media path exactly as given on the command line.
 fn run_probe(mediafile: &str) -> i32 {
-	if !std::path::Path::new(mediafile).exists() {
+	if !path::Path::new(mediafile).exists() {
 		eprintln!("error: probe: file does not exist: {mediafile}");
 		return EXIT_ERROR;
 	}
@@ -69,10 +70,18 @@ fn run_probe(mediafile: &str) -> i32 {
 
 	// Stream durations are `duration` ticks in each stream's time base.
 	let video: Vec<_> = (0..footage.video_stream_count())
-		.filter_map(|ordinal| footage.video_stream(ordinal).map(|params| (ordinal, params)))
+		.filter_map(|ordinal| {
+			footage
+				.video_stream(ordinal)
+				.map(|params| (ordinal, params))
+		})
 		.collect();
 	let audio: Vec<_> = (0..footage.audio_stream_count())
-		.filter_map(|ordinal| footage.audio_stream(ordinal).map(|params| (ordinal, params)))
+		.filter_map(|ordinal| {
+			footage
+				.audio_stream(ordinal)
+				.map(|params| (ordinal, params))
+		})
 		.collect();
 	let video_durations: Vec<Rational> = video
 		.iter()
@@ -91,7 +100,11 @@ fn run_probe(mediafile: &str) -> i32 {
 		.chain(audio_durations.iter())
 		.copied()
 		.fold(Rational::new(0, 1), |longest, value| {
-			if value > longest { value } else { longest }
+			if value > longest {
+				value
+			} else {
+				longest
+			}
 		});
 	println!("{}", fmt::duration_line(rational_secs(duration)));
 
@@ -134,7 +147,10 @@ fn run_probe(mediafile: &str) -> i32 {
 		let _ = ordinal;
 	}
 
-	println!("{}", fmt::subtitle_streams_line(footage.subtitle_stream_count() as i64));
+	println!(
+		"{}",
+		fmt::subtitle_streams_line(footage.subtitle_stream_count() as i64)
+	);
 
 	EXIT_OK
 }

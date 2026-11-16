@@ -370,10 +370,7 @@ impl NodeElement {
 							cx,
 							&port.label,
 							label_font_size,
-							point(
-								center.x + dot_r + px(6.0) * zoom,
-								center.y - px(6.0) * zoom,
-							),
+							point(center.x + dot_r + px(6.0) * zoom, center.y - px(6.0) * zoom),
 							label_height,
 							Hsla::from(colors.text),
 							TextAlign::Left,

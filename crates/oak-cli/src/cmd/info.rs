@@ -28,6 +28,8 @@
 //! convention); the online flag reports whether the resolved file exists.
 //! A load failure prints the module's error and exits 1.
 
+use quercus_engine_rs::node;
+use std::fs;
 use std::path::Path;
 
 use crate::cmd::{EXIT_ERROR, EXIT_OK};
@@ -89,7 +91,7 @@ fn run_info(project: &str) -> i32 {
 	// wiping the pre-load filename; when the project reports an empty
 	// filename the CLI falls back to the path it loaded — the C++ CLI's own
 	// project filename convention.
-	let abs = std::fs::canonicalize(project).unwrap_or_else(|_| Path::new(project).to_path_buf());
+	let abs = fs::canonicalize(project).unwrap_or_else(|_| Path::new(project).to_path_buf());
 	let project_ref = &loaded.project;
 	let name = {
 		let n = engine::project_name(project_ref);
@@ -155,7 +157,7 @@ fn run_info(project: &str) -> i32 {
 /// * `seq_id` - Sequence node id to query.
 /// * `index` - Zero-based position in the sequence list, printed as the
 ///   block's ordinal.
-fn print_sequence(project: &engine::ProjectRef, seq_id: quercus_engine_rs::node::NodeId, index: i64) {
+fn print_sequence(project: &engine::ProjectRef, seq_id: node::NodeId, index: i64) {
 	let name = engine::node_label(project, seq_id);
 	let length = engine::sequence_length(project, seq_id);
 	let frame_rate = engine::sequence_frame_rate(project, seq_id);

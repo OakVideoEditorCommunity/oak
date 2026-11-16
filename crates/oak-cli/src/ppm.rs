@@ -28,6 +28,7 @@
 
 #![allow(dead_code)]
 
+use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -108,7 +109,7 @@ pub fn write_ppm(
 		out.extend_from_slice(&row);
 	}
 
-	let mut f = std::fs::File::create(path)?;
+	let mut f = fs::File::create(path)?;
 	f.write_all(&out)
 }
 

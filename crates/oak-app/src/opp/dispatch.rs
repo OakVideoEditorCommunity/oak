@@ -7,15 +7,14 @@
 //! `oak-extensions` ever depending on this crate.
 
 use oak_extensions::host_services::{
-	AddEffectReq, AddMarkerReq, AddTransitionReq, AudioLevelsRequest, DeleteClipReq,
-	ExportRequest, FrameRequest, HostError, HostServices, SetKeyframeReq, SetParamReq,
-	SetWorkareaReq, ThumbnailsRequest,
+	AddEffectReq, AddMarkerReq, AddTransitionReq, AudioLevelsRequest, DeleteClipReq, ExportRequest,
+	FrameRequest, HostError, HostServices, SetKeyframeReq, SetParamReq, SetWorkareaReq,
+	ThumbnailsRequest,
 };
-use oak_extensions::protocol::{
-	ErrorObject, Request, Response, INVALID_PARAMS, METHOD_NOT_FOUND,
-};
-use oak_extensions::session::{handle_host_request, HostSession};
-use serde_json::{json, Value};
+use oak_extensions::protocol::{ErrorObject, INVALID_PARAMS, METHOD_NOT_FOUND, Request, Response};
+use oak_extensions::session::{HostSession, handle_host_request};
+use serde::de;
+use serde_json::{Value, json};
 
 use super::host::OppHost;
 
@@ -50,7 +49,7 @@ pub fn dispatch(host: &OppHost, session: &HostSession, req: &Request) -> Respons
 }
 
 /// Deserialize `params` into the protocol's own request struct.
-fn params_as<T: serde::de::DeserializeOwned>(req: &Request) -> Result<T, HostError> {
+fn params_as<T: de::DeserializeOwned>(req: &Request) -> Result<T, HostError> {
 	serde_json::from_value(req.params.clone()).map_err(|e| {
 		HostError::with_data(
 			INVALID_PARAMS,
@@ -90,7 +89,9 @@ fn execute(host: &OppHost, req: &Request) -> Result<Value, HostError> {
 	match req.method.as_str() {
 		// ---- project.* ----
 		"project.get_info" => to_value(host.project_get_info()?),
-		"project.open" => to_value(host.project_open(str_param(req, "path")?, txn_param(req).as_deref())?),
+		"project.open" => {
+			to_value(host.project_open(str_param(req, "path")?, txn_param(req).as_deref())?)
+		}
 		"project.save" => {
 			let path = req.params.get("path").and_then(Value::as_str);
 			to_value(host.project_save(path, txn_param(req).as_deref())?)
@@ -105,62 +106,53 @@ fn execute(host: &OppHost, req: &Request) -> Result<Value, HostError> {
 
 		// ---- timeline.* ----
 		"timeline.get_structure" => to_value(host.timeline_get_structure()?),
-		"timeline.add_track" => to_value(host.timeline_add_track(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.place_clip" => to_value(host.timeline_place_clip(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.split_clip" => to_value(host.timeline_split_clip(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.trim_clip" => to_value(host.timeline_trim_clip(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.move_clip" => to_value(host.timeline_move_clip(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.ripple_delete" => to_value(host.timeline_ripple_delete(
-			params_as(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.delete_clip" => to_value(host.timeline_delete_clip(
-			params_as::<DeleteClipReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
+		"timeline.add_track" => {
+			to_value(host.timeline_add_track(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.place_clip" => {
+			to_value(host.timeline_place_clip(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.split_clip" => {
+			to_value(host.timeline_split_clip(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.trim_clip" => {
+			to_value(host.timeline_trim_clip(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.move_clip" => {
+			to_value(host.timeline_move_clip(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.ripple_delete" => {
+			to_value(host.timeline_ripple_delete(params_as(req)?, txn_param(req).as_deref())?)
+		}
+		"timeline.delete_clip" => to_value(
+			host.timeline_delete_clip(params_as::<DeleteClipReq>(req)?, txn_param(req).as_deref())?,
+		),
 		"timeline.add_transition" => to_value(host.timeline_add_transition(
 			params_as::<AddTransitionReq>(req)?,
 			txn_param(req).as_deref(),
 		)?),
-		"timeline.add_marker" => to_value(host.timeline_add_marker(
-			params_as::<AddMarkerReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"timeline.set_workarea" => to_value(host.timeline_set_workarea(
-			params_as::<SetWorkareaReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
+		"timeline.add_marker" => to_value(
+			host.timeline_add_marker(params_as::<AddMarkerReq>(req)?, txn_param(req).as_deref())?,
+		),
+		"timeline.set_workarea" => {
+			to_value(host.timeline_set_workarea(
+				params_as::<SetWorkareaReq>(req)?,
+				txn_param(req).as_deref(),
+			)?)
+		}
 
 		// ---- node.* ----
 		"node.list_types" => to_value(host.node_list_types()?),
 		"node.get_params" => to_value(host.node_get_params(&str_param(req, "node")?.to_string())?),
-		"node.add_effect" => to_value(host.node_add_effect(
-			params_as::<AddEffectReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"node.set_param" => to_value(host.node_set_param(
-			params_as::<SetParamReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
-		"node.set_keyframe" => to_value(host.node_set_keyframe(
-			params_as::<SetKeyframeReq>(req)?,
-			txn_param(req).as_deref(),
-		)?),
+		"node.add_effect" => to_value(
+			host.node_add_effect(params_as::<AddEffectReq>(req)?, txn_param(req).as_deref())?,
+		),
+		"node.set_param" => to_value(
+			host.node_set_param(params_as::<SetParamReq>(req)?, txn_param(req).as_deref())?,
+		),
+		"node.set_keyframe" => to_value(
+			host.node_set_keyframe(params_as::<SetKeyframeReq>(req)?, txn_param(req).as_deref())?,
+		),
 		"node.remove" => to_value(host.node_remove(
 			&str_param(req, "node")?.to_string(),
 			txn_param(req).as_deref(),
@@ -168,18 +160,17 @@ fn execute(host: &OppHost, req: &Request) -> Result<Value, HostError> {
 
 		// ---- render.* ----
 		"render.get_frame" => to_value(host.render_get_frame(params_as::<FrameRequest>(req)?)?),
-		"render.get_thumbnails" => to_value(host.render_get_thumbnails(params_as::<ThumbnailsRequest>(
-			req,
-		)?)?),
-		"render.get_audio_levels" => to_value(host.render_get_audio_levels(
-			params_as::<AudioLevelsRequest>(req)?,
-		)?),
+		"render.get_thumbnails" => {
+			to_value(host.render_get_thumbnails(params_as::<ThumbnailsRequest>(req)?)?)
+		}
+		"render.get_audio_levels" => {
+			to_value(host.render_get_audio_levels(params_as::<AudioLevelsRequest>(req)?)?)
+		}
 
 		// ---- export.* ----
-		"export.start" => to_value(host.export_start(
-			params_as::<ExportRequest>(req)?,
-			txn_param(req).as_deref(),
-		)?),
+		"export.start" => to_value(
+			host.export_start(params_as::<ExportRequest>(req)?, txn_param(req).as_deref())?,
+		),
 		"export.cancel" => {
 			host.export_cancel(&str_param(req, "job")?.to_string())?;
 			Ok(Value::Null)
@@ -236,7 +227,11 @@ mod tests {
 		);
 		let resp2 = dispatch(&host, &session, &req2);
 		assert!(resp2.is_success(), "{resp2:?}");
-		assert_eq!(session.logs().len(), 1, "P1 handler must record the log line");
+		assert_eq!(
+			session.logs().len(),
+			1,
+			"P1 handler must record the log line"
+		);
 
 		// A method in no domain at all → the P1 handler's METHOD_NOT_FOUND.
 		let req3 = Request::new(3u64, "ui.set_tree", json!({}));

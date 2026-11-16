@@ -1,3 +1,4 @@
+use core::panic;
 use refineable::Refineable as _;
 
 use crate::{
@@ -42,7 +43,7 @@ impl<T: 'static> Element for Canvas<T> {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

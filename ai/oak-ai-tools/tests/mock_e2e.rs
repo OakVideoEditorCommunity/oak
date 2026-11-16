@@ -8,6 +8,8 @@
 //! Everything runs through `dispatch::execute`, i.e. through schema
 //! validation and one undo group per call, exactly like the SDK path.
 
+use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 use oak_ai_tools::dispatch::execute;
@@ -17,14 +19,13 @@ use serde_json::{Value, json};
 
 /// Two real files on disk (the mock checks existence only).
 fn temp_media(tag: &str) -> PathBuf {
-	let path = std::env::temp_dir().join(format!("oak_e2e_{tag}.mp4"));
-	std::fs::write(&path, b"oak mock e2e media fixture").expect("write fixture");
+	let path = env::temp_dir().join(format!("oak_e2e_{tag}.mp4"));
+	fs::write(&path, b"oak mock e2e media fixture").expect("write fixture");
 	path
 }
 
 fn call(backend: &mut MockBackend, tool: &str, args: Value) -> Value {
-	execute(backend, tool, args)
-		.unwrap_or_else(|err| panic!("{tool} failed: {err:?}"))
+	execute(backend, tool, args).unwrap_or_else(|err| panic!("{tool} failed: {err:?}"))
 }
 
 #[test]
@@ -34,7 +35,11 @@ fn acceptance_chain_render_and_full_undo() {
 	let mut backend = MockBackend::new();
 
 	// --- open ---------------------------------------------------------
-	let out = call(&mut backend, "project.open", json!({"name": "e2e", "fps": 30}));
+	let out = call(
+		&mut backend,
+		"project.open",
+		json!({"name": "e2e", "fps": 30}),
+	);
 	assert_eq!(out["created"], true);
 	let out = call(&mut backend, "timeline.add_track", json!({"type": "video"}));
 	let track_a = out["track"].as_str().unwrap().to_string();
@@ -196,8 +201,7 @@ fn acceptance_chain_render_and_full_undo() {
 			"max_size": {"width": 8, "height": 8},
 		}),
 	);
-	let gap = Frame::from_png(&b64_decode(out["png_base64"].as_str().unwrap()))
-		.expect("gap PNG");
+	let gap = Frame::from_png(&b64_decode(out["png_base64"].as_str().unwrap())).expect("gap PNG");
 	assert_eq!(gap.stats().non_black_ratio, 0.0, "gap frames are black");
 
 	// --- undo the whole chain ----------------------------------------
@@ -227,10 +231,13 @@ fn acceptance_chain_render_and_full_undo() {
 	assert_eq!(overview["footage"].as_array().unwrap().len(), 2);
 	// 2 default tracks from project.open + the 2 we added (still present:
 	// the undo loop stopped at the post-import snapshot).
-	assert_eq!(overview["sequences"][0]["tracks"].as_array().unwrap().len(), 4);
+	assert_eq!(
+		overview["sequences"][0]["tracks"].as_array().unwrap().len(),
+		4
+	);
 
-	let _ = std::fs::remove_file(&media_a);
-	let _ = std::fs::remove_file(&media_b);
+	let _ = fs::remove_file(&media_a);
+	let _ = fs::remove_file(&media_b);
 }
 
 #[test]
@@ -244,8 +251,7 @@ fn one_call_is_one_undo_group_and_failure_rolls_back() {
 		json!({"paths": [media.display().to_string()]}),
 	);
 	let footage = out["footage"][0]["id"].as_str().unwrap().to_string();
-	let track = call(&mut backend, "timeline.add_track", json!({"type": "video"}))
-		["track"]
+	let track = call(&mut backend, "timeline.add_track", json!({"type": "video"}))["track"]
 		.as_str()
 		.unwrap()
 		.to_string();
@@ -291,7 +297,7 @@ fn one_call_is_one_undo_group_and_failure_rolls_back() {
 		assert!(wire.get(key).is_some(), "error JSON must carry {key}");
 	}
 
-	let _ = std::fs::remove_file(&media);
+	let _ = fs::remove_file(&media);
 }
 
 /// Minimal standard base64 (the crate under test exposes its own, but
@@ -310,10 +316,7 @@ fn b64_decode(text: &str) -> Vec<u8> {
 				pad += 1;
 				sextets[i] = 0;
 			} else {
-				sextets[i] = TABLE
-					.iter()
-					.position(|&t| t == b)
-					.expect("bad base64 char") as u32;
+				sextets[i] = TABLE.iter().position(|&t| t == b).expect("bad base64 char") as u32;
 			}
 		}
 		let n = (sextets[0] << 18) | (sextets[1] << 12) | (sextets[2] << 6) | sextets[3];

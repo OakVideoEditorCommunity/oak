@@ -2,8 +2,9 @@
 //! build script. The binary and its tests run from `target/<profile>` and
 //! `target/<profile>/deps` respectively.
 
+use std::env;
 fn main() {
-	match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+	match env::var("CARGO_CFG_TARGET_OS").as_deref() {
 		Ok("macos") => {
 			println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
 			println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/..");

@@ -1,3 +1,4 @@
+use std::process;
 use std::{
     fs::File,
     io::{ErrorKind, Write},
@@ -140,7 +141,7 @@ impl Clipboard {
         Self {
             connection,
             loop_handle,
-            self_mime: format!("pid/{}", std::process::id()),
+            self_mime: format!("pid/{}", process::id()),
 
             contents: None,
             primary_contents: None,

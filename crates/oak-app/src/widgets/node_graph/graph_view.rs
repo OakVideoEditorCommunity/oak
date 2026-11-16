@@ -995,7 +995,8 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 		// with graph coordinate k lands at screen x = offset.x + k*GRID_SIZE*zoom.
 		let zoom = draw.zoom;
 		let x0 = ((-draw.offset.x.as_f32()) / (GRID_SIZE * zoom)).floor() as i64;
-		let x1 = ((bounds.size.width.as_f32() - draw.offset.x.as_f32()) / (GRID_SIZE * zoom)).ceil() as i64;
+		let x1 = ((bounds.size.width.as_f32() - draw.offset.x.as_f32()) / (GRID_SIZE * zoom)).ceil()
+			as i64;
 		for k in x0..=x1 {
 			let x = bounds.left() + px(k as f32 * GRID_SIZE * zoom + draw.offset.x.as_f32());
 			window.paint_quad(fill(
@@ -1004,7 +1005,8 @@ impl<D: NodeGraphDataSource + 'static> NodeGraphView<D> {
 			));
 		}
 		let y0 = ((-draw.offset.y.as_f32()) / (GRID_SIZE * zoom)).floor() as i64;
-		let y1 = ((bounds.size.height.as_f32() - draw.offset.y.as_f32()) / (GRID_SIZE * zoom)).ceil() as i64;
+		let y1 = ((bounds.size.height.as_f32() - draw.offset.y.as_f32()) / (GRID_SIZE * zoom))
+			.ceil() as i64;
 		for k in y0..=y1 {
 			let y = bounds.top() + px(k as f32 * GRID_SIZE * zoom + draw.offset.y.as_f32());
 			window.paint_quad(fill(

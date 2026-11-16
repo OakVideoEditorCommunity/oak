@@ -1,3 +1,4 @@
+use std::result;
 use std::rc::Rc;
 
 use crate::{
@@ -52,7 +53,7 @@ impl KeyBinding {
         use_key_equivalents: bool,
         action_input: Option<SharedString>,
         keyboard_mapper: &dyn PlatformKeyboardMapper,
-    ) -> std::result::Result<Self, InvalidKeystrokeError> {
+    ) -> result::Result<Self, InvalidKeystrokeError> {
         let keystrokes: SmallVec<[KeybindingKeystroke; 2]> = keystrokes
             .split_whitespace()
             .map(|source| {
@@ -63,7 +64,7 @@ impl KeyBinding {
                     keyboard_mapper,
                 ))
             })
-            .collect::<std::result::Result<_, _>>()?;
+            .collect::<result::Result<_, _>>()?;
 
         Ok(Self {
             keystrokes,

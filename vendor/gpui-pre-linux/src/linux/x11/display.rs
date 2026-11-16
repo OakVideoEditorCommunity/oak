@@ -1,3 +1,4 @@
+use std::time;
 use anyhow::Context as _;
 use uuid::Uuid;
 use x11rb::{connection::Connection as _, xcb_ffi::XCBConnection};
@@ -38,7 +39,7 @@ impl X11Display {
 
 impl PlatformDisplay for X11Display {
     // An X screen spans every monitor, so it has no single refresh rate.
-    fn refresh_interval(&self) -> Option<std::time::Duration> {
+    fn refresh_interval(&self) -> Option<time::Duration> {
         None
     }
 

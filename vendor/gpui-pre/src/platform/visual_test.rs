@@ -5,6 +5,8 @@
 //! - Deterministic task scheduling via TestDispatcher
 //! - Controllable time via `advance_clock`
 
+use std::ffi;
+use super::ThermalState;
 use crate::ScreenCaptureSource;
 use crate::{
     ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle,
@@ -83,7 +85,7 @@ impl Platform for VisualTestPlatform {
 
     fn quit(&self) {}
 
-    fn restart(&self, _binary_path: Option<PathBuf>, _arguments: Vec<std::ffi::OsString>) {}
+    fn restart(&self, _binary_path: Option<PathBuf>, _arguments: Vec<ffi::OsString>) {}
 
     fn activate(&self, _ignoring_other_apps: bool) {}
 
@@ -263,7 +265,7 @@ impl Platform for VisualTestPlatform {
     fn on_keyboard_layout_change(&self, _callback: Box<dyn FnMut()>) {}
 
     fn thermal_state(&self) -> super::ThermalState {
-        super::ThermalState::Nominal
+        ThermalState::Nominal
     }
 
     fn on_thermal_state_change(&self, _callback: Box<dyn FnMut()>) {}

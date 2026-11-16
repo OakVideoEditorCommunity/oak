@@ -76,17 +76,21 @@ pub mod testmedia {
 	///
 	/// Panics when FFmpeg is missing or exits non-zero (tests that need real
 	/// media must fail loudly, never skip silently).
+	use std::fs;
+	use std::io;
+	use std::path;
+	use std::process;
 	pub fn write_test_clip(
-		path: &std::path::Path,
+		path: &path::Path,
 		width: u32,
 		height: u32,
 		frames: u32,
 		fps: u32,
-	) -> std::io::Result<()> {
+	) -> io::Result<()> {
 		if let Some(dir) = path.parent() {
-			std::fs::create_dir_all(dir)?;
+			fs::create_dir_all(dir)?;
 		}
-		let status = std::process::Command::new("ffmpeg")
+		let status = process::Command::new("ffmpeg")
 			.args(["-y", "-hide_banner", "-loglevel", "error"])
 			.args(["-f", "lavfi"])
 			.arg("-i")
@@ -100,7 +104,7 @@ pub mod testmedia {
 			.arg(path)
 			.status()?;
 		if !status.success() {
-			return Err(std::io::Error::other(format!(
+			return Err(io::Error::other(format!(
 				"ffmpeg exited with {status} generating {}",
 				path.display()
 			)));

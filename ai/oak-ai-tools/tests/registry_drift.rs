@@ -6,6 +6,7 @@
 //! a registry entry added/removed without a schema, turns this test red.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::Path;
 
 use oak_ai_tools::dispatch;
@@ -17,12 +18,16 @@ fn schema_dir() -> std::path::PathBuf {
 fn schema_names() -> BTreeSet<String> {
 	let dir = schema_dir();
 	let mut names = BTreeSet::new();
-	let entries = std::fs::read_dir(&dir)
-		.unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()));
+	let entries =
+		fs::read_dir(&dir).unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()));
 	for entry in entries {
 		let path = entry.expect("schema entry").path();
 		if path.extension().is_some_and(|ext| ext == "json") {
-			let stem = path.file_stem().expect("stem").to_string_lossy().to_string();
+			let stem = path
+				.file_stem()
+				.expect("stem")
+				.to_string_lossy()
+				.to_string();
 			names.insert(stem);
 		}
 	}
@@ -32,8 +37,10 @@ fn schema_names() -> BTreeSet<String> {
 #[test]
 fn registry_and_schema_dir_are_sets_equal_with_count_22() {
 	let schemas = schema_names();
-	let registry: BTreeSet<String> =
-		dispatch::tool_names().iter().map(|name| name.to_string()).collect();
+	let registry: BTreeSet<String> = dispatch::tool_names()
+		.iter()
+		.map(|name| name.to_string())
+		.collect();
 
 	assert_eq!(schemas.len(), 22, "frozen schema dir must hold 22 tools");
 	assert_eq!(registry.len(), 22, "registry must hold 22 tools");
@@ -74,6 +81,11 @@ fn every_registry_entry_has_a_compiled_validator_and_flags() {
 		// Schema title == file name == registry name (checked at load,
 		// asserted here as the public contract).
 		let title = schema.schema.get("title").and_then(|v| v.as_str());
-		assert_eq!(title, Some(def.name), "schema title mismatch for {}", def.name);
+		assert_eq!(
+			title,
+			Some(def.name),
+			"schema title mismatch for {}",
+			def.name
+		);
 	}
 }

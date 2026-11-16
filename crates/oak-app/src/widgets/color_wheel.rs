@@ -155,11 +155,7 @@ pub fn wheel_to_color(angle_deg: f32, radius: f32) -> Rgba {
 /// Map a param color back to the wheel: the color's hue and
 /// `max|channel - 0.5| * 2` as the radius. Grays sit at the center.
 pub fn color_to_wheel(color: Rgba) -> (f32, f32) {
-	let (dr, dg, db) = (
-		color.r - NEUTRAL,
-		color.g - NEUTRAL,
-		color.b - NEUTRAL,
-	);
+	let (dr, dg, db) = (color.r - NEUTRAL, color.g - NEUTRAL, color.b - NEUTRAL);
 	let intensity = (dr.abs().max(dg.abs()).max(db.abs()) * 2.0).clamp(0.0, 1.0);
 	if intensity < 1e-4 {
 		return (0.0, 0.0);
@@ -341,10 +337,7 @@ impl ColorWheel {
 			center.x + px(rad.cos() * radius * radius_px),
 			center.y - px(rad.sin() * radius * radius_px),
 		);
-		for (ring_radius, color) in [
-			(6.0f32, colors.background),
-			(5.0, colors.text),
-		] {
+		for (ring_radius, color) in [(6.0f32, colors.background), (5.0, colors.text)] {
 			let mut ring = PathBuilder::stroke(px(1.5));
 			let steps = 16;
 			for i in 0..=steps {
@@ -475,7 +468,11 @@ mod tests {
 			wheel: gpui_kit::Entity<ColorWheel>,
 		}
 		impl Render for Host {
-			fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+			fn render(
+				&mut self,
+				_window: &mut Window,
+				_cx: &mut Context<Self>,
+			) -> impl IntoElement {
 				div().size_full().child(self.wheel.clone())
 			}
 		}
@@ -503,9 +500,10 @@ mod tests {
 			matches!(got.first(), Some(ColorWheelEvent::DragStarted { .. })),
 			"the gesture opens: {got:?}"
 		);
-		assert!(got
-			.iter()
-			.any(|e| matches!(e, ColorWheelEvent::Changed { color, .. } if color.r > 0.9)));
+		assert!(
+			got.iter()
+				.any(|e| matches!(e, ColorWheelEvent::Changed { color, .. } if color.r > 0.9))
+		);
 		assert!(
 			matches!(got.last(), Some(ColorWheelEvent::DragFinished { .. })),
 			"the gesture closes: {got:?}"
@@ -516,8 +514,8 @@ mod tests {
 		cx.simulate_click(center, Modifiers::default());
 		cx.simulate_click(center, Modifiers::default());
 		let got = events.read().unwrap().clone();
-		assert!(got
-			.iter()
-			.any(|e| matches!(e, ColorWheelEvent::Changed { color, .. } if (color.r - 0.5).abs() < 1e-6)));
+		assert!(got.iter().any(
+			|e| matches!(e, ColorWheelEvent::Changed { color, .. } if (color.r - 0.5).abs() < 1e-6)
+		));
 	}
 }

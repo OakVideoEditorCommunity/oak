@@ -83,7 +83,7 @@ use serde_json::{Value, json};
 
 use crate::backend::EngineBackend;
 use crate::error::{
-	CODE_BACKEND, CODE_INVALID_PARAMS, CODE_IO, CODE_NOTHING_TO_UNDO, CODE_NOT_FOUND,
+	CODE_BACKEND, CODE_INVALID_PARAMS, CODE_IO, CODE_NOT_FOUND, CODE_NOTHING_TO_UNDO,
 	CODE_SCHEMA_VALIDATION, CODE_STATE, CODE_TIMECODE, CODE_TRANSACTION, CODE_UNKNOWN_TOOL,
 	CODE_UNSUPPORTED, ToolError,
 };
@@ -530,7 +530,10 @@ impl Feedback {
 				 or a limit, do NOT retry: explain the limitation to the user instead \
 				 of changing the arguments",
 			),
-			CODE_IO => (true, "a file could not be read or written; check the path and retry"),
+			CODE_IO => (
+				true,
+				"a file could not be read or written; check the path and retry",
+			),
 			CODE_REJECTED => (
 				false,
 				"the user rejected this edit; do not re-send it — propose a different \
@@ -673,7 +676,10 @@ fn check_frame(value: &Value, min_non_black: f64) -> Result<(), String> {
 		.ok_or_else(|| "missing or zero `height`".to_string())?;
 
 	if let Some(encoded) = value.get("png_base64").and_then(Value::as_str) {
-		let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok().ok_or_else(|| "`png_base64` is not valid base64".to_string())?;
+		let bytes = base64::engine::general_purpose::STANDARD
+			.decode(encoded)
+			.ok()
+			.ok_or_else(|| "`png_base64` is not valid base64".to_string())?;
 		if let Some(declared) = value.get("png_bytes").and_then(Value::as_u64) {
 			if declared != bytes.len() as u64 {
 				return Err(format!(
@@ -1091,11 +1097,23 @@ mod tests {
 	#[test]
 	fn the_gate_point_follows_the_rollback_coverage() {
 		// Inside the undo group: gate at commit.
-		assert_eq!(OperationClass::Edit.gate_point(true), GatePoint::BeforeCommit);
+		assert_eq!(
+			OperationClass::Edit.gate_point(true),
+			GatePoint::BeforeCommit
+		);
 		// No group to roll back, or effects outside the group.
-		assert_eq!(OperationClass::Edit.gate_point(false), GatePoint::BeforeInvoke);
-		assert_eq!(OperationClass::Project.gate_point(true), GatePoint::BeforeInvoke);
-		assert_eq!(OperationClass::Export.gate_point(true), GatePoint::BeforeInvoke);
+		assert_eq!(
+			OperationClass::Edit.gate_point(false),
+			GatePoint::BeforeInvoke
+		);
+		assert_eq!(
+			OperationClass::Project.gate_point(true),
+			GatePoint::BeforeInvoke
+		);
+		assert_eq!(
+			OperationClass::Export.gate_point(true),
+			GatePoint::BeforeInvoke
+		);
 	}
 
 	#[test]
@@ -1149,7 +1167,8 @@ mod tests {
 	fn pixel_readback_decodes_the_png_and_can_reject_a_black_frame() {
 		use crate::render::frame_summary;
 
-		let coloured = Frame::from_rgba(2, 1, vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
+		let coloured =
+			Frame::from_rgba(2, 1, vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
 		let black = Frame::black(2, 1);
 
 		let mut strict = PixelReadback::opaque(0.9);
@@ -1219,7 +1238,10 @@ mod tests {
 		assert_eq!(error.code, CODE_PROPOSAL_ONLY);
 		assert_eq!(error.tool.as_deref(), Some("timeline.add_track"));
 		assert_eq!(error.step.as_deref(), Some("confirm"));
-		assert!(error.txn.is_none(), "nothing was opened, so nothing aborted");
+		assert!(
+			error.txn.is_none(),
+			"nothing was opened, so nothing aborted"
+		);
 		assert!(!outcome.is_applied());
 	}
 

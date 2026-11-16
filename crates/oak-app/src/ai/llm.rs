@@ -4,9 +4,10 @@
 //! response shape, one error enum. [`LlmClient`] is the seam every test
 //! injects a scripted mock through, so the agent loop never needs a network.
 
-
 use oak_ai_tools::schema::SchemaRegistry;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::time;
+use ureq::Agent;
 
 use super::config::AiConfig;
 
@@ -259,8 +260,8 @@ pub struct UreqClient {
 
 impl UreqClient {
 	pub fn new(config: AiConfig) -> Self {
-		let agent_config = ureq::Agent::config_builder()
-			.timeout_global(Some(std::time::Duration::from_secs(60)))
+		let agent_config = Agent::config_builder()
+			.timeout_global(Some(time::Duration::from_secs(60)))
 			.build();
 		Self {
 			agent: agent_config.into(),
@@ -286,15 +287,11 @@ impl LlmClient for UreqClient {
 			"tools": request.tools,
 			"stream": false,
 		});
-		let payload = serde_json::to_string(&body)
-			.map_err(|e| LlmError::Parse(e.to_string()))?;
+		let payload = serde_json::to_string(&body).map_err(|e| LlmError::Parse(e.to_string()))?;
 		let mut response = self
 			.agent
 			.post(&url)
-			.header(
-				"authorization",
-				&format!("Bearer {}", self.config.api_key),
-			)
+			.header("authorization", &format!("Bearer {}", self.config.api_key))
 			.header("content-type", "application/json")
 			.send(payload)
 			.map_err(|e| LlmError::Http(e.to_string()))?;

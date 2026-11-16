@@ -51,7 +51,7 @@ use oak_engine_rust_sdk::types::Rational as SdkRational;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::error::{ToolError, CODE_STATE, CODE_TRANSACTION};
+use crate::error::{CODE_STATE, CODE_TRANSACTION, ToolError};
 use crate::timecode::{Rat, TimeContext, TimeValue};
 use crate::txn::TxnOps;
 
@@ -173,9 +173,9 @@ impl SdkBackend {
 	// -- project / traversal -------------------------------------------
 
 	fn project(&self) -> Result<&Project, ToolError> {
-		self.project
-			.as_ref()
-			.ok_or_else(|| ToolError::new(CODE_STATE, "no project is open (call project.open first)"))
+		self.project.as_ref().ok_or_else(|| {
+			ToolError::new(CODE_STATE, "no project is open (call project.open first)")
+		})
 	}
 
 	/// Every child of the bin root (footage and sequences live here).
@@ -243,7 +243,10 @@ impl SdkBackend {
 		let live = match kind {
 			NodeKind::Sequence => self.sequence_nodes()?.contains(&node),
 			NodeKind::Footage => self.footage_nodes()?.contains(&node),
-			NodeKind::Track => self.all_tracks()?.iter().any(|(track, _, _)| *track == node),
+			NodeKind::Track => self
+				.all_tracks()?
+				.iter()
+				.any(|(track, _, _)| *track == node),
 			NodeKind::Clip | NodeKind::Transition | NodeKind::Gap | NodeKind::Adjustment => {
 				self.all_tracks()?.iter().any(|(track, _, _)| {
 					self.blocks_of(*track)
@@ -357,7 +360,8 @@ impl SdkBackend {
 
 	/// Remembers which footage a clip was placed from.
 	fn remember_clip_source(&mut self, clip: &str, footage: &str) {
-		self.clip_source.insert(clip.to_string(), footage.to_string());
+		self.clip_source
+			.insert(clip.to_string(), footage.to_string());
 	}
 
 	/// The footage id a clip was placed from, when this session saw the
@@ -426,7 +430,11 @@ impl SdkBackend {
 		// video stream length and finally to zero rather than inventing one.
 		let duration = {
 			let total = project.footage_duration(node);
-			let total = if total.den == 0 { project.footage_video_length(node) } else { total };
+			let total = if total.den == 0 {
+				project.footage_video_length(node)
+			} else {
+				total
+			};
 			Self::rat(total, "footage duration").unwrap_or(Rat { num: 0, den: 1 })
 		};
 		let mut out = json!({
@@ -549,21 +557,30 @@ impl SdkBackend {
 					self.node_of(id)
 						.ok_or_else(|| ToolError::not_found(format!("unknown sequence '{id}'")))?
 				};
-				Self::rat(self.project()?.sequence_frame_rate(sequence), "sequence frame rate")
+				Self::rat(
+					self.project()?.sequence_frame_rate(sequence),
+					"sequence frame rate",
+				)
 			}
 			TimeContext::Track(id) => {
 				let track = self
 					.node_of(id)
 					.ok_or_else(|| ToolError::not_found(format!("unknown track '{id}'")))?;
 				let sequence = self.sequence_of_track(track)?;
-				Self::rat(self.project()?.sequence_frame_rate(sequence), "sequence frame rate")
+				Self::rat(
+					self.project()?.sequence_frame_rate(sequence),
+					"sequence frame rate",
+				)
 			}
 			TimeContext::Clip(id) => {
 				let clip = self
 					.node_of(id)
 					.ok_or_else(|| ToolError::not_found(format!("unknown clip '{id}'")))?;
 				let (sequence, _, _, _) = self.locate_block(clip)?;
-				Self::rat(self.project()?.sequence_frame_rate(sequence), "sequence frame rate")
+				Self::rat(
+					self.project()?.sequence_frame_rate(sequence),
+					"sequence frame rate",
+				)
 			}
 			TimeContext::Footage(id) => {
 				let footage = self
@@ -572,7 +589,9 @@ impl SdkBackend {
 				let params = self
 					.project()?
 					.footage_video_params(footage, 0)
-					.ok_or_else(|| ToolError::state(format!("footage '{id}' has no video stream")))?;
+					.ok_or_else(|| {
+						ToolError::state(format!("footage '{id}' has no video stream"))
+					})?;
 				Rat::new(params.frame_rate.num, params.frame_rate.den)
 			}
 		}

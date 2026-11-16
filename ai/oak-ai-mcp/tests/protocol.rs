@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -50,7 +51,7 @@ impl Session {
 		let stdin = child.stdin.take().expect("child stdin");
 		let stdout = child.stdout.take().expect("child stdout");
 		let (tx, rx) = mpsc::channel();
-		std::thread::spawn(move || {
+		thread::spawn(move || {
 			for line in BufReader::new(stdout).lines() {
 				match line {
 					Ok(line) => {
@@ -103,7 +104,10 @@ impl Session {
 			.lines
 			.recv_timeout(FRAME_TIMEOUT)
 			.unwrap_or_else(|err| panic!("no response frame within {FRAME_TIMEOUT:?}: {err}"));
-		assert!(!line.contains('\r'), "frames must be LF-terminated: {line:?}");
+		assert!(
+			!line.contains('\r'),
+			"frames must be LF-terminated: {line:?}"
+		);
 		let value: Value = serde_json::from_str(&line)
 			.unwrap_or_else(|err| panic!("stdout frame is not JSON ({err}): {line:?}"));
 		assert_eq!(value["jsonrpc"], "2.0", "bad envelope: {line}");
@@ -160,9 +164,15 @@ fn full_protocol_chain_initialize_list_call_and_errors() {
 	let init = session.recv_for(1);
 	assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
 	assert_eq!(init["result"]["serverInfo"]["name"], "oak-ai-mcp");
-	assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], false);
+	assert_eq!(
+		init["result"]["capabilities"]["tools"]["listChanged"],
+		false
+	);
 	assert!(
-		init["result"]["instructions"].as_str().unwrap().contains("22 tools"),
+		init["result"]["instructions"]
+			.as_str()
+			.unwrap()
+			.contains("22 tools"),
 		"instructions must describe the frozen tool face: {init}"
 	);
 
@@ -200,8 +210,7 @@ fn full_protocol_chain_initialize_list_call_and_errors() {
 			tool["name"]
 		);
 		assert_eq!(
-			tool["inputSchema"]["type"],
-			"object",
+			tool["inputSchema"]["type"], "object",
 			"{} inputSchema must be an object schema",
 			tool["name"]
 		);
@@ -330,7 +339,10 @@ fn framing_follows_the_sdk_rules() {
 	assert_eq!(batch["id"], Value::Null);
 
 	session.request(1, "initialize", initialize_params());
-	assert_eq!(session.recv_for(1)["result"]["protocolVersion"], "2024-11-05");
+	assert_eq!(
+		session.recv_for(1)["result"]["protocolVersion"],
+		"2024-11-05"
+	);
 
 	// Unknown request method -> -32601.
 	session.request(2, "tools/teleport", json!({}));
@@ -455,7 +467,10 @@ fn unknown_backend_and_help_exit_codes() {
 		String::from_utf8_lossy(&unknown.stderr)
 	);
 
-	let help = Command::new(BIN).arg("--help").output().expect("run binary");
+	let help = Command::new(BIN)
+		.arg("--help")
+		.output()
+		.expect("run binary");
 	assert_eq!(help.status.code(), Some(0), "{:?}", help.status);
 	let stdout = String::from_utf8_lossy(&help.stdout);
 	assert!(stdout.contains("oak-ai-mcp"), "{stdout}");

@@ -15,6 +15,6 @@ pub mod discover;
 pub mod dispatch;
 pub mod host;
 
-pub use discover::{discover, discover_all, search_dirs, start_enabled, DiscoveredPlugin};
+pub use discover::{DiscoveredPlugin, discover, discover_all, search_dirs, start_enabled};
 pub use dispatch::dispatch;
 pub use host::OppHost;

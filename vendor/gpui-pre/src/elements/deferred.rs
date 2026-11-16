@@ -1,3 +1,4 @@
+use core::panic;
 use crate::{
     AnyElement, App, Bounds, Element, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
     Pixels, Window,
@@ -36,7 +37,7 @@ impl Element for Deferred {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

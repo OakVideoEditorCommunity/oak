@@ -18,6 +18,8 @@
 //! resolved relative to that directory (`Manifest::resolve_command`).
 
 use std::collections::BTreeSet;
+use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use oak_extensions::lifecycle::{LifecycleConfig, PluginHost};
@@ -39,7 +41,7 @@ pub struct DiscoveredPlugin {
 /// `$OAK_HOME/plugins`, or `~/.oak/plugins` (`OAK_HOME` keeps other Oak
 /// state in one place, matching the engine's cache-root convention).
 pub fn default_plugin_dir() -> PathBuf {
-	match std::env::var_os("OAK_HOME") {
+	match env::var_os("OAK_HOME") {
 		Some(home) if !home.is_empty() => PathBuf::from(home).join("plugins"),
 		_ => dirs_home().join(".oak").join("plugins"),
 	}
@@ -48,7 +50,7 @@ pub fn default_plugin_dir() -> PathBuf {
 /// The user's home directory without pulling in the `dirs` crate: fall back
 /// to `/tmp` rather than panicking when neither variable is set.
 fn dirs_home() -> PathBuf {
-	std::env::var_os("HOME")
+	env::var_os("HOME")
 		.filter(|h| !h.is_empty())
 		.map(PathBuf::from)
 		.unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -57,7 +59,7 @@ fn dirs_home() -> PathBuf {
 /// The directories to scan, honouring `OAK_OPP_PLUGINS`; empty when the
 /// switch is off (P1.2 default: plugins do not start with the GUI).
 pub fn search_dirs() -> Vec<PathBuf> {
-	let raw = match std::env::var("OAK_OPP_PLUGINS") {
+	let raw = match env::var("OAK_OPP_PLUGINS") {
 		Ok(v) => v,
 		Err(_) => return Vec::new(),
 	};
@@ -68,7 +70,7 @@ pub fn search_dirs() -> Vec<PathBuf> {
 	if ON.contains(&trimmed) {
 		return vec![default_plugin_dir()];
 	}
-trimmed
+	trimmed
 		.split(':')
 		.map(str::trim)
 		.filter(|s| !s.is_empty())
@@ -90,17 +92,16 @@ pub fn discover(dir: &Path) -> Vec<DiscoveredPlugin> {
 pub fn discover_with_errors(dir: &Path) -> (Vec<DiscoveredPlugin>, Vec<(PathBuf, String)>) {
 	let mut found = Vec::new();
 	let mut errors = Vec::new();
-	let push = |path: PathBuf, found: &mut Vec<_>, errors: &mut Vec<_>| {
-		match Manifest::load(&path) {
-			Ok(manifest) => match manifest.validate() {
-				Ok(()) => found.push(DiscoveredPlugin {
-					dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
-					manifest,
-				}),
-				Err(e) => errors.push((path, format!("invalid manifest: {e}"))),
-			},
-			Err(e) => errors.push((path, format!("load failed: {e}"))),
-		}
+	let push = |path: PathBuf, found: &mut Vec<_>, errors: &mut Vec<_>| match Manifest::load(&path)
+	{
+		Ok(manifest) => match manifest.validate() {
+			Ok(()) => found.push(DiscoveredPlugin {
+				dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+				manifest,
+			}),
+			Err(e) => errors.push((path, format!("invalid manifest: {e}"))),
+		},
+		Err(e) => errors.push((path, format!("load failed: {e}"))),
 	};
 
 	if !dir.exists() {
@@ -112,7 +113,7 @@ pub fn discover_with_errors(dir: &Path) -> (Vec<DiscoveredPlugin>, Vec<(PathBuf,
 		push(own, &mut found, &mut errors);
 	}
 	// Otherwise each child directory that carries a manifest is one plugin.
-	let Ok(entries) = std::fs::read_dir(dir) else {
+	let Ok(entries) = fs::read_dir(dir) else {
 		return (found, errors);
 	};
 	let mut children: Vec<PathBuf> = entries
@@ -206,10 +207,18 @@ command = ["./plugin"]
 		.unwrap();
 
 		let (found, errors) = discover_with_errors(&dir);
-		assert_eq!(found.len(), 1, "only the valid plugin is accepted: {found:?}");
+		assert_eq!(
+			found.len(),
+			1,
+			"only the valid plugin is accepted: {found:?}"
+		);
 		assert_eq!(found[0].manifest.id, "com.example.demo");
 		assert_eq!(found[0].dir, dir.join("good"));
-		assert_eq!(errors.len(), 1, "the invalid manifest is reported: {errors:?}");
+		assert_eq!(
+			errors.len(),
+			1,
+			"the invalid manifest is reported: {errors:?}"
+		);
 		assert!(
 			errors[0].0.ends_with("bad/plugin.toml"),
 			"wrong manifest reported: {:?}",

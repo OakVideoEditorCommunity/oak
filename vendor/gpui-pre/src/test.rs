@@ -25,6 +25,8 @@
 //!   assert!(true)
 //! }
 //! ```
+use std::mem;
+use std::task;
 use crate::{Entity, Subscription, TestAppContext, TestDispatcher, calculate_seeds};
 use futures::StreamExt as _;
 use proptest::prelude::{Just, Strategy, any};
@@ -122,7 +124,7 @@ pub fn run_test(
                         attempt += 1;
                         // The panic payload might itself trigger an unwind on drop:
                         // https://doc.rust-lang.org/std/panic/fn.catch_unwind.html#notes
-                        std::mem::forget(error);
+                        mem::forget(error);
                     } else {
                         if is_multiple_runs {
                             eprintln!("failing seed: {seed}");
@@ -152,8 +154,8 @@ impl<T: 'static> futures::Stream for Observation<T> {
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+        cx: &mut task::Context<'_>,
+    ) -> task::Poll<Option<Self::Item>> {
         self.rx.poll_next_unpin(cx)
     }
 }

@@ -20,21 +20,22 @@
 ///
 /// Startup or SDK errors are printed to stderr and the process exits with
 /// status 1; the headless success path prints the run summary to stdout.
+use std::env;
+use std::path;
+use std::process;
 fn main() {
-	let args: Vec<String> = std::env::args().skip(1).collect();
+	let args: Vec<String> = env::args().skip(1).collect();
 	let gui = args.iter().any(|arg| arg == "--gui");
 	let work_dir = args
 		.iter()
 		.find(|arg| !arg.starts_with("--"))
-		.map(std::path::PathBuf::from)
-		.unwrap_or_else(|| {
-			std::env::temp_dir().join(format!("oak-sdk-editor-{}", std::process::id()))
-		});
+		.map(path::PathBuf::from)
+		.unwrap_or_else(|| env::temp_dir().join(format!("oak-sdk-editor-{}", process::id())));
 
 	if gui {
 		if let Err(error) = sdk_editor::shell::run(&work_dir) {
 			eprintln!("sdk_editor gui: {error}");
-			std::process::exit(1);
+			process::exit(1);
 		}
 		return;
 	}
@@ -45,7 +46,7 @@ fn main() {
 		}
 		Err(error) => {
 			eprintln!("sdk_editor: {error}");
-			std::process::exit(1);
+			process::exit(1);
 		}
 	}
 }

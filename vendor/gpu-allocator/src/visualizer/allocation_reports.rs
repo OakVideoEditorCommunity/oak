@@ -1,3 +1,4 @@
+use core::cmp;
 use std::backtrace::BacktraceStatus;
 
 use egui::{Label, Response, Sense, Ui, WidgetText};
@@ -92,7 +93,7 @@ pub(crate) fn render_allocation_reports_ui(
         (AllocationReportVisualizeSorting::None, _) => {}
         (AllocationReportVisualizeSorting::Idx, true) => allocations.sort_by_key(|(idx, _)| *idx),
         (AllocationReportVisualizeSorting::Idx, false) => {
-            allocations.sort_by_key(|(idx, _)| core::cmp::Reverse(*idx))
+            allocations.sort_by_key(|(idx, _)| cmp::Reverse(*idx))
         }
         (AllocationReportVisualizeSorting::Name, true) => {
             allocations.sort_by(|(_, alloc1), (_, alloc2)| alloc1.name.cmp(&alloc2.name))
@@ -104,7 +105,7 @@ pub(crate) fn render_allocation_reports_ui(
             allocations.sort_by_key(|(_, alloc)| alloc.size)
         }
         (AllocationReportVisualizeSorting::Size, false) => {
-            allocations.sort_by_key(|(_, alloc)| core::cmp::Reverse(alloc.size))
+            allocations.sort_by_key(|(_, alloc)| cmp::Reverse(alloc.size))
         }
     }
 

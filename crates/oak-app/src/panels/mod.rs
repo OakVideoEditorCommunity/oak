@@ -75,7 +75,10 @@ pub mod ids {
 /// A small info chip used in viewer headers and the status bar: muted
 /// background, thin border, small text. `colors` comes from the caller's
 /// `cx.default_colors()` so the chip follows the active theme.
-pub(crate) fn chip(colors: &gpui_kit::colors::Colors, label: impl gpui_kit::IntoElement) -> gpui_kit::Div {
+pub(crate) fn chip(
+	colors: &gpui_kit::colors::Colors,
+	label: impl gpui_kit::IntoElement,
+) -> gpui_kit::Div {
 	use gpui_kit::prelude::*;
 	gpui_kit::div()
 		.px_2()

@@ -28,11 +28,11 @@
 //! theme (`App::default_colors`) rather than the component theme.
 
 use gpui_kit::base::input::InputState;
-use gpui_kit::component::input::Input;
 use gpui_kit::component::Sizable as _;
+use gpui_kit::component::input::Input;
 use gpui_kit::{
-	colors::DefaultColors, div, App, AppContext, ElementId, Entity, IntoElement,
-	InteractiveElement, ParentElement, RenderOnce, Styled, WeakEntity, Window,
+	App, AppContext, ElementId, Entity, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+	Styled, WeakEntity, Window, colors::DefaultColors, div,
 };
 
 /// A no-op kept for source compatibility: gpui-kit's input keymap is

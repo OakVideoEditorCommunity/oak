@@ -27,12 +27,13 @@
 
 use crate::manifest::Manifest;
 use crate::protocol::{
-	encode_line, ping_request, shutdown_notification, FramedReader, FrameError, HelloParams,
-	HelloResult, MsgId, Request, Response, API_VERSION, INVALID_PARAMS, INVALID_REQUEST,
+	API_VERSION, FrameError, FramedReader, HelloParams, HelloResult, INVALID_PARAMS,
+	INVALID_REQUEST, MsgId, Request, Response, encode_line, ping_request, shutdown_notification,
 };
-use crate::session::{handle_host_request, HostSession, RpcError};
+use crate::session::{HostSession, RpcError, handle_host_request};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::env;
 use std::fmt;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -85,7 +86,9 @@ pub enum FailureReason {
 	/// Non-protocol bytes on stdout (§1 stdout discipline).
 	StdoutViolation(String),
 	/// A single line exceeded 16 MiB (§1) — killed on the spot.
-	MessageTooLarge { bytes: usize },
+	MessageTooLarge {
+		bytes: usize,
+	},
 	/// Three consecutive heartbeat timeouts (§4.2).
 	HeartbeatMissed,
 	/// Child closed stdout / exited.
@@ -252,7 +255,7 @@ impl PluginHost {
 		let inner = Arc::new(Inner {
 			manifest,
 			plugin_dir: plugin_dir.into(),
-			env_base: std::env::vars().collect(),
+			env_base: env::vars().collect(),
 			config,
 			state: Mutex::new(StateCell {
 				state: PluginState::Discovered,
@@ -637,11 +640,7 @@ fn reenable(inner: &Arc<Inner>, ctrl_rx: &Receiver<Ctrl>) -> bool {
 // Phases
 // ---------------------------------------------------------------------------
 
-fn recv_first(
-	ev_rx: &Receiver<Ev>,
-	ctrl_rx: &Receiver<Ctrl>,
-	timeout: Duration,
-) -> First {
+fn recv_first(ev_rx: &Receiver<Ev>, ctrl_rx: &Receiver<Ctrl>, timeout: Duration) -> First {
 	let deadline = Instant::now() + timeout;
 	loop {
 		match ctrl_rx.try_recv() {
@@ -827,11 +826,7 @@ fn ready_loop(inner: &Arc<Inner>, ev_rx: &Receiver<Ev>, ctrl_rx: &Receiver<Ctrl>
 // Child management
 // ---------------------------------------------------------------------------
 
-fn spawn_child(
-	argv: &[String],
-	env: &[(String, String)],
-	cwd: &Path,
-) -> Result<Child, String> {
+fn spawn_child(argv: &[String], env: &[(String, String)], cwd: &Path) -> Result<Child, String> {
 	let (prog, rest) = argv
 		.split_first()
 		.ok_or_else(|| "empty process.command".to_string())?;

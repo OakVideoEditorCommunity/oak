@@ -34,8 +34,8 @@
 //! byte-identical logs — that equality is what CI diffs.
 
 use base64::Engine as _;
-use sha2::Digest as _;
 use serde_json::Value;
+use sha2::Digest as _;
 
 /// One recorded step: a frozen tool call and its arguments.
 #[derive(Debug, Clone)]

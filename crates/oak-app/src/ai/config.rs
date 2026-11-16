@@ -5,6 +5,8 @@
 //! a `Debug`/`Display`, and never leaves the process except as the
 //! `Authorization` header of the one HTTP request that needs it.
 
+use crate::ai;
+use std::env;
 use std::fmt;
 
 /// Default endpoint — the xiaomi mimo openai-completions surface that was
@@ -62,7 +64,7 @@ impl fmt::Debug for AiConfig {
 impl AiConfig {
 	/// Reads the three environment variables.
 	pub fn from_env() -> Result<Self, ConfigError> {
-		Self::load(|name| std::env::var(name).ok())
+		Self::load(|name| env::var(name).ok())
 	}
 
 	/// Same as [`from_env`](Self::from_env) but with an injectable
@@ -73,7 +75,7 @@ impl AiConfig {
 	/// empty [`SecretStore`](crate::ai::secrets::SecretStore) is passed
 	/// down), so every existing caller and test behaves exactly as before.
 	pub fn load(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-		Self::load_with(get, &crate::ai::secrets::MemoryStore::new())
+		Self::load_with(get, &ai::secrets::MemoryStore::new())
 	}
 
 	/// Layered read: **env > keyring > default**.
@@ -86,7 +88,7 @@ impl AiConfig {
 	/// this function never panics on its account.
 	pub fn load_with(
 		env_get: impl Fn(&str) -> Option<String>,
-		store: &dyn crate::ai::secrets::SecretStore,
+		store: &dyn ai::secrets::SecretStore,
 	) -> Result<Self, ConfigError> {
 		let pick = |env_name: &str, account: &str| -> Option<String> {
 			let from_env = env_get(env_name)
@@ -99,11 +101,11 @@ impl AiConfig {
 					.filter(|v| !v.is_empty())
 			})
 		};
-		let api_key = pick(ENV_API_KEY, crate::ai::secrets::ACCOUNT_API_KEY)
-			.ok_or(ConfigError::MissingApiKey)?;
-		let base_url = pick(ENV_BASE_URL, crate::ai::secrets::ACCOUNT_BASE_URL)
+		let api_key =
+			pick(ENV_API_KEY, ai::secrets::ACCOUNT_API_KEY).ok_or(ConfigError::MissingApiKey)?;
+		let base_url = pick(ENV_BASE_URL, ai::secrets::ACCOUNT_BASE_URL)
 			.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-		let model = pick(ENV_MODEL, crate::ai::secrets::ACCOUNT_MODEL)
+		let model = pick(ENV_MODEL, ai::secrets::ACCOUNT_MODEL)
 			.unwrap_or_else(|| DEFAULT_MODEL.to_string());
 		Ok(Self {
 			api_key,
@@ -116,7 +118,7 @@ impl AiConfig {
 	/// (`service = "oak-ai"`). On a machine with no Secret Service the
 	/// keyring layer reads as unset; the env-only contract still holds.
 	pub fn from_env_and_keyring() -> Result<Self, ConfigError> {
-		Self::load_with(|n| std::env::var(n).ok(), &crate::ai::secrets::KeyringStore)
+		Self::load_with(|n| env::var(n).ok(), &ai::secrets::KeyringStore)
 	}
 }
 
@@ -140,10 +142,8 @@ mod tests {
 	/// Blank keys count as missing; defaults fill in for url/model.
 	#[test]
 	fn blank_key_is_missing_and_defaults_apply() {
-		let err = AiConfig::load(|name| {
-			(name == ENV_API_KEY).then(|| "   ".to_string())
-		})
-		.expect_err("whitespace key must not load");
+		let err = AiConfig::load(|name| (name == ENV_API_KEY).then(|| "   ".to_string()))
+			.expect_err("whitespace key must not load");
 		assert_eq!(err, ConfigError::MissingApiKey);
 
 		let cfg = AiConfig::load(|name| match name {
@@ -234,11 +234,10 @@ mod tests {
 	#[test]
 	fn load_keeps_env_only_semantics() {
 		let empty = crate::ai::secrets::MemoryStore::new();
-		let via_load = AiConfig::load(|n| (n == ENV_API_KEY).then(|| "k".to_string()))
-			.expect("legacy path");
-		let via_with =
-			AiConfig::load_with(|n| (n == ENV_API_KEY).then(|| "k".to_string()), &empty)
-				.expect("layered path");
+		let via_load =
+			AiConfig::load(|n| (n == ENV_API_KEY).then(|| "k".to_string())).expect("legacy path");
+		let via_with = AiConfig::load_with(|n| (n == ENV_API_KEY).then(|| "k".to_string()), &empty)
+			.expect("layered path");
 		assert_eq!(via_load.api_key, via_with.api_key);
 		assert_eq!(via_load.base_url, via_with.base_url);
 		assert_eq!(via_load.model, via_with.model);
@@ -250,10 +249,9 @@ mod tests {
 	/// The key must not survive a `Debug` round-trip.
 	#[test]
 	fn debug_redacts_the_key() {
-		let cfg = AiConfig::load(|name| {
-			(name == ENV_API_KEY).then(|| "super-secret-key".to_string())
-		})
-		.unwrap();
+		let cfg =
+			AiConfig::load(|name| (name == ENV_API_KEY).then(|| "super-secret-key".to_string()))
+				.unwrap();
 		let printed = format!("{cfg:?}");
 		assert!(!printed.contains("super-secret-key"), "leaked: {printed}");
 		assert!(printed.contains("[REDACTED]"), "{printed}");

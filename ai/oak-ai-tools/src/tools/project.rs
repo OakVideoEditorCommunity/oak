@@ -1,6 +1,7 @@
 //! Arguments for `project.*`.
 
 use serde_json::Value;
+use std::path;
 
 use crate::error::ToolError;
 use crate::timecode::{Rat, rate_arg};
@@ -56,7 +57,7 @@ pub fn parse_overview(args: &Value) -> Result<(), ToolError> {
 
 /// Convenience used by backends that must name a file.
 pub fn file_stem(path: &str) -> String {
-	std::path::Path::new(path)
+	path::Path::new(path)
 		.file_stem()
 		.map(|s| s.to_string_lossy().to_string())
 		.filter(|s| !s.is_empty())

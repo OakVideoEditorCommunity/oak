@@ -139,7 +139,9 @@ impl TrackHeader {
 		let index = self.index;
 		let on_toggle = self.on_toggle.clone();
 		let mut target = div()
-			.id(ElementId::Name(format!("track-toggle-{index}-{glyph}").into()))
+			.id(ElementId::Name(
+				format!("track-toggle-{index}-{glyph}").into(),
+			))
 			.debug_selector(move || format!("track-toggle-{index}-{glyph}").into())
 			.px_1()
 			.rounded(px(3.))
@@ -159,12 +161,10 @@ impl TrackHeader {
 			target = target
 				.cursor_pointer()
 				.hover(|style| style.bg(hsla(0.63, 0.6, 0.65, 0.35)))
-				.on_click(
-					move |_click: &ClickEvent, _window, cx: &mut App| {
-						handler(index, event, _window, cx);
-						cx.stop_propagation();
-					},
-				);
+				.on_click(move |_click: &ClickEvent, _window, cx: &mut App| {
+					handler(index, event, _window, cx);
+					cx.stop_propagation();
+				});
 		}
 		target
 	}

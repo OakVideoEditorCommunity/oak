@@ -1,3 +1,4 @@
+use core::panic;
 use smallvec::SmallVec;
 
 use crate::{
@@ -91,7 +92,7 @@ impl Element for Anchored {
         None
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

@@ -4,6 +4,7 @@
 //! measurement. This is much faster than the full layout system, but only works for
 //! elements with uniform height.
 
+use core::panic;
 use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Element, ElementId, Entity,
     GlobalElementId, Hitbox, InspectorElementId, InteractiveElement, Interactivity, IntoElement,
@@ -268,7 +269,7 @@ impl Element for UniformList {
         self.interactivity.element_id.clone()
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 

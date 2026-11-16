@@ -577,8 +577,6 @@ pub fn type_fits_host(project: &ProjectRef, host: NodeId, type_id: &str) -> bool
 		.unwrap_or(true)
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Chain edits (SDK session; each entry point is ONE undo row)
 // ---------------------------------------------------------------------------
@@ -616,7 +614,11 @@ pub fn set_input_value(
 	value: quercus_engine_rs::node::NodeValue,
 ) -> Result<(), String> {
 	let session = super::real::editor_session_for_project(p)?;
-	if session.project().standard_value(effect, input_id, -1).is_none() {
+	if session
+		.project()
+		.standard_value(effect, input_id, -1)
+		.is_none()
+	{
 		return Err(format!("set parameter: unknown input \"{input_id}\""));
 	}
 	let command = EditCommand::SetNodeStandardValue {
@@ -625,7 +627,10 @@ pub fn set_input_value(
 		element: -1,
 		value,
 	};
-	session.execute(command).map(|_| ()).map_err(|e| e.to_string())
+	session
+		.execute(command)
+		.map(|_| ())
+		.map_err(|e| e.to_string())
 }
 
 /// Undoable insertion of a new effect of `type_id` at **engine chain

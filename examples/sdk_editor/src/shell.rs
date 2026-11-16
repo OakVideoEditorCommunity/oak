@@ -16,6 +16,8 @@
 
 use std::io::{BufRead, Write};
 use std::path::Path;
+use std::thread;
+use std::time;
 
 use quercus_engine_rs::editor::EditorSession;
 use quercus_engine_rs::preview::PreviewSession;
@@ -66,7 +68,10 @@ pub fn run(work_dir: &Path) -> Result<(), String> {
 		.flat_map(|item| item.tracks.iter())
 		.flat_map(|track| track.clips.iter())
 		.map(|clip| clip.out_time)
-		.fold(Rational::new(0, 1), |end, out| if out > end { out } else { end });
+		.fold(
+			Rational::new(0, 1),
+			|end, out| if out > end { out } else { end },
+		);
 	let mut time = Rational::new(0, 1);
 	let step = Rational::new(1, 25);
 	let mut program = PreviewSession::program(session.clone(), sequence, (COLS, ROWS))
@@ -88,7 +93,7 @@ pub fn run(work_dir: &Path) -> Result<(), String> {
 						time = Rational::new(0, 1);
 					}
 					render(&mut program, time)?;
-					std::thread::sleep(std::time::Duration::from_millis(40));
+					thread::sleep(time::Duration::from_millis(40));
 				}
 			}
 			"+" => {
@@ -144,9 +149,7 @@ pub fn run(work_dir: &Path) -> Result<(), String> {
 /// the render fails or produces no frame, or the frame buffer is smaller
 /// than `COLS * ROWS * 4` floats.
 fn render(program: &mut PreviewSession, time: Rational) -> Result<(), String> {
-	program
-		.seek(time)
-		.map_err(|e| format!("seek: {e}"))?;
+	program.seek(time).map_err(|e| format!("seek: {e}"))?;
 	let request = program
 		.request_frame()
 		.ok_or_else(|| "frame request rejected".to_string())?;
@@ -162,9 +165,8 @@ fn render(program: &mut PreviewSession, time: Rational) -> Result<(), String> {
 	for row in 0..ROWS {
 		for col in 0..COLS {
 			let index = ((row * COLS + col) * 4) as usize;
-			let luma = 0.2126 * samples[index]
-				+ 0.7152 * samples[index + 1]
-				+ 0.0722 * samples[index + 2];
+			let luma =
+				0.2126 * samples[index] + 0.7152 * samples[index + 1] + 0.0722 * samples[index + 2];
 			let ramp = (luma.clamp(0.0, 1.0) * (RAMP.len() - 1) as f32).round() as usize;
 			out.push(RAMP[ramp] as char);
 		}

@@ -5,14 +5,14 @@
 //! reported as `READBACK_ASSERTION_FAILED` — the same structured failure
 //! path the re-planning loop consumes.
 
+use base64::Engine as _;
 use oak_ai_tools::dispatch::{self, execute};
 use oak_ai_tools::hooks::{
-	self, BeforeCommit, Decision, EditFailed, FailureEvent, GatedOutcome, PendingEdit, PixelReadback,
-	Policy, ReadbackVerdict, RenderDone, RenderDoneEvent,
+	self, BeforeCommit, Decision, EditFailed, FailureEvent, GatedOutcome, PendingEdit,
+	PixelReadback, Policy, ReadbackVerdict, RenderDone, RenderDoneEvent,
 };
 use oak_ai_tools::mock::{MockBackend, footage_rgb};
 use oak_ai_tools::render::Frame;
-use base64::Engine as _;
 use serde_json::{Value, json};
 
 /// Records every trigger, optionally checks the pixels itself, and then
@@ -59,7 +59,9 @@ impl RenderDone for Probe {
 					.get("png_base64")
 					.and_then(Value::as_str)
 					.expect("the event carries the PNG payload");
-				let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).expect("base64");
+				let bytes = base64::engine::general_purpose::STANDARD
+					.decode(encoded)
+					.expect("base64");
 				let decoded = Frame::from_png(&bytes).expect("PNG");
 				let centre = decoded.pixel(decoded.width / 2, decoded.height / 2);
 				for channel in 0..3 {
@@ -101,7 +103,12 @@ fn temp_media(tag: &str) -> std::path::PathBuf {
 /// A project with a single clip covering the whole 10 s fixture at t=0.
 /// Returns `(clip id, media path)`.
 fn seed(backend: &mut MockBackend) -> (String, String) {
-	execute(backend, "project.open", json!({"name": "readback", "fps": 30})).expect("open");
+	execute(
+		backend,
+		"project.open",
+		json!({"name": "readback", "fps": 30}),
+	)
+	.expect("open");
 	let media = temp_media("clip");
 	let out = execute(
 		backend,
@@ -119,7 +126,10 @@ fn seed(backend: &mut MockBackend) -> (String, String) {
 	)
 	.expect("place");
 	let _ = std::fs::remove_file(&media);
-	(out["clip"].as_str().unwrap().to_string(), media.display().to_string())
+	(
+		out["clip"].as_str().unwrap().to_string(),
+		media.display().to_string(),
+	)
 }
 
 #[test]
@@ -145,7 +155,11 @@ fn render_done_fires_after_the_frame_returns_and_sees_the_pixels() {
 	assert!(outcome.is_applied(), "{outcome:?}");
 	assert_eq!(probe.seen, vec![("render.get_frame".to_string(), 1)]);
 	assert!(probe.failures.is_empty());
-	assert_eq!(backend.undo_depth(), depth + 1, "a read still commits its group");
+	assert_eq!(
+		backend.undo_depth(),
+		depth + 1,
+		"a read still commits its group"
+	);
 }
 
 #[test]
@@ -237,7 +251,10 @@ fn a_failed_readback_aborts_the_group_and_feeds_the_failure_back() {
 		Policy::Auto,
 		&mut lenient,
 	);
-	assert!(retry.is_applied(), "the pixels are fine, the assertion was the gate");
+	assert!(
+		retry.is_applied(),
+		"the pixels are fine, the assertion was the gate"
+	);
 	assert_eq!(backend.undo_depth(), depth + 1);
 }
 
@@ -349,6 +366,9 @@ fn a_failing_body_never_reaches_the_readback() {
 		}
 		other => panic!("expected a failure, got {other:?}"),
 	}
-	assert!(probe.seen.is_empty(), "no frame came back, nothing to assert");
+	assert!(
+		probe.seen.is_empty(),
+		"no frame came back, nothing to assert"
+	);
 	assert_eq!(probe.failures.len(), 1);
 }

@@ -56,23 +56,25 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::widgets::audio_meter::AudioMeterDataSource;
 use crate::widgets::effect_stack::{
 	EffectCardKind, EffectData, EffectId, EffectStackDataSource, EffectStackEvent,
 };
 use crate::widgets::node_graph::{NodeGraphDataSource, NodeGraphEvent};
+use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::timeline::{
 	ClipData, ClipId, Frame, FrameRange, FrameRate, Marker, TimelineDataSource, TimelineEvent,
 	TrackData, TrackHeaderEvent, TrackKind, TrimEdge,
 };
-use gpui_kit::{prelude::*, px, App, Context, Entity, Hsla, Pixels, Point, RenderImage, SharedString};
-use crate::widgets::audio_meter::AudioMeterDataSource;
-use crate::widgets::project_explorer::{ProjectDataSource, ProjectEntry};
 use crate::widgets::viewer::PlaybackClock;
+use gpui_kit::{
+	App, Context, Entity, Hsla, Pixels, Point, RenderImage, SharedString, prelude::*, px,
+};
 
-use quercus_engine_rs::editor::TrackKind as DomainTrackKind;
-use quercus_engine_rs::node::{NodeId, NodeKind};
 use quercus_engine_rs::edit::EditCommand;
 use quercus_engine_rs::editor::EditorSession;
+use quercus_engine_rs::editor::TrackKind as DomainTrackKind;
+use quercus_engine_rs::node::{NodeId, NodeKind};
 use quercus_engine_rs::state::Config;
 use quercus_engine_rs::types::{Rational, TimeRange};
 
@@ -86,7 +88,9 @@ use super::settings::proxy_params_from_config;
 use super::transport::TransportState;
 
 /// Converts the SDK proxy DTO into the proxy dialog's app-owned parameters.
-fn proxy_ui_from_sdk(params: &quercus_engine_rs::codec::ProxyParams) -> super::engine::ProxyParamsUi {
+fn proxy_ui_from_sdk(
+	params: &quercus_engine_rs::codec::ProxyParams,
+) -> super::engine::ProxyParamsUi {
 	super::engine::ProxyParamsUi {
 		width: params.width,
 		height: params.height,
@@ -117,14 +121,17 @@ pub(crate) fn editor_session_for_project(project: &ProjectRef) -> Result<EditorS
 	if let Some(session) = LIVE_SESSION.with(|slot| slot.borrow().clone()) {
 		return Ok(session);
 	}
-	let session = EditorSession::from_project(project.clone()).map_err(|error| error.to_string())?;
+	let session =
+		EditorSession::from_project(project.clone()).map_err(|error| error.to_string())?;
 	if let Some(seq) = graphops::sequence_ids(project).first() {
 		let _ = session.set_current_sequence(*seq);
 	}
 	Ok(session)
 }
 /// Converts the SDK's codec-neutral proxy state into the app facade's UI state.
-fn proxy_media_state(state: quercus_engine_rs::codec::ProxyState) -> super::engine::ProxyMediaState {
+fn proxy_media_state(
+	state: quercus_engine_rs::codec::ProxyState,
+) -> super::engine::ProxyMediaState {
 	match state {
 		quercus_engine_rs::codec::ProxyState::Missing => super::engine::ProxyMediaState::Missing,
 		quercus_engine_rs::codec::ProxyState::Generating => {
@@ -328,17 +335,11 @@ struct PreviewWindow {
 /// A finished, backend-independent frame in the playback pre-render window.
 type PreviewSlot = quercus_engine_rs::preview_video::VideoFrame;
 
-fn nearest_ready_preview_frame<T>(
-	slots: &BTreeMap<i64, T>,
-	playhead: i64,
-) -> Option<i64> {
+fn nearest_ready_preview_frame<T>(slots: &BTreeMap<i64, T>, playhead: i64) -> Option<i64> {
 	if slots.contains_key(&playhead) {
 		return Some(playhead);
 	}
-	slots
-		.range(playhead..)
-		.next()
-		.map(|(frame, _)| *frame)
+	slots.range(playhead..).next().map(|(frame, _)| *frame)
 }
 
 /// Whether the playhead move from `previous` to `playhead` breaks the
@@ -362,9 +363,8 @@ fn preview_discontinuity(
 	explicit_seek
 		|| (playing
 			&& length > 0
-			&& previous.is_some_and(|prev| {
-				playhead < prev - 2 && playhead <= 2 && prev + 2 >= length
-			}))
+			&& previous
+				.is_some_and(|prev| playhead < prev - 2 && playhead <= 2 && prev + 2 >= length))
 }
 
 // ---------------------------------------------------------------------------
@@ -1648,10 +1648,7 @@ impl RealEngine {
 						self.sequence_info.as_ref()?.format.height as i32,
 					)
 				};
-				return Some((
-					(width / divider).max(2),
-					(height / divider).max(2),
-				));
+				return Some(((width / divider).max(2), (height / divider).max(2)));
 			}
 		}
 		let info = self.sequence_info.as_ref()?;
@@ -1833,7 +1830,9 @@ impl RealEngine {
 		let session = self.editor_session()?;
 		let sequence = quercus_engine_rs::node::NodeId::from_raw(self.sequence?.raw());
 		if let Some(clip) = self.selected_clip_node() {
-			if let Some(state) = session.multicam_state(quercus_engine_rs::node::NodeId::from_raw(clip.raw())) {
+			if let Some(state) =
+				session.multicam_state(quercus_engine_rs::node::NodeId::from_raw(clip.raw()))
+			{
 				return Some(multicam_state_from_sdk(state));
 			}
 		}
@@ -2047,10 +2046,7 @@ impl RealEngine {
 		);
 		window.last_playhead = Some(playhead);
 		window.seek_generation = self.preview_seek_generation;
-		if window.sequence != node_id
-			|| window.generation != self.preview_generation
-			|| jumped
-		{
+		if window.sequence != node_id || window.generation != self.preview_generation || jumped {
 			for (_, task) in std::mem::take(&mut window.requests) {
 				task.cancel();
 				window.retired.push(task);
@@ -2352,7 +2348,9 @@ impl RealEngine {
 		if project.node_kind(node) != Some(quercus_engine_rs::node::NodeKind::Footage) {
 			return None;
 		}
-		let filename = project.footage_filename(node).filter(|filename| !filename.is_empty())?;
+		let filename = project
+			.footage_filename(node)
+			.filter(|filename| !filename.is_empty())?;
 		let (cache_mode, cache_path) = project.cache_location();
 		let cache_dir = (cache_mode != 0).then_some(cache_path);
 		let path = thumbnail_path(cache_dir.as_deref(), &filename);
@@ -2522,7 +2520,10 @@ impl RealEngine {
 					&& status.state != quercus_engine_rs::codec::ProxyState::Ready
 					&& status.state != quercus_engine_rs::codec::ProxyState::Failed
 					&& (!status.has_proxy || status.enabled)
-					&& self.proxy_runs.iter().all(|run| run.footage != footage.id.raw())
+					&& self
+						.proxy_runs
+						.iter()
+						.all(|run| run.footage != footage.id.raw())
 			})
 			.map(|footage| footage.id.raw())
 			.collect();
@@ -2742,16 +2743,15 @@ impl RealEngine {
 		);
 
 		// (node, track, list, track index, placement, speed, old speed).
-		let mut placements: Vec<(NodeId, NodeId, NodeId, i32, Rational, f64, f64)> =
-			vec![(
-				reference.node,
-				reference.track,
-				reference.list,
-				reference.track_index,
-				reference.block_in,
-				1.0,
-				reference.speed,
-			)];
+		let mut placements: Vec<(NodeId, NodeId, NodeId, i32, Rational, f64, f64)> = vec![(
+			reference.node,
+			reference.track,
+			reference.list,
+			reference.track_index,
+			reference.block_in,
+			1.0,
+			reference.speed,
+		)];
 
 		for (i, target) in targets.iter().enumerate() {
 			if i == ref_index {
@@ -2935,9 +2935,8 @@ impl RealEngine {
 			let transfer = project
 				.setting("outputtransfer")
 				.unwrap_or_else(|| "srgb".to_string());
-			let _ = quercus_engine_rs::state::color_set_pipeline_settings(
-				&working, &gamut, &transfer,
-			);
+			let _ =
+				quercus_engine_rs::state::color_set_pipeline_settings(&working, &gamut, &transfer);
 		}
 		// The inline (test) render backend's node-graph source: the live
 		// project, so preview frames evaluate through the traverser just
@@ -3021,8 +3020,7 @@ impl RealEngine {
 	/// (the file may have moved since the project was saved).
 	fn apply_project_color_config(project: Option<&ProjectRef>) {
 		let stored = project.and_then(|p| p.setting(PROJECT_SETTING_OCIO_CONFIG));
-		let applied =
-			quercus_engine_rs::state::color_set_up_default_config(stored.as_deref());
+		let applied = quercus_engine_rs::state::color_set_up_default_config(stored.as_deref());
 		if let Err(e) = applied {
 			println!("[real engine] project OCIO config apply failed: {e}");
 			let _ = quercus_engine_rs::state::color_set_up_default_config(None);
@@ -3085,11 +3083,7 @@ impl RealEngine {
 		// pool to what fits now; the size change on the OTHER sequence's
 		// update re-expands it.
 		let fps = (rate.num as f64 / rate.den.max(1) as f64).round().max(1.0) as u32;
-		quercus_engine_rs::render::manager_set_workspace_size(
-			width as i32,
-			height as i32,
-			fps,
-		);
+		quercus_engine_rs::render::manager_set_workspace_size(width as i32, height as i32, fps);
 		// Stage 6b: keep the OFX normalised-coordinate default conversion in
 		// sync with the current sequence's extent.
 		crate::oakui::ofx::update_project_extent(width as f64, height as f64);
@@ -3129,14 +3123,24 @@ impl RealEngine {
 			// list is displayed reversed, so an appended track lands on
 			// top), audio tracks grow downward (list order = display
 			// order, so an appended track lands at the bottom).
-			for kind in [DomainTrackKind::Video, DomainTrackKind::Audio, DomainTrackKind::Subtitle] {
+			for kind in [
+				DomainTrackKind::Video,
+				DomainTrackKind::Audio,
+				DomainTrackKind::Subtitle,
+			] {
 				let tracks = graphops::track_ids(&project, seq, kind);
 				let ordered: Box<dyn Iterator<Item = (usize, &NodeId)>> = match kind {
 					DomainTrackKind::Audio => Box::new(tracks.iter().enumerate()),
 					_ => Box::new(tracks.iter().enumerate().rev()),
 				};
 				for (track_index, &track_id) in ordered {
-					out.push(Self::snapshot_track(&project, track_id, kind, track_index, tb));
+					out.push(Self::snapshot_track(
+						&project,
+						track_id,
+						kind,
+						track_index,
+						tb,
+					));
 				}
 			}
 		}
@@ -3196,9 +3200,7 @@ impl RealEngine {
 			.enumerate()
 			.filter_map(|(clip_index, &block)| {
 				let (in_r, out_r, media_r) = graphops::clip_range(project, block)?;
-				let to_ts = |r: Rational| {
-					tb.map(|tb| graphops::rational_to_ts(r, tb)).unwrap_or(0)
-				};
+				let to_ts = |r: Rational| tb.map(|tb| graphops::rational_to_ts(r, tb)).unwrap_or(0);
 				let wedge = |w: Option<Rational>| w.map(|r| Frame(to_ts(r)));
 				let (head, tail) = widths.get(&block).copied().unwrap_or((None, None));
 				let is_adjustment = project.node_kind(block) == Some(NodeKind::Adjustment);
@@ -3348,11 +3350,10 @@ impl RealEngine {
 		if matches!(
 			project.node_kind(node),
 			Some(NodeKind::Clip | NodeKind::Gap | NodeKind::Transition | NodeKind::Adjustment)
-		)
-			&& self
-				.tracks
-				.iter()
-				.any(|t| t.clips.iter().any(|c| c.id.0 == ident))
+		) && self
+			.tracks
+			.iter()
+			.any(|t| t.clips.iter().any(|c| c.id.0 == ident))
 		{
 			return (Some(ClipId(ident)), None);
 		}
@@ -3367,8 +3368,7 @@ impl RealEngine {
 					project.node_kind(block),
 					Some(
 						NodeKind::Clip
-							| NodeKind::Gap
-							| NodeKind::Transition
+							| NodeKind::Gap | NodeKind::Transition
 							| NodeKind::Adjustment
 					)
 				) {
@@ -3786,7 +3786,11 @@ impl NodeGraphDataSource for RealEngine {
 		}
 	}
 
-	fn can_connect(&self, from: crate::widgets::node_graph::PortId, to: crate::widgets::node_graph::PortId) -> bool {
+	fn can_connect(
+		&self,
+		from: crate::widgets::node_graph::PortId,
+		to: crate::widgets::node_graph::PortId,
+	) -> bool {
 		let (Some(project), Some(sequence)) = (self.project_ref(), self.sequence) else {
 			return false;
 		};
@@ -4034,7 +4038,8 @@ impl AppEngine for RealEngine {
 		let (Some(project), Some(seq)) = (self.project.clone(), self.sequence) else {
 			return;
 		};
-		let internal = quercus_engine_rs::node::internal_height_from_pixels(f32::from(height) as i32);
+		let internal =
+			quercus_engine_rs::node::internal_height_from_pixels(f32::from(height) as i32);
 		let ids: Vec<NodeId> = [
 			DomainTrackKind::Video,
 			DomainTrackKind::Audio,
@@ -4244,11 +4249,12 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = session.execute(EditCommand::EffectSetEnabled {
-					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
-					enabled: *enabled,
-				})
-				.map(|_| ());
+				let result = session
+					.execute(EditCommand::EffectSetEnabled {
+						effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
+						enabled: *enabled,
+					})
+					.map(|_| ());
 				self.apply_edit(result, "toggle effect", cx);
 			}
 			EffectStackEvent::ExpansionToggled { effect, expanded } => {
@@ -4262,7 +4268,8 @@ impl AppEngine for RealEngine {
 				cx.notify();
 			}
 			EffectStackEvent::RemoveRequested(id) => {
-				let (Some(session), Some(host)) = (self.editor_session(), self.selected_clip_node())
+				let (Some(session), Some(host)) =
+					(self.editor_session(), self.selected_clip_node())
 				else {
 					cx.notify();
 					return;
@@ -4271,15 +4278,17 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = session.execute(EditCommand::EffectRemove {
-					host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
-					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
-				})
-				.map(|_| ());
+				let result = session
+					.execute(EditCommand::EffectRemove {
+						host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
+						effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
+					})
+					.map(|_| ());
 				self.apply_edit(result, "remove effect", cx);
 			}
 			EffectStackEvent::ReorderRequested { effect, new_index } => {
-				let (Some(session), Some(host)) = (self.editor_session(), self.selected_clip_node())
+				let (Some(session), Some(host)) =
+					(self.editor_session(), self.selected_clip_node())
 				else {
 					cx.notify();
 					return;
@@ -4288,12 +4297,13 @@ impl AppEngine for RealEngine {
 					cx.notify();
 					return;
 				};
-				let result = session.execute(EditCommand::EffectMove {
-					host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
-					effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
-					new_index: *new_index,
-				})
-				.map(|_| ());
+				let result = session
+					.execute(EditCommand::EffectMove {
+						host: quercus_engine_rs::node::NodeId::from_raw(host.raw()),
+						effect: quercus_engine_rs::node::NodeId::from_raw(node.raw()),
+						new_index: *new_index,
+					})
+					.map(|_| ());
 				self.apply_edit(result, "reorder effect", cx);
 			}
 			EffectStackEvent::AddRequested { index } => {
@@ -4628,9 +4638,10 @@ impl AppEngine for RealEngine {
 			}
 			TimelineEvent::TrackHeightChanged { track, height } => {
 				if let (Some(t), Some(project)) = (self.tracks.get(*track), self.project.clone()) {
-					let internal = quercus_engine_rs::node::internal_height_from_pixels(
-						f32::from(*height) as i32,
-					);
+					let internal = quercus_engine_rs::node::internal_height_from_pixels(f32::from(
+						*height,
+					)
+						as i32);
 					graphops::set_track_height(&project, t.track, internal);
 					self.rebuild_timeline();
 				}
@@ -5112,13 +5123,8 @@ impl AppEngine for RealEngine {
 		let Some((in_point, out_point)) = self.workarea() else {
 			return;
 		};
-		let result = graphops::delete_area(
-			&project,
-			seq,
-			in_point.0.max(0),
-			out_point.0.max(0),
-			ripple,
-		);
+		let result =
+			graphops::delete_area(&project, seq, in_point.0.max(0), out_point.0.max(0), ripple);
 		self.apply_edit(
 			result,
 			if ripple {
@@ -5264,11 +5270,7 @@ impl AppEngine for RealEngine {
 		cx.notify();
 	}
 
-	fn import_subtitles(
-		&mut self,
-		path: PathBuf,
-		cx: &mut Context<Self>,
-	) -> Result<usize, String> {
+	fn import_subtitles(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<usize, String> {
 		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
@@ -5378,10 +5380,7 @@ impl AppEngine for RealEngine {
 		Ok(())
 	}
 
-	fn subtitle_style(
-		&self,
-		clip: u64,
-	) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
+	fn subtitle_style(&self, clip: u64) -> Option<quercus_engine_rs::editor::SubtitleStyle> {
 		let session = self.editor_session()?;
 		session.subtitle_style(quercus_engine_rs::node::NodeId::from_raw(clip))
 	}
@@ -5456,10 +5455,7 @@ impl AppEngine for RealEngine {
 		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
-		if !session.set_subtitle_style(
-			quercus_engine_rs::node::NodeId::from_raw(clip),
-			style,
-		) {
+		if !session.set_subtitle_style(quercus_engine_rs::node::NodeId::from_raw(clip), style) {
 			return Err("failed to apply subtitle style".into());
 		}
 		self.rebuild_timeline();
@@ -5498,10 +5494,8 @@ impl AppEngine for RealEngine {
 		let Some(session) = self.editor_session() else {
 			return Err("no project open".into());
 		};
-		if !session.remove_clip_audio_effect(
-			quercus_engine_rs::node::NodeId::from_raw(clip),
-			index,
-		) {
+		if !session.remove_clip_audio_effect(quercus_engine_rs::node::NodeId::from_raw(clip), index)
+		{
 			return Err("failed to remove audio effect".into());
 		}
 		self.rebuild_timeline();
@@ -5651,8 +5645,7 @@ impl AppEngine for RealEngine {
 		// Text entry drop: a GENERATOR clip — the clip reads the text
 		// node's output through `tex_in` instead of decoding media.
 		let is_sequence = project.node_kind(footage) == Some(NodeKind::Sequence);
-		let is_text =
-			graphops::node_type_id(&project, footage) == graphops::TEXT_FOOTAGE_TYPE_ID;
+		let is_text = graphops::node_type_id(&project, footage) == graphops::TEXT_FOOTAGE_TYPE_ID;
 		if is_sequence {
 			self.drop_sequence_entry(&project, footage, track_index, time, cx);
 			return;
@@ -5968,8 +5961,7 @@ impl AppEngine for RealEngine {
 		// refuses an invalid config the same way). Applying is the
 		// process-wide color config reload plus a full frame invalidation.
 		let path = (!trimmed.is_empty()).then_some(trimmed.as_str());
-		quercus_engine_rs::state::color_set_up_default_config(path)
-			.map_err(|e| e.to_string())?;
+		quercus_engine_rs::state::color_set_up_default_config(path).map_err(|e| e.to_string())?;
 		if trimmed.is_empty() {
 			project.unset_setting(PROJECT_SETTING_OCIO_CONFIG);
 		} else {
@@ -6021,7 +6013,8 @@ impl AppEngine for RealEngine {
 		let Some(project) = self.project_ref() else {
 			return (working_default, gamut_default, transfer_default);
 		};
-		let get = |key: &str, default: &str| project.setting(key).unwrap_or_else(|| default.to_string());
+		let get =
+			|key: &str, default: &str| project.setting(key).unwrap_or_else(|| default.to_string());
 		(
 			get("workingcolorspace", &working_default),
 			get("outputgamut", &gamut_default),
@@ -6044,9 +6037,7 @@ impl AppEngine for RealEngine {
 		project.set_setting("outputtransfer", &transfer);
 		// The app-side transforms read the process global; the workers pick
 		// the new settings up with the next graph upload.
-		let _ = quercus_engine_rs::state::color_set_pipeline_settings(
-			&working, &gamut, &transfer,
-		);
+		let _ = quercus_engine_rs::state::color_set_pipeline_settings(&working, &gamut, &transfer);
 		// The workers derive their pipeline colors from the uploaded project
 		// snapshot; a settings change alone does not bump the undo-stack
 		// revision (the manager dedups re-uploads on it), so push an explicit
@@ -6311,12 +6302,10 @@ impl AppEngine for RealEngine {
 				.copied();
 			let next = index.and_then(|i| blocks.get(i + 1)).copied();
 			let prev_touch = prev.is_some_and(|b| {
-				project.node_kind(b) == Some(NodeKind::Clip)
-					&& project.block_out(b) == in_r
+				project.node_kind(b) == Some(NodeKind::Clip) && project.block_out(b) == in_r
 			});
 			let next_touch = next.is_some_and(|b| {
-				project.node_kind(b) == Some(NodeKind::Clip)
-					&& project.block_in(b) == out_r
+				project.node_kind(b) == Some(NodeKind::Clip) && project.block_in(b) == out_r
 			});
 			// The default transition's half-length, one frame at least.
 			let fps = tb.1 as f64 / tb.0.max(1) as f64;
@@ -6435,7 +6424,11 @@ impl AppEngine for RealEngine {
 				})?
 			}
 		};
-		self.proxy_runs.push(ProxyRun { footage: id, session, task });
+		self.proxy_runs.push(ProxyRun {
+			footage: id,
+			session,
+			task,
+		});
 		cx.notify();
 		Ok(())
 	}
@@ -6541,9 +6534,9 @@ impl AppEngine for RealEngine {
 	fn proxy_custom_params(&self, id: u64) -> Option<super::engine::ProxyParamsUi> {
 		let session = self.editor_session()?;
 		let node = graphops::id_of(id)?;
-		let params = session.project().footage_custom_proxy_params(
-			quercus_engine_rs::node::NodeId::from_raw(node.raw()),
-		)?;
+		let params = session
+			.project()
+			.footage_custom_proxy_params(quercus_engine_rs::node::NodeId::from_raw(node.raw()))?;
 		Some(proxy_ui_from_sdk(&params))
 	}
 
@@ -6592,14 +6585,17 @@ impl AppEngine for RealEngine {
 			return eligibility;
 		};
 		for clip in clips {
-			let Some(info) = session.clip_sync_info(quercus_engine_rs::node::NodeId::from_raw(clip.0)) else {
+			let Some(info) =
+				session.clip_sync_info(quercus_engine_rs::node::NodeId::from_raw(clip.0))
+			else {
 				continue;
 			};
 			if info.has_source_start_time {
 				eligibility.source_time += 1;
 			}
 			if let Some(waveform) = cache.get(clip.0) {
-				if super::waveformsync::waveform_sync_eligible(&waveform, info.media_length_seconds) {
+				if super::waveformsync::waveform_sync_eligible(&waveform, info.media_length_seconds)
+				{
 					eligibility.waveform += 1;
 				}
 			}
@@ -6960,7 +6956,9 @@ impl AppEngine for RealEngine {
 				if project.node_kind(node) != Some(NodeKind::Footage) {
 					return Err("angle is not footage".to_string());
 				}
-				let filename = project.footage_filename(node).ok_or("angle is not footage")?;
+				let filename = project
+					.footage_filename(node)
+					.ok_or("angle is not footage")?;
 				out.push((entry.id, filename));
 			}
 			out
@@ -7196,7 +7194,6 @@ impl RealEngine {
 			self.apply_edit(Ok(()), "drop sequence", cx);
 		}
 	}
-
 }
 
 // ---------------------------------------------------------------------------
@@ -7262,10 +7259,9 @@ impl RealEngine {
 		let Some(session) = self.editor_session() else {
 			return None;
 		};
-		let params = session.project().footage_video_params(
-			quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
-			0,
-		);
+		let params = session
+			.project()
+			.footage_video_params(quercus_engine_rs::node::NodeId::from_raw(footage.raw()), 0);
 		match params {
 			Some(_) => match session.execute(EditCommand::CreateSequenceFromFootage {
 				footage: quercus_engine_rs::node::NodeId::from_raw(footage.raw()),
@@ -7738,7 +7734,10 @@ mod session_smoke_tests {
 		assert_eq!(nearest_ready_preview_frame(&slots, 32), Some(40));
 		assert_eq!(nearest_ready_preview_frame(&slots, 5), Some(10));
 		assert_eq!(nearest_ready_preview_frame(&slots, 50), None);
-		assert_eq!(nearest_ready_preview_frame(&BTreeMap::<i64, ()>::new(), 0), None);
+		assert_eq!(
+			nearest_ready_preview_frame(&BTreeMap::<i64, ()>::new(), 0),
+			None
+		);
 	}
 
 	/// The live SDK session survives a full open → import → undo/redo →
@@ -7754,7 +7753,10 @@ mod session_smoke_tests {
 		cx.update(|app| {
 			engine.update(app, |engine, cx| engine.new_project(cx));
 			engine.update(app, |engine, cx| {
-				assert!(engine.current_sequence_id().is_some(), "new project has a sequence");
+				assert!(
+					engine.current_sequence_id().is_some(),
+					"new project has a sequence"
+				);
 				assert!(engine.track_count() > 0, "default track layout");
 				let before = engine.history_entries().len();
 				engine
@@ -7825,8 +7827,8 @@ mod session_smoke_tests {
 
 		let project = graphops::create_project();
 		let seq = graphops::create_sequence(&project, "Render E2E");
-		let tb = graphops::sequence_time_base(&project, seq)
-			.expect("the sequence has a frame rate");
+		let tb =
+			graphops::sequence_time_base(&project, seq).expect("the sequence has a frame rate");
 
 		// The app's proxy size: sequence aspect (default 1920x1080) scaled
 		// to a 480px long edge.
@@ -7860,8 +7862,7 @@ mod session_smoke_tests {
 		// black). The media is program-generated.
 		let media =
 			std::env::temp_dir().join(format!("oakapp_e2e_media_{}.mp4", std::process::id()));
-		crate::testmedia::write_test_clip(&media, 64, 64, 10, 10)
-			.expect("generate e2e test media");
+		crate::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate e2e test media");
 		let footage = graphops::import_footage(&project, &media).expect("import_footage");
 		graphops::add_track(&project, seq, DomainTrackKind::Video).expect("add a video track");
 		// Clip covering [0, 10) frames at the sequence's rate.
@@ -7890,10 +7891,10 @@ mod session_smoke_tests {
 		);
 
 		// A second frame at a later timestamp renders too.
-		assert!(crate::oakui::renderops::render_sequence_frame(
-			&project, seq, 30, tb, 480, 270, None
-		)
-		.is_ok());
+		assert!(
+			crate::oakui::renderops::render_sequence_frame(&project, seq, 30, tb, 480, 270, None)
+				.is_ok()
+		);
 
 		// Invalid geometry is rejected.
 		assert!(
@@ -7974,8 +7975,7 @@ mod session_smoke_tests {
 
 		let media =
 			std::env::temp_dir().join(format!("oakapp_engine_import_{}.mp4", std::process::id()));
-		crate::testmedia::write_test_clip(&media, 64, 64, 10, 10)
-			.expect("generate e2e test media");
+		crate::testmedia::write_test_clip(&media, 64, 64, 10, 10).expect("generate e2e test media");
 		let imported = cx.update(|app| {
 			engine.update(app, |engine, cx| engine.import_footage(media.clone(), cx))
 		});
@@ -8024,7 +8024,13 @@ mod session_smoke_tests {
 				.expect("imported footage entry")
 				.id;
 			engine.update(app, |engine, cx| {
-				engine.drop_footage(footage, crate::widgets::timeline::TrackKind::Video, 0, Frame::ZERO, cx)
+				engine.drop_footage(
+					footage,
+					crate::widgets::timeline::TrackKind::Video,
+					0,
+					Frame::ZERO,
+					cx,
+				)
 			});
 			let clip = engine
 				.read(app)
@@ -8047,8 +8053,14 @@ mod session_smoke_tests {
 			let (from, base, blend, merge) = {
 				let engine = engine.read(app);
 				let nodes = engine.nodes();
-				let footage = nodes.iter().find(|node| node.id.0 == footage).expect("footage card");
-				let merge_node = nodes.iter().find(|node| node.title == "Merge").expect("merge card");
+				let footage = nodes
+					.iter()
+					.find(|node| node.id.0 == footage)
+					.expect("footage card");
+				let merge_node = nodes
+					.iter()
+					.find(|node| node.title == "Merge")
+					.expect("merge card");
 				(
 					footage.outputs[0].id,
 					merge_node.inputs[0].id,
@@ -8058,11 +8070,17 @@ mod session_smoke_tests {
 			};
 			assert!(engine.read(app).can_connect(from, base));
 			engine.update(app, |engine, cx| {
-				engine.apply_node_graph_event(&NodeGraphEvent::ConnectionRequested { from, to: base }, cx)
+				engine.apply_node_graph_event(
+					&NodeGraphEvent::ConnectionRequested { from, to: base },
+					cx,
+				)
 			});
 			assert!(engine.read(app).can_connect(from, blend));
 			engine.update(app, |engine, cx| {
-				engine.apply_node_graph_event(&NodeGraphEvent::ConnectionRequested { from, to: blend }, cx)
+				engine.apply_node_graph_event(
+					&NodeGraphEvent::ConnectionRequested { from, to: blend },
+					cx,
+				)
 			});
 			let edges = engine.read(app).edges();
 			assert_eq!(edges.iter().filter(|edge| edge.to_node == merge).count(), 2);

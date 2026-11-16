@@ -65,7 +65,12 @@ fn temp_media(tag: &str) -> std::path::PathBuf {
 /// Opens a project with one video track holding one clip at t=0 (10 s).
 /// Returns `(track id, clip id)`.
 fn seed(backend: &mut MockBackend) -> (String, String) {
-	execute(backend, "project.open", json!({"name": "replan", "fps": 30})).expect("open");
+	execute(
+		backend,
+		"project.open",
+		json!({"name": "replan", "fps": 30}),
+	)
+	.expect("open");
 	let media = temp_media("replan");
 	let out = execute(
 		backend,
@@ -92,12 +97,7 @@ fn clips(overview: &Value) -> Vec<Value> {
 		.as_array()
 		.expect("tracks")
 		.iter()
-		.flat_map(|track| {
-			track["clips"]
-				.as_array()
-				.cloned()
-				.unwrap_or_default()
-		})
+		.flat_map(|track| track["clips"].as_array().cloned().unwrap_or_default())
 		.collect()
 }
 
@@ -139,7 +139,10 @@ fn a_missing_clip_is_aborted_fed_back_and_the_retry_succeeds() {
 	assert_eq!(backend.serialize(), state);
 	assert_eq!(backend.undo_depth(), depth);
 	// Feedback keeps the error object and adds the two advisory keys.
-	assert!(feedback.retryable, "a stale id is retryable after a re-read");
+	assert!(
+		feedback.retryable,
+		"a stale id is retryable after a re-read"
+	);
 	assert!(feedback.hint.contains("overview"), "{}", feedback.hint);
 	let wire = feedback.to_json();
 	assert_eq!(wire["code"], "NOT_FOUND");
@@ -148,7 +151,11 @@ fn a_missing_clip_is_aborted_fed_back_and_the_retry_succeeds() {
 	assert!(wire["hint"].as_str().unwrap().contains("overview"));
 	assert_eq!(
 		hook.failures,
-		vec![("timeline.split_clip".to_string(), "NOT_FOUND".to_string(), true)]
+		vec![(
+			"timeline.split_clip".to_string(),
+			"NOT_FOUND".to_string(),
+			true
+		)]
 	);
 
 	// --- re-plan: follow the hint -------------------------------------
@@ -173,9 +180,7 @@ fn a_missing_clip_is_aborted_fed_back_and_the_retry_succeeds() {
 		&mut hook,
 	);
 	let new_clip = match retry {
-		GatedOutcome::Applied { result } => {
-			result["new_clip"].as_str().unwrap().to_string()
-		}
+		GatedOutcome::Applied { result } => result["new_clip"].as_str().unwrap().to_string(),
 		other => panic!("the corrected retry must succeed, got {other:?}"),
 	};
 	assert_ne!(new_clip, clip);
@@ -187,14 +192,21 @@ fn a_missing_clip_is_aborted_fed_back_and_the_retry_succeeds() {
 	let after = clips(&execute(&mut backend, "project.get_overview", json!({})).unwrap());
 	assert_eq!(after.len(), 2, "the clip was actually split");
 	// The failed attempt left no history row behind (depth +2, not +3).
-	assert_eq!(hook.failures.len(), 1, "a success does not report a failure");
+	assert_eq!(
+		hook.failures.len(),
+		1,
+		"a success does not report a failure"
+	);
 
 	assert_ne!(
 		backend.serialize_timeline(),
 		snapshot,
 		"the successful split changed the timeline"
 	);
-	assert!(hook.gate.is_empty(), "Policy::Auto must not consult the gate");
+	assert!(
+		hook.gate.is_empty(),
+		"Policy::Auto must not consult the gate"
+	);
 	let _ = track;
 }
 
@@ -254,8 +266,14 @@ fn a_conflicting_placement_is_fed_back_and_the_retry_succeeds() {
 		&mut hook,
 	);
 	assert!(matches!(retry, GatedOutcome::Applied { .. }), "{retry:?}");
-	assert_eq!(clips(&execute(&mut backend, "project.get_overview", json!({})).unwrap()).len(), 2);
-	assert!(hook.gate.is_empty(), "Policy::Auto must not consult the gate");
+	assert_eq!(
+		clips(&execute(&mut backend, "project.get_overview", json!({})).unwrap()).len(),
+		2
+	);
+	assert!(
+		hook.gate.is_empty(),
+		"Policy::Auto must not consult the gate"
+	);
 }
 
 #[test]
@@ -281,8 +299,15 @@ fn a_user_rejection_is_not_fed_back_as_a_failure() {
 		}
 		other => panic!("expected a rejection, got {other:?}"),
 	}
-	assert!(hook.failures.is_empty(), "a rejection is a decision, not a failure");
-	assert_eq!(backend.undo_depth(), depth, "the rejected group was rolled back");
+	assert!(
+		hook.failures.is_empty(),
+		"a rejection is a decision, not a failure"
+	);
+	assert_eq!(
+		backend.undo_depth(),
+		depth,
+		"the rejected group was rolled back"
+	);
 
 	// The model can re-plan and be approved this time.
 	let retry = dispatch::execute_with(

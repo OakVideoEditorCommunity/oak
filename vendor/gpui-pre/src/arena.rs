@@ -1,3 +1,4 @@
+use alloc::Layout;
 use std::{
     alloc::{self, handle_alloc_error},
     cell::Cell,
@@ -30,7 +31,7 @@ impl Drop for Chunk {
         unsafe {
             let chunk_size = self.end.offset_from_unsigned(self.start);
             // SAFETY: This succeeded during allocation.
-            let layout = alloc::Layout::from_size_align_unchecked(chunk_size, 1);
+            let layout = Layout::from_size_align_unchecked(chunk_size, 1);
             alloc::dealloc(self.start, layout);
         }
     }
@@ -39,7 +40,7 @@ impl Drop for Chunk {
 impl Chunk {
     fn new(chunk_size: NonZeroUsize) -> Self {
         // this only fails if chunk_size is unreasonably huge
-        let layout = alloc::Layout::from_size_align(chunk_size.get(), 1).unwrap();
+        let layout = Layout::from_size_align(chunk_size.get(), 1).unwrap();
         let start = unsafe { alloc::alloc(layout) };
         if start.is_null() {
             handle_alloc_error(layout);
@@ -171,7 +172,7 @@ impl Arena {
             unsafe { std::ptr::drop_in_place(ptr.cast::<T>()) };
         }
 
-        let layout = alloc::Layout::new::<T>();
+        let layout = Layout::new::<T>();
         let current_chunk = &mut self.chunks[self.current_chunk_index];
         let ptr = if let Some(ptr) = current_chunk.allocate(layout) {
             ptr.as_ptr()

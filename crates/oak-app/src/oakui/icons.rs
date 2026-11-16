@@ -26,7 +26,10 @@
 //!
 //! [`OakTheme`]: crate::widgets::theme::OakTheme
 
+use crate::widgets;
+use std::env;
 use std::path::PathBuf;
+use std::sync;
 
 use gpui_kit::App;
 
@@ -68,7 +71,7 @@ pub const ICON_FF: &str = "ff";
 /// is not checked here; a missing PNG renders as a blank button, so callers
 /// should tolerate an absent path.
 pub fn icon_path(name: &str, cx: &App) -> PathBuf {
-	let theme = crate::widgets::theme::current_theme(cx);
+	let theme = widgets::theme::current_theme(cx);
 	let family = if theme.name == "Olive Dark" {
 		"dark"
 	} else {
@@ -81,11 +84,11 @@ pub fn icon_path(name: &str, cx: &App) -> PathBuf {
 /// i18n pack search in `crate::i18n`). Cached: one process resolves one
 /// directory.
 fn icon_root() -> &'static PathBuf {
-	static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+	static ROOT: sync::OnceLock<PathBuf> = sync::OnceLock::new();
 	ROOT.get_or_init(|| {
 		let dev = || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons");
 		let mut candidates = vec![dev()];
-		if let Ok(exe) = std::env::current_exe() {
+		if let Ok(exe) = env::current_exe() {
 			if let Some(dir) = exe.parent() {
 				candidates.push(dir.join("icons"));
 				candidates.push(dir.join("assets/icons"));
@@ -110,10 +113,7 @@ fn icon_root() -> &'static PathBuf {
 /// transport bar) resolve the same theme-aware paths. Call at startup before
 /// any window renders; re-registering after a theme switch is harmless.
 pub fn init(cx: &mut App) {
-	crate::widgets::icons::set_resolver(
-		std::sync::Arc::new(|name, cx| Some(icon_path(name, cx))),
-		cx,
-	);
+	widgets::icons::set_resolver(sync::Arc::new(|name, cx| Some(icon_path(name, cx))), cx);
 }
 
 #[cfg(test)]
@@ -169,7 +169,10 @@ mod tests {
 				"dark theme → dark family, got {dark:?}"
 			);
 
-			crate::widgets::theme::apply_theme(app, &crate::widgets::theme::OakTheme::olive_light());
+			crate::widgets::theme::apply_theme(
+				app,
+				&crate::widgets::theme::OakTheme::olive_light(),
+			);
 			let light = icon_path(ICON_PLAY, app);
 			assert!(
 				light.ends_with("light/play.png"),

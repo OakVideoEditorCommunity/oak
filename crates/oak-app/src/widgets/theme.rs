@@ -8,6 +8,8 @@
 //! stores the full theme in a [`ThemeGlobal`] for widgets that want the
 //! extended fields (accent, link, alternate base).
 
+use gpui_kit::Hsla;
+use gpui_kit::component;
 use gpui_kit::{App, Global, Rgba, colors::GlobalColors, rgb};
 use std::sync::Arc;
 
@@ -129,16 +131,16 @@ pub fn apply_theme(cx: &mut App, theme: &OakTheme) {
 	// light/dark theme loads; `Theme::update` (not `global_mut`) so the
 	// renderable tokens reconcile from the edited colors.
 	let dark = relative_luminance(theme.text) > relative_luminance(theme.base);
-	gpui_kit::component::theme::Theme::change(
+	component::theme::Theme::change(
 		if dark {
-			gpui_kit::component::theme::ThemeMode::Dark
+			component::theme::ThemeMode::Dark
 		} else {
-			gpui_kit::component::theme::ThemeMode::Light
+			component::theme::ThemeMode::Light
 		},
 		None,
 		cx,
 	);
-	gpui_kit::component::theme::Theme::update(cx, |component| {
+	component::theme::Theme::update(cx, |component| {
 		let colors = &mut component.colors;
 		colors.background = theme.base.into();
 		colors.foreground = theme.text.into();
@@ -216,7 +218,7 @@ pub fn neutral_hover(colors: &gpui_kit::colors::Colors) -> Rgba {
 /// solid accent is too loud for row-sized areas and would read as a
 /// selection change.
 pub fn row_hover(colors: &gpui_kit::colors::Colors) -> gpui_kit::Hsla {
-	gpui_kit::Hsla::from(colors.selected).opacity(0.3)
+	Hsla::from(colors.selected).opacity(0.3)
 }
 
 #[cfg(test)]

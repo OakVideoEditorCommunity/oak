@@ -84,7 +84,10 @@ mod tests {
 		let color = hsla(0.402, 0.385, 0.459, 1.0);
 
 		let plain = clip_body_color(color, false, true);
-		assert_eq!(plain.l, color.l, "an unselected enabled clip keeps its color");
+		assert_eq!(
+			plain.l, color.l,
+			"an unselected enabled clip keeps its color"
+		);
 		assert_eq!(plain.a, color.a);
 
 		let selected = clip_body_color(color, true, true);
@@ -358,7 +361,8 @@ impl RenderOnce for ClipElement {
 						// is dimmed.
 						let body_color =
 							clip_body_color(paint.color, paint.selected, paint.enabled);
-						window.paint_quad(fill(bounds, body_color).corner_radii(CLIP_CORNER_RADIUS));
+						window
+							.paint_quad(fill(bounds, body_color).corner_radii(CLIP_CORNER_RADIUS));
 
 						// Transition wedges: triangles tapering into the clip
 						// from each edge, capped at 40% of the body width so tiny
@@ -433,12 +437,8 @@ impl RenderOnce for ClipElement {
 						// the green selection outline).
 						if paint.multicam {
 							window.paint_quad(
-								outline(
-									bounds,
-									hsla(0.13, 0.9, 0.55, 1.0),
-									BorderStyle::Solid,
-								)
-								.corner_radii(CLIP_CORNER_RADIUS),
+								outline(bounds, hsla(0.13, 0.9, 0.55, 1.0), BorderStyle::Solid)
+									.corner_radii(CLIP_CORNER_RADIUS),
 							);
 							// Corner badge: a small triangle in the top-left
 							// corner, echoing a lens/record indicator.

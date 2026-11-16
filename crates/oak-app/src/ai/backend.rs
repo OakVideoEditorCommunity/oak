@@ -31,17 +31,19 @@
 //! **untested** until the real-engine task runs it.
 
 pub use oak_ai_tools::backend::{EngineBackend, EngineExt};
-use oak_ai_tools::error::{ToolError, CODE_BACKEND, CODE_INVALID_PARAMS, CODE_NOT_FOUND, CODE_STATE, CODE_UNSUPPORTED};
+use oak_ai_tools::error::{
+	CODE_BACKEND, CODE_INVALID_PARAMS, CODE_NOT_FOUND, CODE_STATE, CODE_UNSUPPORTED, ToolError,
+};
 pub use oak_ai_tools::mock::MockBackend;
 use oak_ai_tools::timecode::{Rat, TimeContext};
+use oak_ai_tools::tools;
 use oak_ai_tools::txn::TxnOps;
 use oak_extensions::host_services::{
-	AddEffectAtReq, AddMarkerReq, AddTrackReq, AddTransitionPlacedReq, HostError,
-	HostServices, MoveClipReq, PlaceClipReq, SetParamReq,
-	SplitClipReq, TransitionSide, TrimClipReq,
+	AddEffectAtReq, AddMarkerReq, AddTrackReq, AddTransitionPlacedReq, HostError, HostServices,
+	MoveClipReq, PlaceClipReq, SetParamReq, SplitClipReq, TransitionSide, TrimClipReq,
 };
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Real-engine backend: adapts any [`HostServices`] implementation to the
 /// tool face. Generic over the trait on purpose (lead's constraint): the
@@ -104,31 +106,31 @@ fn rat_arg(args: &Value, key: &str) -> Result<oak_extensions::host_services::Rat
 		.get(key)
 		.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, format!("missing field '{key}'")))?;
 	if let Some(obj) = value.as_object() {
-		let num = obj
-			.get("num")
-			.and_then(Value::as_i64)
-			.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.num' not an integer")))?;
-		let den = obj
-			.get("den")
-			.and_then(Value::as_i64)
-			.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.den' not an integer")))?;
+		let num = obj.get("num").and_then(Value::as_i64).ok_or_else(|| {
+			ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.num' not an integer"))
+		})?;
+		let den = obj.get("den").and_then(Value::as_i64).ok_or_else(|| {
+			ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.den' not an integer"))
+		})?;
 		let rat = Rat::new(num, den)?;
-		return Ok(oak_extensions::host_services::Rational::new(rat.num, rat.den));
+		return Ok(oak_extensions::host_services::Rational::new(
+			rat.num, rat.den,
+		));
 	}
 	if let Some(text) = value.as_str() {
 		let (num, den) = text
 			.split_once('/')
 			.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, format!("'{key}' not n/d")))?;
-		let num: i64 = num
-			.trim()
-			.parse()
-			.map_err(|_| ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.num' not an integer")))?;
-		let den: i64 = den
-			.trim()
-			.parse()
-			.map_err(|_| ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.den' not an integer")))?;
+		let num: i64 = num.trim().parse().map_err(|_| {
+			ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.num' not an integer"))
+		})?;
+		let den: i64 = den.trim().parse().map_err(|_| {
+			ToolError::new(CODE_INVALID_PARAMS, format!("'{key}.den' not an integer"))
+		})?;
 		let rat = Rat::new(num, den)?;
-		return Ok(oak_extensions::host_services::Rational::new(rat.num, rat.den));
+		return Ok(oak_extensions::host_services::Rational::new(
+			rat.num, rat.den,
+		));
 	}
 	Err(ToolError::new(
 		CODE_INVALID_PARAMS,
@@ -173,9 +175,7 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 				let probe = self.host.media_probe(&path).map_err(map_host)?;
 				rational_to_rat(&probe.fps)
 			}
-			TimeContext::Sequence(id)
-			| TimeContext::Clip(id)
-			| TimeContext::Track(id) => {
+			TimeContext::Sequence(id) | TimeContext::Clip(id) | TimeContext::Track(id) => {
 				// fps lives on the sequence; resolve it through the project
 				// info (TimelineStructure carries no rate).
 				let info = self.host.project_get_info().map_err(map_host)?;
@@ -228,7 +228,10 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 	// --- media ---------------------------------------------------------
 
 	fn media_probe(&mut self, args: &Value) -> Result<Value, ToolError> {
-		let probe = self.host.media_probe(arg(args, "path")?).map_err(map_host)?;
+		let probe = self
+			.host
+			.media_probe(arg(args, "path")?)
+			.map_err(map_host)?;
 		owned(&probe)
 	}
 
@@ -241,9 +244,9 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 			.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, "missing 'paths' array"))?;
 		let mut ids = Vec::new();
 		for path in paths {
-			let path = path
-				.as_str()
-				.ok_or_else(|| ToolError::new(CODE_INVALID_PARAMS, "'paths' entries must be strings"))?;
+			let path = path.as_str().ok_or_else(|| {
+				ToolError::new(CODE_INVALID_PARAMS, "'paths' entries must be strings")
+			})?;
 			ids.push(
 				self.host
 					.media_import_footage(path, self.txn.as_deref())
@@ -309,7 +312,7 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 				return Err(ToolError::new(
 					CODE_INVALID_PARAMS,
 					format!("unknown trim side '{other}'"),
-				))
+				));
 			}
 		};
 		let req = TrimClipReq {
@@ -352,7 +355,7 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 			other => {
 				return Err(ToolError::invalid_params(format!(
 					"side must be 'in' or 'out', got '{other}'"
-				)))
+				)));
 			}
 		};
 		let req = AddTransitionPlacedReq {
@@ -392,12 +395,13 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 	// --- nodes ---------------------------------------------------------
 
 	fn node_add_effect(&mut self, args: &Value) -> Result<Value, ToolError> {
-		let index = match args.get("index") {
-			None | Some(Value::Null) => None,
-			Some(v) => Some(v.as_u64().ok_or_else(|| {
-				ToolError::invalid_params("field 'index' must be an integer >= 0")
-			})? as usize),
-		};
+		let index =
+			match args.get("index") {
+				None | Some(Value::Null) => None,
+				Some(v) => Some(v.as_u64().ok_or_else(|| {
+					ToolError::invalid_params("field 'index' must be an integer >= 0")
+				})? as usize),
+			};
 		let req = AddEffectAtReq {
 			target: arg(args, "clip")?.to_string(),
 			// schema `effect` → host `type_id`.
@@ -446,7 +450,10 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 			// documented default square and let `max_size` scale it.
 			width: 320,
 			height: 180,
-			max_size: args.get("max_size").and_then(Value::as_u64).map(|v| v as usize),
+			max_size: args
+				.get("max_size")
+				.and_then(Value::as_u64)
+				.map(|v| v as usize),
 		};
 		let frame = self.host.render_get_frame(req).map_err(map_host)?;
 		owned(&frame)
@@ -479,7 +486,10 @@ impl<H: HostServices> EngineBackend for HostAdapter<H> {
 			preset: opt_arg(args, "preset").unwrap_or_default(),
 			range: None,
 		};
-		let job = self.host.export_start(req, self.txn.as_deref()).map_err(map_host)?;
+		let job = self
+			.host
+			.export_start(req, self.txn.as_deref())
+			.map_err(map_host)?;
 		owned(&job)
 	}
 
@@ -506,12 +516,16 @@ impl<H: HostServices> EngineExt for HostAdapter<H> {
 			.host
 			.sequence_get_settings(sequence.as_ref())
 			.map_err(map_host)?;
-		Ok(serde_json::to_value(&settings)
-			.map_err(|e| ToolError::new(oak_ai_tools::error::CODE_INTERNAL, format!("sequence settings encode: {e}")))?)
+		Ok(serde_json::to_value(&settings).map_err(|e| {
+			ToolError::new(
+				oak_ai_tools::error::CODE_INTERNAL,
+				format!("sequence settings encode: {e}"),
+			)
+		})?)
 	}
 
 	fn sequence_set_format(&mut self, args: Value) -> Result<Value, ToolError> {
-		let parsed = oak_ai_tools::tools::v2::sequence::parse_set_format(&args)?;
+		let parsed = tools::v2::sequence::parse_set_format(&args)?;
 		let req = oak_extensions::host_services::SetSequenceFormatReq {
 			sequence: parsed.sequence,
 			name: parsed.name,
@@ -526,8 +540,12 @@ impl<H: HostServices> EngineExt for HostAdapter<H> {
 			.host
 			.sequence_set_format(req, self.txn.as_deref())
 			.map_err(map_host)?;
-		let mut value = serde_json::to_value(&settings)
-			.map_err(|e| ToolError::new(oak_ai_tools::error::CODE_INTERNAL, format!("sequence settings encode: {e}")))?;
+		let mut value = serde_json::to_value(&settings).map_err(|e| {
+			ToolError::new(
+				oak_ai_tools::error::CODE_INTERNAL,
+				format!("sequence settings encode: {e}"),
+			)
+		})?;
 		if let Some(obj) = value.as_object_mut() {
 			// The AI reply must say the edit can be taken back (首辅 requirement).
 			obj.insert("undoable".to_string(), Value::Bool(true));

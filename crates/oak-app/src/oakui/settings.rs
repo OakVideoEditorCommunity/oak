@@ -87,7 +87,9 @@ pub fn set_stop_on_last(enabled: bool) {
 /// clamped, so this always returns a valid mode. Counterpart of
 /// [`set_waveform_mode`].
 pub fn waveform_mode() -> i32 {
-	Config::global().get_i64("ViewerWaveformMode", 0).clamp(0, 2) as i32
+	Config::global()
+		.get_i64("ViewerWaveformMode", 0)
+		.clamp(0, 2) as i32
 }
 
 /// Store the viewer's audio-waveform overlay mode.
@@ -109,11 +111,7 @@ pub fn set_waveform_mode(mode: i32) {
 /// when the user has not picked an OCIO config; it takes no input and always
 /// succeeds.
 pub fn default_project_color_settings() -> (String, String, String) {
-	(
-		"acescg".to_string(),
-		"srgb".to_string(),
-		"srgb".to_string(),
-	)
+	("acescg".to_string(), "srgb".to_string(), "srgb".to_string())
 }
 
 /// The proxy-generation parameters currently stored in the global config.

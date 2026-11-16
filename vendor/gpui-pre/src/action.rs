@@ -1,4 +1,6 @@
 // Modified for gpui-pre (snapshot of zed@93d7456): the `actions!` derive paths are crate-relative.
+use std::error;
+use std::result;
 use anyhow::{Context as _, Result};
 use collections::{HashMap, TypeIdHashMap};
 pub use gpui_macros::Action;
@@ -207,8 +209,8 @@ pub enum ActionBuildError {
     },
 }
 
-impl std::error::Error for ActionBuildError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for ActionBuildError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             ActionBuildError::NotFound { .. } => None,
             ActionBuildError::BuildError { error, .. } => error.source(),
@@ -353,7 +355,7 @@ impl ActionRegistry {
         &self,
         name: &str,
         params: Option<serde_json::Value>,
-    ) -> std::result::Result<Box<dyn Action>, ActionBuildError> {
+    ) -> result::Result<Box<dyn Action>, ActionBuildError> {
         let build_action = self
             .by_name
             .get(name)

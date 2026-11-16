@@ -14,6 +14,7 @@
 //! rewrites/filters/normalises a schema, turns this test red.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use oak_ai_mcp::server::Server;
@@ -29,7 +30,7 @@ fn schema_dir() -> PathBuf {
 /// Tool name -> raw schema document, read straight from disk.
 fn schema_files() -> Vec<(String, Value)> {
 	let dir = schema_dir();
-	let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
+	let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
 		.unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()))
 		.filter_map(|entry| entry.ok().map(|e| e.path()))
 		.filter(|path| path.extension().is_some_and(|ext| ext == "json"))
@@ -44,7 +45,7 @@ fn schema_files() -> Vec<(String, Value)> {
 				.expect("schema stem")
 				.to_string_lossy()
 				.to_string();
-			let text = std::fs::read_to_string(&path)
+			let text = fs::read_to_string(&path)
 				.unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()));
 			let value: Value = serde_json::from_str(&text)
 				.unwrap_or_else(|err| panic!("{} is not JSON: {err}", path.display()));
@@ -79,7 +80,10 @@ fn tools_list_over_mcp() -> Vec<Value> {
 			"params": {},
 		}))
 		.expect("tools/list is a request");
-	assert!(response.get("error").is_none(), "tools/list failed: {response}");
+	assert!(
+		response.get("error").is_none(),
+		"tools/list failed: {response}"
+	);
 	let tools = response["result"]["tools"]
 		.as_array()
 		.unwrap_or_else(|| panic!("tools/list result has no tools array: {response}"))
@@ -117,21 +121,39 @@ fn mcp_registry_and_schema_dir_are_sets_equal_with_count_22() {
 
 	// tools/list ⊆ registry (nothing invented by the MCP layer).
 	let invented: Vec<&String> = mcp_names.difference(&registry_names).collect();
-	assert!(invented.is_empty(), "tools/list names absent from the registry: {invented:?}");
+	assert!(
+		invented.is_empty(),
+		"tools/list names absent from the registry: {invented:?}"
+	);
 
 	// registry ⊆ tools/list (nothing hidden by the MCP layer).
 	let hidden: Vec<&String> = registry_names.difference(&mcp_names).collect();
-	assert!(hidden.is_empty(), "registry tools missing from tools/list: {hidden:?}");
+	assert!(
+		hidden.is_empty(),
+		"registry tools missing from tools/list: {hidden:?}"
+	);
 
 	// registry == schema files, both directions.
 	let unwired: Vec<&String> = registry_names.difference(&file_names).collect();
-	assert!(unwired.is_empty(), "registry tools without a frozen schema: {unwired:?}");
+	assert!(
+		unwired.is_empty(),
+		"registry tools without a frozen schema: {unwired:?}"
+	);
 	let orphans: Vec<&String> = file_names.difference(&registry_names).collect();
-	assert!(orphans.is_empty(), "frozen schemas with no registry entry: {orphans:?}");
+	assert!(
+		orphans.is_empty(),
+		"frozen schemas with no registry entry: {orphans:?}"
+	);
 
 	// Explicit full equality so a regression names the pair that broke.
-	assert_eq!(mcp_names, registry_names, "MCP face drifted from the registry");
-	assert_eq!(registry_names, file_names, "registry drifted from the schema dir");
+	assert_eq!(
+		mcp_names, registry_names,
+		"MCP face drifted from the registry"
+	);
+	assert_eq!(
+		registry_names, file_names,
+		"registry drifted from the schema dir"
+	);
 }
 
 #[test]
@@ -153,7 +175,10 @@ fn every_input_schema_is_the_frozen_document_verbatim() {
 			input_schema, file,
 			"'{name}': MCP inputSchema is not the frozen schema document"
 		);
-		assert_eq!(input_schema["type"], "object", "'{name}' inputSchema must be an object schema");
+		assert_eq!(
+			input_schema["type"], "object",
+			"'{name}' inputSchema must be an object schema"
+		);
 		assert_eq!(
 			input_schema["title"], name,
 			"'{name}': schema title must equal the tool name"
@@ -161,7 +186,10 @@ fn every_input_schema_is_the_frozen_document_verbatim() {
 
 		// The MCP `description` is the schema's own description, not a
 		// second hand-written blurb that could go stale.
-		let expected = file.get("description").and_then(Value::as_str).unwrap_or("");
+		let expected = file
+			.get("description")
+			.and_then(Value::as_str)
+			.unwrap_or("");
 		assert_eq!(
 			tool["description"].as_str().unwrap_or(""),
 			expected,

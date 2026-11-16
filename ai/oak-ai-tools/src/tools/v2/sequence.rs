@@ -37,9 +37,7 @@ pub struct SetFormat {
 /// it retry the same call until the round cap — exactly the 6-round failure
 /// this helper exists to prevent.
 fn shape_error(args: &Value, detail: String, example: &str) -> ToolError {
-	ToolError::invalid_params(format!(
-		"{detail}. Received: {args}. Send e.g. {example}"
-	))
+	ToolError::invalid_params(format!("{detail}. Received: {args}. Send e.g. {example}"))
 }
 
 /// A string field, also accepting a bare number (models quote numbers).
