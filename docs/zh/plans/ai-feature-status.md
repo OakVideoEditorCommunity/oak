@@ -209,7 +209,7 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 - commit：`e94d3707b2da60d75891e25873a6d8ab1932110f`，标题 `add(ai): freeze the T0 tool schema face`（作者 `fslong`），`66 files changed, 2329 insertions(+)`。
 - 范围：`ai/schema/`（22 tools + 40 samples + `method-map.md` + `test_schema.py` = 64 文件）、本台账、`.gitignore`（增补 `__pycache__/`、`*.pyc`）。
 - 提交前复验：`python3 ai/schema/test_schema.py` exit 0、`pass=524 fail=0`；`ai/schema` 当日 0 次改动（无并发污染）。
-- 未纳入：`ai/prescan/`（task-8 在办，见 10.2）、`ai/oak-ai-tools/`、`ai/oak-ai-mcp/`、`ai/agent/`、`docs/zh/plans/resolve21-oak-applicability.md`。
+- 未纳入：`ai/prescan/`（task-8 在办，见 10.2）、`ai/oak-ai-tools/`、`ai/oak-ai-mcp/`、`ai/agent/`、`resolve21-oak-applicability.md`。
 - `git show --stat HEAD` 尾部原文：
 
   ```
@@ -257,7 +257,7 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 ### 10.4 第四次提交：T5 MCP 薄封装入仓（2026-11-09 00:35）
 
 - commit：`dfd42eafaf1450e5af5e61043dffa53daf01764b`，标题 `feat(ai): add the T5 MCP thin wrapper with zero schema drift`（作者 `fslong`），`12 files changed, 7679 insertions(+), 6 deletions(-)`。
-- 范围：`ai/oak-ai-mcp/**` 11 文件（`Cargo.toml`、`Cargo.lock`、`.gitignore`、`README.md`、`src/{backend_select,lib,main,rpc,server}.rs`、`tests/{protocol,zero_drift}.rs`）+ 本台账；不含 `target/`（`ai/oak-ai-mcp/.gitignore:1` `/target/`）、`ai/agent/`、`docs/zh/plans/resolve21-oak-applicability.md`。
+- 范围：`ai/oak-ai-mcp/**` 11 文件（`Cargo.toml`、`Cargo.lock`、`.gitignore`、`README.md`、`src/{backend_select,lib,main,rpc,server}.rs`、`tests/{protocol,zero_drift}.rs`）+ 本台账；不含 `target/`（`ai/oak-ai-mcp/.gitignore:1` `/target/`）、`ai/agent/`、`resolve21-oak-applicability.md`。
 - 验收依据（两项门全过）：
   - task-12 独立验收 `/tmp/oak-reviews/mcp.md` **pass**：默认 features 干净构建 lib 20 + protocol 6 + zero_drift 3 = 29 全绿；协议链（initialize → tools/list → tools/call → 非法参数 → 未知工具）实测；删 `structuredContent` 消融 → 3 项红；`--backend sdk` 未构建时明确拒绝（exit 2，不静默降级）。
   - task-16 增量抽查 `/tmp/oak-reviews/t5-delta.md` **pass**：全量 **30/0/0**（回声断言加入后）；删版本回声 → 恰 `protocol_version_is_echoed_or_baselined` 红（protocol.rs:443）；O1 schema 目录缺失 → `tools/list` panic exit 101，README 段落逐字复现。
@@ -277,7 +277,7 @@ SDK 侧锚点均在 `crates/oak-engine-rust-sdk/src/`。结论列"可行"= 有�
 ### 10.5 第五次提交：T3 agent 核 + 两档记忆入仓（2026-11-09 00:38）
 
 - commit：`b8401b75bbb7d89511c4baf6292d2d6cb65d9ffe`，标题 `feat(ai): add the agent core with the three-layer context chain and memlite memory`（作者 `fslong`），`21 files changed, 3420 insertions(+), 7 deletions(-)`。
-- 范围：`ai/agent/**` 20 文件（`.gitignore`、`.pi/mcp.json`、`README.md`、`package.json`、`package-lock.json`、`context/{10-repo,20-project,task.example}.md`、`scripts/{build-mcp,context,lib,mcp-serve,oak-mem,smoke,start}.sh`、`tests/{stub-model-server.mjs,test.sh}`、`tests/fixtures/{memory-recall,memory-write,smoke}.json`）+ 本台账；**不含**被 `ai/agent/.gitignore` 挡下的生成物 `AGENTS.md`、`context/30-task.md`、`node_modules/`、`.agentdir/`，不含 `runs/` 产物，不含 `docs/zh/plans/resolve21-oak-applicability.md`。
+- 范围：`ai/agent/**` 20 文件（`.gitignore`、`.pi/mcp.json`、`README.md`、`package.json`、`package-lock.json`、`context/{10-repo,20-project,task.example}.md`、`scripts/{build-mcp,context,lib,mcp-serve,oak-mem,smoke,start}.sh`、`tests/{stub-model-server.mjs,test.sh}`、`tests/fixtures/{memory-recall,memory-write,smoke}.json`）+ 本台账；**不含**被 `ai/agent/.gitignore` 挡下的生成物 `AGENTS.md`、`context/30-task.md`、`node_modules/`、`.agentdir/`，不含 `runs/` 产物，不含 `resolve21-oak-applicability.md`。
 - 验收依据：task-15 独立验收 `/tmp/oak-reviews/t3-agent.md` **pass**（八项必查全绿）：smoke exit 0（51 events / 3 tool_calls / live 22 / fails=[]）；`tests/test.sh` 9 通过 0 失败；隔离三进程记忆复现（写 `4de460d66a43` → 新进程同 id 召回 → layer 4 注入）；密钥 grep 零命中；`~/.memlite/config.json` sha 六时点不变；消融摘记忆层 → 恰 D 红 8/1。
 - 整改：F1（`context/20-project.md` 枚举 22 工具改为「举例，不保证穷尽」）、F2（`README.md:142` 工具表字符数改实测 39634/42726）已完成。
 - 状态改写：§0 表 T3「未开始」→ **已完成（已入仓，§10.5）**。

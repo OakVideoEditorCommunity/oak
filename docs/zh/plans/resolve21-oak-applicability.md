@@ -134,14 +134,14 @@ C 类的代价是语义损失。交换会丢节点图、关键帧、色彩管理
 | 音频 | 部分实现 | 波形、VU/EBU R128 LUFS、重采样、混音；无总线、效果链与 EQ |
 | 跟踪/稳定 | 未实现 | 只读审计未见点跟踪、平面跟踪、稳定实现；抠像与遮罩已有 |
 | 互操作 | 部分实现 | OTIO JSON 读写与 FCPXML 双向（`crates/oak-otio/src/fcpxml.rs:762/803/1314/1349`）；无 AAF/EDL |
-| AI/Agent | 部分落地 | `agent/mcp-oak` 共 28 个工具（媒体 7、工程 6、时间线 11、渲染 4），取证层已实现；AI 剪辑 T0-T6 仍为规划（`docs/zh/plans/ai-editing-feature-plan.md`） |
-| 扩展点 | 单一 | 除 OFX 外无 Lua/Python/JS 绑定（`crates/oak-extensions` 仅 hello world）；无 Lottie/HTML |
+| AI/Agent | 部分落地 | `agent/mcp-oak` 共 28 个工具（媒体 7、工程 6、时间线 11、渲染 4），取证层已实现；AI 剪辑 T0-T6 仍为规划（`ai-editing-feature-plan.md`） |
+| 扩展点 | 单一 | 除 OFX 外无 Lua/Python/JS 绑定（`../../../crates/oak-extensions` 仅 hello world）；无 Lottie/HTML |
 
 底账的两点读法。第一，oak 的 OFX 宿主是「能加载、能出图」的静态层，缺的是动画与遮罩两条输入通路；这决定了 B 类能力的天花板。第二，关键帧内核与 parametric 曲线是两套已存在但未打通的设施，P0/P2 的工作量主要在桥接与 UX，而非从零建模。
 
 ## 6. 建议路线
 
-里程碑口径以仓库根 `README.md` 的 Roadmap 为准：0.5 为 Rust Rewrite（当前），0.6 为 Color, Audio & Performance，0.7 为 Animation, Tracking & Collaboration，0.8 为 Stability，1.0 为 Production Ready。`docs/zh/README.new.md` 中的旧版路线图（0.5 动画跟踪 / 0.6 稳定性）为历史稿，不作为本报告基线。
+里程碑口径以仓库根 `../../../README.md` 的 Roadmap 为准：0.5 为 Rust Rewrite（当前），0.6 为 Color, Audio & Performance，0.7 为 Animation, Tracking & Collaboration，0.8 为 Stability，1.0 为 Production Ready。`docs/zh/README.new.md` 中的旧版路线图（0.5 动画跟踪 / 0.6 稳定性）为历史稿，不作为本报告基线。
 
 ### 6.1 P0（先行验证，低风险）
 
@@ -193,7 +193,7 @@ C 类的代价是语义损失。交换会丢节点图、关键帧、色彩管理
 | 开源 AI 模型未做基准 | 指标可能达不到验收线 | 先跑 20×50 小样本再定基线 |
 | 版本号与发布日期 | 21 精确版本以官方为准 | 本报告只核到页面当前内容（下载指向 21.1） |
 | 代码行号漂移 | 引用失效 | 行号以 HEAD bf64bee6c 为准，引用前复核 |
-| 里程碑编号口径 | 根 `README.md` 与 `docs/zh/README.new.md` 的路线图不一致 | 已裁定以根 `README.md` 为准；`README.new.md` 为历史稿，建议后续清理或标注归档 |
+| 里程碑编号口径 | 根 `../../../README.md` 与 `docs/zh/README.new.md` 的路线图不一致 | 已裁定以根 `../../../README.md` 为准；`README.new.md` 为历史稿，建议后续清理或标注归档 |
 
 ## 9. 附录
 
