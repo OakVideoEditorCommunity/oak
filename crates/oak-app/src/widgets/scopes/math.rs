@@ -12,6 +12,9 @@ pub fn histogram_bins(samples: &[f32], bins: usize) -> Vec<u32> {
 		return out;
 	}
 	for &sample in samples {
+		if !sample.is_finite() {
+			continue;
+		}
 		let clamped = sample.clamp(0.0, 1.0);
 		let index = ((clamped * bins as f32) as usize).min(bins - 1);
 		out[index] += 1;
@@ -34,11 +37,15 @@ pub fn waveform_envelope(samples: &[f32], columns: usize) -> Vec<(f32, f32)> {
 			.min(samples.len());
 		let mut min = f32::MAX;
 		let mut max = f32::MIN;
+		let mut has_finite = false;
 		for &sample in &samples[start..end] {
-			min = min.min(sample);
-			max = max.max(sample);
+			if sample.is_finite() {
+				min = min.min(sample);
+				max = max.max(sample);
+				has_finite = true;
+			}
 		}
-		if end > start {
+		if end > start && has_finite {
 			out[column] = (min, max);
 		}
 	}
@@ -54,6 +61,7 @@ pub type ChromaSample = (f32, f32);
 pub fn vectorscope_points(samples: &[ChromaSample]) -> Vec<(f32, f32)> {
 	samples
 		.iter()
+		.filter(|(u, v)| u.is_finite() && v.is_finite())
 		.map(|&(u, v)| ((u - 0.5).clamp(-0.5, 0.5), (v - 0.5).clamp(-0.5, 0.5)))
 		.collect()
 }
@@ -61,16 +69,26 @@ pub fn vectorscope_points(samples: &[ChromaSample]) -> Vec<(f32, f32)> {
 /// Map a normalized `0..1` level to a meter segment's lit count: `segments`
 /// segments, the lit portion is proportional to the level.
 pub fn meter_lit_segments(level: f32, segments: usize) -> usize {
+	if level.is_nan() {
+		return 0;
+	}
 	let lit = (level.clamp(0.0, 1.0) * segments as f32).round() as usize;
 	lit.min(segments)
 }
 
 /// Peak-hold decay: `peak` decays toward `level` at `decay_per_frame`.
 pub fn decay_peak(peak: f32, level: f32, decay_per_frame: f32) -> f32 {
+	let peak = if peak.is_finite() { peak } else { 0.0 };
+	let level = if level.is_finite() { level } else { 0.0 };
+	let decay = if decay_per_frame.is_finite() && decay_per_frame >= 0.0 {
+		decay_per_frame
+	} else {
+		0.0
+	};
 	if level >= peak {
 		level
 	} else {
-		(peak - decay_per_frame).max(level)
+		(peak - decay).max(level)
 	}
 }
 
@@ -133,5 +151,50 @@ mod tests {
 		assert_eq!(decay_peak(0.8, 0.5, 0.1), 0.7);
 		assert_eq!(decay_peak(0.8, 0.9, 0.1), 0.9);
 		assert_eq!(decay_peak(0.8, 0.78, 0.1), 0.78);
+	}
+
+	#[test]
+	fn histogram_filters_nan_and_inf() {
+		let samples = [f32::NAN, 0.5, f32::INFINITY, -f32::INFINITY];
+		let bins = histogram_bins(&samples, 2);
+		// 0.5 falls into bucket [0.5, 1.0] (index 1), all non-finite skipped
+		assert_eq!(bins, vec![0, 1]);
+	}
+
+	#[test]
+	fn waveform_envelope_handles_nan_and_inf() {
+		let samples = [f32::NAN, f32::INFINITY, -f32::INFINITY];
+		let env = waveform_envelope(&samples, 1);
+		assert_eq!(env, vec![(0.0, 0.0)]);
+
+		let mixed = [f32::NAN, 0.2, 0.8, f32::INFINITY];
+		let env_mixed = waveform_envelope(&mixed, 1);
+		assert_eq!(env_mixed, vec![(0.2, 0.8)]);
+	}
+
+	#[test]
+	fn vectorscope_filters_nan_and_inf() {
+		let samples = [
+			(0.5, 0.5),
+			(f32::NAN, 0.5),
+			(0.5, f32::INFINITY),
+			(1.0, 0.0),
+		];
+		let points = vectorscope_points(&samples);
+		assert_eq!(points.len(), 2);
+		assert_eq!(points[0], (0.0, 0.0));
+		assert_eq!(points[1], (0.5, -0.5));
+	}
+
+	#[test]
+	fn meter_and_decay_nan_and_inf() {
+		assert_eq!(meter_lit_segments(f32::NAN, 8), 0);
+		assert_eq!(meter_lit_segments(f32::INFINITY, 8), 8);
+		assert_eq!(meter_lit_segments(-f32::INFINITY, 8), 0);
+
+		// decay_peak with NaN and Inf
+		assert_eq!(decay_peak(0.8, f32::NAN, 0.1), 0.7);
+		assert_eq!(decay_peak(f32::NAN, 0.5, 0.1), 0.5);
+		assert_eq!(decay_peak(0.8, f32::INFINITY, 0.1), 0.7);
 	}
 }
