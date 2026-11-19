@@ -44,6 +44,10 @@ const KB: f32 = 0.0722;
 /// from the engine's frame cache to a panel copies two pointers.
 #[derive(Debug, Clone, Default)]
 pub struct ScopeData {
+	/// Frame width in pixels.
+	pub width: u32,
+	/// Frame height in pixels.
+	pub height: u32,
 	/// Per-pixel luma in `0..=1` (BT.709), row-major.
 	pub luma: Arc<Vec<f32>>,
 	/// Per-pixel chroma `(Cb, Cr)` in `0..=1`, centered on `0.5`.
@@ -78,6 +82,8 @@ pub(crate) fn analyze_f32_rgba(width: u32, height: u32, samples: &[f32]) -> Scop
 		chroma.push((cb.clamp(0.0, 1.0), cr.clamp(0.0, 1.0)));
 	}
 	ScopeData {
+		width,
+		height,
 		luma: Arc::new(luma),
 		chroma: Arc::new(chroma),
 	}
@@ -108,6 +114,8 @@ pub(crate) fn analyze_bgra8(width: u32, height: u32, bytes: &[u8]) -> ScopeData 
 		chroma.push((cb.clamp(0.0, 1.0), cr.clamp(0.0, 1.0)));
 	}
 	ScopeData {
+		width,
+		height,
 		luma: Arc::new(luma),
 		chroma: Arc::new(chroma),
 	}
@@ -159,9 +167,8 @@ mod tests {
 	#[test]
 	fn analyzed_samples_feed_the_scope_math() {
 		// A black top half and a white bottom half: the histogram puts every
-		// sample into the two edge bins, and the waveform envelope (slicing
-		// the row-major luma stream) rises from black to white across the
-		// columns.
+		// sample into the two edge bins, and every X column of the waveform
+		// spans from black (0.0) to white (1.0).
 		let width = 8u32;
 		let height = 4u32;
 		let mut samples = vec![0.0f32; (width * height * 4) as usize];
@@ -176,19 +183,56 @@ mod tests {
 			}
 		}
 		let data = analyze_f32_rgba(width, height, &samples);
+		assert_eq!(data.width, width);
+		assert_eq!(data.height, height);
 
 		let bins = crate::widgets::scopes::histogram_bins(&data.luma, 4);
 		assert_eq!(bins, vec![16, 0, 0, 16]);
 
-		let envelope = crate::widgets::scopes::waveform_envelope(&data.luma, 2);
+		let envelope = crate::widgets::scopes::waveform_envelope(
+			&data.luma,
+			data.width as usize,
+			data.height as usize,
+			2,
+		);
 		assert_eq!(envelope.len(), 2);
-		assert!((envelope[0].0 - 0.0).abs() < 1e-6 && (envelope[0].1 - 0.0).abs() < 1e-6);
-		assert!((envelope[1].0 - 1.0).abs() < 1e-6 && (envelope[1].1 - 1.0).abs() < 1e-6);
+		assert!((envelope[0].0 - 0.0).abs() < 1e-6 && (envelope[0].1 - 1.0).abs() < 1e-6);
+		assert!((envelope[1].0 - 0.0).abs() < 1e-6 && (envelope[1].1 - 1.0).abs() < 1e-6);
 
 		// Neutral gray chroma projects to the vectorscope's center.
 		let points = crate::widgets::scopes::vectorscope_points(&data.chroma);
 		assert!(points
 			.iter()
 			.all(|&(u, v)| u.abs() < 1e-6 && v.abs() < 1e-6));
+	}
+
+	#[test]
+	fn left_right_split_keeps_waveform_columns_distinct() {
+		let width = 8u32;
+		let height = 4u32;
+		let mut bytes = vec![0u8; (width * height * 4) as usize];
+		for y in 0..height {
+			for x in 0..width {
+				let i = ((y * width + x) * 4) as usize;
+				let v = if x >= width / 2 { 255u8 } else { 0u8 };
+				bytes[i] = v;
+				bytes[i + 1] = v;
+				bytes[i + 2] = v;
+				bytes[i + 3] = 255;
+			}
+		}
+		let data = analyze_bgra8(width, height, &bytes);
+		assert_eq!(data.width, width);
+		assert_eq!(data.height, height);
+
+		let envelope = crate::widgets::scopes::waveform_envelope(
+			&data.luma,
+			data.width as usize,
+			data.height as usize,
+			2,
+		);
+		assert_eq!(envelope.len(), 2);
+		assert!((envelope[0].0 - 0.0).abs() < 1e-6 && (envelope[0].1 - 0.0).abs() < 1e-6);
+		assert!((envelope[1].0 - 1.0).abs() < 1e-6 && (envelope[1].1 - 1.0).abs() < 1e-6);
 	}
 }
