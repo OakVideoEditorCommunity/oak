@@ -60,6 +60,10 @@ enum ProgramViewTab {
 /// the displayed frame changes. The scope widgets read this entity through
 /// the [`LumaDataSource`] / [`ChromaDataSource`] traits.
 struct ScopeState {
+	/// Frame width in pixels.
+	width: u32,
+	/// Frame height in pixels.
+	height: u32,
 	/// Per-pixel luma of the current frame (`0..=1`).
 	luma: Vec<f32>,
 	/// Per-pixel chroma `(Cb, Cr)` of the current frame (`0..=1`).
@@ -69,6 +73,10 @@ struct ScopeState {
 impl LumaDataSource for ScopeState {
 	fn luma_samples(&self) -> Vec<f32> {
 		self.luma.clone()
+	}
+
+	fn luma_dimensions(&self) -> (usize, usize) {
+		(self.width as usize, self.height as usize)
 	}
 }
 
@@ -222,6 +230,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		let context_menu = ContextMenuHandle::new(Self::on_local_menu_item, window, cx);
 
 		let scope_state = cx.new(|_cx| ScopeState {
+			width: 0,
+			height: 0,
 			luma: Vec::new(),
 			chroma: Vec::new(),
 		});
@@ -393,6 +403,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			self.scope_frame = Some(frame.clone());
 			let scope = self.engine.read(cx).scope_data(Monitor::Program, cx);
 			self.scope_state.update(cx, |state, cx| {
+				state.width = scope.width;
+				state.height = scope.height;
 				state.luma = (*scope.luma).clone();
 				state.chroma = (*scope.chroma).clone();
 				cx.notify();

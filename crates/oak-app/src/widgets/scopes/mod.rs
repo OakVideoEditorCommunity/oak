@@ -16,8 +16,11 @@ use gpui_kit::{
 
 /// Provides luma samples (`0..1`) for the histogram and waveform scopes.
 pub trait LumaDataSource: 'static {
-	/// Luma samples for the current frame.
+	/// Luma samples for the current frame, row-major.
 	fn luma_samples(&self) -> Vec<f32>;
+
+	/// Dimensions `(width, height)` of the row-major frame in [`Self::luma_samples`].
+	fn luma_dimensions(&self) -> (usize, usize);
 }
 
 /// Provides chroma samples for the vectorscope.
@@ -126,12 +129,14 @@ impl<D: LumaDataSource> Waveform<D> {
 
 	/// The current envelope columns, one `(min, max)` luma pair per column.
 	///
-	/// `cx` provides the data source; the frame's samples are split into 128
-	/// equal runs and each run is reduced to its min and max in `0..1`. Both
-	/// values are 0 for an empty source or an empty run, so the render pass
-	/// can draw every column unconditionally.
+	/// `cx` provides the data source; the frame's samples are grouped by image
+	/// `X` column into 128 output columns and each column is reduced to its min
+	/// and max in `0..1`. Both values are 0 for an empty source or an empty
+	/// frame, so the render pass can draw every column unconditionally.
 	pub fn envelope(&self, cx: &App) -> Vec<(f32, f32)> {
-		waveform_envelope(&self.data.read(cx).luma_samples(), 128)
+		let data = self.data.read(cx);
+		let (width, height) = data.luma_dimensions();
+		waveform_envelope(&data.luma_samples(), width, height, 128)
 	}
 }
 
@@ -260,10 +265,18 @@ mod tests {
 	use super::*;
 	use gpui_kit::{Entity, Render, TestAppContext, Window, div, px, size};
 
-	struct MockLuma(Vec<f32>);
+	struct MockLuma {
+		width: usize,
+		height: usize,
+		samples: Vec<f32>,
+	}
 	impl LumaDataSource for MockLuma {
 		fn luma_samples(&self) -> Vec<f32> {
-			self.0.clone()
+			self.samples.clone()
+		}
+
+		fn luma_dimensions(&self) -> (usize, usize) {
+			(self.width, self.height)
 		}
 	}
 	struct MockChroma(Vec<(f32, f32)>);
@@ -293,7 +306,11 @@ mod tests {
 		use gpui_kit::VisualTestContext;
 		cx.update(|cx| cx.init_colors());
 		let window = cx.open_window(size(px(300.0), px(200.0)), |window, cx| {
-			let luma = cx.new(|_| MockLuma((0..100).map(|i| i as f32 / 100.0).collect()));
+			let luma = cx.new(|_| MockLuma {
+				width: 10,
+				height: 10,
+				samples: (0..100).map(|i| i as f32 / 100.0).collect(),
+			});
 			let chroma = cx.new(|_| MockChroma(vec![(0.5, 0.5), (0.75, 0.25), (0.25, 0.75)]));
 			let histogram = cx.new(|cx| Histogram::new(1, luma.clone(), window, cx));
 			let waveform = cx.new(|cx| Waveform::new(2, luma.clone(), window, cx));

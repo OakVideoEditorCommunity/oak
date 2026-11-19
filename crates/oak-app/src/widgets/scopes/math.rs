@@ -22,31 +22,52 @@ pub fn histogram_bins(samples: &[f32], bins: usize) -> Vec<u32> {
 	out
 }
 
-/// Compute the min/max envelope of `samples` over `columns` vertical slices.
-/// Each column covers a contiguous slice of the input; empty columns report
-/// `(0.0, 0.0)`.
-pub fn waveform_envelope(samples: &[f32], columns: usize) -> Vec<(f32, f32)> {
+/// Compute the min/max luma envelope across `columns` output columns for a
+/// row-major `width * height` frame. Each output column aggregates every `Y`
+/// row at its corresponding image `X` columns; empty frames, zero dimensions,
+/// and non-finite samples fall back safely to `(0.0, 0.0)`.
+pub fn waveform_envelope(
+	samples: &[f32],
+	width: usize,
+	height: usize,
+	columns: usize,
+) -> Vec<(f32, f32)> {
 	let mut out = vec![(0.0f32, 0.0f32); columns.max(1)];
-	if columns == 0 || samples.is_empty() {
+	if columns == 0 || width == 0 || height == 0 || samples.is_empty() {
 		return out;
 	}
-	for column in 0..columns {
-		let start = column * samples.len() / columns;
-		let end = ((column + 1) * samples.len() / columns)
-			.max(start + 1)
-			.min(samples.len());
-		let mut min = f32::MAX;
-		let mut max = f32::MIN;
-		let mut has_finite = false;
-		for &sample in &samples[start..end] {
-			if sample.is_finite() {
-				min = min.min(sample);
-				max = max.max(sample);
-				has_finite = true;
+
+	let ranges: Vec<(usize, usize)> = (0..columns)
+		.map(|column| {
+			let x_start = ((column as u128 * width as u128) / columns as u128) as usize;
+			let x_end = (((column as u128 + 1) * width as u128) / columns as u128)
+				.max(x_start as u128 + 1)
+				.min(width as u128) as usize;
+			(x_start, x_end)
+		})
+		.collect();
+
+	let mut acc = vec![(f32::MAX, f32::MIN, false); columns];
+	for row in samples.chunks(width).take(height) {
+		for (column, &(x_start, x_end)) in ranges.iter().enumerate() {
+			let row_end = x_end.min(row.len());
+			if x_start >= row_end {
+				continue;
+			}
+			let (min, max, has_finite) = &mut acc[column];
+			for &sample in &row[x_start..row_end] {
+				if sample.is_finite() {
+					*min = min.min(sample);
+					*max = max.max(sample);
+					*has_finite = true;
+				}
 			}
 		}
-		if end > start && has_finite {
-			out[column] = (min, max);
+	}
+
+	for (dst, (min, max, has_finite)) in out.iter_mut().zip(acc) {
+		if has_finite {
+			*dst = (min, max);
 		}
 	}
 	out
@@ -118,16 +139,129 @@ mod tests {
 	}
 
 	#[test]
-	fn waveform_envelope_slices() {
-		let samples: Vec<f32> = (0..100).map(|i| i as f32 / 100.0).collect();
-		let env = waveform_envelope(&samples, 10);
-		assert_eq!(env.len(), 10);
-		// First column covers [0, 10): min 0.0, max 0.09.
-		assert!((env[0].0 - 0.0).abs() < 0.001);
-		assert!((env[0].1 - 0.09).abs() < 0.001);
-		// Last column covers [90, 100): min 0.9, max 0.99.
-		assert!((env[9].0 - 0.9).abs() < 0.001);
-		assert!((env[9].1 - 0.99).abs() < 0.001);
+	fn waveform_envelope_by_x_column_cases() {
+		struct Case {
+			name: &'static str,
+			width: usize,
+			height: usize,
+			columns: usize,
+			samples: Vec<f32>,
+			expected: Vec<(f32, f32)>,
+		}
+
+		let cases = [
+			Case {
+				name: "black top half, white bottom half spans (0, 1) in every X column",
+				width: 4,
+				height: 2,
+				columns: 4,
+				samples: vec![
+					0.0, 0.0, 0.0, 0.0, // y = 0
+					1.0, 1.0, 1.0, 1.0, // y = 1
+				],
+				expected: vec![(0.0, 1.0); 4],
+			},
+			Case {
+				name: "black left half, white right half keeps columns distinct",
+				width: 4,
+				height: 2,
+				columns: 2,
+				samples: vec![
+					0.0, 0.0, 1.0, 1.0, // y = 0
+					0.0, 0.0, 1.0, 1.0, // y = 1
+				],
+				expected: vec![(0.0, 0.0), (1.0, 1.0)],
+			},
+			Case {
+				name: "per-column gradients aggregate vertically by X",
+				width: 3,
+				height: 2,
+				columns: 3,
+				samples: vec![
+					0.1, 0.5, 0.9, // y = 0
+					0.2, 0.5, 0.8, // y = 1
+				],
+				expected: vec![(0.1, 0.2), (0.5, 0.5), (0.8, 0.9)],
+			},
+			Case {
+				name: "non-divisible width partitions X columns cleanly",
+				width: 5,
+				height: 2,
+				columns: 2,
+				// X partitions: [0..2] -> (0.1, 0.3), [2..5] -> (0.6, 0.9)
+				samples: vec![
+					0.1, 0.2, 0.6, 0.7, 0.9, // y = 0
+					0.3, 0.2, 0.8, 0.6, 0.7, // y = 1
+				],
+				expected: vec![(0.1, 0.3), (0.6, 0.9)],
+			},
+			Case {
+				name: "tiny image narrower than output columns repeats nearest X columns",
+				width: 2,
+				height: 2,
+				columns: 4,
+				samples: vec![
+					0.2, 0.8, // y = 0
+					0.4, 0.9, // y = 1
+				],
+				expected: vec![(0.2, 0.4), (0.2, 0.4), (0.8, 0.9), (0.8, 0.9)],
+			},
+			Case {
+				name: "1x1 tiny image expands safely across columns",
+				width: 1,
+				height: 1,
+				columns: 3,
+				samples: vec![0.42],
+				expected: vec![(0.42, 0.42); 3],
+			},
+			Case {
+				name: "empty frame returns zeroed envelopes",
+				width: 4,
+				height: 2,
+				columns: 3,
+				samples: vec![],
+				expected: vec![(0.0, 0.0); 3],
+			},
+			Case {
+				name: "zero columns returns single zeroed fallback slot",
+				width: 2,
+				height: 2,
+				columns: 0,
+				samples: vec![0.5; 4],
+				expected: vec![(0.0, 0.0)],
+			},
+			Case {
+				name: "zero image width or height returns zeroed envelopes",
+				width: 0,
+				height: 2,
+				columns: 3,
+				samples: vec![0.5; 4],
+				expected: vec![(0.0, 0.0); 3],
+			},
+			Case {
+				name: "short buffer does not panic and aggregates available pixels",
+				width: 4,
+				height: 2,
+				columns: 2,
+				samples: vec![0.1, 0.2, 0.7, 0.9, 0.3],
+				expected: vec![(0.1, 0.3), (0.7, 0.9)],
+			},
+		];
+
+		for case in cases {
+			let env = waveform_envelope(&case.samples, case.width, case.height, case.columns);
+			assert_eq!(env.len(), case.expected.len(), "case: {}", case.name);
+			for (col, (&got, &want)) in env.iter().zip(case.expected.iter()).enumerate() {
+				assert!(
+					(got.0 - want.0).abs() < 1e-6 && (got.1 - want.1).abs() < 1e-6,
+					"case '{}' column {}: got {:?}, expected {:?}",
+					case.name,
+					col,
+					got,
+					want
+				);
+			}
+		}
 	}
 
 	#[test]
@@ -163,13 +297,18 @@ mod tests {
 
 	#[test]
 	fn waveform_envelope_handles_nan_and_inf() {
-		let samples = [f32::NAN, f32::INFINITY, -f32::INFINITY];
-		let env = waveform_envelope(&samples, 1);
+		let samples = [f32::NAN, f32::INFINITY, -f32::INFINITY, f32::NAN];
+		let env = waveform_envelope(&samples, 2, 2, 1);
 		assert_eq!(env, vec![(0.0, 0.0)]);
 
-		let mixed = [f32::NAN, 0.2, 0.8, f32::INFINITY];
-		let env_mixed = waveform_envelope(&mixed, 1);
-		assert_eq!(env_mixed, vec![(0.2, 0.8)]);
+		let mixed = [
+			f32::NAN,
+			0.2, // y = 0
+			0.8,
+			f32::INFINITY, // y = 1
+		];
+		let env_mixed = waveform_envelope(&mixed, 2, 2, 2);
+		assert_eq!(env_mixed, vec![(0.8, 0.8), (0.2, 0.2)]);
 	}
 
 	#[test]
