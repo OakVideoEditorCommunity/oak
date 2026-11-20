@@ -378,17 +378,22 @@ async fn scopes_tab_renders_from_the_current_frame(cx: &mut TestAppContext) {
 		window.draw(cx).clear(cx);
 	});
 
-	let (luma_len, chroma_len, bins, envelope) = cx.read(|app| {
+	let (scope_width, scope_height, luma_len, chroma_len, bins, envelope) = cx.read(|app| {
 		let panel = panel.read(app);
+		let state = panel.scope_state.read(app);
 		(
-			panel.scope_state.read(app).luma.len(),
-			panel.scope_state.read(app).chroma.len(),
+			state.width,
+			state.height,
+			state.luma.len(),
+			state.chroma.len(),
 			panel.histogram.read(app).bins(app),
 			panel.waveform.read(app).envelope(app),
 		)
 	});
 	let pixels = (crate::oakui::frames::SYNTH_FRAME_WIDTH
 		* crate::oakui::frames::SYNTH_FRAME_HEIGHT) as usize;
+	assert_eq!(scope_width, crate::oakui::frames::SYNTH_FRAME_WIDTH);
+	assert_eq!(scope_height, crate::oakui::frames::SYNTH_FRAME_HEIGHT);
 	assert_eq!(luma_len, pixels);
 	assert_eq!(chroma_len, pixels);
 	assert_eq!(bins.iter().sum::<u32>() as usize, pixels);
