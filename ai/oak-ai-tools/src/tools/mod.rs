@@ -6,6 +6,8 @@
 //! shape problems into structured `ToolError`s instead of panics.
 //! Backends share them, so the mock and the SDK parse identically.
 
+pub mod analysis;
+pub mod analysis_exec;
 pub mod common;
 pub mod edit;
 pub mod export;
