@@ -11,6 +11,13 @@
 //! loop runs under test with a scripted model and a mock engine.
 
 use super::config;
+use super::confirm::{ConfirmMode, GatedHooks};
+use super::plan::{
+	Baseline, CostGuard, CostStop, CostUsage, OnFail, Plan, PlanStep, RetryPolicy, RollbackReport,
+	StepStatus, StepTrace, estimate_tokens, rollback_to, substitute,
+};
+use super::progress::{ProgressEvent, ProgressSink};
+use super::readback;
 use super::tool_text;
 use oak_ai_tools::error;
 use oak_ai_tools::schema_v2;
@@ -18,9 +25,10 @@ use serde_json::{Value, json};
 
 use oak_ai_tools::backend::{EngineBackend, EngineExt};
 use oak_ai_tools::dispatch;
-use oak_ai_tools::hooks::{GatedOutcome, Hooks, NoHooks, Policy};
+use oak_ai_tools::hooks::{GatedOutcome, Hooks, NoHooks, OperationClass, Policy, class_of,
+	class_of_v2};
 
-use super::llm::{ChatMessage, ChatRequest, LlmClient, ToolCall, openai_tools};
+use super::llm::{ChatMessage, ChatRequest, LlmClient, LlmError, ToolCall, openai_tools};
 
 /// Loop bounds and gate policy.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +40,10 @@ pub struct AgentConfig {
 	pub policy: Policy,
 	/// Model name sent on each request (from `OAK_AI_MODEL`).
 	pub model: String,
+	/// Confirm gate for mutating tools before they run (reads never
+	/// ask). `Headless` = auto-approve (today's behaviour), `Strict` =
+	/// refuse every write.
+	pub confirm: ConfirmMode,
 }
 
 impl Default for AgentConfig {
@@ -40,6 +52,7 @@ impl Default for AgentConfig {
 			max_rounds: 8,
 			policy: Policy::Auto,
 			model: config::DEFAULT_MODEL.to_string(),
+			confirm: ConfirmMode::Headless,
 		}
 	}
 }
@@ -76,6 +89,25 @@ pub struct AgentReport {
 	/// Set when the loop stopped early because the same tool kept failing
 	/// with the same error code: what it was stuck on, for the user.
 	pub stalled: Option<StallStop>,
+	/// The explicit plan this run executed (plan-based runs only):
+	/// produced *before* the steps ran.
+	pub plan: Option<Plan>,
+	/// What actually happened, step by step, with attempts and failures.
+	pub trajectory: Vec<StepTrace>,
+	/// Progress events in order (rounds and plan steps).
+	pub progress: Vec<ProgressEvent>,
+	/// Cost consumed by this run (tool calls, LLM rounds, ~tokens).
+	pub cost: CostUsage,
+	/// The `stopped_reason` when a hard cost limit ended the run.
+	pub cost_stop: Option<CostStop>,
+	/// Set when a failed plan was rolled back — including a rollback that
+	/// could not confirm the restore (`restored: false` + the failing
+	/// undo calls; never a silent success).
+	pub rollback: Option<RollbackReport>,
+	/// Readback checks performed / failed / skipped (probe unavailable).
+	pub readbacks: usize,
+	pub readback_failures: usize,
+	pub readback_skipped: usize,
 }
 
 /// Why the loop stopped before the round cap: the same tool failed with the
@@ -137,6 +169,16 @@ pub struct Agent<L, B> {
 	tools: Vec<Value>,
 	/// Long-term memory tools (memlite subprocess; see [`super::memory`]).
 	memory: super::memory::MemoryTools,
+	/// Progress subscribers; the events also land in [`AgentReport::progress`].
+	progress_sink: Option<Box<dyn ProgressSink>>,
+	/// Hard cost limits (default: unlimited).
+	cost_guard: CostGuard,
+	/// What the current run has spent.
+	cost_usage: CostUsage,
+	/// Retry policy for plan steps (default: 2 attempts, 100 ms backoff).
+	retry: RetryPolicy,
+	/// Post-write readback self-check (default: on).
+	readback: bool,
 }
 
 impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
@@ -159,6 +201,11 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 			messages,
 			tools,
 			memory: super::memory::MemoryTools::from_env(),
+			progress_sink: None,
+			cost_guard: CostGuard::unlimited(),
+			cost_usage: CostUsage::default(),
+			retry: RetryPolicy::default(),
+			readback: true,
 		}
 	}
 
@@ -172,6 +219,36 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 	/// The memory tools in use.
 	pub fn memory(&self) -> &super::memory::MemoryTools {
 		&self.memory
+	}
+
+	/// Subscribes to progress events (rounds and plan steps); the events
+	/// also land in [`AgentReport::progress`].
+	pub fn with_progress_sink(mut self, sink: impl ProgressSink + 'static) -> Self {
+		self.progress_sink = Some(Box::new(sink));
+		self
+	}
+
+	/// Replaces the cost guard (default: unlimited).
+	pub fn with_cost_guard(mut self, guard: CostGuard) -> Self {
+		self.cost_guard = guard;
+		self
+	}
+
+	/// Replaces the plan-step retry policy (default: 2 attempts, 100 ms).
+	pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+		self.retry = retry;
+		self
+	}
+
+	/// Turns the post-write readback self-check off (default: on).
+	pub fn without_readback(mut self) -> Self {
+		self.readback = false;
+		self
+	}
+
+	/// What the current run has spent so far.
+	pub fn cost_usage(&self) -> &CostUsage {
+		&self.cost_usage
 	}
 
 	/// The backend, for tests and for the panel that renders engine state.
@@ -188,7 +265,8 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		&self.messages
 	}
 
-	/// One user turn with the default gate policy ([`NoHooks`]).
+	/// One user turn through the configured confirm gate
+	/// ([`AgentConfig::confirm`], default `Headless` = auto-approve).
 	pub fn run(&mut self, user: &str) -> Result<AgentReport, AgentError> {
 		self.run_with(user, &mut NoHooks)
 	}
@@ -203,6 +281,32 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		user: &str,
 		hooks: &mut dyn Hooks,
 	) -> Result<AgentReport, AgentError> {
+		self.cost_usage = CostUsage::default();
+		// The confirm gate sits between the loop and the caller's hooks:
+		// mutating calls are asked per `config.confirm` before they run,
+		// and an approval still falls through to the caller's hooks.
+		let mut gate = GatedHooks::new(self.config.confirm, hooks);
+		let mut report = self.run_loop(user, &mut gate)?;
+		report.cost = self.cost_usage.clone();
+		Ok(report)
+	}
+
+	/// The policy the engine actually runs under: a strict confirm gate
+	/// forces `Policy::Confirm` so the gate is consulted (reads stay
+	/// exempt by class); headless keeps the configured policy untouched.
+	fn effective_policy(&self) -> Policy {
+		match self.config.confirm {
+			ConfirmMode::Strict => Policy::Confirm,
+			ConfirmMode::Headless => self.config.policy,
+		}
+	}
+
+	/// The turn body behind [`run_with`]: history, rounds, tool calls.
+	fn run_loop(
+		&mut self,
+		user: &str,
+		hooks: &mut dyn Hooks,
+	) -> Result<AgentReport, AgentError> {
 		self.messages.push(ChatMessage::user(user));
 		let mut report = AgentReport::default();
 
@@ -211,12 +315,28 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		// a different tool or a different code resets it.
 		let mut streak: Option<(String, String, usize)> = None;
 
-		for round in 1..=self.config.max_rounds.max(1) {
+		let total_rounds = self.config.max_rounds.max(1);
+		for round in 1..=total_rounds {
+			// Hard stop before spending a round the budget does not cover.
+			if let Some(stop) = self.cost_guard.check_llm(&self.cost_usage) {
+				report.cost_stop = Some(stop);
+				break;
+			}
+			self.emit_progress(
+				&mut report,
+				ProgressEvent::new(round, total_rounds, "round"),
+			);
 			let response = self.llm.complete(&ChatRequest {
 				model: &self.config.model,
 				messages: &self.messages,
 				tools: &self.tools,
 			})?;
+			self.cost_usage.llm_rounds += 1;
+			self.cost_usage.tokens +=
+				estimate_tokens(response.content.as_deref().unwrap_or_default());
+			for asked in &response.tool_calls {
+				self.cost_usage.tokens += estimate_tokens(&asked.arguments.to_string());
+			}
 			report.rounds = round;
 
 			if response.tool_calls.is_empty() {
@@ -291,32 +411,43 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 		report: &mut AgentReport,
 		streak: &mut Option<(String, String, usize)>,
 	) -> Result<bool, AgentError> {
+		// Hard cost gate first: a capped run stops before spending the
+		// next call, on every face, and says so instead of limping on.
+		if let Some(stop) = self.cost_guard.check_tool(&self.cost_usage) {
+			let payload = json!({
+				"ok": false,
+				"code": "COST_LIMIT",
+				"message": stop.detail.clone(),
+				"budget": stop.limit,
+			});
+			self.messages
+				.push(ChatMessage::tool_result(&call.id, &payload));
+			report.tools.push(ToolLogEntry {
+				round,
+				tool: call.name.clone(),
+				outcome: "cost-stopped",
+				detail: payload.to_string(),
+			});
+			if report.cost_stop.is_none() {
+				report.cost_stop = Some(stop);
+			}
+			return Ok(true);
+		}
+
 		// Three faces, one loop: memory tools answer host-side (a
-		// subprocess, no engine and no edit transaction), a v2 name goes
-		// to the extension dispatcher, everything else keeps the frozen
-		// 22 path. All three end in the same payload/streak handling.
+		// subprocess, no engine and no edit transaction); the engine faces
+		// (frozen 22 and v2) share `engine_call`, which adds cost
+		// accounting and the readback self-check. All three end in the
+		// same payload/streak handling.
 		let (payload, label) = if super::memory::is_memory_tool(&call.name) {
+			self.cost_usage.tool_calls += 1;
 			memory_payload(super::memory::execute(
 				&self.memory,
 				&call.name,
 				call.arguments.clone(),
 			))
-		} else if schema_v2::is_v2_tool(&call.name) {
-			outcome_payload(dispatch::execute_v2_with(
-				&mut self.backend,
-				&call.name,
-				call.arguments.clone(),
-				self.config.policy,
-				hooks,
-			))
 		} else {
-			outcome_payload(dispatch::execute_with(
-				&mut self.backend,
-				&call.name,
-				call.arguments.clone(),
-				self.config.policy,
-				hooks,
-			))
+			self.engine_call(call, hooks, report)
 		};
 		self.messages
 			.push(ChatMessage::tool_result(&call.id, &payload));
@@ -358,6 +489,409 @@ impl<L: LlmClient, B: EngineBackend + EngineExt> Agent<L, B> {
 			*streak = None;
 		}
 		Ok(false)
+	}
+
+	/// One engine tool call (frozen 22 or v2): cost accounting →
+	/// optional baseline probe → dispatch → readback self-check.
+	///
+	/// A readback that cannot confirm the write **replaces** the success
+	/// payload with a structured `READBACK_MISMATCH` failure and relabels
+	/// the call: a write whose effect is not observable never reports
+	/// `applied`.
+	fn engine_call(
+		&mut self,
+		call: &ToolCall,
+		hooks: &mut dyn Hooks,
+		report: &mut AgentReport,
+	) -> (Value, &'static str) {
+		if let Some(stop) = self.cost_guard.check_tool(&self.cost_usage) {
+			let payload = json!({
+				"ok": false,
+				"code": "COST_LIMIT",
+				"message": stop.detail,
+				"budget": stop.limit,
+			});
+			if report.cost_stop.is_none() {
+				report.cost_stop = Some(stop);
+			}
+			return (payload, "cost-stopped");
+		}
+		self.cost_usage.tool_calls += 1;
+
+		let v2 = schema_v2::is_v2_tool(&call.name);
+		let class = if v2 {
+			class_of_v2(&call.name)
+		} else {
+			class_of(&call.name)
+		};
+		let mutating = !matches!(class, Some(OperationClass::Read));
+		let probe_plan = if mutating && self.readback {
+			readback::probe_plan(&call.name)
+		} else {
+			readback::ProbePlan::Skip
+		};
+		// Baseline only when a "changed" verdict may need it: `AfterOnly`
+		// tools have no usable baseline by construction (no project yet /
+		// the timeline does not move).
+		let baseline = if probe_plan == readback::ProbePlan::BeforeAndAfter {
+			Some(readback::probe(&mut self.backend))
+		} else {
+			None
+		};
+
+		// Resolved before `&mut self.backend` is lent to dispatch.
+		let policy = self.effective_policy();
+		let outcome = if v2 {
+			dispatch::execute_v2_with(
+				&mut self.backend,
+				&call.name,
+				call.arguments.clone(),
+				policy,
+				hooks,
+			)
+		} else {
+			dispatch::execute_with(
+				&mut self.backend,
+				&call.name,
+				call.arguments.clone(),
+				policy,
+				hooks,
+			)
+		};
+		let (mut payload, mut label) = outcome_payload(outcome);
+
+		if label == "applied" && probe_plan != readback::ProbePlan::Skip {
+			match readback::probe(&mut self.backend) {
+				Ok(after) => {
+					report.readbacks += 1;
+					let result = payload.get("result").cloned().unwrap_or(Value::Null);
+					if let Some(expect) = readback::expectation_for(&call.name, &result) {
+						let before = baseline.as_ref().and_then(|probe| probe.as_ref().ok());
+						let verdict = readback::verify(before, &after, expect);
+						if !verdict.ok {
+							report.readback_failures += 1;
+							payload = verdict.failure_payload();
+							label = "readback-failed";
+						}
+					}
+				}
+				Err(_) => {
+					// The probe itself is unavailable: count it rather than
+					// pretend the write was verified.
+					report.readback_skipped += 1;
+				}
+			}
+		}
+		(payload, label)
+	}
+
+	/// One user turn: first produce an explicit plan for `user`, then
+	/// execute it step by step. Plan and trajectory land in the report.
+	pub fn run_planned(
+		&mut self,
+		user: &str,
+		hooks: &mut dyn Hooks,
+	) -> Result<AgentReport, AgentError> {
+		self.cost_usage = CostUsage::default();
+		let mut report = AgentReport::default();
+		let plan = self.plan_from_llm(user)?;
+		report.rounds = self.cost_usage.llm_rounds;
+		self.run_steps(plan, hooks, &mut report)?;
+		report.cost = self.cost_usage.clone();
+		Ok(report)
+	}
+
+	/// Executes a pre-built plan through the default [`NoHooks`] gate
+	/// (no model in the loop: the plan is the instruction).
+	pub fn run_plan(&mut self, plan: Plan) -> Result<AgentReport, AgentError> {
+		self.run_plan_with(plan, &mut NoHooks)
+	}
+
+	/// [`run_plan`] through the hooks transaction gate.
+	pub fn run_plan_with(
+		&mut self,
+		plan: Plan,
+		hooks: &mut dyn Hooks,
+	) -> Result<AgentReport, AgentError> {
+		self.cost_usage = CostUsage::default();
+		let mut report = AgentReport::default();
+		let mut gate = GatedHooks::new(self.config.confirm, hooks);
+		self.run_steps(plan, &mut gate, &mut report)?;
+		report.cost = self.cost_usage.clone();
+		Ok(report)
+	}
+
+	/// Asks the model for an explicit plan of `user`'s request — one LLM
+	/// round; the answer must be JSON
+	/// `{"goal": "...", "steps": [{"title","tool","args"}]}` (code fences
+	/// tolerated). The raw exchange stays in the conversation.
+	pub fn plan_from_llm(&mut self, user: &str) -> Result<Plan, AgentError> {
+		let prompt = format!(
+			"{user}\n\nBefore executing anything, reply with ONLY a JSON plan, no \
+			 other prose: {{\"goal\": \"...\", \"steps\": [{{\"title\": \"...\", \
+			 \"tool\": \"...\", \"args\": {{}}}}]}}. Use only the provided tools."
+		);
+		self.messages.push(ChatMessage::user(&prompt));
+		let response = self.llm.complete(&ChatRequest {
+			model: &self.config.model,
+			messages: &self.messages,
+			tools: &self.tools,
+		})?;
+		self.cost_usage.llm_rounds += 1;
+		let content = response.content.unwrap_or_default();
+		self.cost_usage.tokens += estimate_tokens(&content);
+		self.messages
+			.push(ChatMessage::assistant(Some(content.clone()), Vec::new()));
+		parse_plan(&content, user)
+	}
+
+	/// Executes `plan` step by step: progress events, template vars from
+	/// earlier results, retry while the feedback says retryable, the
+	/// step's `on_fail` policy, the hard cost guard — and, when a step
+	/// fails, an undo-based rollback to the baseline taken before the
+	/// first step.
+	fn run_steps(
+		&mut self,
+		plan: Plan,
+		hooks: &mut dyn Hooks,
+		report: &mut AgentReport,
+	) -> Result<(), AgentError> {
+		report.plan = Some(plan.clone());
+		let total = plan.steps.len();
+		let baseline = if self.readback && total > 0 {
+			Some(Baseline::capture(&mut self.backend))
+		} else {
+			None
+		};
+		let mut vars = if plan.vars.is_object() {
+			plan.vars.clone()
+		} else {
+			json!({})
+		};
+
+		for (index, step) in plan.steps.iter().enumerate() {
+			self.emit_progress(
+				report,
+				ProgressEvent::new(index + 1, total, step.title.clone())
+					.with_detail(step.tool.clone()),
+			);
+
+			// Hard stop: the budget is spent before this step begins.
+			if let Some(stop) = self.cost_guard.check_tool(&self.cost_usage) {
+				if report.cost_stop.is_none() {
+					report.cost_stop = Some(stop);
+				}
+				report.trajectory.push(StepTrace {
+					index,
+					title: step.title.clone(),
+					tool: step.tool.clone(),
+					status: StepStatus::Blocked,
+					attempts: 0,
+					detail: Some("cost budget exhausted before this step".into()),
+				});
+				break;
+			}
+
+			let args = match substitute(&step.args, &vars) {
+				Ok(args) => args,
+				Err(message) => {
+					report.trajectory.push(StepTrace {
+						index,
+						title: step.title.clone(),
+						tool: step.tool.clone(),
+						status: StepStatus::Failed,
+						attempts: 0,
+						detail: Some(message),
+					});
+					self.rollback_after(report, &baseline, &step.title);
+					break;
+				}
+			};
+
+			let (payload, label, attempts) = self.run_step_attempts(step, &args, hooks, report);
+			if label == "applied" {
+				if let Some(result) = payload.get("result") {
+					merge_vars(&mut vars, result);
+				}
+				report.trajectory.push(StepTrace {
+					index,
+					title: step.title.clone(),
+					tool: step.tool.clone(),
+					status: StepStatus::Done,
+					attempts,
+					detail: None,
+				});
+				continue;
+			}
+			if label == "cost-stopped" {
+				report.trajectory.push(StepTrace {
+					index,
+					title: step.title.clone(),
+					tool: step.tool.clone(),
+					status: StepStatus::Blocked,
+					attempts,
+					detail: Some("cost budget exhausted mid-step".into()),
+				});
+				break;
+			}
+
+			let detail = payload
+				.get("message")
+				.and_then(Value::as_str)
+				.unwrap_or(label)
+				.to_string();
+			match &step.on_fail {
+				OnFail::Skip => {
+					report.trajectory.push(StepTrace {
+						index,
+						title: step.title.clone(),
+						tool: step.tool.clone(),
+						status: StepStatus::Skipped,
+						attempts,
+						detail: Some(detail),
+					});
+					continue;
+				}
+				OnFail::Fallback {
+					tool: fallback_tool,
+					args: fallback_args,
+				} => {
+					let fallback_args =
+						substitute(fallback_args, &vars).unwrap_or_else(|_| fallback_args.clone());
+					let call = ToolCall {
+						id: format!("plan_fb_{index}"),
+						name: fallback_tool.clone(),
+						arguments: fallback_args,
+					};
+					let (fb_payload, fb_label) = self.engine_call(&call, hooks, report);
+					if fb_label == "applied" {
+						if let Some(result) = fb_payload.get("result") {
+							merge_vars(&mut vars, result);
+						}
+						report.trajectory.push(StepTrace {
+							index,
+							title: step.title.clone(),
+							tool: fallback_tool.clone(),
+							status: StepStatus::Degraded,
+							attempts,
+							detail: Some(format!(
+								"degraded to `{fallback_tool}` after `{}` failed: {detail}",
+								step.tool
+							)),
+						});
+						continue;
+					}
+					let fb_detail = fb_payload
+						.get("message")
+						.and_then(Value::as_str)
+						.unwrap_or(fb_label)
+						.to_string();
+					report.trajectory.push(StepTrace {
+						index,
+						title: step.title.clone(),
+						tool: step.tool.clone(),
+						status: StepStatus::Failed,
+						attempts,
+						detail: Some(format!(
+							"step failed ({detail}); fallback `{fallback_tool}` failed too 							 ({fb_detail})"
+						)),
+					});
+					self.rollback_after(report, &baseline, &step.title);
+					break;
+				}
+				OnFail::Fail => {
+					report.trajectory.push(StepTrace {
+						index,
+						title: step.title.clone(),
+						tool: step.tool.clone(),
+						status: StepStatus::Failed,
+						attempts,
+						detail: Some(detail),
+					});
+					self.rollback_after(report, &baseline, &step.title);
+					break;
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// Runs one step's primary call, retrying while the failure's
+	/// feedback says the error is retryable and the policy allows it.
+	fn run_step_attempts(
+		&mut self,
+		step: &PlanStep,
+		args: &Value,
+		hooks: &mut dyn Hooks,
+		report: &mut AgentReport,
+	) -> (Value, &'static str, usize) {
+		let mut attempts = 0;
+		loop {
+			attempts += 1;
+			let call = ToolCall {
+				id: format!("plan_{attempts}"),
+				name: step.tool.clone(),
+				arguments: args.clone(),
+			};
+			let (payload, label) = self.engine_call(&call, hooks, report);
+			let retryable = payload
+				.get("retryable")
+				.and_then(Value::as_bool)
+				.unwrap_or(false);
+			if label == "applied"
+				|| label == "cost-stopped"
+				|| !self.retry.should_retry(attempts, retryable)
+			{
+				return (payload, label, attempts);
+			}
+			self.retry.backoff();
+		}
+	}
+
+	/// Rolls back to `baseline` after a failed step. A rollback that
+	/// cannot confirm the restore lists the steps it could not undo — it
+	/// never reports a silent success.
+	fn rollback_after(
+		&mut self,
+		report: &mut AgentReport,
+		baseline: &Option<Baseline>,
+		step_title: &str,
+	) {
+		let Some(baseline) = baseline else {
+			return;
+		};
+		let mut rollback = rollback_to(
+			&mut self.backend,
+			baseline,
+			format!("step `{step_title}` failed"),
+			64,
+		);
+		if !rollback.restored {
+			rollback.unrestored_steps = report
+				.trajectory
+				.iter()
+				.filter(|trace| matches!(trace.status, StepStatus::Done | StepStatus::Degraded))
+				.map(|trace| trace.title.clone())
+				.collect();
+			rollback.detail = format!(
+				"{}; steps not confirmed undone: {}",
+				rollback.detail,
+				if rollback.unrestored_steps.is_empty() {
+					"<none recorded>".into()
+				} else {
+					rollback.unrestored_steps.join(", ")
+				}
+			);
+		}
+		report.rollback = Some(rollback);
+	}
+
+	/// Fans one progress event out to the subscriber and the report.
+	fn emit_progress(&mut self, report: &mut AgentReport, event: ProgressEvent) {
+		if let Some(sink) = self.progress_sink.as_mut() {
+			sink.on_progress(&event);
+		}
+		report.progress.push(event);
 	}
 }
 
@@ -414,6 +948,61 @@ fn outcome_payload(outcome: GatedOutcome) -> (Value, &'static str) {
 			}),
 			"failed",
 		),
+	}
+}
+
+/// Parses a plan out of a model reply (tolerates ```json fences).
+fn parse_plan(content: &str, goal: &str) -> Result<Plan, AgentError> {
+	let trimmed = content.trim();
+	let json_text = if trimmed.starts_with("```") {
+		trimmed
+			.trim_start_matches("```json")
+			.trim_start_matches("```")
+			.trim_end_matches("```")
+			.trim()
+	} else {
+		trimmed
+	};
+	let root: Value = serde_json::from_str(json_text).map_err(|err| {
+		AgentError::Llm(LlmError::Parse(format!("the plan is not JSON: {err}")))
+	})?;
+	let steps = root
+		.get("steps")
+		.and_then(Value::as_array)
+		.ok_or_else(|| {
+			AgentError::Llm(LlmError::Parse("the plan has no `steps` array".into()))
+		})?;
+	let mut plan = Plan::new(
+		root.get("goal")
+			.and_then(Value::as_str)
+			.unwrap_or(goal),
+	);
+	for (index, step) in steps.iter().enumerate() {
+		let tool = step
+			.get("tool")
+			.and_then(Value::as_str)
+			.ok_or_else(|| {
+				AgentError::Llm(LlmError::Parse(format!("plan step {index} has no `tool`")))
+			})?
+			.to_string();
+		let title = step
+			.get("title")
+			.and_then(Value::as_str)
+			.map(str::to_string)
+			.unwrap_or_else(|| format!("step {}", index + 1));
+		let args = step.get("args").cloned().unwrap_or_else(|| json!({}));
+		plan.steps.push(PlanStep::new(title, tool, args));
+	}
+	Ok(plan)
+}
+
+/// Folds a step's result into the template variables (top-level fields:
+/// `${track}` resolves against what the earlier step returned).
+fn merge_vars(vars: &mut Value, result: &Value) {
+	if let (Some(into), Value::Object(from)) = (vars.as_object_mut(), result) {
+		for (key, value) in from {
+			into.insert(key.clone(), value.clone());
+		}
 	}
 }
 

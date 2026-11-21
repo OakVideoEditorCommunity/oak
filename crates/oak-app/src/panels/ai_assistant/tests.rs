@@ -154,6 +154,7 @@ fn append_report_surfaces_a_stall_as_a_notice() {
 		text_fallback_calls: 0,
 		unparsed_text_calls: 0,
 		unparsed_text: None,
+		..Default::default()
 	};
 	append_report(&mut bubbles, &report);
 
@@ -192,6 +193,7 @@ fn append_report_reports_unparsed_text_markup() {
 		text_fallback_calls: 0,
 		unparsed_text_calls: 1,
 		unparsed_text: Some(raw.to_string()),
+		..Default::default()
 	};
 	append_report(&mut bubbles, &report);
 
@@ -221,6 +223,7 @@ fn append_report_reports_unparsed_text_markup() {
 	);
 }
 
+#[test]
 fn append_report_orders_tools_then_answer() {
 	let tool = |name: &str, outcome: &'static str| ToolLogEntry {
 		round: 1,
@@ -241,6 +244,7 @@ fn append_report_orders_tools_then_answer() {
 		text_fallback_calls: 0,
 		unparsed_text_calls: 0,
 		unparsed_text: None,
+		..Default::default()
 	};
 	append_report(&mut bubbles, &report);
 	assert_eq!(
@@ -275,6 +279,7 @@ fn capped_run_becomes_the_round_limit_notice() {
 		text_fallback_calls: 0,
 		unparsed_text_calls: 0,
 		unparsed_text: None,
+		..Default::default()
 	};
 	append_report(&mut bubbles, &report);
 	assert_eq!(

@@ -21,7 +21,7 @@ pub struct V2Tool {
 
 /// The v2 tool table.
 pub fn v2_tools() -> &'static [V2Tool] {
-	static TOOLS: [V2Tool; 2] = [
+	static TOOLS: [V2Tool; 7] = [
 		V2Tool {
 			name: "sequence.get_settings",
 			description: "Read a sequence's settings: name, width, height, \
@@ -34,6 +34,42 @@ pub fn v2_tools() -> &'static [V2Tool] {
 				interlaced). Only the fields you pass change; the edit is one \
 				undoable step.",
 			parameters: set_format_schema,
+		},
+		V2Tool {
+			name: "analysis.detect_silence",
+			description: "Detect silent intervals in a media file's audio with \
+				ffmpeg silencedetect. Returns {intervals, count}; each interval \
+				is {start, end, duration} in rational seconds {num, den}.",
+			parameters: detect_silence_schema,
+		},
+		V2Tool {
+			name: "analysis.detect_scenes",
+			description: "Detect scene-change points in a media file's video with \
+				ffmpeg scdet. Returns {points, count}; each point is {time, score} \
+				with time in rational seconds {num, den}.",
+			parameters: detect_scenes_schema,
+		},
+		V2Tool {
+			name: "analysis.detect_black",
+			description: "Detect black intervals in a media file's video with \
+				ffmpeg blackdetect. Returns {intervals, count}; each interval is \
+				{start, end, duration} in rational seconds {num, den}.",
+			parameters: detect_black_schema,
+		},
+		V2Tool {
+			name: "analysis.loudness",
+			description: "Measure EBU R128 loudness of a media file's audio with \
+				ffmpeg ebur128: integrated loudness (I, LUFS), loudness range \
+				(LRA, LU) and true peak (dBFS).",
+			parameters: loudness_schema,
+		},
+		V2Tool {
+			name: "analysis.export_thumbnails",
+			description: "Export JPEG thumbnails from a media file with ffmpeg: \
+				either every `interval_sec` seconds or at explicit `times` \
+				(rational seconds {num, den} or frame indices). Returns the \
+				{paths, count} actually written under `outdir`.",
+			parameters: export_thumbnails_schema,
 		},
 	];
 
@@ -67,6 +103,136 @@ fn get_settings_schema() -> Value {
 /// `additionalProperties` stays **false** on purpose: a key that *looks*
 /// writable but is misspelled (`frameRate`) must be refused and named, never
 /// silently dropped. Ignorance is only licensed for the read-only echo.
+/// The five `analysis.*` schemas (task K). Shared fragments keep the
+/// returned shapes identical across the three interval tools.
+fn src_property() -> Value {
+	json!({ "type": "string", "minLength": 1, "description": "Path to the media file to analyse." })
+}
+
+fn detect_silence_schema() -> Value {
+	json!({
+		"type": "object",
+		"properties": {
+			"src": src_property(),
+			"noise_db": {
+				"type": "number",
+				"minimum": -128,
+				"maximum": 0,
+				"default": -30,
+				"description": "Silence threshold in dBFS; anything quieter counts as silence."
+			},
+			"min_dur": {
+				"type": "number",
+				"exclusiveMinimum": 0,
+				"default": 0.5,
+				"description": "Minimum silence length in seconds."
+			}
+		},
+		"required": ["src"],
+		"additionalProperties": false
+	})
+}
+
+fn detect_scenes_schema() -> Value {
+	json!({
+		"type": "object",
+		"properties": {
+			"src": src_property(),
+			"threshold": {
+				"type": "number",
+				"minimum": 0,
+				"maximum": 1,
+				"default": 0.3,
+				"description": "Scene-change score threshold; higher means fewer cuts."
+			}
+		},
+		"required": ["src"],
+		"additionalProperties": false
+	})
+}
+
+fn detect_black_schema() -> Value {
+	json!({
+		"type": "object",
+		"properties": {
+			"src": src_property(),
+			"min_dur": {
+				"type": "number",
+				"exclusiveMinimum": 0,
+				"default": 0.3,
+				"description": "Minimum black interval length in seconds."
+			},
+			"pix_th": {
+				"type": "number",
+				"minimum": 0,
+				"maximum": 1,
+				"default": 0.10,
+				"description": "Pixel luminance threshold; a pixel at or below it is black."
+			}
+		},
+		"required": ["src"],
+		"additionalProperties": false
+	})
+}
+
+fn loudness_schema() -> Value {
+	json!({
+		"type": "object",
+		"properties": {
+			"src": src_property()
+		},
+		"required": ["src"],
+		"additionalProperties": false
+	})
+}
+
+fn export_thumbnails_schema() -> Value {
+	json!({
+		"type": "object",
+		"properties": {
+			"src": src_property(),
+			"interval_sec": {
+				"type": "number",
+				"exclusiveMinimum": 0,
+				"description": "Seconds between thumbnails. Required unless `times` is given."
+			},
+			"times": {
+				"type": "array",
+				"minItems": 1,
+				"description": "Explicit time points: each is rational seconds {\"num\", \"den\"} or a non-negative integer frame index (bare floats rejected). Required unless `interval_sec` is given.",
+				"items": {
+					"oneOf": [
+						{ "type": "integer", "minimum": 0 },
+						{
+							"type": "object",
+							"properties": {
+								"num": { "type": "integer" },
+								"den": { "type": "integer", "minimum": 1 }
+							},
+							"required": ["num"],
+							"additionalProperties": false
+						}
+					]
+				}
+			},
+			"outdir": {
+				"type": "string",
+				"minLength": 1,
+				"description": "Directory to write the JPEG thumbnails into (created if absent)."
+			},
+			"width": {
+				"type": "integer",
+				"minimum": 16,
+				"maximum": 8192,
+				"default": 320,
+				"description": "Thumbnail width in pixels; height follows the source aspect ratio."
+			}
+		},
+		"required": ["src", "outdir"],
+		"additionalProperties": false
+	})
+}
+
 fn set_format_schema() -> Value {
 	json!({
 		"type": "object",
@@ -282,7 +448,7 @@ mod tests {
 	#[test]
 	fn openai_envelopes_name_every_v2_tool() {
 		let tools = v2_openai_tools();
-		assert_eq!(tools.len(), 2);
+		assert_eq!(tools.len(), 7);
 		for tool in &tools {
 			assert_eq!(tool["type"], "function");
 			let name = tool["function"]["name"].as_str().expect("a name");

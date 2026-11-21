@@ -121,4 +121,46 @@ pub trait EngineExt: EngineBackend {
 			"this backend has no `sequence.set_format` support",
 		))
 	}
+
+	/// `analysis.detect_silence` — ffmpeg silencedetect over `src`.
+	///
+	/// The default body runs the real `ffmpeg` process (the analysis tools
+	/// are file-level reads, not engine state), so mock and SDK backends
+	/// both get them; a machine without ffmpeg answers the structured
+	/// `GAP_ANALYSIS_FFMPEG` gap instead of a fabricated success.
+	fn analysis_detect_silence(
+		&self,
+		parsed: &crate::tools::analysis::DetectSilence,
+	) -> Result<Value, ToolError> {
+		crate::tools::analysis_exec::detect_silence(parsed)
+	}
+
+	/// `analysis.detect_scenes` — ffmpeg scdet over `src`.
+	fn analysis_detect_scenes(
+		&self,
+		parsed: &crate::tools::analysis::DetectScenes,
+	) -> Result<Value, ToolError> {
+		crate::tools::analysis_exec::detect_scenes(parsed)
+	}
+
+	/// `analysis.detect_black` — ffmpeg blackdetect over `src`.
+	fn analysis_detect_black(
+		&self,
+		parsed: &crate::tools::analysis::DetectBlack,
+	) -> Result<Value, ToolError> {
+		crate::tools::analysis_exec::detect_black(parsed)
+	}
+
+	/// `analysis.loudness` — ffmpeg ebur128 over `src`.
+	fn analysis_loudness(&self, parsed: &crate::tools::analysis::Loudness) -> Result<Value, ToolError> {
+		crate::tools::analysis_exec::loudness(parsed)
+	}
+
+	/// `analysis.export_thumbnails` — ffmpeg frame dump into `outdir`.
+	fn analysis_export_thumbnails(
+		&self,
+		parsed: &crate::tools::analysis::ExportThumbnails,
+	) -> Result<Value, ToolError> {
+		crate::tools::analysis_exec::export_thumbnails(parsed)
+	}
 }
