@@ -31,6 +31,7 @@
 pub mod backend;
 pub mod dispatch;
 pub mod error;
+pub mod ffmpeg;
 pub mod hooks;
 pub mod mock;
 pub mod render;
