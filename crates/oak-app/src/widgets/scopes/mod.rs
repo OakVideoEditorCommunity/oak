@@ -17,7 +17,7 @@ use gpui_kit::{
 /// Provides luma samples (`0..1`) for the histogram and waveform scopes.
 pub trait LumaDataSource: 'static {
 	/// Luma samples for the current frame, row-major.
-	fn luma_samples(&self) -> Vec<f32>;
+	fn luma_samples(&self) -> &[f32];
 
 	/// Dimensions `(width, height)` of the row-major frame in [`Self::luma_samples`].
 	fn luma_dimensions(&self) -> (usize, usize);
@@ -26,7 +26,7 @@ pub trait LumaDataSource: 'static {
 /// Provides chroma samples for the vectorscope.
 pub trait ChromaDataSource: 'static {
 	/// `(u, v)` samples in `0..1` (centered on `0.5`).
-	fn chroma_samples(&self) -> Vec<(f32, f32)>;
+	fn chroma_samples(&self) -> &[(f32, f32)];
 }
 
 /// A luminance histogram.
@@ -63,7 +63,7 @@ impl<D: LumaDataSource> Histogram<D> {
 	/// than an empty vector, so the render pass and hosts can index it
 	/// directly. Also used by tests to assert the mapping.
 	pub fn bins(&self, cx: &App) -> Vec<u32> {
-		histogram_bins(&self.data.read(cx).luma_samples(), 64)
+		histogram_bins(self.data.read(cx).luma_samples(), 64)
 	}
 }
 
@@ -136,7 +136,7 @@ impl<D: LumaDataSource> Waveform<D> {
 	pub fn envelope(&self, cx: &App) -> Vec<(f32, f32)> {
 		let data = self.data.read(cx);
 		let (width, height) = data.luma_dimensions();
-		waveform_envelope(&data.luma_samples(), width, height, 128)
+		waveform_envelope(data.luma_samples(), width, height, 128)
 	}
 }
 
@@ -207,7 +207,7 @@ impl<D: ChromaDataSource> Vectorscope<D> {
 	/// subtracting the 0.5 center and clamping; the render pass maps these
 	/// onto the canvas. Empty when the source has no samples.
 	pub fn points(&self, cx: &App) -> Vec<(f32, f32)> {
-		vectorscope_points(&self.data.read(cx).chroma_samples())
+		vectorscope_points(self.data.read(cx).chroma_samples())
 	}
 }
 
@@ -264,6 +264,7 @@ impl<D: ChromaDataSource> Render for Vectorscope<D> {
 mod tests {
 	use super::*;
 	use gpui_kit::{Entity, Render, TestAppContext, Window, div, px, size};
+	use std::ptr;
 
 	struct MockLuma {
 		width: usize,
@@ -271,8 +272,8 @@ mod tests {
 		samples: Vec<f32>,
 	}
 	impl LumaDataSource for MockLuma {
-		fn luma_samples(&self) -> Vec<f32> {
-			self.samples.clone()
+		fn luma_samples(&self) -> &[f32] {
+			&self.samples
 		}
 
 		fn luma_dimensions(&self) -> (usize, usize) {
@@ -281,8 +282,8 @@ mod tests {
 	}
 	struct MockChroma(Vec<(f32, f32)>);
 	impl ChromaDataSource for MockChroma {
-		fn chroma_samples(&self) -> Vec<(f32, f32)> {
-			self.0.clone()
+		fn chroma_samples(&self) -> &[(f32, f32)] {
+			&self.0
 		}
 	}
 
@@ -330,14 +331,20 @@ mod tests {
 			window.draw(cx).clear(cx);
 		});
 
-		let (bins, envelope, points) = cx.read(|app| {
+		let (bins, envelope, points, luma_ptrs_match, chroma_ptrs_match) = cx.read(|app| {
 			let host = host.read(app);
+			let luma_ref = luma.read(app);
+			let chroma_ref = chroma.read(app);
 			(
 				host.histogram.read(app).bins(app),
 				host.waveform.read(app).envelope(app),
 				host.vectorscope.read(app).points(app),
+				ptr::eq(luma_ref.luma_samples().as_ptr(), luma_ref.samples.as_ptr()),
+				ptr::eq(chroma_ref.chroma_samples().as_ptr(), chroma_ref.0.as_ptr()),
 			)
 		});
+		assert!(luma_ptrs_match);
+		assert!(chroma_ptrs_match);
 		assert_eq!(bins.len(), 64);
 		let total: u32 = bins.iter().sum();
 		assert_eq!(total, 100);
