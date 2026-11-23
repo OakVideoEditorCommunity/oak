@@ -333,8 +333,8 @@ mod tests {
 
 		let (bins, envelope, points, luma_ptrs_match, chroma_ptrs_match) = cx.read(|app| {
 			let host = host.read(app);
-			let luma_ref = luma.read(app);
-			let chroma_ref = chroma.read(app);
+			let luma_ref = host.histogram.read(app).data.read(app);
+			let chroma_ref = host.vectorscope.read(app).data.read(app);
 			(
 				host.histogram.read(app).bins(app),
 				host.waveform.read(app).envelope(app),
