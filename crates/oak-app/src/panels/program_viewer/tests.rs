@@ -5,6 +5,8 @@ use crate::oakui::graphops;
 use crate::widgets::timeline::Frame;
 use crate::widgets::viewer::PlaybackClock;
 use gpui_kit::{Keystroke, Modifiers, Rgba, TestAppContext, VisualTestContext, size};
+use std::ptr;
+use std::sync::Arc;
 
 /// Serializes the tests that mutate process-global state (HOME, the
 /// debug env var) and the undo stack.
@@ -378,14 +380,32 @@ async fn scopes_tab_renders_from_the_current_frame(cx: &mut TestAppContext) {
 		window.draw(cx).clear(cx);
 	});
 
-	let (scope_width, scope_height, luma_len, chroma_len, bins, envelope) = cx.read(|app| {
+	let (
+		scope_width,
+		scope_height,
+		luma_len,
+		chroma_len,
+		luma_arc,
+		chroma_arc,
+		engine_scope,
+		luma_ptrs_match,
+		chroma_ptrs_match,
+		bins,
+		envelope,
+	) = cx.read(|app| {
 		let panel = panel.read(app);
 		let state = panel.scope_state.read(app);
+		let engine_scope = panel.engine.read(app).scope_data(Monitor::Program, app);
 		(
 			state.width,
 			state.height,
 			state.luma.len(),
 			state.chroma.len(),
+			state.luma.clone(),
+			state.chroma.clone(),
+			engine_scope,
+			ptr::eq(state.luma_samples().as_ptr(), state.luma.as_ptr()),
+			ptr::eq(state.chroma_samples().as_ptr(), state.chroma.as_ptr()),
 			panel.histogram.read(app).bins(app),
 			panel.waveform.read(app).envelope(app),
 		)
@@ -396,6 +416,21 @@ async fn scopes_tab_renders_from_the_current_frame(cx: &mut TestAppContext) {
 	assert_eq!(scope_height, crate::oakui::frames::SYNTH_FRAME_HEIGHT);
 	assert_eq!(luma_len, pixels);
 	assert_eq!(chroma_len, pixels);
+	assert!(Arc::ptr_eq(&luma_arc, &engine_scope.luma));
+	assert!(Arc::ptr_eq(&chroma_arc, &engine_scope.chroma));
+	assert!(luma_ptrs_match);
+	assert!(chroma_ptrs_match);
 	assert_eq!(bins.iter().sum::<u32>() as usize, pixels);
 	assert_eq!(envelope.len(), 128);
+
+	// Redrawing while paused must keep sharing the exact same buffers without
+	// allocating or copying samples.
+	cx.update(|window, cx| {
+		window.draw(cx).clear(cx);
+	});
+	cx.read(|app| {
+		let state = panel.read(app).scope_state.read(app);
+		assert!(Arc::ptr_eq(&state.luma, &luma_arc));
+		assert!(Arc::ptr_eq(&state.chroma, &chroma_arc));
+	});
 }

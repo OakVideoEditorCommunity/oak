@@ -43,6 +43,7 @@ use crate::oakui::timecode::{format_fps, format_resolution};
 use crate::oakui::{AppEngine, Monitor};
 use crate::panels::commands::{self as panel_commands, PanelCommandHandler};
 use crate::panels::{chip, viewer_title};
+use std::sync::Arc;
 
 /// Width of the audio level strip, per the design (26px).
 const METER_WIDTH: f32 = 26.0;
@@ -64,15 +65,15 @@ struct ScopeState {
 	width: u32,
 	/// Frame height in pixels.
 	height: u32,
-	/// Per-pixel luma of the current frame (`0..=1`).
-	luma: Vec<f32>,
-	/// Per-pixel chroma `(Cb, Cr)` of the current frame (`0..=1`).
-	chroma: Vec<(f32, f32)>,
+	/// Per-pixel luma of the current frame (`0..=1`), shared via [`Arc`].
+	luma: Arc<Vec<f32>>,
+	/// Per-pixel chroma `(Cb, Cr)` of the current frame (`0..=1`), shared via [`Arc`].
+	chroma: Arc<Vec<(f32, f32)>>,
 }
 
 impl LumaDataSource for ScopeState {
-	fn luma_samples(&self) -> Vec<f32> {
-		self.luma.clone()
+	fn luma_samples(&self) -> &[f32] {
+		&self.luma
 	}
 
 	fn luma_dimensions(&self) -> (usize, usize) {
@@ -81,8 +82,8 @@ impl LumaDataSource for ScopeState {
 }
 
 impl ChromaDataSource for ScopeState {
-	fn chroma_samples(&self) -> Vec<(f32, f32)> {
-		self.chroma.clone()
+	fn chroma_samples(&self) -> &[(f32, f32)] {
+		&self.chroma
 	}
 }
 
@@ -232,8 +233,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 		let scope_state = cx.new(|_cx| ScopeState {
 			width: 0,
 			height: 0,
-			luma: Vec::new(),
-			chroma: Vec::new(),
+			luma: Arc::default(),
+			chroma: Arc::default(),
 		});
 		let histogram = cx.new(|cx| Histogram::new(41, scope_state.clone(), window, cx));
 		let waveform = cx.new(|cx| Waveform::new(42, scope_state.clone(), window, cx));
@@ -405,8 +406,8 @@ impl<E: AppEngine> ProgramViewerPanel<E> {
 			self.scope_state.update(cx, |state, cx| {
 				state.width = scope.width;
 				state.height = scope.height;
-				state.luma = (*scope.luma).clone();
-				state.chroma = (*scope.chroma).clone();
+				state.luma = scope.luma;
+				state.chroma = scope.chroma;
 				cx.notify();
 			});
 		}
