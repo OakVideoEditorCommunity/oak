@@ -45,7 +45,7 @@
 | 剩余实现文件评审 | 已完成 | 按自然职责边界决定拆分或保留，例外见下文 |
 | `cargo fmt` | 已完成 | Quercus、Oak 主工作区及三个独立 AI 工作区均通过 |
 | 测试与 CI 修复 | 已完成 | 可见性、条件导入、资源路径和宏作用域问题已修复 |
-| 代码风格指南 | 已完成 | 新增 `docs/zh/code-style.md`，并从 `CONTRIBUTING.md` 链接 |
+| 代码风格指南 | 已完成 | 新增 `../../code-style.md`，并从 `CONTRIBUTING.md` 链接 |
 | 全限定路径整理 | 已完成 | 两库尽可能改为 `use`，保留冲突与特殊解析场景 |
 | 最终提交 | 已完成 | 两库各一个码风提交，不包含 `MAINTAINERS.md` |
 
@@ -84,7 +84,7 @@
 - `cargo test --workspace --locked`（Quercus）：通过，全部测试与文档测试成功，无跳过用例。
 - 提交后复核：上述格式检查、Oak 全套件、Quercus 除基线失败项的测试以及 AI headless CI 均再次通过。
 - Readback 测试修复：测试现同时覆盖 GPU surface import 与 staged upload 两条合法路径；导入帧不得重复上传，未导入帧按实际帧数上传，两个原失败用例均已通过。
-- `docs/zh/code-style.md` 已按维护者要求改为英文。
+- `../../code-style.md` 已按维护者要求改为英文。
 
 ## 8. 提交记录
 
