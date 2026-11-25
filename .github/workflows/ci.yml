@@ -264,7 +264,7 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}
+          shared-key: oak-ci-${{ matrix.distro }}-${{ matrix.arch }}-${{ github.ref }}
           cache-on-failure: true
 
       # The bundled OCIO build (ocio-sys' build script, ~600 MB of MSVC
