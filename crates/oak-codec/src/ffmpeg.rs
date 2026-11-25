@@ -355,18 +355,41 @@ impl Decoder for FFmpegDecoder {
 		// the requested timestamp.
 		// Note: the Rust `RetrieveVideoParams` carries no cancellation atom
 		// (dropped from the C++ struct), so decoding is not cancellable here.
-		let mut decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
-		if decoded.is_err() && state.hw_device.is_some() {
-			// First-frame hardware fallback: the hardware decoder opened
-			// but cannot actually decode this stream (unsupported profile
-			// / driver issue at decode time). Reopen as software and retry
-			// once — this is the automatic fallback path; the config
-			// switch is the manual one.
-			state.reopen_software()?;
-			decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
-		}
-		let f = decoded?
-			.ok_or_else(|| fail("no video frame available at the requested time"))?;
+		let any_timecode = p.time == crate::decoder::k_any_timecode();
+		let mut decoded = state.retrieve_frame(&p.time, any_timecode, None);
+		let mut attempts = 0;
+		let f = loop {
+			match decoded {
+				Err(err) => {
+					if state.hw_device.is_some() && attempts < 4 {
+						state.reopen_after_hw_failure()?;
+						attempts += 1;
+						decoded = state.retrieve_frame(&p.time, any_timecode, None);
+						continue;
+					}
+					return Err(err);
+				}
+				Ok(None) => {
+					return Err(fail("no video frame available at the requested time"));
+				}
+				Ok(Some(frame)) => {
+					let raw_format = unsafe {
+						std::mem::transmute::<i32, sys::AVPixelFormat>((*frame.as_ptr()).format)
+					};
+					if state.hw_device.is_some()
+						&& !crate::hwdecode::is_hw_format(raw_format)
+						&& attempts < 4
+					{
+						drop(frame);
+						state.reopen_after_hw_failure()?;
+						attempts += 1;
+						decoded = state.retrieve_frame(&p.time, any_timecode, None);
+						continue;
+					}
+					break frame;
+				}
+			}
+		};
 
 		let (w, h, bytes, color_meta) =
 			state.scale_video_to_f32(f, p.force_range, p.target_size)?;
@@ -405,7 +428,7 @@ impl Decoder for FFmpegDecoder {
 		// path: an import attempt and its fallback share one decode.
 		let mut decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
 		if decoded.is_err() && state.hw_device.is_some() {
-			state.reopen_software()?;
+			state.reopen_after_hw_failure()?;
 			decoded = state.retrieve_frame(&p.time, p.time == crate::decoder::k_any_timecode(), None);
 		}
 		let Some(f) = decoded? else {
@@ -909,6 +932,17 @@ impl DecoderState {
 	/// Reopen the session as a pure software decode (the hardware decoder
 	/// opened but cannot decode this stream). Swaps the state in place;
 	/// the retry re-seeks to the requested frame on the fresh session.
+	fn reopen_after_hw_failure(&mut self) -> crate::error::Result<()> {
+		if let Some(failed) = self.hw_device {
+			crate::hwdecode::mark_device_unavailable(failed);
+		}
+		let stream = CodecStream::with_block(self.filename.clone(), self.stream_index as i32, None);
+		let mut fresh = Self::open_impl(&stream, true)
+			.or_else(|_| Self::open_impl(&stream, false))?;
+		std::mem::swap(self, &mut fresh);
+		Ok(())
+	}
+
 	fn reopen_software(&mut self) -> crate::error::Result<()> {
 		let stream = CodecStream::with_block(self.filename.clone(), self.stream_index as i32, None);
 		let mut fresh = Self::open_impl(&stream, false)?;
@@ -1066,6 +1100,21 @@ impl DecoderState {
 	/// Retrieve the video frame at (or before) `time`, mirroring the C++
 	/// `retrieve_frame` seek/cache logic.
 	fn retrieve_frame(
+		&mut self,
+		time: &Rational,
+		any_timecode: bool,
+		cancelled: Option<&CancelAtom>,
+	) -> crate::error::Result<Option<RefFrame>> {
+		match self.retrieve_frame_impl(time, any_timecode, cancelled) {
+			Err(_) if self.hw_device.is_some() => {
+				self.reopen_software()?;
+				self.retrieve_frame_impl(time, any_timecode, cancelled)
+			}
+			result => result,
+		}
+	}
+
+	fn retrieve_frame_impl(
 		&mut self,
 		time: &Rational,
 		any_timecode: bool,

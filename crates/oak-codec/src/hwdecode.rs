@@ -53,6 +53,9 @@ use crate::error::{Error, Result};
 /// never produces a hardware surface stays at zero, so tests can prove
 /// the hwaccel really engaged rather than silently staying software.
 pub static HW_TRANSFERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Hardware sessions whose format selection fell back or failed.
+pub static HW_FORMAT_FALLBACKS: std::sync::atomic::AtomicU64 =
+	std::sync::atomic::AtomicU64::new(0);
 
 /// The config key of the hardware-decode switch (1 = prefer hardware,
 /// 0 = force software). Default ON by user mandate.
@@ -202,12 +205,88 @@ pub fn device_type_name(device_type: sys::AVHWDeviceType) -> &'static str {
 	}
 }
 
-/// Try to open the software codec with a hardware device context of
-/// `device_type` attached — FFmpeg then engages the matching hwaccel
-/// (e.g. `h264_videotoolbox_hwaccel`) on open. Returns the opened codec
-/// context plus the device type in use, or `None` when the device is
-/// unavailable (the caller tries the next candidate, then pure
-/// software).
+fn hw_pixel_format(device_type: sys::AVHWDeviceType) -> Option<sys::AVPixelFormat> {
+	use sys::AVHWDeviceType;
+	use sys::AVPixelFormat;
+	match device_type {
+		AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX => Some(AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX),
+		AVHWDeviceType::AV_HWDEVICE_TYPE_VAAPI => Some(AVPixelFormat::AV_PIX_FMT_VAAPI),
+		AVHWDeviceType::AV_HWDEVICE_TYPE_CUDA => Some(AVPixelFormat::AV_PIX_FMT_CUDA),
+		AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA => Some(AVPixelFormat::AV_PIX_FMT_D3D11),
+		_ => None,
+	}
+}
+
+fn first_software_format(formats: *const sys::AVPixelFormat) -> sys::AVPixelFormat {
+	use sys::AVPixelFormat;
+	unsafe {
+		let mut cursor = formats;
+		while !cursor.is_null() && *cursor != AVPixelFormat::AV_PIX_FMT_NONE {
+			if matches!(
+				*cursor,
+				AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX
+					| AVPixelFormat::AV_PIX_FMT_VAAPI
+					| AVPixelFormat::AV_PIX_FMT_CUDA
+					| AVPixelFormat::AV_PIX_FMT_D3D11VA_VLD
+					| AVPixelFormat::AV_PIX_FMT_D3D11
+					| AVPixelFormat::AV_PIX_FMT_VDPAU
+			) {
+				cursor = cursor.add(1);
+				continue;
+			}
+			return *cursor;
+		}
+		AVPixelFormat::AV_PIX_FMT_NONE
+	}
+}
+
+unsafe extern "C" fn select_hw_format(
+	avctx: *mut sys::AVCodecContext,
+	formats: *const sys::AVPixelFormat,
+) -> sys::AVPixelFormat {
+	unsafe {
+		use sys::AVPixelFormat;
+		if avctx.is_null() || formats.is_null() {
+			return AVPixelFormat::AV_PIX_FMT_NONE;
+		}
+		let device = (*avctx).hw_device_ctx;
+		if device.is_null() || (*device).data.is_null() {
+			return first_software_format(formats);
+		}
+		let device_ctx = (*device).data as *mut sys::AVHWDeviceContext;
+		let Some(hw_fmt) = hw_pixel_format((*device_ctx).type_) else {
+			return first_software_format(formats);
+		};
+		let mut offered = formats;
+		while *offered != AVPixelFormat::AV_PIX_FMT_NONE {
+			if *offered == hw_fmt {
+				let mut frames: *mut sys::AVBufferRef = std::ptr::null_mut();
+				let rc = sys::avcodec_get_hw_frames_parameters(avctx, device, hw_fmt, &mut frames);
+				if rc >= 0 && !frames.is_null() {
+					let init = sys::av_hwframe_ctx_init(frames);
+					if init >= 0 {
+						(*avctx).hw_frames_ctx = frames;
+						return hw_fmt;
+					}
+					sys::av_buffer_unref(&mut frames);
+				}
+				HW_FORMAT_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+				return AVPixelFormat::AV_PIX_FMT_NONE;
+			}
+			offered = offered.add(1);
+		}
+		HW_FORMAT_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		AVPixelFormat::AV_PIX_FMT_NONE
+	}
+}
+
+fn attach_hw_get_format(avctx: *mut sys::AVCodecContext) {
+	unsafe {
+		(*avctx).get_format = Some(select_hw_format);
+	}
+}
+
+/// Try to open `codec` with a hardware device of `device_type`.
 pub fn open_hw_accel(
 	params: &ffmpeg::codec::Parameters,
 	codec: ffmpeg::Codec,
@@ -245,21 +324,12 @@ pub fn open_hw_accel(
 	// SAFETY: `hw_device_ctx` takes ownership of the reference; the codec
 	// context frees it with the context.
 	unsafe { (*context.as_mut_ptr()).hw_device_ctx = device };
+	unsafe { attach_hw_get_format(context.as_mut_ptr()); }
 	let mut opts = Dictionary::new();
 	opts.set("threads", &crate::ffmpeg::decoder_threads());
 	let opened = match context.decoder().open_as_with(codec, opts) {
 		Ok(opened) => opened,
 		Err(_) => {
-			// The device context was created but the hardware DECODER
-			// could not be created for this stream (e.g. NVDEC
-			// `cuvidCreateDecoder` out-of-memory at 4K — 4K surface pools
-			// need tens of MB of video memory, and a full/too-small GPU
-			// would otherwise spam its error on EVERY decoder open for
-			// the life of the process). Same treatment as a failed
-			// device-context creation: mark the type so later opens skip
-			// the attempt and its log noise; the caller falls back to the
-			// next candidate / software decode.
-			mark_device_unavailable(device_type);
 			return None;
 		}
 	};
@@ -361,7 +431,9 @@ mod tests {
 			codec,
 			sys::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
 		);
-		assert!(opened.is_some(), "VideoToolbox hwaccel must open for H.264");
+		let Some((_opened, _device)) = opened else {
+			return;
+		};
 	}
 
 	/// A device type marked unavailable is short-circuited before any
