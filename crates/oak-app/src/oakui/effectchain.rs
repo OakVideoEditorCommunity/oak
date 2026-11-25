@@ -528,6 +528,20 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 // Chain edits (each is ONE undo row)
 // ---------------------------------------------------------------------------
 
+struct GroupGuard {
+	armed: bool,
+}
+
+impl Drop for GroupGuard {
+	fn drop(&mut self) {
+		if self.armed {
+			let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+				let _ = oak_undo::global::group_abort();
+			}));
+		}
+	}
+}
+
 /// Run `f` inside an undo group: every push redoes eagerly (so a later
 /// child's construction and validation see the post-edit graph — the
 /// facade's `oakengine_undo_group_begin` flow), and the group closes as
@@ -535,13 +549,16 @@ fn add_node_command(p: &ProjectRef, entry: NodeEntry) -> (UndoCommand, AddNodeSt
 /// error.
 fn grouped<T>(name: &str, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 	oak_undo::global::group_begin(name).map_err(|e| e.to_string())?;
+	let mut guard = GroupGuard { armed: true };
 	match f() {
 		Ok(v) => {
 			oak_undo::global::group_end().map_err(|e| e.to_string())?;
+			guard.armed = false;
 			Ok(v)
 		}
 		Err(e) => {
 			let _ = oak_undo::global::group_abort();
+			guard.armed = false;
 			Err(e)
 		}
 	}
