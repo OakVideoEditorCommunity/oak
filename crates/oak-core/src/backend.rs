@@ -708,6 +708,13 @@ impl GpuContext {
 		lock(&self.textures).get(&token).map(|t| t.format)
 	}
 
+	/// Whether normalized 16-bit plane textures are enabled on this device.
+	pub fn supports_16bit_norm_planes(&self) -> bool {
+		self.device
+			.features()
+			.contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
+	}
+
 	/// Upload tightly packed raw bytes into a plain-format texture (the
 	/// YUV→RGB planes). Counted as a CPU→GPU transfer.
 	pub fn upload_plane(&self, token: u64, data: &[u8]) -> Result<()> {
@@ -936,14 +943,12 @@ impl GpuContext {
 			hi[2],
 			0.0,
 		];
-		let uniform = self.device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("oakrender-present-params"),
-			size: 48,
-			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-			mapped_at_creation: false,
-		});
-		self.queue
-			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		let uniform = uniform_buffer_from_bytes(
+			&self.device,
+			"oakrender-present-params",
+			&f32_uniform_bytes(&params),
+			48,
+		);
 		let src_view = src_tex
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1153,14 +1158,12 @@ impl GpuContext {
 			0.0,
 			0.0,
 		];
-		let uniform = self.device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("oakrender-yuv-params"),
-			size: 64,
-			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-			mapped_at_creation: false,
-		});
-		self.queue
-			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		let uniform = uniform_buffer_from_bytes(
+			&self.device,
+			"oakrender-yuv-params",
+			&f32_uniform_bytes(&params),
+			64,
+		);
 		let y_view = y_tex
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1363,14 +1366,12 @@ impl GpuContext {
 			0.0,
 			0.0,
 		];
-		let uniform = self.device.create_buffer(&wgpu::BufferDescriptor {
-			label: Some("oakrender-yuv-planar-params"),
-			size: 64,
-			usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-			mapped_at_creation: false,
-		});
-		self.queue
-			.write_buffer(&uniform, 0, &f32_uniform_bytes(&params));
+		let uniform = uniform_buffer_from_bytes(
+			&self.device,
+			"oakrender-yuv-planar-params",
+			&f32_uniform_bytes(&params),
+			64,
+		);
 		let dst_view = dst_tex
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1664,7 +1665,14 @@ impl GpuContext {
 			.map_async(wgpu::MapMode::Read, move |result| {
 				let _ = tx.send(result.is_ok());
 			});
-		let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+		let poll = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+			let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+		}));
+		if poll.is_err() {
+			return Err(Error::Failed(
+				"wgpu device lost during texture download".into(),
+			));
+		}
 		if !rx.recv().unwrap_or(false) {
 			return Err(Error::Failed("texture download map failed".into()));
 		}
@@ -2097,16 +2105,12 @@ impl GpuContext {
 
 		let uniform_buffer = if program.has_uniforms {
 			let size = uniforms.len().max(16) as u64;
-			let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-				label: Some("oakrender-fx-uniforms"),
+			Some(uniform_buffer_from_bytes(
+				&self.device,
+				"oakrender-fx-uniforms",
+				uniforms,
 				size,
-				usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-				mapped_at_creation: false,
-			});
-			if !uniforms.is_empty() {
-				self.queue.write_buffer(&buffer, 0, uniforms);
-			}
-			Some(buffer)
+			))
 		} else {
 			None
 		};
@@ -2312,6 +2316,27 @@ impl YuvTransform {
 	pub fn bt2020_full() -> Self {
 		Self::from_matrix(crate::colormath::YuvMatrix::Bt2020, true)
 	}
+}
+
+fn uniform_buffer_from_bytes(
+	device: &wgpu::Device,
+	label: &str,
+	data: &[u8],
+	size: u64,
+) -> wgpu::Buffer {
+	let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+		label: Some(label),
+		size,
+		usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+		mapped_at_creation: true,
+	});
+	{
+		let mut view = buffer.slice(..).get_mapped_range_mut();
+		let len = data.len().min(view.len());
+		view.slice(..len).copy_from_slice(&data[..len]);
+	}
+	buffer.unmap();
+	buffer
 }
 
 /// Pack an f32 slice as little-endian bytes for `write_buffer`.
