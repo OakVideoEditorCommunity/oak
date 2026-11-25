@@ -91,7 +91,9 @@ pub struct ExportDialogContent {
 	pub(crate) resolution_w: Entity<SpinBox>,
 	pub(crate) resolution_h: Entity<SpinBox>,
 	pub(crate) frame_rate: Entity<SpinBox>,
+	pub(crate) rate_control: Entity<ComboBox>,
 	pub(crate) bitrate: Entity<SpinBox>,
+	pub(crate) quality: Entity<SpinBox>,
 	pub(crate) path: Entity<PathField>,
 	/// (format id, display name, extension) in dropdown order.
 	pub(crate) formats: Vec<(i32, String, String)>,
@@ -100,6 +102,40 @@ pub struct ExportDialogContent {
 	/// (entry id, display name) of the pickable sequences, in dropdown
 	/// order; populated by the host from the open project.
 	pub(crate) sequences: Vec<(u64, SharedString)>,
+	/// Kept alive so format / codec / rate-control changes update the dialog.
+	_subscriptions: Vec<gpui_kit::Subscription>,
+}
+
+/// Whether `video_codec` supports CRF / CQP quality-based rate control.
+///
+/// H.264 (`1`), H.264 RGB (`2`), H.265 (`3`) and AV1 (`18`) support constant
+/// quality modes; mezzanine/intraframe codecs (DNxHD, ProRes, CineForm,
+/// MPEG-2) stay in bitrate mode.
+pub fn codec_supports_quality_control(video_codec: i32) -> bool {
+	matches!(video_codec, 1 | 2 | 3 | 18)
+}
+
+/// Returns `(min, max, default)` quality bounds for `video_codec`.
+///
+/// AV1 (`18`) uses a `0..=63` scale (default `30`); H.264 and H.265 use
+/// `0..=51` (default `23`). Lower values mean higher quality.
+pub fn codec_quality_bounds(video_codec: i32) -> (i32, i32, i32) {
+	match video_codec {
+		18 => (0, 63, 30),
+		_ => (0, 51, 23),
+	}
+}
+
+fn rate_control_options(supports_quality: bool) -> Vec<ComboBoxOption> {
+	let mut opts = vec![ComboBoxOption::new(
+		0,
+		i18n::tr("export.rate_control.bitrate"),
+	)];
+	if supports_quality {
+		opts.push(ComboBoxOption::new(1, i18n::tr("export.rate_control.crf")));
+		opts.push(ComboBoxOption::new(2, i18n::tr("export.rate_control.cqp")));
+	}
+	opts
 }
 
 impl ExportDialogContent {
@@ -163,6 +199,7 @@ impl ExportDialogContent {
 				.collect::<Vec<_>>()
 		};
 		let video_codecs = compatible_video_codecs(active_format);
+		let initial_video_codec = video_codecs.first().copied().unwrap_or(1);
 		let audio_codecs = compatible_audio_codecs(active_format);
 		let video_codec = cx.new(|cx| {
 			ComboBox::new(5, codec_options(video_codecs), window, cx)
@@ -174,21 +211,6 @@ impl ExportDialogContent {
 				.with_placeholder(i18n::tr("export.audio_codec"))
 		});
 		audio_codec.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
-
-		// Container change → rebuild the codec lists (and re-select the
-		// first compatible entry) so a stale incompatible codec can never
-		// survive a format switch.
-		// NOTE: the returned subscription is dropped immediately, so this
-		// handler never runs; the drop is kept to preserve behavior.
-		let _ = cx.subscribe(&format, |this, _format, event: &ComboBoxEvent, cx| {
-			let ComboBoxEvent::Selected { value } = event;
-			let fmt = this
-				.formats
-				.get(*value)
-				.map(|(id, _, _)| *id)
-				.unwrap_or(EXPORT_FORMAT_MP4);
-			this.apply_format(fmt, cx);
-		});
 
 		let color = cx.new(|cx| {
 			let options = vec![
@@ -236,10 +258,31 @@ impl ExportDialogContent {
 				cx,
 			)
 		});
+		let rate_control = cx.new(|cx| {
+			let options = rate_control_options(codec_supports_quality_control(initial_video_codec));
+			ComboBox::new(14, options, window, cx).with_placeholder(i18n::tr("export.rate_control"))
+		});
+		rate_control.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
+
 		let bitrate = cx.new(|cx| {
 			SpinBox::new(
 				11,
 				SliderModel::new(ValueKind::Integer, 0.0, 500_000_000.0, 1_000_000.0, 0.0),
+				window,
+				cx,
+			)
+		});
+		let (min_q, max_q, default_q) = codec_quality_bounds(initial_video_codec);
+		let quality = cx.new(|cx| {
+			SpinBox::new(
+				15,
+				SliderModel::new(
+					ValueKind::Integer,
+					min_q as f64,
+					max_q as f64,
+					1.0,
+					default_q as f64,
+				),
 				window,
 				cx,
 			)
@@ -260,6 +303,24 @@ impl ExportDialogContent {
 			ComboBox::new(13, Vec::new(), window, cx).with_placeholder(i18n::tr("export.sequence"))
 		});
 
+		// Persist subscriptions so container, codec, and rate-control changes
+		// keep the dependent dropdowns and conditional quality/bitrate row in sync.
+		let format_sub = cx.subscribe(&format, |this, _format, event: &ComboBoxEvent, cx| {
+			let ComboBoxEvent::Selected { value } = event;
+			let fmt = this
+				.formats
+				.get(*value)
+				.map(|(id, _, _)| *id)
+				.unwrap_or(EXPORT_FORMAT_MP4);
+			this.apply_format(fmt, cx);
+		});
+		let codec_sub = cx.subscribe(&video_codec, |this, _codec, _event: &ComboBoxEvent, cx| {
+			this.sync_rate_control_for_codec(cx);
+		});
+		let rc_sub = cx.subscribe(&rate_control, |_this, _rc, _event: &ComboBoxEvent, cx| {
+			cx.notify();
+		});
+
 		Self {
 			sequence,
 			format,
@@ -270,11 +331,14 @@ impl ExportDialogContent {
 			resolution_w,
 			resolution_h,
 			frame_rate,
+			rate_control,
 			bitrate,
+			quality,
 			path,
 			formats,
 			active_format,
 			sequences: Vec::new(),
+			_subscriptions: vec![format_sub, codec_sub, rc_sub],
 		}
 	}
 
@@ -319,9 +383,8 @@ impl ExportDialogContent {
 	/// the container's compatibility tables, so a codec the container cannot carry
 	/// is never offered; a codec id missing from the label table falls back to
 	/// H.264 for video and AAC for audio. Also records `fmt` as the active format
-	/// reported by [`Self::settings`]. Callers: [`Self::new`] wires it to the
-	/// format combo (though that subscription is currently dropped, so only direct
-	/// calls take effect) and tests; `cx` is used to update the two combos.
+	/// reported by [`Self::settings`] and syncs rate-control / quality bounds.
+	/// Callers: [`Self::new`]'s persisted format-combo subscription and tests.
 	pub(crate) fn apply_format(&mut self, fmt: i32, cx: &mut Context<Self>) {
 		let video_codes = compatible_video_codecs(fmt);
 		let audio_codes = compatible_audio_codecs(fmt);
@@ -358,14 +421,54 @@ impl ExportDialogContent {
 		self.audio_codec
 			.update(cx, |combo, cx| combo.set_selected(Some(0), cx));
 		self.active_format = fmt;
+		self.sync_rate_control_for_codec(cx);
+	}
+
+	/// Returns the currently selected video codec id for `active_format`.
+	pub(crate) fn active_video_codec(&self, cx: &App) -> i32 {
+		compatible_video_codecs(self.active_format)
+			.get(self.video_codec.read(cx).selected().unwrap_or(0))
+			.copied()
+			.unwrap_or(1)
+	}
+
+	/// Syncs the rate-control dropdown and quality bounds to the active video
+	/// codec. Codecs without CRF/CQP support fall back to Bitrate-only; codecs
+	/// that support quality control clamp the current quality value into the
+	/// codec's valid range (`0..=51` for H.264/H.265, `0..=63` for AV1).
+	pub(crate) fn sync_rate_control_for_codec(&mut self, cx: &mut Context<Self>) {
+		let codec = self.active_video_codec(cx);
+		let supports_quality = codec_supports_quality_control(codec);
+		let prev = self.rate_control.read(cx).selected().unwrap_or(0);
+		let next = if supports_quality { prev.min(2) } else { 0 };
+		self.rate_control.update(cx, |combo, cx| {
+			combo.set_options(rate_control_options(supports_quality), cx);
+			combo.set_selected(Some(next), cx);
+		});
+		if supports_quality {
+			let (min_q, max_q, _) = codec_quality_bounds(codec);
+			let cur = self.quality.read(cx).value().to_f64().round() as i32;
+			let clamped = cur.clamp(min_q, max_q);
+			self.quality.update(cx, |spin, cx| {
+				spin.set_model(
+					SliderModel::new(
+						ValueKind::Integer,
+						min_q as f64,
+						max_q as f64,
+						1.0,
+						clamped as f64,
+					),
+					cx,
+				);
+			});
+		}
+		cx.notify();
 	}
 
 	/// Returns the container-format id currently shown in the combo.
 	///
 	/// With no selection, or an index outside the format table, it falls back to
-	/// [`EXPORT_FORMAT_MP4`]. This is the id the user picked, which may differ
-	/// from the active format used by [`Self::settings`] when the container combo
-	/// is switched (see [`Self::new`]).
+	/// [`EXPORT_FORMAT_MP4`].
 	pub fn format(&self, cx: &App) -> i32 {
 		let Some(selected) = self.format.read(cx).selected() else {
 			return EXPORT_FORMAT_MP4;
@@ -425,10 +528,7 @@ impl ExportDialogContent {
 	/// container's compatible codes, so the picked ids are always valid
 	/// for `format`.
 	pub fn settings(&self, cx: &App) -> crate::oakui::engine::ExportSettings {
-		let video_codec = compatible_video_codecs(self.active_format)
-			.get(self.video_codec.read(cx).selected().unwrap_or(0))
-			.copied()
-			.unwrap_or(1);
+		let video_codec = self.active_video_codec(cx);
 		let audio_codec = compatible_audio_codecs(self.active_format)
 			.get(self.audio_codec.read(cx).selected().unwrap_or(0))
 			.copied()
@@ -440,6 +540,14 @@ impl ExportDialogContent {
 		let size = if w > 0 && h > 0 { (w, h) } else { (0, 0) };
 		let frame_rate = self.frame_rate.read(cx).value().to_f64();
 		let video_bitrate = self.bitrate.read(cx).value().to_f64().round() as i64;
+		let rate_control = if codec_supports_quality_control(video_codec) {
+			self.rate_control.read(cx).selected().unwrap_or(0).min(2) as i32
+		} else {
+			0
+		};
+		let (min_q, max_q, _) = codec_quality_bounds(video_codec);
+		let video_quality =
+			(self.quality.read(cx).value().to_f64().round() as i32).clamp(min_q, max_q);
 		crate::oakui::engine::ExportSettings {
 			format: self.active_format,
 			video_codec,
@@ -447,6 +555,8 @@ impl ExportDialogContent {
 			size,
 			frame_rate,
 			video_bitrate,
+			rate_control,
+			video_quality,
 			audio_bitrate: 0,
 			bit_depth: if hdr { 10 } else { 8 },
 			color_primaries: if hdr { 9 } else { 1 },
@@ -483,6 +593,24 @@ pub fn compatible_audio_codecs(format: i32) -> Vec<i32> {
 impl Render for ExportDialogContent {
 	fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		let colors = cx.default_colors().clone();
+		let video_codec = self.active_video_codec(cx);
+		let supports_quality = codec_supports_quality_control(video_codec);
+		let rate_control = if supports_quality {
+			self.rate_control.read(cx).selected().unwrap_or(0)
+		} else {
+			0
+		};
+		let quality_row = if rate_control == 0 {
+			form_row(
+				&colors,
+				i18n::tr("export.bitrate").into(),
+				self.bitrate.clone(),
+			)
+		} else {
+			let (min_q, max_q, _) = codec_quality_bounds(video_codec);
+			let label = format!("{} ({min_q}–{max_q})", i18n::tr("export.quality"));
+			form_row(&colors, label.into(), self.quality.clone())
+		};
 		div()
 			.flex()
 			.flex_col()
@@ -535,9 +663,10 @@ impl Render for ExportDialogContent {
 			))
 			.child(form_row(
 				&colors,
-				i18n::tr("export.bitrate").into(),
-				self.bitrate.clone(),
+				i18n::tr("export.rate_control").into(),
+				self.rate_control.clone(),
 			))
+			.child(quality_row)
 			.child(form_row(
 				&colors,
 				i18n::tr("export.path").into(),

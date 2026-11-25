@@ -948,7 +948,10 @@ pub(crate) use audio::{color_from_rgba, rgba_from_array, subscribe_checkbox, tex
 pub(crate) use export::PROXY_PRESETS;
 pub use export::{ExportDialogContent, PathField};
 #[cfg(test)]
-pub(crate) use export::{compatible_audio_codecs, compatible_video_codecs};
+pub(crate) use export::{
+	codec_quality_bounds, codec_supports_quality_control, compatible_audio_codecs,
+	compatible_video_codecs,
+};
 #[cfg(test)]
 pub(crate) use keyboard::keyboard_filter_matches;
 #[cfg(test)]

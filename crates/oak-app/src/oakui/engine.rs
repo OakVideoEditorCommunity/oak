@@ -2070,6 +2070,11 @@ pub struct ExportSettings {
 	pub frame_rate: f64,
 	/// Video bitrate in bit/s (`0` = codec default).
 	pub video_bitrate: i64,
+	/// Video rate-control mode (`0` = Bitrate, `1` = CRF, `2` = CQP).
+	pub rate_control: i32,
+	/// Video quality value for CRF/CQP modes (e.g. 0..=51 for H.264/H.265,
+	/// 0..=63 for AV1; lower = higher quality).
+	pub video_quality: i32,
 	/// Audio bitrate in bit/s (`0` = codec default).
 	pub audio_bitrate: i64,
 	/// Bit depth: 8 → U8, 10 → U10 (SDR / HDR respectively).
@@ -2093,6 +2098,8 @@ impl Default for ExportSettings {
 			size: (0, 0),
 			frame_rate: 0.0,
 			video_bitrate: 0,
+			rate_control: 0,
+			video_quality: 23,
 			audio_bitrate: 0,
 			bit_depth: 8,
 			color_primaries: 1,

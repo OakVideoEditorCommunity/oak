@@ -1262,6 +1262,17 @@ impl SpinBox {
 		self.model.set_value(value);
 	}
 
+	/// Replaces the spin box's range/step/value model and repaints.
+	///
+	/// Closes any active direct-entry editor so stale text cannot commit
+	/// against the new bounds.
+	pub fn set_model(&mut self, model: SliderModel, cx: &mut Context<Self>) {
+		self.model = model;
+		self.edit = None;
+		self.edit_cancel = false;
+		cx.notify();
+	}
+
 	/// The current value.
 	pub fn value(&self) -> SliderValue {
 		self.model.value()

@@ -857,6 +857,8 @@ pub fn encoding_params(
 		color_primaries: 0,
 		color_trc: 0,
 		color_space: 0,
+		video_rate_control: 0,
+		video_quality: 0,
 	})
 }
 
@@ -990,6 +992,8 @@ pub fn encoding_params_with_settings(
 		color_primaries: settings.color_primaries,
 		color_trc: settings.color_transfer,
 		color_space: settings.color_space,
+		video_rate_control: settings.rate_control,
+		video_quality: settings.video_quality,
 	})
 }
 
@@ -1074,5 +1078,87 @@ mod tests {
 		assert!(validate_geometry(1, 0, (1, 25)).is_err());
 		assert!(validate_geometry(1, 1, (0, 25)).is_err());
 		assert!(validate_geometry(1, 1, (1, 25)).is_ok());
+	}
+
+	#[test]
+	fn encoding_params_with_settings_forwards_rate_control_and_quality() {
+		let project = super::super::graphops::create_project();
+		let seq = super::super::graphops::create_sequence(&project, "ExportRateControlSeq");
+		let out_path = path::Path::new("out.mp4");
+
+		// Default container-only helper leaves rate control in Bitrate (0) with quality 0.
+		let default_params = encoding_params(&project, seq, 2, out_path, None, 100)
+			.expect("default MP4 encoding params");
+		assert_eq!(default_params.video_rate_control, 0);
+		assert_eq!(default_params.video_quality, 0);
+		assert_eq!(default_params.video_bit_rate, 0);
+
+		// Bitrate mode forwards video_bitrate and rate_control = 0.
+		let bitrate_settings = oakui::engine::ExportSettings {
+			format: 2,
+			video_codec: 1,
+			audio_codec: 12,
+			video_bitrate: 12_000_000,
+			rate_control: 0,
+			video_quality: 23,
+			..Default::default()
+		};
+		let bitrate_params =
+			encoding_params_with_settings(&project, seq, &bitrate_settings, out_path, None, 100)
+				.expect("Bitrate encoding params");
+		assert_eq!(bitrate_params.video_rate_control, 0);
+		assert_eq!(bitrate_params.video_quality, 23);
+		assert_eq!(bitrate_params.video_bit_rate, 12_000_000);
+
+		// CRF mode forwards rate_control = 1 and video_quality; video_bit_rate is
+		// passed through untouched (the codec layer decides whether to apply it).
+		let crf_settings = oakui::engine::ExportSettings {
+			rate_control: 1,
+			video_quality: 18,
+			..bitrate_settings.clone()
+		};
+		let crf_params =
+			encoding_params_with_settings(&project, seq, &crf_settings, out_path, None, 100)
+				.expect("CRF encoding params");
+		assert_eq!(crf_params.video_rate_control, 1);
+		assert_eq!(crf_params.video_quality, 18);
+		assert_eq!(crf_params.video_bit_rate, 12_000_000);
+
+		// CQP mode forwards rate_control = 2 and video_quality (including non-zero bitrate).
+		let cqp_settings = oakui::engine::ExportSettings {
+			video_bitrate: 8_000_000,
+			rate_control: 2,
+			video_quality: 26,
+			..bitrate_settings.clone()
+		};
+		let cqp_params =
+			encoding_params_with_settings(&project, seq, &cqp_settings, out_path, None, 100)
+				.expect("CQP encoding params");
+		assert_eq!(cqp_params.video_rate_control, 2);
+		assert_eq!(cqp_params.video_quality, 26);
+		assert_eq!(cqp_params.video_bit_rate, 8_000_000);
+
+		// AV1 in WebM (format = 12): quality upper bound (63 > H.264/H.265 max 51) is forwarded unmodified.
+		let av1_settings = oakui::engine::ExportSettings {
+			format: 12,
+			video_codec: 18,
+			rate_control: 1,
+			video_quality: 63,
+			..bitrate_settings
+		};
+		let av1_params = encoding_params_with_settings(
+			&project,
+			seq,
+			&av1_settings,
+			path::Path::new("out.webm"),
+			None,
+			100,
+		)
+		.expect("AV1 CRF encoding params");
+		assert_eq!(av1_params.format, 12);
+		assert_eq!(av1_params.video_codec, 18);
+		assert_eq!(av1_params.video_rate_control, 1);
+		assert_eq!(av1_params.video_quality, 63);
+		assert_eq!(av1_params.video_bit_rate, 12_000_000);
 	}
 }
