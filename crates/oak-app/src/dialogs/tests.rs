@@ -346,6 +346,176 @@ async fn export_dialog_format_extension_and_settings(cx: &mut gpui_kit::TestAppC
 	.expect("window is still open");
 }
 
+#[test]
+fn export_codec_quality_capabilities_and_bounds() {
+	for codec in [1, 2, 3, 18] {
+		assert!(
+			codec_supports_quality_control(codec),
+			"codec {codec} should support CRF/CQP"
+		);
+	}
+	for codec in [0, 6, 7, 10] {
+		assert!(
+			!codec_supports_quality_control(codec),
+			"codec {codec} should fall back to bitrate-only"
+		);
+	}
+	assert_eq!(codec_quality_bounds(1), (0, 51, 23));
+	assert_eq!(codec_quality_bounds(3), (0, 51, 23));
+	assert_eq!(codec_quality_bounds(18), (0, 63, 30));
+}
+
+#[gpui_kit::test]
+async fn export_dialog_rate_control_and_quality_control(cx: &mut gpui_kit::TestAppContext) {
+	cx.update(|cx| {
+		gpui_kit::init(cx);
+		cx.init_colors();
+	});
+	let window = cx.open_window(
+		gpui_kit::size(gpui_kit::px(440.0), gpui_kit::px(500.0)),
+		ExportDialogContent::new,
+	);
+	cx.run_until_parked();
+	let content = window.root(cx).expect("dialog content root");
+
+	// Default is Bitrate (0) with default H.264 quality (23).
+	let settings = cx.read(|cx| content.read(cx).settings(cx));
+	assert_eq!(settings.rate_control, 0);
+	assert_eq!(settings.video_quality, 23);
+
+	// Selecting CRF and setting quality 18 propagates into ExportSettings
+	// and renders the conditional quality row cleanly.
+	cx.update(|cx| {
+		content.update(cx, |content, cx| {
+			content
+				.rate_control
+				.update(cx, |combo, cx| combo.set_selected(Some(1), cx));
+			content
+				.quality
+				.update(cx, |spin, cx| spin.set_value(SliderValue::Integer(18), cx));
+			cx.notify();
+		});
+	});
+	cx.update_window(window.into(), |_root, window, cx| {
+		window.draw(cx).clear(cx);
+	})
+	.expect("window renders in CRF mode");
+	let settings = cx.read(|cx| content.read(cx).settings(cx));
+	assert_eq!(settings.rate_control, 1);
+	assert_eq!(settings.video_quality, 18);
+
+	// Selecting CQP and setting quality 26 propagates into ExportSettings.
+	cx.update(|cx| {
+		content.update(cx, |content, cx| {
+			content
+				.rate_control
+				.update(cx, |combo, cx| combo.set_selected(Some(2), cx));
+			content
+				.quality
+				.update(cx, |spin, cx| spin.set_value(SliderValue::Integer(26), cx));
+			cx.notify();
+		});
+	});
+	cx.update_window(window.into(), |_root, window, cx| {
+		window.draw(cx).clear(cx);
+	})
+	.expect("window renders in CQP mode");
+	let settings = cx.read(|cx| content.read(cx).settings(cx));
+	assert_eq!(settings.rate_control, 2);
+	assert_eq!(settings.video_quality, 26);
+
+	// On H.264 (0..=51), the quality SpinBox model itself clamps > 51 to 51.
+	cx.update(|cx| {
+		content.update(cx, |content, cx| {
+			content
+				.quality
+				.update(cx, |spin, cx| spin.set_value(SliderValue::Integer(60), cx));
+		});
+	});
+	assert_eq!(
+		cx.read(|cx| content.read(cx).quality.read(cx).value().to_f64().round() as i32),
+		51
+	);
+
+	// Switching to AV1 via the persisted video_codec subscription updates
+	// the SpinBox model to 0..=63 so 60 sticks; switching back to H.264
+	// clamps the SpinBox model back to 0..=51.
+	let mp4_codecs = compatible_video_codecs(EXPORT_FORMAT_MP4);
+	if let Some(av1_idx) = mp4_codecs.iter().position(|&c| c == 18) {
+		cx.update(|cx| {
+			content.update(cx, |content, cx| {
+				content.video_codec.update(cx, |combo, cx| {
+					combo.set_selected(Some(av1_idx), cx);
+					cx.emit(ComboBoxEvent::Selected { value: av1_idx });
+				});
+			});
+		});
+		cx.run_until_parked();
+		cx.update(|cx| {
+			content.update(cx, |content, cx| {
+				content
+					.quality
+					.update(cx, |spin, cx| spin.set_value(SliderValue::Integer(60), cx));
+			});
+		});
+		let settings = cx.read(|cx| content.read(cx).settings(cx));
+		assert_eq!(settings.video_codec, 18);
+		assert_eq!(settings.video_quality, 60);
+
+		// Switching back to H.264 via ComboBoxEvent clamps quality from 60 to 51.
+		let h264_idx = mp4_codecs.iter().position(|&c| c == 1).unwrap_or(0);
+		cx.update(|cx| {
+			content.update(cx, |content, cx| {
+				content.video_codec.update(cx, |combo, cx| {
+					combo.set_selected(Some(h264_idx), cx);
+					cx.emit(ComboBoxEvent::Selected { value: h264_idx });
+				});
+			});
+		});
+		cx.run_until_parked();
+		let settings = cx.read(|cx| content.read(cx).settings(cx));
+		assert_eq!(settings.video_codec, 1);
+		assert_eq!(settings.video_quality, 51);
+		assert_eq!(
+			cx.read(|cx| content.read(cx).quality.read(cx).value().to_f64().round() as i32),
+			51
+		);
+	}
+
+	// Switching to a container whose first video codec does not support
+	// CRF/CQP (DNxHD format 0) via the persisted format subscription forces
+	// rate_control back to Bitrate (0).
+	let dnxhd_idx = cx
+		.read(|cx| {
+			content
+				.read(cx)
+				.formats
+				.iter()
+				.position(|(id, _, _)| *id == 0)
+		})
+		.expect("DNxHD format listed");
+	cx.update(|cx| {
+		content.update(cx, |content, cx| {
+			content.format.update(cx, |combo, cx| {
+				combo.set_selected(Some(dnxhd_idx), cx);
+				cx.emit(ComboBoxEvent::Selected { value: dnxhd_idx });
+			});
+		});
+	});
+	cx.run_until_parked();
+	cx.update_window(window.into(), |_root, window, cx| {
+		window.draw(cx).clear(cx);
+	})
+	.expect("window renders after fallback to bitrate");
+	let settings = cx.read(|cx| content.read(cx).settings(cx));
+	assert_eq!(settings.format, 0);
+	assert_eq!(settings.rate_control, 0);
+	assert_eq!(
+		cx.read(|cx| content.read(cx).rate_control.read(cx).selected()),
+		Some(0)
+	);
+}
+
 /// Every general-tab row writes its choice into the config store: the
 /// backend / bit-depth / theme / proxy / decode / color / storage combos
 /// and checkboxes, and the numeric spin boxes (value changed and
