@@ -860,12 +860,15 @@ fn retry_policy_spends_every_attempt_on_a_retryable_failure() {
 /// placed, and the readback confirms it.
 #[test]
 fn rough_cut_recipe_executes_end_to_end() {
-	std::fs::write("/tmp/oak58-rough.mp4", b"x").expect("fixture");
+	// `env::temp_dir()` is %TEMP% on Windows and /tmp elsewhere — the
+	// fixture must exist wherever CI runs.
+	let media = std::env::temp_dir().join("oak58-rough.mp4");
+	std::fs::write(&media, b"x").expect("fixture");
 	let book = RecipeBook::builtin();
 	let plan = book
 		.plan("rough-cut", "cut one clip")
 		.expect("the built-in recipe exists")
-		.with_vars(json!({"media": "/tmp/oak58-rough.mp4"}));
+		.with_vars(json!({"media": media.to_string_lossy().to_string()}));
 	let mut agent = plan_agent(MockBackend::new());
 	let report = agent.run_plan(plan).expect("the plan runs");
 

@@ -447,11 +447,12 @@ mod tests {
 		dispatch::execute(&mut backend, "project.open", json!({"name": "rb", "fps": 30}))
 			.expect("open");
 		// The mock only checks that the file exists.
-		std::fs::write("/tmp/oak-readback-fixture.mp4", b"x").expect("fixture");
+		let fixture = std::env::temp_dir().join("oak-readback-fixture.mp4");
+		std::fs::write(&fixture, b"x").expect("fixture");
 		let footage = dispatch::execute(
 			&mut backend,
 			"media.import_footage",
-			json!({"paths": ["/tmp/oak-readback-fixture.mp4"]}),
+			json!({"paths": [fixture.to_string_lossy().to_string()]}),
 		)
 		.unwrap_or_else(|err| panic!("import: {err}"));
 		let footage_id = footage["footage"][0]["id"].as_str().expect("id").to_string();
@@ -498,11 +499,12 @@ mod tests {
 		let mut backend = MockBackend::new();
 		dispatch::execute(&mut backend, "project.open", json!({"name": "rb", "fps": 30}))
 			.expect("open");
-		std::fs::write("/tmp/oak-readback-fixture.mp4", b"x").expect("fixture");
+		let fixture = std::env::temp_dir().join("oak-readback-fixture.mp4");
+		std::fs::write(&fixture, b"x").expect("fixture");
 		let footage = dispatch::execute(
 			&mut backend,
 			"media.import_footage",
-			json!({"paths": ["/tmp/oak-readback-fixture.mp4"]}),
+			json!({"paths": [fixture.to_string_lossy().to_string()]}),
 		)
 		.expect("import");
 		let footage_id = footage["footage"][0]["id"].as_str().expect("id").to_string();
