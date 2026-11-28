@@ -368,11 +368,22 @@ impl EditFailed for DenyHooks {
 use oak_ai_tools::hooks::{BeforeCommit, EditFailed, RenderDone};
 
 fn timeline_track_count(backend: &MockBackend) -> usize {
+	// `serialize_timeline` is `{footage, sequences}` — tracks live under
+	// each sequence. (The old lookup hit a non-existent top-level
+	// `tracks` and could only ever return 0; every existing use compared
+	// 0 to 0, so only an absolute assertion exposes it.)
 	backend
 		.serialize_timeline()
-		.get("tracks")
+		.get("sequences")
 		.and_then(Value::as_array)
-		.map(Vec::len)
+		.map(|sequences| {
+			sequences
+				.iter()
+				.filter_map(|sequence| sequence.get("tracks"))
+				.filter_map(Value::as_array)
+				.map(Vec::len)
+				.sum::<usize>()
+		})
 		.unwrap_or(0)
 }
 
@@ -384,6 +395,7 @@ fn agent(script: Vec<ChatResponse>, max_rounds: usize) -> Agent<ScriptedLlm, Moc
 			max_rounds,
 			policy: Policy::Auto,
 			model: "test-model".into(),
+		confirm: ConfirmMode::Headless,
 		},
 	)
 }
@@ -633,4 +645,421 @@ fn zz_probe_memory_write_ignores_proposal_only() {
 	);
 	assert_eq!(report.tools[0].outcome, "applied");
 	let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// Task J: the capability layer (confirm gate / readback / progress / plan /
+// retry+rollback+cost+recipes) at the loop level.
+
+use crate::ai::plan::RecipeBook;
+use crate::ai::progress::FnSink;
+use std::sync::{Arc, Mutex};
+
+/// A backend with one open project (0 tracks), the usual plan sandbox.
+fn seeded_for_plan() -> MockBackend {
+	let mut backend = MockBackend::new();
+	oak_ai_tools::dispatch::execute(&mut backend, "project.open", json!({"name": "plan", "fps": 30}))
+		.expect("open");
+	backend
+}
+
+fn plan_agent(backend: MockBackend) -> Agent<ScriptedLlm, MockBackend> {
+	Agent::new(
+		ScriptedLlm::new(vec![ScriptedLlm::say("unused")]),
+		backend,
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Auto,
+			model: "test-model".into(),
+		confirm: ConfirmMode::Headless,
+		},
+	)
+}
+
+/// ④ A plan executes stepwise: plan + trajectory + progress + cost land
+/// in the report, and every write is read back.
+#[test]
+fn run_plan_records_plan_trajectory_progress_and_cost() {
+	let mut agent = plan_agent(seeded_for_plan());
+	// `project.open` seeds default tracks: judge the plan against the
+	// baseline it starts from, not against zero.
+	let baseline_tracks = timeline_track_count(agent.backend());
+	let plan = Plan::new("add two tracks")
+		.push(PlanStep::new("video track", "timeline.add_track", json!({"type": "video"})))
+		.push(PlanStep::new("audio track", "timeline.add_track", json!({"type": "audio"})));
+	let report = agent.run_plan(plan).expect("plan runs");
+
+	assert_eq!(
+		report.plan.as_ref().expect("the plan is recorded").goal,
+		"add two tracks"
+	);
+	assert_eq!(report.trajectory.len(), 2, "{:?}", report.trajectory);
+	assert!(
+		report
+			.trajectory
+			.iter()
+			.all(|trace| trace.status == StepStatus::Done && trace.attempts == 1),
+		"{:?}",
+		report.trajectory
+	);
+	// Progress: one event per step, ending at 100%.
+	assert_eq!(report.progress.len(), 2, "{:?}", report.progress);
+	assert_eq!(report.progress[0].step, 1);
+	assert_eq!(report.progress[1].percent(), 100);
+	// Cost: one call per step; every write read back, none failed.
+	assert_eq!(report.cost.tool_calls, 2);
+	assert_eq!(report.readbacks, 2, "both writes were read back");
+	assert_eq!(report.readback_failures, 0);
+	assert!(report.rollback.is_none(), "nothing failed: {:?}", report.rollback);
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		baseline_tracks + 2,
+		"exactly the two planned writes landed"
+	);
+}
+
+/// ⑤ The cost guard is a hard stop: the second step never runs and the
+/// reason is reported (not merely counted).
+#[test]
+fn cost_guard_blocks_the_second_step_and_reports_the_reason() {
+	let mut agent = plan_agent(seeded_for_plan()).with_cost_guard(CostGuard {
+		max_tool_calls: Some(1),
+		..CostGuard::default()
+	});
+	let baseline_tracks = timeline_track_count(agent.backend());
+	let plan = Plan::new("two tracks")
+		.push(PlanStep::new("video track", "timeline.add_track", json!({"type": "video"})))
+		.push(PlanStep::new("audio track", "timeline.add_track", json!({"type": "audio"})));
+	let report = agent.run_plan(plan).expect("plan runs");
+
+	assert_eq!(report.trajectory[0].status, StepStatus::Done, "{:?}", report.trajectory);
+	assert_eq!(report.trajectory[1].status, StepStatus::Blocked, "{:?}", report.trajectory);
+	let stop = report.cost_stop.as_ref().expect("the stop must be reported");
+	assert_eq!(stop.limit, "tool_calls");
+	assert!(stop.detail.contains("1 of 1"), "{}", stop.detail);
+	// Only the funded call touched the engine.
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		baseline_tracks + 1,
+		"the blocked step must not have run"
+	);
+}
+
+/// ⑤ The same guard stops the *loop* mid-round: the second call of a
+/// two-call reply is refused with `COST_LIMIT`, and the run says why.
+#[test]
+fn cost_guard_stops_the_loop_after_the_budget_is_spent() {
+	let two_calls = ChatResponse {
+		content: None,
+		tool_calls: vec![
+			ToolCall {
+				id: "call_a".into(),
+				name: "timeline.add_track".into(),
+				arguments: json!({"type": "video"}),
+			},
+			ToolCall {
+				id: "call_b".into(),
+				name: "timeline.add_track".into(),
+				arguments: json!({"type": "audio"}),
+			},
+		],
+		finish_reason: Some("tool_calls".into()),
+	};
+	let seeded = seeded_for_plan();
+	let baseline_tracks = timeline_track_count(&seeded);
+	let mut agent = Agent::new(
+		ScriptedLlm::new(vec![two_calls, ScriptedLlm::say("never reached")]),
+		seeded,
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Auto,
+			model: "test-model".into(),
+		confirm: ConfirmMode::Headless,
+		},
+	)
+	.with_cost_guard(CostGuard {
+		max_tool_calls: Some(1),
+		..CostGuard::default()
+	});
+
+	let report = agent.run("add both tracks").expect("the loop reports, not errors");
+	assert_eq!(report.tools.len(), 2, "{:?}", report.tools);
+	assert_eq!(report.tools[0].outcome, "applied", "{}", report.tools[0].detail);
+	assert_eq!(report.tools[1].outcome, "cost-stopped", "{}", report.tools[1].detail);
+	assert!(report.tools[1].detail.contains("COST_LIMIT"), "{}", report.tools[1].detail);
+	let stop = report.cost_stop.as_ref().expect("a hard stop must be reported");
+	assert_eq!(stop.limit, "tool_calls");
+	assert!(!report.converged, "the loop must stop, not limp on");
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		baseline_tracks + 1,
+		"only the funded call ran"
+	);
+}
+
+/// ④⑤ A failing step rolls the applied ones back to the baseline —
+/// verified against the state, not against the undo bookkeeping.
+#[test]
+fn a_failed_plan_step_rolls_back_the_applied_steps() {
+	let mut agent = plan_agent(seeded_for_plan());
+	let baseline_tracks = timeline_track_count(agent.backend());
+	let plan = Plan::new("track then an impossible placement")
+		.push(PlanStep::new("add track", "timeline.add_track", json!({"type": "video"})))
+		.push(PlanStep::new(
+			"place",
+			"timeline.place_clip",
+			json!({"track": "no-such-track", "footage": "no-such-footage", "in": 0}),
+		));
+	let report = agent.run_plan(plan).expect("the plan reports, not errors");
+
+	assert_eq!(report.trajectory[0].status, StepStatus::Done, "{:?}", report.trajectory);
+	assert_eq!(report.trajectory[1].status, StepStatus::Failed, "{:?}", report.trajectory);
+	let rollback = report.rollback.as_ref().expect("a failed plan must roll back");
+	assert!(rollback.restored, "{}", rollback.detail);
+	assert!(rollback.is_clean(), "{rollback:?}");
+	assert!(
+		rollback.triggered_by.contains("place"),
+		"the trigger names the failing step: {}",
+		rollback.triggered_by
+	);
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		baseline_tracks,
+		"the applied step was undone — observable state matches the baseline"
+	);
+}
+
+/// ⑤ Retry spends exactly `max_attempts` on a retryable failure, then
+/// fails honestly (with the rollback record).
+#[test]
+fn retry_policy_spends_every_attempt_on_a_retryable_failure() {
+	let mut agent = plan_agent(seeded_for_plan()).with_retry(RetryPolicy {
+		max_attempts: 3,
+		backoff_ms: 0,
+	});
+	let plan = Plan::new("impossible placement").push(PlanStep::new(
+		"place",
+		"timeline.place_clip",
+		json!({"track": "nope", "footage": "nope", "in": 0}),
+	));
+	let report = agent.run_plan(plan).expect("the plan reports, not errors");
+
+	assert_eq!(report.trajectory.len(), 1);
+	assert_eq!(
+		report.trajectory[0].attempts, 3,
+		"all three attempts must be spent: {:?}",
+		report.trajectory[0]
+	);
+	assert_eq!(report.trajectory[0].status, StepStatus::Failed);
+	assert_eq!(report.cost.tool_calls, 3, "each attempt is a paid call");
+	assert!(report.rollback.is_some(), "the failure is recorded with a rollback");
+}
+
+/// ⑥ The built-in `rough-cut` recipe runs end to end: template vars from
+/// earlier results (`${track}`, `${footage.0.id}`) resolve, the clip is
+/// placed, and the readback confirms it.
+#[test]
+fn rough_cut_recipe_executes_end_to_end() {
+	// `env::temp_dir()` is %TEMP% on Windows and /tmp elsewhere — the
+	// fixture must exist wherever CI runs.
+	let media = std::env::temp_dir().join("oak58-rough.mp4");
+	std::fs::write(&media, b"x").expect("fixture");
+	let book = RecipeBook::builtin();
+	let plan = book
+		.plan("rough-cut", "cut one clip")
+		.expect("the built-in recipe exists")
+		.with_vars(json!({"media": media.to_string_lossy().to_string()}));
+	let mut agent = plan_agent(MockBackend::new());
+	let report = agent.run_plan(plan).expect("the plan runs");
+
+	let statuses: Vec<StepStatus> = report
+		.trajectory
+		.iter()
+		.map(|trace| trace.status)
+		.collect();
+	assert_eq!(
+		statuses,
+		vec![StepStatus::Done; 4],
+		"open → track → import → place: {:?}",
+		report.trajectory
+	);
+	let overview = readback::probe(agent.backend_mut()).expect("probe");
+	assert!(
+		overview.to_string().contains("clip-"),
+		"a clip must be readable back: {overview}"
+	);
+	assert_eq!(report.readback_failures, 0);
+}
+
+/// ④ `plan_from_llm` turns a (scripted) model reply into an explicit
+/// plan before anything executes — one LLM round, then the steps run.
+#[test]
+fn plan_from_llm_parses_the_reply_then_runs() {
+	let reply = ScriptedLlm::say(
+		r#"```json
+{"goal": "open and add a track", "steps": [
+  {"title": "open", "tool": "project.open", "args": {"name": "llm-plan", "fps": 30}},
+  {"title": "track", "tool": "timeline.add_track", "args": {"type": "video"}}
+]}
+```"#,
+	);
+	let mut agent = agent(vec![reply], 4);
+	let plan = agent.plan_from_llm("make a plan").expect("the plan parses");
+	assert_eq!(plan.goal, "open and add a track");
+	assert_eq!(plan.steps.len(), 2);
+	assert_eq!(agent.cost_usage().llm_rounds, 1, "planning costs one round");
+
+	let report = agent.run_plan(plan).expect("the plan runs");
+	assert!(
+		report
+			.trajectory
+			.iter()
+			.all(|trace| trace.status == StepStatus::Done),
+		"{:?}",
+		report.trajectory
+	);
+}
+
+/// ③ Progress reaches a subscriber as it happens (rounds here; plan
+/// steps are asserted via `report.progress` in the plan test).
+#[test]
+fn progress_sink_sees_the_rounds() {
+	let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+	let sink_seen = Arc::clone(&seen);
+	let script = vec![
+		ScriptedLlm::tool_call("timeline.add_track", json!({"type": "video"})),
+		ScriptedLlm::say("done"),
+	];
+	let mut agent = Agent::new(
+		ScriptedLlm::new(script),
+		seeded_for_plan(),
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Auto,
+			model: "test-model".into(),
+		confirm: ConfirmMode::Headless,
+		},
+	)
+	.with_progress_sink(FnSink(move |event: &ProgressEvent| {
+		sink_seen
+			.lock()
+			.expect("poisoned")
+			.push(event.to_string());
+	}));
+
+	let report = agent.run("add a track").expect("run");
+	let events = seen.lock().expect("poisoned").clone();
+	assert_eq!(
+		events.len(),
+		report.progress.len(),
+		"the sink and the report must agree: {events:?} vs {:?}",
+		report.progress
+	);
+	assert_eq!(events.len(), 2, "one event per round: {events:?}");
+	assert!(events[0].contains("round"), "{events:?}");
+	assert_eq!(report.progress[0].phase, "round");
+	assert_eq!(report.progress[1].step, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Task-62: the confirm gate is wired into the production run path
+// (`Agent::run` → `run_with` → `GatedHooks`).
+
+/// ① Strict gate: the write never reaches the engine, the report marks
+/// it `rejected` by the gate, and neither state nor undo stack moves.
+#[test]
+fn strict_confirm_gate_blocks_the_write_and_the_report_says_so() {
+	let mut agent = Agent::new(
+		ScriptedLlm::new(vec![
+			ScriptedLlm::tool_call("timeline.add_track", json!({"type": "video"})),
+			ScriptedLlm::say("done"),
+		]),
+		seeded_for_plan(),
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Auto,
+			model: "test-model".into(),
+			confirm: ConfirmMode::Strict,
+		},
+	);
+	let tracks_before = timeline_track_count(agent.backend());
+	let depth_before = agent.backend().undo_depth();
+
+	let report = agent.run("add a track").expect("the run reports, not errors");
+
+	assert_eq!(report.tools.len(), 1, "{:?}", report.tools);
+	assert_eq!(report.tools[0].outcome, "rejected", "{}", report.tools[0].detail);
+	assert!(
+		report.tools[0].detail.contains("the confirmation gate refused"),
+		"the refusal must come from the gate: {}",
+		report.tools[0].detail
+	);
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		tracks_before,
+		"the write must not have landed"
+	);
+	assert_eq!(
+		agent.backend().undo_depth(),
+		depth_before,
+		"the gate must not have opened an undo group"
+	);
+}
+
+/// ② Headless gate under `Policy::Confirm` (so the gate really is
+/// asked): it auto-approves and the write runs for real.
+#[test]
+fn headless_confirm_gate_approves_and_the_write_runs() {
+	let mut agent = Agent::new(
+		ScriptedLlm::new(vec![
+			ScriptedLlm::tool_call("timeline.add_track", json!({"type": "video"})),
+			ScriptedLlm::say("done"),
+		]),
+		seeded_for_plan(),
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Confirm,
+			model: "test-model".into(),
+			confirm: ConfirmMode::Headless,
+		},
+	);
+	let tracks_before = timeline_track_count(agent.backend());
+
+	let report = agent.run("add a track").expect("the run reports, not errors");
+
+	assert_eq!(report.tools[0].outcome, "applied", "{}", report.tools[0].detail);
+	assert_eq!(
+		timeline_track_count(agent.backend()),
+		tracks_before + 1,
+		"the approved write must have landed"
+	);
+}
+
+/// ③ Reads stay exempt: the strict gate never sees them.
+#[test]
+fn strict_confirm_gate_still_lets_reads_through() {
+	let mut agent = Agent::new(
+		ScriptedLlm::new(vec![
+			ScriptedLlm::tool_call("project.get_overview", json!({})),
+			ScriptedLlm::say("done"),
+		]),
+		seeded_for_plan(),
+		AgentConfig {
+			max_rounds: 4,
+			policy: Policy::Auto,
+			model: "test-model".into(),
+			confirm: ConfirmMode::Strict,
+		},
+	);
+
+	let report = agent
+		.run("what is on the timeline?")
+		.expect("the run reports, not errors");
+
+	assert_eq!(report.tools[0].outcome, "applied", "{}", report.tools[0].detail);
+	assert!(
+		report.tools[0].detail.contains("sequences"),
+		"the read must return real state: {}",
+		report.tools[0].detail
+	);
 }

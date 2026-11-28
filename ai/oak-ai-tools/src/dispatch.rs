@@ -341,7 +341,7 @@ pub struct V2ToolDef {
 
 /// The v2 registry: parse, then forward to the extension method.
 pub fn v2_registry() -> &'static [V2ToolDef] {
-	static REGISTRY: [V2ToolDef; 2] = [
+	static REGISTRY: [V2ToolDef; 7] = [
 		V2ToolDef {
 			name: "sequence.get_settings",
 			transactional: true,
@@ -356,6 +356,47 @@ pub fn v2_registry() -> &'static [V2ToolDef] {
 			call: |backend, args| {
 				tools::v2::sequence::parse_set_format(args)?;
 				backend.sequence_set_format(args.clone())
+			},
+		},
+		V2ToolDef {
+			name: "analysis.detect_silence",
+			// Pure read: no project state, no undo row → not transactional.
+			transactional: false,
+			call: |backend, args| {
+				let parsed = tools::analysis::parse_detect_silence(args)?;
+				backend.analysis_detect_silence(&parsed)
+			},
+		},
+		V2ToolDef {
+			name: "analysis.detect_scenes",
+			transactional: false,
+			call: |backend, args| {
+				let parsed = tools::analysis::parse_detect_scenes(args)?;
+				backend.analysis_detect_scenes(&parsed)
+			},
+		},
+		V2ToolDef {
+			name: "analysis.detect_black",
+			transactional: false,
+			call: |backend, args| {
+				let parsed = tools::analysis::parse_detect_black(args)?;
+				backend.analysis_detect_black(&parsed)
+			},
+		},
+		V2ToolDef {
+			name: "analysis.loudness",
+			transactional: false,
+			call: |backend, args| {
+				let parsed = tools::analysis::parse_loudness(args)?;
+				backend.analysis_loudness(&parsed)
+			},
+		},
+		V2ToolDef {
+			name: "analysis.export_thumbnails",
+			transactional: false,
+			call: |backend, args| {
+				let parsed = tools::analysis::parse_export_thumbnails(args)?;
+				backend.analysis_export_thumbnails(&parsed)
 			},
 		},
 	];
